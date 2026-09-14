@@ -1,0 +1,36 @@
+-- What a registered device actually IS.
+--
+-- Until now there was one answer and it was implied by the table: a physical
+-- Android phone reached through the cluster's adb bridge. 098 wrote that
+-- assumption into the schema in words ("android today, and only android: the
+-- cluster has no macOS host"), and it was true of a cluster.
+--
+-- This instance also runs directly on an operator's Mac, where two more things
+-- exist and neither one is reachable the way a phone is: an `xcrun simctl` iOS
+-- simulator and an Android SDK emulator. They are not a new device table and
+-- not a new tool surface — the same eleven mobile_* tools drive all three, which
+-- is the whole point — but they are attached, probed and released by completely
+-- different means, so the row has to say which.
+--
+--   remote_adb        the bridge pairs/connects it and allocates the loopback
+--                     port device_udid holds. device_addr is the tailnet
+--                     host:port a human reads off the phone.
+--   ios_simulator     this host boots it with simctl. device_addr = device_udid
+--                     = the simulator's own UDID; simctl's identity is stable,
+--                     so there is no mapping step and nothing to allocate.
+--   android_emulator  this host starts it with the emulator binary.
+--                     device_addr is the AVD name (an emulator's only stable
+--                     name), device_udid the adb serial it came up on
+--                     (emulator-5554), which the emulator allocates.
+--
+-- DEFAULT rather than a backfill UPDATE: every existing row is a bridge phone
+-- by construction — it is the only kind that could have been registered — so the
+-- default IS the correct value for all of them, and a separate UPDATE would only
+-- be a slower way to write the same thing.
+--
+-- No CHECK constraint on the value. The set is enforced in domain.ValidDeviceKind
+-- where an unknown kind can be refused with a sentence, and a constraint would
+-- additionally make adding a fourth kind a migration on a table that is being
+-- read by pods still running the previous image.
+ALTER TABLE mobile_devices
+    ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'remote_adb';

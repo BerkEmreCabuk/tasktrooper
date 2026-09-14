@@ -1,0 +1,31 @@
+-- The build targets a mobile working copy already names for itself, read at
+-- import next to detected_bundle_id / detected_package_name (migration 125)
+-- and stored so they can be served from a host that does not hold the code:
+--
+--   detected_xcode_scheme    the shared Xcode scheme `xcodebuild -scheme` archives
+--   detected_gradle_module   the module `./gradlew :<module>:bundleRelease` builds
+--
+-- '' = nobody could read one, and it is a REAL state rather than a missing
+-- answer. These two are interpolated straight into the generated release
+-- script, so the alternative to '' is a convention dressed up as a fact — "the
+-- scheme is named after the app", "the module is called app" — which archives
+-- a target that does not exist and dies deep inside a build log with nothing
+-- naming the cause. On '' the release is refused before it starts, and the
+-- refusal says to share the scheme or type the target in.
+--
+-- Persisted rather than read on demand for exactly the reason migration 125's
+-- pair is: detection runs where the working copy is, while the release build
+-- is started from a shared agent-server whose disk may hold no copy of this
+-- repository at all.
+--
+-- DETECTED, not chosen, again like 125: it is what the checked-in Xcode and
+-- Gradle files state, not a preference anybody set here.
+--
+-- Sub-projects carry their own inside sub_projects (migration 118) — that
+-- column is read and written whole, so it needs no schema change.
+--
+-- TEXT NOT NULL DEFAULT '' for the same reason mobile_platform is: '' is a
+-- real state, which a NULL would only spell a second way.
+ALTER TABLE repositories
+    ADD COLUMN IF NOT EXISTS detected_xcode_scheme  TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS detected_gradle_module TEXT NOT NULL DEFAULT '';

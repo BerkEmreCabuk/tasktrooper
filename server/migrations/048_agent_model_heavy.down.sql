@@ -1,0 +1,2 @@
+ALTER TABLE plan_tasks DROP COLUMN IF EXISTS difficulty;
+ALTER TABLE agents DROP COLUMN IF EXISTS model_heavy;

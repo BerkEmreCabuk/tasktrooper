@@ -1,0 +1,28 @@
+-- A chat with an agent on the 'claude_code' provider is not answered by the
+-- in-process agent loop: the turn is handed to a headless Claude Code CLI
+-- session on this host (internal/adapter/agentcli/claudecode). That works for a
+-- single question, but a chat is a conversation, and the CLI's own memory of it
+-- lives under an id only the CLI knows.
+--
+-- cli_session_id is that id, kept on the chat row so the SECOND message can be
+-- sent as `claude -p --resume <id> "<what the user just typed>"` instead of
+-- re-flattening the whole transcript into a fresh session. The difference is not
+-- cosmetic:
+--
+--   * cost — a re-flattened turn pays for the entire conversation again, every
+--     message, and the bill grows quadratically with the thread;
+--   * correctness — a session handed its own remembered context back reads it
+--     as a NEW instruction stacked on top of what it already believes, which is
+--     how a resumed agent ends up re-doing work it had finished.
+--
+-- On the row rather than in memory for the same reason the run-level column
+-- (migration 101, task_agent_runs.cli_session_id) is: a pod restart must not
+-- silently turn every open chat into a first turn again.
+--
+-- Empty string, never NULL, matching how this repo already spells "no id yet"
+-- on task_agent_runs — the scan target is a plain string on both sides.
+--
+-- No index: it is only ever read as part of a row already being fetched by
+-- primary key, never searched by.
+ALTER TABLE sessions
+    ADD COLUMN IF NOT EXISTS cli_session_id TEXT NOT NULL DEFAULT '';

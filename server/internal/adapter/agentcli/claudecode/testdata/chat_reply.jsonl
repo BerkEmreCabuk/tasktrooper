@@ -1,0 +1,5 @@
+{"type":"system","subtype":"init","session_id":"cli-chat-1","model":"claude-opus-5","tools":["Read","Grep"],"cwd":"/tmp/repo"}
+{"type":"assistant","session_id":"cli-chat-1","message":{"role":"assistant","content":[{"type":"text","text":"Let me look at the router first."},{"type":"tool_use","id":"toolu_a1","name":"Read","input":{"file_path":"internal/adapter/http/handler.go"}}],"usage":{"input_tokens":100,"output_tokens":20}}}
+{"type":"user","session_id":"cli-chat-1","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_a1","content":"func (h *Handler) Models(c *fiber.Ctx) error {}"}]}}
+{"type":"assistant","session_id":"cli-chat-1","message":{"role":"assistant","content":[{"type":"text","text":"Routes are registered in handler.go."}]}}
+{"type":"result","subtype":"success","is_error":false,"duration_ms":4210,"num_turns":3,"result":"Routes are registered in handler.go.","session_id":"cli-chat-1","total_cost_usd":0.02,"usage":{"input_tokens":400,"output_tokens":90,"cache_read_input_tokens":1200}}

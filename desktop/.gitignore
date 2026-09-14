@@ -1,0 +1,42 @@
+node_modules/
+ui/node_modules/
+
+# Build output. `dist/` is the shell chrome + main bundles and the embedder,
+# `release/` and `out/` are electron-builder's, and `*.dmg` / `*.zip` catch a
+# packaged artefact written somewhere else by hand.
+dist/
+ui/dist/
+release/
+out/
+*.dmg
+*.zip
+
+# The bundled backend. `npm run build:server` writes it here from ../server.
+# Rebuildable, large, and not source.
+bin/
+
+# Signing material, and this one is not a tidiness rule. A Developer ID
+# certificate or an App Store Connect key in the history is a revoke-and-reissue
+# incident, and a .p8 can never be downloaded again. Note that a leading `./` is
+# NOT a valid git ignore anchor, so `./cert.p12` would have ignored nothing.
+*.p12
+*.p8
+*.cer
+*.certSigningRequest
+*.mobileprovision
+*.provisionprofile
+
+# Local environment. This app deliberately has no env file — it generates its
+# own credentials into the login keychain on first run. This entry exists so a
+# stray one from a one-off experiment cannot be committed.
+.env
+.env.*
+
+# Tool caches and logs.
+.vite/
+.eslintcache
+*.tsbuildinfo
+*.log
+npm-debug.log*
+
+.DS_Store

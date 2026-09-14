@@ -1,0 +1,55 @@
+import { describe, expect, it, vi } from "vitest";
+
+/**
+ * `originOf` exists because of a bug that reached a user, and both halves of
+ * that bug are asserted here.
+ *
+ * The product is served from `app://tasktrooper`, and `new URL(...).origin` is
+ * the literal string `"null"` for any scheme the URL standard does not treat as
+ * special. So:
+ *
+ *   - every `origin === APP_ORIGIN` check failed, which is what refused the
+ *     page's own "Continue with Google" with "this request did not come from
+ *     the TaskTrooper app running in this window", and
+ *   - every `originA === originB` check PASSED for any two custom-scheme URLs,
+ *     because both sides were `"null"`. That is the dangerous half: it made
+ *     `evil://anything` same-origin with the product in the navigation guard.
+ *
+ * The first failure is loud and the second is silent, which is why the second
+ * gets the longer test.
+ */
+vi.mock("electron", () => ({
+  app: { getAppPath: () => "/app", isPackaged: false },
+  net: { fetch: () => Promise.resolve(new Response("")) },
+  protocol: { registerSchemesAsPrivileged: () => {}, handle: () => {} },
+}));
+
+const { APP_ORIGIN, originOf } = await import("./app-scheme.js");
+
+describe("originOf", () => {
+  it("gives the app scheme a comparable origin, which URL.origin does not", () => {
+    // The comparison isTrustedCloudSender makes, on the URL the window actually
+    // holds once the home route has loaded.
+    expect(originOf("app://tasktrooper/board")).toBe(APP_ORIGIN);
+    expect(new URL("app://tasktrooper/board").origin).toBe("null");
+  });
+
+  it("does not make two different custom schemes equal", () => {
+    // The silent half: each of these pairs compared EQUAL through URL.origin,
+    // because both sides were the string "null".
+    expect(originOf("evil://anything")).not.toBe(originOf("app://tasktrooper"));
+    expect(originOf("app://impostor")).not.toBe(originOf("app://tasktrooper"));
+    expect(originOf("file:///etc/passwd")).toBeNull();
+  });
+
+  it("still agrees with URL.origin for http(s), port included", () => {
+    for (const url of ["https://example.com/board", "http://127.0.0.1:5173/", "https://x.dev:8443/a"]) {
+      expect(originOf(url)).toBe(new URL(url).origin);
+    }
+  });
+
+  it("is null rather than throwing for something that is not a URL", () => {
+    expect(originOf("")).toBeNull();
+    expect(originOf("not a url")).toBeNull();
+  });
+});

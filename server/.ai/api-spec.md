@@ -1,0 +1,692 @@
+# API Specification
+
+All endpoints require `Authorization: Bearer <api_key>` unless noted; auth accepts
+`server.api_key` (legacy) or any key in `server.api_keys[]`. `X-Request-ID` is accepted
+and echoed (generated when omitted).
+
+## Chat, models, tools
+
+### POST /v1/chat/completions
+
+Runs the agent loop with optional tool policy, session continuity and RAG context.
+
+```json
+{
+  "model": "local",
+  "messages": [{"role": "user", "content": "List files in /tmp"}],
+  "stream": false,
+  "session_id": "optional-uuid",
+  "tool_policy": {"allow_tools": ["web_search"], "deny_tools": ["run_terminal"]},
+  "file_ids": ["uuid-of-uploaded-file"]
+}
+```
+
+OpenAI-compatible `chat.completion` response; `stream: true` returns SSE chunks for the
+final assistant message.
+
+### POST /v1/llm/providers/{type}/connect | /test
+
+Both resolve `base_url`, `default_model` and `timeout_seconds` on the same ladder as
+`resolveTimeoutSeconds`, with one deliberate difference:
+
+| Field | `/test` | `/connect` |
+|---|---|---|
+| `base_url` | request → **stored** → definition default | request → definition default (an empty field on the form means "reset me") |
+| `default_model` | request → stored → definition default | same |
+
+`/test` skipping the stored row is what made it dial `127.0.0.1:1234` — the "Custom
+(OpenAI-compatible)" default — for a provider connected on `127.0.0.1:11234`, and report the
+refusal there as the user's. `/connect` accepts `default_model` although the form never sends
+one: the custom provider's definition default is empty, so an API caller had no way to set the
+fallback model and no sign that the value it sent had been dropped.
+
+
+### GET /v1/llm/embedding-models | /v1/llm/embedding-status
+
+`?provider=` on the first takes a catalog type, an `llm_endpoints` uuid, **or**
+`local_runner`. `local_runner` is answered from the pin — one model,
+`nomic-embed-text-v1.5` — with no round trip: the runner refuses any other model,
+so LM Studio's real catalog would offer choices that cannot be chosen, and the
+listing must not empty when the Mac is unreachable.
+
+No error from either names storage. A ref that is not a uuid is refused before the
+query (`endpointRef`); `llm_endpoints.id` is a uuid column, so `provider=local_runner`
+used to reach the user as `invalid input syntax for type uuid … (SQLSTATE 22P02)`.
+The same guard now covers `PUT`/`DELETE /v1/llm/endpoints/{id}`.
+
+`/embedding-status` answers "what is embedding, and can it right now":
+
+| field | |
+|---|---|
+| `provider` / `model` / `dimensions` | resolved, never the raw stored `""` |
+| `on_member_mac` | `provider == local_runner`; the Mac is asked only then |
+| `host.state` | `ready`, `no_mac`, `mac_not_ready`, `lm_studio_down`, `model_missing`, `unknown` |
+| `host.detail` | the Mac's own remediation, unrewritten |
+
+Split from `GET /v1/llm/providers` because it crosses the tunnel; a probe failure is
+`unknown`, never an error — the provider and model are true regardless.
+
+### GET /v1/models
+
+Proxies the active provider's model list. `?provider=<type|endpoint uuid>` lists that
+provider instead — this fills the web's model picker.
+
+```json
+{"object": "list", "data": [{"id": "opus", "object": "model", "label": "Opus (latest)"}]}
+```
+
+`label` is optional, present only where ids are not self-explanatory.
+
+**Host-executed providers are answered from a constant.** `claude_code` is a binary on
+the runner host with no endpoint to query, so the handler short-circuits on
+`domain.ModelsForHostExecutedProvider` and serves `domain.ClaudeCodeModels()`:
+
+| id | meaning |
+|---|---|
+| `""` | send no `--model`; the operator's CLI default decides |
+| `fable` / `opus` / `sonnet` / `haiku` | latest of that family |
+| `opus[1m]` / `sonnet[1m]` | 1M-token long-context variants |
+
+Curated and static, because no CLI subcommand enumerates models and the CLI does not
+validate `--model` — a bogus alias reaches the API verbatim and costs a run.
+`haiku[1m]`, `fable[1m]` and `opusplan` work but are deliberately not offered (see the
+`ClaudeCodeModels` doc comment).
+
+### GET /v1/tools · GET /v1/tools/health
+
+Definitions filtered by the merged policy (config default + API key + request), and
+per-server connectivity:
+
+```json
+{"servers": [{"id": "browser", "connected": true, "tool_count": 12},
+             {"id": "github", "connected": false, "last_error": "connect: ..."}]}
+```
+
+## Sessions and jobs
+
+| Endpoint | Notes |
+|---|---|
+| `POST /v1/sessions` | `{title, model}`. Requires PostgreSQL |
+| `GET /v1/sessions/{id}` | `session` + `messages` (each with its `attachments`) |
+| `POST /v1/sessions/{id}/messages` | `{role, content, model, tool_policy, file_ids, attachment_ids}` |
+| `POST /v1/sessions/{id}/cancel` | Optional `{reason}` → `{"cancelled": true}` |
+| `DELETE /v1/sessions/{id}` | 204, messages included |
+| `POST /v1/jobs` | Async agent run; 202 with `status: pending`. Requires PostgreSQL |
+| `GET /v1/jobs/{id}` · `GET /v1/jobs/{id}/result` | `pending`/`running`/`completed`/`failed`/`cancelled`; result JSON once completed |
+| `DELETE /v1/jobs/{id}` | Cancels pending/running, deletes completed |
+| `GET /v1/audit?limit=50` | Recent tool-call audit entries. Requires PostgreSQL |
+
+Cancel: `cancelled: false` means there was nothing left to stop (the answer landed
+first) — normal, not an error. 404 unknown session, 400 malformed id. The stopped run
+ends as `cancelled` (a later terminal write cannot overwrite it), whatever was streamed
+is persisted as the assistant message, and the SSE stream ends with a normal
+`finish_reason: "stop"` frame plus `[DONE]`.
+
+## Files and attachments
+
+| Endpoint | Notes |
+|---|---|
+| `POST /v1/files` | Multipart `file`; chunked and embedded for RAG (pod's ephemeral disk) |
+| `GET /v1/files` · `DELETE /v1/files/{id}` | Delete removes chunks and disk storage |
+| `POST /v1/attachments` | Multipart `file` + optional `repository_id`; binary attachments stored as BYTEA |
+| `GET /v1/attachments/{id}` | Raw bytes, stored `Content-Type`, `Content-Disposition: inline`, `Cache-Control: private, max-age=31536000, immutable` |
+| `DELETE /v1/attachments/{id}` | Task/message links cascade away |
+| `GET /v1/repositories/{id}/tasks/{taskId}/attachments` · `POST` (same path) | `{attachments, count}`; POST `{attachment_id}` links an uploaded one (task existence verified first) |
+| `DELETE .../attachments/{attachmentId}` | Unlinks without deleting the attachment row |
+
+Attachments: max 10 MB (413 over), content-type allowlist (png/jpeg/webp/gif, pdf,
+plain/markdown/csv, json, zip, docx, xlsx) validated after server-side sniffing (415
+otherwise). The POST returns metadata (`{id, filename, content_type, size_bytes,
+sha256, …}`), never bytes, and GET needs the normal Authorization header — the web UI
+fetches blobs and uses object URLs rather than pointing `<img src>` at it. Attachments
+are not injected into the LLM context. Single-task detail responses carry `attachments`
+alongside `documents`.
+
+## Operational endpoints
+
+| Endpoint | Notes |
+|---|---|
+| `GET /metrics` | `bridge_requests_total`, `bridge_tool_calls_total`, `bridge_agent_iterations`, `bridge_llm_latency_seconds`, `bridge_mcp_errors_total` |
+| `GET /docs` | OpenAPI 3.0 YAML |
+| `POST /admin/reload` | Reloads config, reconnects MCP servers; no HTTP restart |
+| `GET /health` | No auth; bridge + LM Studio status |
+| `GET /v1/usage?days=30` | Token usage aggregates (totals, by-model, daily) from `llm_usage`. `days` 1-365 |
+
+## Push notifications
+
+`POST /v1/push/devices` · `DELETE /v1/push/devices/{token}` register APNs tokens. Board
+`task.moved` events into `analiz_review`, `human_uat`, `need_revision` or `done` fan out
+to registered devices (`application/notify` + `adapter/apns`, enabled when `push.apns_*`
+config / `APNS_*` env is set).
+
+A `task.moved` produced by a park sweeper (device, Claude Code quota, deploy watch, work
+order) fans out as a **resume** instead — never as well, so one released card is one
+notification. That push carries application data beside the `aps` dictionary
+(`apns.SendData`), which is what the iOS client routes the tap on:
+
+```json
+{ "aps": { "alert": { "title": "T-42 devam ediyor",
+                      "body": "Claude kullanım limiti sıfırlandı, görev kaldığı yerden sürüyor." },
+           "sound": "default" },
+  "type": "task.resumed", "task_id": "<uuid>", "repository_id": "<uuid>",
+  "task_key": "T-42", "blocked_resource": "claude_code_quota" }
+```
+
+`type`, `task_id` and `repository_id` are required (the client fetches tasks per
+repository, so a tap cannot route without it); `task_key` and `blocked_resource` are
+informational. `type` is matched exactly — an unrecognised value is displayed and opens
+nothing — so it is a contract with the client, not a label. Copy lives in
+`application/notify/copy.go`. The question-answer resume, the billing-period resume and
+a release rollback look similar in the payload and deliberately do NOT send it
+(`board.parkResume`).
+
+`POST /v1/push/live-activities/start-token` saves a device's push-to-start token (the
+backend then launches a `TaskRunAttributes` lock-screen card when a task moves to
+`in_progress`); `POST /v1/push/live-activities` binds a running activity's update token
+to a `task_id`. Later column moves push `update`, `done`/`released` push `end`, over the
+`<bundle>.push-type.liveactivity` topic (`live_activity_tokens`, migration 045).
+
+## Waker service (Cloud Run, separate binary `cmd/waker`)
+
+Wake/sleep controller for the scale-to-zero cloud deploy: `POST /wake` and `GET /status`
+(Firebase auth) start Cloud SQL + the tenant-manager and report the phase
+(`sleeping`/`db_starting`/`service_starting`/`awake`); Cloud Scheduler calls `POST /reap`
+(OIDC) every 15 min and sleeps the system when the gateway's `/internal/idle-status`
+(internal-auth HMAC) proves it idle. Web (`SystemWakeGate`) and iOS
+(`SystemWakeGate`/`WakerClient`) poll `/wake` behind a loading screen.
+
+## Board run control
+
+Both return the run under a `run` key (`{"run": {...domain.TaskAgentRun...}}`), answer
+`503 service_unavailable` with no board runner wired, and `404 not_found` when the run
+does not exist or belongs to a different task than the URL names.
+
+- `POST /v1/repositories/{id}/tasks/{taskId}/runs/{runId}/cancel` — stops a
+  `pending`/`running` run and parks the task **blocked** with the reason; recovery is a
+  human dragging the task onto a column, which releases the block and lets that column's
+  agent take it through normal dispatch. Optional `{reason}`. Returns the cancelled run;
+  `409 conflict` when it already stopped.
+- `POST /v1/repositories/{id}/tasks/{taskId}/runs/{runId}/rerun` — queues a new run of the **same agent** on the task's
+  **current** state. No column move; the run named in the URL stays untouched history.
+  Returns the new (`pending`) run; `409` while the run is still going or the task is
+  blocked — a blocked task is recovered by moving it, not by re-running in place.
+
+Neither goes through the board dispatcher: cancel would immediately fan fresh agents
+onto the task it just stopped, and re-run would start every agent configured for the
+column rather than the one asked for. Each records its own board event
+(`task.run_cancelled` / `task.rerun_requested`).
+
+## POST /v1/repositories/{id}/tasks/{taskId}/chat
+
+Opens — or reopens — the thread a human discusses ONE board task in, returning the
+session to send messages to plus the agent answering there:
+
+```json
+{"session_id": "0f9b…", "agent_id": "3c4d…"}
+```
+
+Idempotent: one thread per task for its whole life, so pressing "discuss" again returns
+the same `session_id`. An existing clarification thread becomes the task thread rather
+than a second one being opened. `agent_id` is `""` when no agent is assigned and nobody
+is subscribed to the column — the chat still works, it just has no persona. `404` for an
+unknown repository or a task the repository does not own (repository scope is the
+ownership check), `400` for a malformed id, `503` without a board.
+
+It differs from an ordinary repository chat in two ways:
+
+- Its workspace is the task's own branch checkout (`<workspace_root>/task-<taskId>` on
+  `feature/<task-key>`), not the shared mirror clone, so changes can be committed and
+  pushed to the task branch and reach the pull request. A checkout that cannot be
+  prepared fails the turn instead of silently falling back to the mirror.
+- Every turn carries compact task + PR context (key, title, column, description,
+  technical notes, acceptance criteria, branch, PR number/url) and the three PR tools
+  (`get_task_pull_request`, `commit_task_changes`, `comment_on_pull_request`). The diff
+  is deliberately not in the prompt; it is fetched per request through the tool.
+
+**PR fields live on the task** (migration 088): `pr_url` / `pr_number` are written the
+moment a PR is opened (`ensurePullRequestAsync`, the pipeline's pre-gate ensure, the
+code-review ensure, `commit_task_changes`) — before this the URL survived only as the
+text of a system comment. Task PRs are opened **ready for review**, not drafts (migration
+104): GitHub refuses to merge a draft and nothing ever un-drafted them. Nothing gates on
+draft state; `get_task_pull_request` still reports the `draft` field and the merge tool
+un-drafts a legacy draft as a repair step. `merge_commit_sha` (migration 104) is the
+squash commit the PR produced, written only by `merge_task_pull_request`: it tells the
+dispatcher a task in `done` needs no QA wake, and is the commit the follow-up deploy
+watch keys off rather than the default branch.
+
+## Repository registration
+
+- `POST /v1/repositories/open`, `POST /v1/repositories/import` and
+  `POST /v1/repositories` accept an optional `kind` (`backend|frontend|mobile|worker|monorepo`; invalid → 400). Omitted, it is
+  detected from the working copy (Flutter/Xcode markers → mobile; several projects under
+  `apps/`/`packages/` → monorepo; a react/vue/svelte/vite/next `package.json` →
+  frontend; otherwise backend) and persisted with the row.
+- `PATCH /v1/repositories/{id}` accepts `kind` too. `name` and `description` are applied
+  unconditionally on this route: an omitted description clears the stored one.
+- `PATCH /v1/repositories/{id}` also accepts `release_engine` (`auto|github_actions|local`):
+  which machine builds/uploads a mobile store release. `auto` (default) means GitHub Actions,
+  falling back to the paired Mac; see `domain.ErrNoReleaseEngine` under Store operations.
+- `POST /v1/repositories/{id}/restore` — re-clones a registered repository from its
+  recorded `remote_url` into **this** runtime's layout (`<workspace>/repos/<name>`) and
+  re-points `root_path`. 202 with the repository; the clone runs in the background and is
+  reported by `git_restore` (`{status: running|completed|failed, root_path, error}`) on
+  any later read, so a client polls `GET /v1/repositories/{id}`.
+
+  Refused with 400 (the message is the reason, nothing on disk is touched) unless the
+  folder is *genuinely missing* — the four-state `GitPresence`, so "exists but is not a
+  repository" and "unreadable" both refuse — and a remote is recorded. `git_restorable`
+  on every repository read is that rule pre-computed, and is what the UI's button keys
+  off. The clone is `port.GitClient.CloneRepo`, the same call the GitHub import makes, so
+  private repositories work through the same token injection.
+
+## Deploy targets
+
+- `GET /v1/deploy/templates?kind=backend` — recipe catalog (bodies stripped);
+  `GET /v1/deploy/templates/{templateId}` — one recipe in full.
+- `GET /v1/repositories/{id}/deploy/config` — saved targets + fitting templates + missing
+  vars per env, plus `detected_app_identity: {bundle_id, package_name}` (migration 125):
+  the store identifiers read off the working copy at import, for prefilling a store
+  target's `bundle_id`/`package_name`. Both keys always present, `""` = not readable.
+  Persisted, not read on demand — detection runs where the code is, this endpoint is
+  served by a host that may hold no copy. Scoped like `kind`: with `sub_project_path`
+  it is that sub-project's own (from the `sub_projects` JSON), never the repository's.
+- `PUT /v1/repositories/{id}/deploy/targets` — upsert one env: `{env, provider,
+  template_id, vars, health_url, logs_url, base_url, app_package, app_url,
+  auto_rollback}`. `health_url` and `logs_url` are destination-guarded (urlguard) before
+  storage; `logs_url` is an endpoint the application itself serves, read by the deploy
+  watch after a deploy (migration 105).
+- `DELETE /v1/repositories/{id}/deploy/targets/{env}`.
+- `GET /v1/repositories/{id}/deploy/targets/{env}/instructions` — recipe rendered with the target's vars.
+- `POST /v1/repositories/{id}/deploy/targets/{env}/setup-task` — opens the board task that authors the
+  deploy workflow.
+
+## Vercel connection & hosting links (migration 112)
+
+- `GET /v1/settings/vercel` — `{connected, username, email, team_id, team_slug, detail}`;
+  `PUT /v1/settings/vercel {token?, team_id?}` — a token is verified against `/v2/user`
+  and stored encrypted (same cipher as the GitHub token); `team_id` alone re-scopes
+  (`""` = personal account, validated against the token's teams);
+  `DELETE /v1/settings/vercel` — forgets token + team, keeps links.
+- `GET /v1/settings/vercel/teams` · `GET /v1/settings/vercel/projects?team_id=` (omitted →
+  default team). 409 when Vercel is not connected.
+- `GET /v1/repositories/{id}/hosting/detect` — per AREA (`""` for a backend/frontend repo;
+  `frontend`/`backend` halves of a monorepo, mobile/worker skipped): tree `hints`
+  (hosting markers, deploy workflows), Vercel `candidates` with a `reason`
+  (`project_json` > `git_link_dir` > `git_link` > `name`) and a `confidence`
+  (`exact` | `ambiguous` | `none`). Only one decisive candidate is `exact`; the UI asks otherwise.
+- `GET/PUT /v1/repositories/{id}/hosting/links` — `{area, provider, external_id, scope_id?,
+  source, evidence}`; a `vercel` link is resolved against the API before it is stored and, on
+  the root area, fills the empty fields of the prod deploy target (base/health URL, recipe
+  vars). Other providers record the operator's answer as given.
+  `DELETE …/hosting/links/{area}` (`root` for `""`).
+
+## Deploy metadata, ordering relations, packages
+
+**`assignee_user_id`** — the PERSON a card belongs to, and the thing that decides whose Mac runs
+it. Plain string on `POST`, optional pointer on `PATCH` (omitted leaves it, `""` unassigns). A uid
+that is not in `tenant_members` is a `400` naming the uid, never stored; with no roster wired
+(self-hosted, desktop) it is taken as given. See [Teams](projects.md#teams-migration-115).
+
+**Task fields** `before_deploy`, `after_deploy`, `rollback_plan` (nullable markdown) ride
+on `domain.BoardTask` and are accepted by `POST /v1/repositories/{id}/tasks` and
+`PATCH /v1/repositories/{id}/tasks/{taskId}` (the usual optional-pointer contract: omitted leaves the value, `""`
+clears it). `before_deploy` + `rollback_plan` are posted as ONE system comment when
+`TriggerRelease` dispatches the deploy; `after_deploy` when the prod deploy finalizes
+successfully. Empty fields post nothing.
+
+**Relations.** Three types, all reachable from the task API:
+
+| Field | Direction | Write semantics | Enforcement |
+|---|---|---|---|
+| `deploy_depends_on: [{target_task_id \| target_key}]` | source = this task | PATCH **replaces** (`[]` clears, omitting changes nothing); POST via `relations` | `TriggerRelease` 400s with `domain.ErrDeployDependencyNotReleased` and comments the blocking keys while any target lacks production evidence |
+| `blocked_by: [{target_task_id \| target_key}]` | stored as `blocks` with the BLOCKER as `source_task_id` (migration 022) | **ADDS** — a blocker one planner learned must not be silently dropped by another | Work-order park; a move into `todo`/`in_progress` is refused |
+| `derived_from` | source = implementation task, target = the analiz task | via `relations` or `create_board_task` | None — provenance, not order |
+
+- A task may not depend on itself (400). A **cycle is refused where the edge is
+  written**, not at release, naming the chain that closes it (`deploy-order cycle
+  refused: T-2 already ships after T-1 (T-2 → T-1)`).
+- Production evidence = a successful `prod_deploy`, a successful `preprod_deploy` on a
+  repo with no prod workflow mapped, or the `released` column. The gate runs after the
+  migration gate and before the mobile-store and release-target gates.
+- `GET /v1/repositories/{id}/tasks/{taskId}` returns both directions: `relations` (edges
+  this task is the source of) and `blocked_by` (the `blocks` edges pointing at it, with
+  `source_key` / `source_title`). Single-task detail only; bulk lists carry neither.
+- `derived_from` is a route, not an order: an analiz task's deliverable is
+  `task_documents` on that task and nothing else — no `docs/` commit, no file on any
+  branch — so without it an implementation task's specification is unreachable from the
+  work it specifies. `Service.AnalysisReferences` resolves it to
+  `[]domain.AnalysisReference{Key, Title, Documents}` and `board.Runner.analysisContext`
+  renders it into every run of the task.
+
+### The generated ordering block in `before_deploy` (migration 106)
+
+`before_deploy` is part agent-authored, part generated, fenced by `domain.OrderNoteOpen`
+/ `OrderNoteClose` (literal `<!-- tt:order -->`):
+
+```
+<!-- tt:order -->
+**Release order (generated from this task's relations — do not edit by hand):**
+- Ships after: T-1 (task export endpoint). Each one must be live in production before this
+  task is released; the release is refused otherwise.
+- Built after: T-1 (task export endpoint). Work on this task does not start until those are done.
+<!-- /tt:order -->
+
+Confirm the export feature flag is off in prod.
+```
+
+Regenerated by `Service.syncOrderNote` wherever the order can move: after `POST .../tasks`
+writes relations, after `PATCH` replaces `deploy_depends_on` or adds `blocked_by`, and
+inside `TriggerRelease` immediately before the pre-deploy checklist is posted. Only the
+fenced region is replaced, so an agent-written runbook survives. Generated rather than
+agent-written because a typed-in ordering drifts the moment the relation is edited and
+would then assert an order the release gate does not enforce. The checklist comment
+carries the same text with the markers stripped.
+
+### Deploy packages
+
+The release path for a repository with `auto_release_on_done` off, which otherwise has
+none (`trigger_release` refuses it as "batched release"). A package release skips only
+that flag; every other release gate still applies per task.
+
+| Endpoint | Notes |
+|---|---|
+| `GET /v1/repositories/{id}/deploy-packages` | `{packages, count}`. **Not a pure read**: each package is advanced first — members with production evidence marked, an all-live package becomes `released`, members whose dependencies just became satisfied are dispatched. Members carry `{task_id, position, key, title, column, released}` |
+| `POST /v1/repositories/{id}/deploy-packages` | `{name, description?}` → 201, status `draft` |
+| `PATCH /v1/repositories/{id}/deploy-packages/{pkgId}` | `{name?, description?, status?}`; `status` accepts only `"cancelled"` (every other transition is evidence-driven → 400), cancelling an already-`released` package 400s, unknown package 404 |
+| `DELETE /v1/repositories/{id}/deploy-packages/{pkgId}` | 204; membership cascades, tasks untouched |
+| `PUT /v1/repositories/{id}/deploy-packages/{pkgId}/tasks` | `{task_ids: []}` replaces membership, array index becomes `position`. 400 on a task from another repository or a `releasing`/`released` package |
+| `POST /v1/repositories/{id}/deploy-packages/{pkgId}/release` | 202 with the package. Allowed from `draft` or `failed` (a retry). Members are topologically sorted by their in-package `deploy_depends_on` edges, position breaking ties; a cycle fails the package with `domain.ErrDeployPackageCycle` in `note` and dispatches nothing. Only the FIRST wave is dispatched and the package stays `releasing` — deploys are async, so later waves ride the advancement on each GET. A member with production evidence is skipped, not an error; the first hard refusal moves the package to `failed` with `note = "<task key>: <error>"` |
+
+## Production incidents
+
+| Endpoint | Notes |
+|---|---|
+| `POST /v1/repositories/{id}/incidents` | Alert webhook: Alertmanager, Sentry, GCP Cloud Monitoring, or generic `{title, severity, env, detail, fingerprint, resolved}`. `?env=` / `?source=` fill what the payload omits; a recovery payload resolves the matching incident (202 when nothing matched) |
+| `GET /v1/incidents?repository_id=&env=&status=open,triaging` | List |
+| `GET /v1/incidents/{incidentId}` | Incident with its timeline |
+| `POST /v1/incidents/{incidentId}/triage` | Re-run the remedy engine |
+| `POST /v1/incidents/{incidentId}/remedy` | `{kind, summary, steps, evidence, confidence, rollback}` |
+| `POST /v1/incidents/{incidentId}/resolve` · `POST /v1/incidents/{incidentId}/ignore` | — |
+| `PUT /v1/repositories/{id}/incident-policy` | `{incident_policy: off\|suggest\|auto_fix}` |
+
+## Store operations
+
+| Endpoint | Notes |
+|---|---|
+| `PUT /v1/store/credentials/{provider}` | `provider`: `asc` (`{key_id, issuer_id, p8}`) or `google_play` (`{service_account_json}`), wrapped in `{"data": …}`. Validated against the console (`ValidateAuth`) before anything is persisted: 204 ok, 400 invalid input or rejected credential, 500 backend/config failure (e.g. no secrets cipher) |
+| `GET /v1/store/credentials` | `[{provider, configured, updated_at}]` — one row per known provider even when never saved (`configured:false`, zero `updated_at`); never the payload |
+| `DELETE /v1/store/credentials/{provider}` | 204; 400 on an unknown provider |
+| `GET /v1/repositories/{id}/store/apps` | `[]domain.MobileStoreApp` — the repo's per-platform store lifecycle rows |
+| `POST /v1/repositories/{id}/store/apps/{platform}/verify` | Re-runs `VerifyOnboarding` against the store API now instead of waiting for the next monitor sweep; returns the resulting row |
+| `GET /v1/store/credentials/{provider}/apps` | Picker source: `{listing_available, apps: []port.StoreAppRef}`. 200 with `listing_available:false` (never 5xx) when the store cannot enumerate — the Play Developer API has no listing endpoint at all and a service account may not reach the separate Reporting API that does |
+| `PUT /v1/repositories/{id}/store/apps/{platform}/link` | Body `{identifier, store_app_id, name}` — binds the repo/platform to one app from the picker; returns the updated `MobileStoreApp` |
+| `GET /v1/repositories/{id}/store/apps/{platform}/tracks` | Reads the three channels (internal/external/production) live from the console and refreshes the row's `tracks` cache; returns `domain.StoreTracks` |
+| `POST /v1/repositories/{id}/store/apps/{platform}/promote` | Body `{from, to, confirm}` — one channel forward at a time (`domain.NextChannel`: internal→external→production); `to=production` requires `confirm`; 409 `ErrAppNotReady` |
+| `POST /v1/repositories/{id}/store/apps/{platform}/build` | Body `{engine?}` (`auto`\|`github_actions`\|`local`, default the repo's `release_engine`); 409 `domain.ErrNoReleaseEngine` when neither engine can run — the card is parked on `human_decision`, not retried; 409 `storeops.ErrBuildTargetUnknown` when the working copy named no Xcode scheme / Gradle module (migration 127) |
+
+Mobile release now runs through `application/storeops/pipeline`-generated
+`scripts/mobile-release.sh` (one script, called by a thin workflow wrapper) —
+the four platform deploy templates (`ios-app-store`, `android-google-play`,
+`flutter-app-store`, `flutter-google-play`) and `mobile-qa-build` are deleted.
+Publishing is store-link + app-pick (above); mobile QA verification is now the
+repository's own `local_run` doc (`scripts/dev.sh`).
+
+## Verification settings & environment inventory
+
+- `PUT /v1/repositories/{id}/test-strategy` — `{test_strategy: local|stage|per_step}`:
+  `local` runs workspace tests only, `stage` (default) deploys to staging when a task
+  enters ready_for_qa, `per_step` also deploys at code_review.
+- `GET /v1/repositories/{id}/env-inventory` — variable **names** declared by the repo's
+  `.env.example`-style files (root + two levels for monorepos; real `.env` files are
+  never read) plus the deploy targets, so "what does this need and where does it answer"
+  is one call. Targets carry `base_url` next to `health_url`.
+- `PUT /v1/repositories/{id}/lifecycle-gates` — `{require_review_chain?,
+  require_release_deploy?, require_pipeline_for_review?}`, all optional; an omitted field
+  is left as it was. Returns the updated `domain.Repository` (every flag round-trips).
+  400 on an invalid id or a failed update.
+
+  The first two default `false`; **`require_pipeline_for_review` defaults `true`**
+  (migration 107), deliberately: the others are new requirements a repository opts INTO,
+  while this is behaviour that has always been on and is now opt-OUT-able. It is also the
+  only one gating a **dispatch** rather than a **move** — on, a task entering
+  `code_review` waits for the build/test pipeline before the reviewing architect is
+  dispatched; off, dispatch is immediate and the board event carries `pipeline_gate:
+  gate_disabled` so a card that skipped the gate is never mistaken for one that passed
+  it. Turn it off for a repository whose CI cannot answer (no Actions minutes, checks the
+  control plane cannot read). Even on, the wait is bounded
+  (`board.pipeline_gate_timeout`).
+
+  Arming the other two changes what a later move accepts, not this call.
+  `require_review_chain`: moving into `done` (or `released` when that skips `done`) 400s
+  unless the column-span history shows every review stage the type requires —
+  `code_review`, `in_qa`, `pm_uat` for `task`/`bug`, `analiz_review` for `analiz` — with
+  none of those stages' latest visit rejected; the message names the missing/rejected
+  stage and the move that earns it (`done means the task passed its review chain, and
+  this one has not … Missing: QA (in_qa) — move it to ready_for_qa`).
+  `require_release_deploy`: moving into `released` 400s unless `task_pipelines` holds a
+  successful `prod_deploy` (or `preprod_deploy` on a repo with no prod workflow mapped);
+  a `skipped` pipeline is never accepted and `analiz` tasks are exempt. Both fail closed
+  (400, not 200) if their evidence store cannot be read, so only enable a gate the board
+  can satisfy — see [orchestration-agents.md](orchestration-agents.md) and
+  [architecture.md](architecture.md) for the deadlock each can cause.
+
+## GitHub webhook
+
+- `POST /v1/github/webhook` — **public path, no bearer auth.** The per-repository HMAC
+  over the raw body (`X-Hub-Signature-256`) is the entire authentication story:
+  `verifiedWebhookRepo` resolves the delivery's repository by `repository.full_name` and
+  verifies before anything that costs money (a pull, an embedding call, a GitHub
+  round-trip). An unknown repository → `204`, so GitHub stops retrying; a bad or missing
+  signature → `401`; otherwise `202 {accepted, reason}`, where `reason` is diagnostic and
+  shows up in GitHub's delivery log.
+
+  Three `X-GitHub-Event` values are handled; anything else (`ping`, `installation`, …) is
+  acknowledged with `204` and ignored.
+
+  - `push` to the default branch debounces a reindex + project-profile refresh.
+  - `workflow_run`, `check_suite`: a **completed** run resolves the task pipelines waiting
+    on its `head_sha` (`HandleGitHubWorkflowEvent` → `PipelineRunner.ResolveByHeadSHA`) —
+    the `task_pipelines` row is written and the board acts on it: success/skipped hands
+    the card to its reviewer, failure moves it to `need_revision`. A run that is not yet
+    completed, a payload with no head SHA, or a redelivered `X-GitHub-Delivery` is
+    acknowledged and does nothing. Most deliveries legitimately match no waiting pipeline
+    (`reason: "no pipeline is waiting on this commit"`), which is not an error.
+
+- `POST /v1/repositories/{id}/webhook` — one-click install/rotate: mints a fresh secret
+  and `PATCH`es or `POST`s the hook so GitHub agrees with both the stored secret and
+  `githubapi.WebhookEvents` (`push`, `workflow_run`, `check_suite`). Returns the updated
+  `domain.Repository` (`webhook_installed`); 400 with the reason when the repository has
+  no GitHub remote, GitHub is not connected, or `server.public_base_url` is unset.
+  Existing hooks are also repaired at boot, without this call and without rotating any
+  secret.
+
+## Project profile
+
+- `GET /v1/repositories/{id}/profile` — `{profile_md, profile_updated_at}`: the
+  agent-maintained markdown brief (purpose, stack, layout, commands, conventions).
+  `profile_md` is `""` and `profile_updated_at` `null` until the first analysis lands;
+  404 on an unknown repository.
+- `POST /v1/repositories/{id}/profile/refresh` — 202 `{status: "started" |
+  "already_running"}`. Kicks a background analysis (system-architect's model, read-only
+  code tools against `root_path`); per-repo in-flight dedup makes a second request a
+  no-op. Also rebuilt automatically on import and after a push-triggered reindex when
+  missing or older than 6h.
+
+## Embedding map (UMAP source data)
+
+The browser runs UMAP (umap-js); the backend picks the right chunk embeddings,
+L2-normalizes them and reduces the dimensions before they cross the wire — a raw
+3072-float embedding × 2000 chunks is ~25 MB of JSON, the same points at 50 dimensions
+~400 KB.
+
+- `GET /v1/embedding-map/sources` — what can be visualized, so the UI can build its
+  selectors:
+
+  ```json
+  {
+    "files": {"available": true, "chunk_count": 412, "document_count": 7},
+    "repositories": [
+      {"id": "uuid", "name": "local-llm", "branch": "main", "index_id": "uuid",
+       "chunk_count": 8321, "file_count": 640, "indexed_at": "2026-08-05T10:00:00Z"}
+    ]
+  }
+  ```
+
+  Only repositories with a workspace index holding at least one chunk appear. A
+  repository indexed on several branches contributes **one** row, picked deterministically
+  (most chunks, ties to the most recently indexed, then index id). `indexed_at` is `null`
+  for an index that never completed.
+
+- `GET /v1/embedding-map?source=files|code&repository_id=&limit=&dims=` — the projection.
+
+  - `source` is required; anything other than `files`/`code` is `400`. `repository_id` is
+    required (and must be a uuid) when `source=code`, ignored for `files`.
+  - `limit` defaults to 2000, `dims` to 50. Out-of-range values are **clamped** (limit
+    100…5000, dims 2…128), never rejected — they are viewer controls.
+  - `dims` is additionally capped by the source's own embedding width (a 64-wide
+    embedding answers `dims=128` with `"dimensions": 64`), so the response's `dimensions`
+    is authoritative; never assume it equals what was asked.
+
+  ```json
+  {
+    "source": "code", "repository_id": "uuid-or-empty-string", "branch": "main",
+    "dimensions": 50, "total": 8321, "sampled": 2000, "truncated": true,
+    "points": [
+      {"id": "uuid", "group_id": "uuid-or-path", "group_label": "apps/web/src/api.ts",
+       "chunk_index": 0, "snippet": "first ~200 chars, whitespace-collapsed",
+       "language": "typescript", "symbol": "fetchTasks", "vector": [0.12, -0.4]}
+    ]
+  }
+  ```
+
+  `vector` is exactly `dimensions` long on every point. For `source=files`, `group_id` is
+  the `files.id` and `group_label` the filename; for `source=code`, both are the
+  repository-relative file path, `chunk_index` is a 0-based ordinal within that file
+  (start line, then id), and `language` / `symbol` carry the chunk's tree-sitter metadata
+  (empty string when unknown).
+
+  `total` is what is stored, `sampled` what came back. When `total > limit` the rows are
+  sampled **evenly** over a stable ordering — a step of `floor(rn·limit/total)` over
+  `(path, start_line, id)` — not the first N, which would show only the
+  alphabetically-first files, and the same request returns the same points. `sampled` can
+  fall below the sampled row count when a stored embedding is unusable (zero, NaN/Inf, or
+  a different width after an embedding-provider switch); such rows are dropped rather
+  than plotted at the origin. An empty source is `200` with `"points": []` and
+  `"total": 0`, not an error — including `source=code` for a repository that was never
+  indexed.
+
+Reduction is PCA computed in-process (`application/embedmap`): L2-normalize, mean-center,
+then block power iteration with Gram-Schmidt deflation against the covariance action
+`Xᵀ(Xv)` — the d×d covariance matrix is never materialized. It is deterministic down to
+the last bit, including the parallel decomposition, so a client may cache a projection
+and diff it against a later one.
+
+## 409 `runner_not_attached` — the request needs a Mac
+
+Any user-initiated request that cannot be served without the assignee's Mac answers `409` with
+**no `Retry-After`**. Nothing about it becomes true by waiting, so a client that backed off would
+show a spinner where the "connect your Mac" screen belongs.
+
+```json
+{ "error": {"message": "…", "type": "runner_not_attached"},
+  "code": "runner_not_attached", "member_uid": "…", "self": true }
+```
+
+| Field | Meaning |
+|---|---|
+| `code` / `error.type` | the same string in both places — the control plane's own refusal writes only the outer one |
+| `self` | the missing Mac is the CALLER's. `false` = a colleague's, so "open your laptop" is the wrong sentence |
+| `member_uid` | whose Mac, when known. Empty on the embedding path, where the call is always made as the acting member |
+
+Written by `adapter/http.runnerNotAttached`, reached from `internalError` (≈90 handlers, so any
+route that propagates the error gets it) and from `badRequestErr` (code search, whose 400 would
+otherwise read as "bad query"). Recognises `*domain.RunnerBlock` and `domain.ErrRunnerNotAttached`,
+including wrapped. `not_ready` answers the same 409 — to a person waiting, "connected but starting"
+and "not connected" are one instruction.
+
+**A dispatched board run is the opposite** and does NOT produce this: nobody is waiting on a socket,
+so it parks on `domain.ResourceRunnerNotAttached` and resumes by itself. Self-hosted and desktop
+never produce it at all.
+
+`POST /v1/agent-cli/{flavor}/connect` is one of these routes in the cloud: its probe reads the
+member's Mac (`preflight.report`), so no Mac answers 409 here rather than
+`agent_cli_binary_missing`. Those two are different problems — a shut laptop and a missing CLI —
+and only the 409 opens the "connect your Mac" screen.
+
+## GET /v1/tenant/members — the workspace roster
+
+Who a task may be assigned to. Readable by **every** role: a picker only an admin can
+populate would make assigning work to a teammate an admin feature by accident.
+
+```json
+{"members": [{"user_id": "…", "email": "…", "display_name": "…", "role": "owner|admin|member"}]}
+```
+
+| Fact | Value |
+|---|---|
+| Source | `tenant_members` (migration 115), the LOCAL mirror — **not** tenant-manager's `GET /api/tenant/members` |
+| Order | `display_name, user_id`; stable between calls |
+| Empty workspace | `{"members": []}`, never `null` |
+| No database | route not mounted (404), rather than an empty list a desktop build would have to explain |
+
+It reads the mirror because that is the exact set `resolveAssignee` validates against. The
+control plane's roster is a **larger** set — it holds invited teammates who have never
+opened the app — so a picker fed from there offers people whose selection is refused.
+
+**`email` and `display_name` are `""` today.** The mirror is filled from the signed identity
+headers, and `internalauth` signs only tenant, role and uid — tenant-manager has the email
+(`GET /api/tenant/members`) and no display name anywhere. Filling them is a coordinated
+multi-repo change (a signed email header); until then a client that wants labels joins this
+list with the control plane's on `user_id`, keeping THIS list as the set of candidates.
+
+## Assignee fields: omitted vs `null` vs a value
+
+`PATCH /v1/repositories/{id}/tasks/{taskId}` reads both assignees the same way
+(`domain.Nullable`), because a client holding one reference is holding the other:
+
+| Spelling | Effect |
+|---|---|
+| key omitted | leave whoever is on the card alone |
+| `null` | unassign |
+| a value (`""` for the person) | assign that agent / that person |
+
+`null` used to decode to the same nil pointer as an omitted key, so it was a clear that
+silently did nothing — including the board's own "unassign this agent" control.
+
+## Machine-readable refusals
+
+Every code below appears in **both** `error.type` and a top-level `code`, matching
+tenant-manager's `writeJSONCode`, so a client reads one place whichever server refused it.
+
+| Code | Status | Meaning |
+|---|---|---|
+| `runner_not_attached` | 409 | see above |
+| `provider_unavailable` | 409 | a declared-but-not-built provider was named (`cursor_agent`, `antigravity`). Same code and status tenant-manager's onboarding route answers |
+| `host_executed_provider` | 409 | `claude_code` was asked to behave like an endpoint — connect/test/activate. It is a process on a machine (in cloud, the assigned member's Mac), so there is nothing to dial |
+| `assignee_not_member` | 400 | the person a task was given to is not in `tenant_members`. The body is wrong, so 400; the sentence explains that the roster fills in as people sign in |
+| `invalid_catalog_input` | 400 | agent-catalog validation (`POST\|PUT /admin/agents`, `.../skills`, `.../rules`): `name is required`, `content is required`, `effort must be one of …`, `max_turns cannot be negative`. The sentence is the whole explanation and is rendered verbatim |
+| `unknown_agent_cli_flavor` | 400 | `POST /v1/agent-cli/{flavor}/connect` or `DELETE /v1/agent-cli/{flavor}` named no CLI at all. A flavor that IS known but not built answers 409 `provider_unavailable` instead |
+
+The first four were previously either `500` (the first three) or an untyped `400` (the
+fourth), i.e. a permanent refusal that told every client and every monitor to retry, or one a
+client could only recognise by matching the prose. The last two already answered 400 and were
+the stragglers: right status, no code. Written by `adapter/http.permanentRefusal` /
+`typedBadRequest` / `codedBadRequest`, the first two reached from `internalError` and
+`badRequestErr`, so any route that propagates the error gets the same answer.
+
+## Push webhook with no member: the index is marked stale
+
+A GitHub delivery carries no actor by design. On a workspace whose embeddings are produced on
+a member's own Mac (`local_runner`), a push therefore has no machine to reindex on, and the
+answer is neither "pick somebody's laptop" nor "start a pass that embeds nothing":
+
+- `202 {"accepted": false, "reason": "index marked stale: …"}`
+- the index's `sync_warning` says the push arrived and the index is behind that commit
+- the next pass a **person** triggers picks it up: opening the repository polls
+  `GET /v1/repositories/{id}/index/status`, which runs the freshness check on a context that
+  names them
+
+The boot freshness sweep is deferred the same way and for the same reason — a background
+fan-out has neither an actor nor an assignee. A deployment that embeds over HTTP (self-hosted,
+desktop, or a tenant that chose an HTTP embedding provider) is unaffected and reindexes on
+push exactly as before.

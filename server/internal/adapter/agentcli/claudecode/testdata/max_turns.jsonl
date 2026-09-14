@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"sess-turns-3","model":"claude-opus-5","cwd":"/tmp/task"}
+{"type":"assistant","session_id":"sess-turns-3","message":{"role":"assistant","content":[{"type":"text","text":"Half of the refactor is done; the remaining call sites are listed in the plan."}]}}
+{"type":"result","subtype":"error_max_turns","is_error":false,"duration_ms":600000,"num_turns":100,"result":"Half of the refactor is done; the remaining call sites are listed in the plan.","session_id":"sess-turns-3","total_cost_usd":1.75,"usage":{"input_tokens":5000,"output_tokens":2000}}

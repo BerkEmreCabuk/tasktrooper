@@ -1,0 +1,140 @@
+import { randomBytes } from "node:crypto";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { app, safeStorage } from "electron";
+
+/**
+ * The two secrets this machine holds, and where they live.
+ *
+ * Both are generated here on first run and then never change: the API key the
+ * backend is started with (and the UI sends as a bearer), and the key the
+ * backend encrypts stored provider credentials with. `mcp_secrets_key` in
+ * particular MUST be stable across runs — a new one on every launch would make
+ * every already-encrypted row unreadable.
+ *
+ * Not a `.env` file. The old shell-sourced one evaluated every value as shell,
+ * so a secret containing a `$` or a backtick was expanded before anything read
+ * it. Here the transport is the macOS Keychain: `safeStorage` encrypts with a
+ * key the OS holds in the login keychain under this app's own entry, the
+ * ciphertext lands in userData at 0600, and the plaintext goes from memory into
+ * a child's environment with no shell in between.
+ *
+ * Why not `security add-generic-password`: it takes the secret as argv, which
+ * is world-readable in `ps` for the lifetime of the call.
+ */
+
+const FILE = "local.bin";
+
+/** 32 bytes each. Long enough that guessing is not a threat model. */
+const TOKEN_BYTES = 32;
+
+export interface LocalSecrets {
+  /** Bearer for the local backend: its `SERVER_API_KEY`, and the UI's token. */
+  api_token: string;
+  /** The backend's `MCP_SECRETS_KEY`. Stable for the life of the install. */
+  mcp_secrets_key: string;
+  created_at: string;
+}
+
+export class SecretStoreUnavailableError extends Error {
+  constructor() {
+    super(
+      "macOS could not provide an encryption key from the login keychain, so this app will not store " +
+        "the credentials its local server needs. Unlock the login keychain and try again — writing them " +
+        "unencrypted is not offered.",
+    );
+    this.name = "SecretStoreUnavailableError";
+  }
+}
+
+export class SecretStore {
+  readonly #dir: string;
+
+  constructor(dir = app.getPath("userData")) {
+    this.#dir = dir;
+  }
+
+  #path(): string {
+    return path.join(this.#dir, FILE);
+  }
+
+  available(): boolean {
+    return safeStorage.isEncryptionAvailable();
+  }
+
+  /**
+   * The secrets, generating them on the first call.
+   *
+   * A file that exists but does not decrypt is regenerated rather than treated
+   * as an error: it means the keychain entry was removed or the app was
+   * restored onto a different machine. That costs the provider credentials
+   * stored under the old key, which is unavoidable — they cannot be decrypted
+   * either — and it is better than an app that will not start.
+   */
+  ensure(): LocalSecrets {
+    const existing = this.read();
+    if (existing) return existing;
+    if (!safeStorage.isEncryptionAvailable()) throw new SecretStoreUnavailableError();
+
+    const next: LocalSecrets = {
+      api_token: randomBytes(TOKEN_BYTES).toString("base64url"),
+      // base64, not base64url: this one is read by the Go backend, whose
+      // existing key handling is the standard encoding.
+      mcp_secrets_key: randomBytes(TOKEN_BYTES).toString("base64"),
+      created_at: new Date().toISOString(),
+    };
+    this.#write(next);
+    return next;
+  }
+
+  read(): LocalSecrets | null {
+    let ciphertext: Buffer;
+    try {
+      ciphertext = readFileSync(this.#path());
+    } catch {
+      return null;
+    }
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    try {
+      return asSecrets(JSON.parse(safeStorage.decryptString(ciphertext)));
+    } catch {
+      return null;
+    }
+  }
+
+  #write(secrets: LocalSecrets): void {
+    mkdirSync(this.#dir, { recursive: true });
+    const file = this.#path();
+    writeFileSync(file, safeStorage.encryptString(JSON.stringify(secrets)), { mode: 0o600 });
+    // writeFileSync's mode is only applied on create; an existing file keeps
+    // whatever it had, so rewriting over a file someone chmod'd wide open would
+    // silently stay wide open.
+    chmodSync(file, 0o600);
+  }
+
+  forget(): void {
+    try {
+      rmSync(this.#path(), { force: true });
+    } catch {
+      // Nothing to do: the next read returns null either way.
+    }
+  }
+}
+
+/**
+ * Both strings present and non-empty, or this is not a usable file. A partial
+ * one would start the backend with an empty key and fail at the first
+ * encrypted read, several layers from here.
+ */
+export function asSecrets(raw: unknown): LocalSecrets | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  const token = typeof o.api_token === "string" ? o.api_token : "";
+  const key = typeof o.mcp_secrets_key === "string" ? o.mcp_secrets_key : "";
+  if (token === "" || key === "") return null;
+  return {
+    api_token: token,
+    mcp_secrets_key: key,
+    created_at: typeof o.created_at === "string" ? o.created_at : "",
+  };
+}

@@ -1,0 +1,123 @@
+// English dictionary for the `operations` namespace — the cross-repository
+// /operations console: Deployments, Mobile Apps and Incidents tabs.
+// No `as const`: strings widen so tr/operations.ts (typed OperationsDict) must
+// mirror keys, not literals.
+export const operations = {
+  nav: "Operations",
+  tabs: {
+    deployments: "Deployments",
+    apps: "Mobile Apps",
+    incidents: "Incidents",
+  },
+  title: "Operations",
+  description: "What is deployed where, every mobile app's store state, and live incidents — across every repository.",
+  deployments: {
+    title: "Deployments",
+    description: "What is live in every environment, across every repository.",
+    empty: "No deploy targets configured yet.",
+    unconfigured: "Not configured",
+    configure: "Configure",
+    deploy: "Deploy",
+    deployTitle: "Deploy {env}?",
+    deployDescription: "This dispatches a new deploy of {repo} to {env} at ref {ref}.",
+    deploySucceeded: "Deploy dispatched",
+    rollback: "Roll back",
+    rollbackTitle: "Roll back {env}?",
+    rollbackDescription: "This rolls {repo} back to {sha} in {env}.",
+    rollbackSucceeded: "Rollback dispatched",
+    gitRef: "Git ref",
+    gitRefHint: "The backend has no persisted default branch — type it here if this repository deploys from something other than main.",
+    history: "Run history",
+    noHistory: "No runs yet.",
+    localRun: "Local",
+    triggeredBy: "Triggered by {actor}",
+    repository: "Repository",
+    runStatus: {
+      success: "Success",
+      failure: "Failed",
+      queued: "Queued",
+      inProgress: "Running",
+      other: "Cancelled",
+    },
+  },
+  apps: {
+    title: "Mobile Apps",
+    description: "Every iOS and Android app and its store state.",
+    empty: "No mobile apps registered yet.",
+    emptyAction: "Go to repositories",
+    lastReleased: "Released",
+    lastSubmitted: "Submitted",
+    storeAppIdLabel: "Store app ID",
+    verify: "Verify",
+    verifying: "Verifying...",
+    verified: "Verification refreshed",
+    checklist: "Checklist",
+    submit: "Submit for review",
+    submitTitle: "Submit for review?",
+    submitDescription: "This submits {identifier}'s latest build to Apple for review.",
+    submitDisabled: "Available once the app is live.",
+    submitSucceeded: "Submitted for review",
+    release: "Release",
+    releaseTitle: "Release to the App Store?",
+    releaseDescription: "This releases the pending version of {identifier} to everyone.",
+    releaseDisabled: "Available once Apple has approved the pending version.",
+    releaseSucceeded: "Released",
+    promote: "Promote",
+    promoteTitle: "Promote to {track}?",
+    promoteDescription: "This promotes {identifier}'s internal build to the {track} track at {fraction} rollout.",
+    promoteDisabled: "Available once the app is live, or ready for testing when promoting to the internal track.",
+    promoteSucceeded: "Promoted",
+    targetTrack: "Target track",
+    trackInternal: "Internal",
+    trackProduction: "Production",
+    rollout: "Rollout fraction",
+    rolloutDisabled: "Available once the app is live.",
+    rolloutSucceeded: "Rollout updated",
+    apply: "Apply",
+    halt: "Halt",
+    haltTitle: "Halt the rollout?",
+    haltDescription: "This stops {identifier}'s production rollout in place.",
+    haltDisabled: "Available once the app is live.",
+    haltSucceeded: "Rollout halted",
+    resume: "Resume",
+    resumeDisabled: "Available once the app is live.",
+    resumeSucceeded: "Rollout resumed",
+    // The channel and status vocabulary, shared with the project-settings
+    // store panel — both screens read their labels from here.
+    channels: {
+      internal: "Internal",
+      external: "External",
+      production: "Production",
+    },
+    trackStatus: {
+      none: "No release",
+      draft: "Draft",
+      in_review: "In review",
+      rolling_out: "Rolling out",
+      halted: "Halted",
+      live: "Live",
+      // The store answered with a status this build does not know. There IS a
+      // release — saying "No release" here would be the wrong answer, not a
+      // vaguer one.
+      unknown: "Unknown",
+    },
+    channelsTitle: "Release channels",
+    refreshChannels: "Refresh channels",
+    channelsNeedApp: "This app is not linked to a store app yet, so it has no channels.",
+    // Linked, but not the same answer as the line above: the app IS bound to a
+    // store listing, onboarding just has not reached a build yet.
+    channelsOnboardingTitle: "Onboarding in progress",
+    channelsOnboarding:
+      "This app is linked, but onboarding is not finished, so it has no channels yet. Work through the checklist above and press Verify — channels appear once the first build reaches the store.",
+    channelsFailed: "Failed to load channels",
+    channelEmpty: "No release on this channel",
+    channelAudience: "Audience",
+  },
+  errors: {
+    noWorkflowMapping: "No deploy workflow is mapped for this environment.",
+    noRollbackTarget: "No previous successful deploy to roll back to.",
+    credentialMissing: "Store credentials are not configured for this app.",
+  },
+};
+
+export type OperationsDict = typeof operations;

@@ -1,0 +1,8 @@
+{"type":"system","subtype":"init","session_id":"sess-mcp","model":"claude-opus-5","cwd":"/tmp/task"}
+{"type":"assistant","session_id":"sess-mcp","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_a","name":"Read","input":{"file_path":"main.go"}}]}}
+{"type":"user","session_id":"sess-mcp","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_a","content":"package main"}]}}
+{"type":"assistant","session_id":"sess-mcp","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_b","name":"mcp__tasktrooper__move_board_task","input":{"column":"code_review"}}]}}
+{"type":"user","session_id":"sess-mcp","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_b","content":"moved"}]}}
+{"type":"assistant","session_id":"sess-mcp","message":{"role":"assistant","content":[{"type":"tool_use","id":"toolu_c","name":"mcp__othervendor__lookup","input":{"q":"x"}}]}}
+{"type":"user","session_id":"sess-mcp","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_c","content":"found"}]}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":6,"result":"Moved the card and finished.","session_id":"sess-mcp","total_cost_usd":0.12,"usage":{"input_tokens":100,"output_tokens":50}}

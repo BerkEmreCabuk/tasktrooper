@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the TaskTrooper.app bundle itself. electron-builder gives
+  this file to `codesign` for the .app and gives entitlements.mac.inherit.plist
+  to everything else inside it (the Electron helpers, and the Go backend under
+  Contents/Resources/bin).
+
+  The hardened runtime is on, because notarization requires it. Every key below
+  is a hole in that runtime, so each one carries the reason it is here. If a
+  reason stops being true, delete the key — this list only ever gets audited if
+  it is short enough to read.
+
+  NOT here, deliberately:
+    - com.apple.security.app-sandbox — this app spawns and supervises arbitrary
+      user tooling (the `claude` CLI, appium, adb, git, a Postgres cluster) and
+      writes to a folder the user picks. The sandbox cannot express that, and a
+      half-sandbox that needs a temporary exception for every one of those is
+      worse than an honest unsandboxed Developer ID app.
+    - com.apple.security.cs.allow-unsigned-executable-memory on the children —
+      see the inherit plist; only the Electron helpers get it.
+    - com.apple.security.automation.apple-events — nothing here scripts another
+      application.
+-->
+<plist version="1.0">
+<dict>
+  <!--
+    V8 compiles JavaScript to machine code at runtime. The hardened runtime
+    forbids that by default, and without these two Electron launches to a blank
+    window. `allow-jit` covers the MAP_JIT path; `allow-unsigned-executable-
+    memory` covers the older W^X-violating path that V8 still uses on some code
+    paths in Electron 40.
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!--
+    Library validation requires every Mach-O image loaded into this process to
+    be signed by the same team as the main binary. Two things here need that
+    relaxed:
+
+      1. The ad-hoc fallback build (`-c.mac.identity=-`) carries no team id, so
+         with library validation on the app refuses to load its own Electron
+         Framework and dies before it draws a window. electron-builder documents
+         this combination explicitly.
+      2. Anything the app is ever asked to load out of a Homebrew or npm prefix
+         is signed by whoever built it, not by us.
+
+    It does NOT cover spawning a differently-signed child process — a child is
+    validated as its own program, not as a library of ours — so this key is not
+    what makes `claude` or the downloaded Postgres runnable. It is only about
+    images loaded into this address space.
+  -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!--
+    macOS scrubs every DYLD_* variable out of the environment of a
+    hardened-runtime process at launch, and the scrubbed environment is what
+    children inherit. The supervisor spawns tooling it did not build and cannot
+    relink — Homebrew's node (which appium runs on), adb, the user's `claude`
+    CLI — and a Homebrew binary linked against a keg-only library needs its
+    DYLD_FALLBACK_LIBRARY_PATH to survive. This is the weakest-justified key in
+    this file: if the supervisor is ever changed to hand each child an explicit,
+    curated environment that contains no DYLD_* at all, remove it.
+  -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+
+  <!--
+    Outbound: the backend reaches Anthropic, GitHub and the repositories a task
+    clones; the first start also downloads the Postgres binaries. Every leg
+    between this app's own processes is loopback.
+  -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+
+  <!--
+    Inbound on loopback only. The backend, the embedder and Postgres each bind
+    127.0.0.1 on a port they chose; Appium binds 127.0.0.1:4723. Nothing binds a
+    routable interface and nothing is ever reachable from off this Mac — but
+    binding a listening socket at all is what this key governs.
+
+    Both network keys are App Sandbox keys and are inert in a Developer ID
+    hardened-runtime build like this one. They are declared anyway so that the
+    day someone tries a sandboxed or MAS build, it fails on something other
+    than a socket the app has always opened.
+  -->
+  <key>com.apple.security.network.server</key>
+  <true/>
+</dict>
+</plist>

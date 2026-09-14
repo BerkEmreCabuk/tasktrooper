@@ -1,0 +1,263 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(0.962 0.007 265);
+  --foreground: oklch(0.145 0.02 265);
+  --card: oklch(0.99 0.003 265);
+  --card-foreground: oklch(0.145 0.02 265);
+  --popover: oklch(0.99 0.003 265);
+  --popover-foreground: oklch(0.145 0.02 265);
+  --primary: oklch(0.488 0.18 264);
+  --primary-foreground: oklch(0.985 0.002 247);
+  --secondary: oklch(0.945 0.01 265);
+  --secondary-foreground: oklch(0.25 0.02 265);
+  --muted: oklch(0.945 0.01 265);
+  --muted-foreground: oklch(0.5 0.02 265);
+  --accent: oklch(0.945 0.012 265);
+  --accent-foreground: oklch(0.25 0.02 265);
+  --destructive: oklch(0.577 0.22 27);
+  --destructive-foreground: oklch(0.985 0.002 247);
+  --border: oklch(0.895 0.012 265);
+  --input: oklch(0.895 0.012 265);
+  --ring: oklch(0.488 0.18 264);
+  --sidebar: oklch(0.962 0.007 265);
+  --sidebar-foreground: oklch(0.35 0.02 265);
+  --sidebar-border: oklch(0.895 0.012 265);
+  --sidebar-accent: oklch(0.935 0.014 265);
+  --sidebar-accent-foreground: oklch(0.2 0.02 265);
+  --success: oklch(0.55 0.15 145);
+  --warning: oklch(0.75 0.15 85);
+  --scrollbar-thumb: oklch(0.72 0.02 265 / 0.45);
+  --scrollbar-thumb-hover: oklch(0.55 0.03 265 / 0.65);
+  --scrollbar-track: transparent;
+}
+
+.dark {
+  --background: oklch(0.13 0.015 265);
+  --foreground: oklch(0.93 0.01 265);
+  --card: oklch(0.17 0.015 265);
+  --card-foreground: oklch(0.93 0.01 265);
+  --popover: oklch(0.17 0.015 265);
+  --popover-foreground: oklch(0.93 0.01 265);
+  --primary: oklch(0.62 0.19 264);
+  --primary-foreground: oklch(0.985 0.002 247);
+  --secondary: oklch(0.22 0.015 265);
+  --secondary-foreground: oklch(0.93 0.01 265);
+  --muted: oklch(0.22 0.015 265);
+  --muted-foreground: oklch(0.62 0.02 265);
+  --accent: oklch(0.24 0.02 265);
+  --accent-foreground: oklch(0.93 0.01 265);
+  --destructive: oklch(0.55 0.2 27);
+  --destructive-foreground: oklch(0.985 0.002 247);
+  --border: oklch(0.28 0.015 265);
+  --input: oklch(0.28 0.015 265);
+  --ring: oklch(0.62 0.19 264);
+  --sidebar: oklch(0.15 0.015 265);
+  --sidebar-foreground: oklch(0.78 0.01 265);
+  --sidebar-border: oklch(0.24 0.015 265);
+  --sidebar-accent: oklch(0.22 0.02 265);
+  --sidebar-accent-foreground: oklch(0.93 0.01 265);
+  --success: oklch(0.65 0.17 145);
+  --warning: oklch(0.78 0.14 85);
+  --scrollbar-thumb: oklch(0.38 0.02 265 / 0.85);
+  --scrollbar-thumb-hover: oklch(0.48 0.03 265 / 0.95);
+  --scrollbar-track: transparent;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: var(--scrollbar-track);
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--scrollbar-thumb);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-thumb-hover);
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+
+  html {
+    @apply antialiased;
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans min-h-screen;
+  }
+
+  #root {
+    @apply min-h-screen;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+}
+
+.prose-chat {
+  @apply text-sm leading-relaxed;
+  /* Agent/user markdown routinely carries long unbroken tokens (URLs,
+     hashes, base64, IDs). Without this the text overflows its bubble/card
+     instead of wrapping — this is the default for the whole block so every
+     element (p, li, table cell, …) inherits it, then `pre`/`pre code` below
+     opt back out because a code fence must stay copy-pasteable and keep its
+     indentation, scrolling horizontally instead of wrapping. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.prose-chat p {
+  @apply mb-2 last:mb-0;
+}
+
+.prose-chat pre {
+  @apply bg-muted rounded-md p-3 overflow-x-auto text-xs my-2;
+  white-space: pre;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.prose-chat code {
+  @apply bg-muted px-1 py-0.5 rounded text-xs font-mono;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.prose-chat pre code {
+  @apply bg-transparent p-0;
+  white-space: inherit;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+.prose-chat ul,
+.prose-chat ol {
+  @apply pl-5 mb-2;
+}
+
+.prose-chat ul {
+  @apply list-disc;
+}
+
+.prose-chat ol {
+  @apply list-decimal;
+}
+
+.prose-chat h1,
+.prose-chat h2,
+.prose-chat h3 {
+  @apply font-semibold mt-3 mb-1;
+}
+
+.prose-chat h1 {
+  @apply text-lg;
+}
+
+.prose-chat h2 {
+  @apply text-base;
+}
+
+.prose-chat h3 {
+  @apply text-sm;
+}
+
+.prose-chat a {
+  @apply text-primary underline underline-offset-2;
+}
+
+.prose-chat blockquote {
+  @apply border-l-2 border-border pl-3 text-muted-foreground italic;
+}
+
+/* The scroll boundary for a GFM table: `MarkdownContent` wraps every
+   rendered <table> in this div (see its `components.table` override). Auto
+   table layout lets a table's rendered width exceed any CSS width you give
+   it once a cell's content can't shrink further, so the table itself is not
+   the clipping box — this wrapper is. Focusable (tabIndex on the element)
+   so a keyboard/trackpad user without a visible drag handle can still reach
+   and scroll it; the thin scrollbar from the global reset above provides
+   the visible affordance. */
+.prose-chat-table-wrap {
+  @apply my-2 overflow-x-auto rounded-md border border-border;
+}
+
+.prose-chat table {
+  @apply w-full text-xs border-collapse;
+  min-width: 32rem;
+  margin: 0;
+}
+
+.prose-chat th,
+.prose-chat td {
+  @apply border border-border px-2 py-1 align-top;
+}
+
+.prose-chat th {
+  @apply bg-muted font-medium;
+}

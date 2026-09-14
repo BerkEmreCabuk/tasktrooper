@@ -1,0 +1,538 @@
+package deploywatch_test
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/application/deploywatch"
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
+)
+
+const mergeSHA = "abc123def456789012345678901234567890abcd"
+
+var (
+	repoID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	taskID = uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	fixed  = time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)
+)
+
+func releasedTask() domain.BoardTask {
+	plan := "Turn the `new_pricing` flag off, then revert. The migration adding pricing_tier must be dropped by hand."
+	return domain.BoardTask{
+		ID:             taskID,
+		RepositoryID:   repoID,
+		Key:            "T-7",
+		Title:          "New pricing tiers",
+		TaskType:       domain.TaskTypeTask,
+		Column:         domain.TaskColumnDone,
+		MergeCommitSHA: mergeSHA,
+		HasMigration:   true,
+		RollbackPlan:   &plan,
+	}
+}
+
+type harness struct {
+	svc       *deploywatch.Service
+	actions   *fakeActions
+	comments  *fakeComments
+	incidents *fakeIncidents
+	git       *fakeGit
+	rollback  *fakeRollbacker
+	runs      *fakeRuns
+	targets   *fakeTargets
+}
+
+func newHarness(t *testing.T, task domain.BoardTask, target domain.DeployTarget, opts ...func(*deploywatch.Deps)) *harness {
+	t.Helper()
+	h := &harness{
+		actions:   &fakeActions{jobsByRun: map[int64][]port.ActionsJob{}, logs: map[int64]string{}},
+		comments:  &fakeComments{},
+		incidents: &fakeIncidents{},
+		git:       &fakeGit{},
+		rollback:  &fakeRollbacker{},
+		runs:      &fakeRuns{byEnv: map[string][]domain.DeploymentRun{}},
+		targets:   &fakeTargets{byEnv: map[string]domain.DeployTarget{domain.DeployEnvProd: target}},
+	}
+	deps := deploywatch.Deps{
+		Tasks:     newFakeTasks(task),
+		Comments:  h.comments,
+		Targets:   h.targets,
+		Repos:     &fakeRepos{repo: domain.Repository{ID: repoID, Name: "acme", RootPath: "/tmp/acme"}},
+		Runs:      h.runs,
+		Pipeline:  &fakePipelineJobs{},
+		Actions:   h.actions,
+		Rollbacks: h.rollback,
+		Git:       h.git,
+		Incidents: h.incidents,
+		RepoCoordinates: func(context.Context, domain.Repository) (string, string, error) {
+			return "acme-org", "acme", nil
+		},
+	}
+	for _, opt := range opts {
+		opt(&deps)
+	}
+	h.svc = deploywatch.New(deps)
+	h.svc.SetClock(func() time.Time { return fixed })
+	return h
+}
+
+// ------------------------------------------------ signal kind 1: Actions run
+
+func TestStatusResolvesFromActionsDeployJob(t *testing.T) {
+	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd, HealthURL: "https://api.example.com/health"})
+	h.actions.runsForCommit = actionRuns(actionRun(55, "https://gh/run/55"))
+	h.actions.jobsByRun[55] = jobs(
+		job(1, "build", "completed", "success"),
+		job(2, "deploy", "completed", "success"),
+	)
+
+	got, err := h.svc.Status(context.Background(), repoID, taskID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got.State != domain.DeployWatchSuccess {
+		t.Fatalf("state = %q, want success (detail: %s)", got.State, got.Detail)
+	}
+	if got.Signal != domain.DeploySignalActionsRun {
+		t.Fatalf("signal = %q, want actions_run", got.Signal)
+	}
+	// The Actions signal answered, so the commit-status surface must not have
+	// been consulted at all: a repository with a deploy job and a stale
+	// third-party status must not have that status override its own CI.
+	if h.actions.commitCalls != 0 {
+		t.Fatalf("commit status consulted %d times despite an Actions deploy job", h.actions.commitCalls)
+	}
+	if got.HealthWindowUntil == nil || !got.HealthWindowUntil.Equal(fixed.Add(deploywatch.DefaultHealthWindow)) {
+		t.Fatalf("health window = %v, want %v", got.HealthWindowUntil, fixed.Add(deploywatch.DefaultHealthWindow))
+	}
+}
+
+func TestStatusIgnoresNonDeployJobsInTheSameRun(t *testing.T) {
+	// "Backend CI/CD" carries build, test AND deploy. A red unit test is a
+	// failed BUILD, not a failed deploy, and must not trigger a rollback.
+	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
+	h.actions.runsForCommit = actionRuns(actionRun(7, ""))
+	h.actions.jobsByRun[7] = jobs(
+		job(1, "test", "completed", "failure"),
+		job(2, "deploy", "completed", "success"),
+	)
+
+	got, err := h.svc.Status(context.Background(), repoID, taskID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got.State != domain.DeployWatchSuccess {
+		t.Fatalf("state = %q, want success — a failing test job is not a failing deploy", got.State)
+	}
+}
+
+func TestStatusPendingWhileDeployJobRuns(t *testing.T) {
+	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
+	h.actions.runsForCommit = actionRuns(actionRun(9, ""))
+	h.actions.jobsByRun[9] = jobs(job(3, "deploy", "in_progress", ""))
+
+	got, err := h.svc.Status(context.Background(), repoID, taskID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got.State != domain.DeployWatchPending {
+		t.Fatalf("state = %q, want pending", got.State)
+	}
+	if got.State.Settled() {
+		t.Fatal("pending must not be Settled — the sweeper would resume the task immediately")
+	}
+	if got.HealthWindowUntil != nil {
+		t.Fatal("a pending deploy must not open a health window")
+	}
+}
+
+// ------------------------------- signal kind 2: commit status (Vercel-style)
+
+func TestStatusResolvesFromCommitStatusWhenNoActionsDeployJob(t *testing.T) {
+	// acme-web: no deploy workflow anywhere. The Actions runs that exist are
+	// lint/typecheck, and vercel[bot] writes the commit status.
+	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
+	h.actions.runsForCommit = actionRuns(actionRun(12, ""))
+	h.actions.jobsByRun[12] = jobs(job(4, "lint", "completed", "success"))
+	h.actions.commitSignal = commitSignal(domain.DeploySignalCommitStatus, "success", "Vercel")
+
+	got, err := h.svc.Status(context.Background(), repoID, taskID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got.State != domain.DeployWatchSuccess {
+		t.Fatalf("state = %q, want success", got.State)
+	}
+	if got.Signal != domain.DeploySignalCommitStatus {
+		t.Fatalf("signal = %q, want commit_status", got.Signal)
+	}
+	if len(got.Contexts) == 0 || got.Contexts[0] != "Vercel" {
+		t.Fatalf("contexts = %v, want the Vercel context named", got.Contexts)
+	}
+	if !strings.Contains(got.Detail, "deploys on push") {
+		t.Fatalf("detail should say this repository deploys on push, got %q", got.Detail)
+	}
+}
+
+func TestStatusResolvesFromDeploymentStatus(t *testing.T) {
+	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
+	h.actions.commitSignal = commitSignal(domain.DeploySignalDeploymentState, "failure", "")
+
+	got, err := h.svc.Status(context.Background(), repoID, taskID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got.State != domain.DeployWatchFailure {
+		t.Fatalf("state = %q, want failure", got.State)
+	}
+	if got.Signal != domain.DeploySignalDeploymentState {
+		t.Fatalf("signal = %q, want deployment_status", got.Signal)
+	}
+}
+
+func TestStatusNoSignalIsNotAFailure(t *testing.T) {
+	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
+
+	got, err := h.svc.Status(context.Background(), repoID, taskID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got.State != domain.DeployWatchNoSignal {
+		t.Fatalf("state = %q, want no_signal", got.State)
+	}
+	if !got.State.Settled() {
+		t.Fatal("no_signal must be Settled — the watch has an answer and must end")
+	}
+}
+
+func TestStatusWithoutMergeCommitIsUnknown(t *testing.T) {
+	task := releasedTask()
+	task.MergeCommitSHA = ""
+	h := newHarness(t, task, domain.DeployTarget{Env: domain.DeployEnvProd})
+
+	got, err := h.svc.Status(context.Background(), repoID, taskID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if got.State != domain.DeployWatchUnknown {
+		t.Fatalf("state = %q, want unknown", got.State)
+	}
+}
+
+// ------------------------------------------- failure → log fetch → summary
+
+func TestFailedDeployNamesTheJobAndItsLogIsSummarized(t *testing.T) {
+	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
+	h.actions.runsForCommit = actionRuns(actionRun(21, "https://gh/run/21"))
+	h.actions.jobsByRun[21] = jobs(job(99, "deploy", "completed", "failure"))
+	h.actions.logs[99] = strings.Repeat("noisy setup line\n", 2000) +
+		"##[error]migration 0021 failed: relation pricing_tier already exists\n" +
+		strings.Repeat("cleanup\n", 200)
+
+	status, err := h.svc.Status(context.Background(), repoID, taskID)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.State != domain.DeployWatchFailure {
+		t.Fatalf("state = %q, want failure", status.State)
+	}
+	if status.FailedJob == nil || status.FailedJob.ID != 99 {
+		t.Fatalf("failed job = %+v, want job 99 so get_deploy_logs has something to fetch", status.FailedJob)
+	}
+
+	res, err := h.svc.JobLogs(context.Background(), repoID, status.FailedJob.ID, 2000)
+	if err != nil {
+		t.Fatalf("JobLogs: %v", err)
+	}
+	if !res.Truncated {
+		t.Fatal("a 40k-line log must come back truncated, not whole")
+	}
+	if len(res.Content) > 2400 {
+		t.Fatalf("summary is %d chars, well past the 2000 cap", len(res.Content))
+	}
+	// The point of summarizing rather than tailing: the error line survives even
+	// though 200 lines of cleanup were printed after it.
+	if !strings.Contains(res.Content, "migration 0021 failed") {
+		t.Fatalf("the error line was lost in truncation:\n%s", res.Content)
+	}
+}
+
+func TestSummarizeLogKeepsShortLogsWhole(t *testing.T) {
+	out, truncated := deploywatch.SummarizeLog("boom\n", 500)
+	if truncated {
+		t.Fatal("a short log must not be reported as truncated")
+	}
+	if out != "boom" {
+		t.Fatalf("out = %q", out)
+	}
+}
+
+// ------------------------------------------------- health-window attribution
+
+func TestAttributeReleaseNamesTheTaskThatDeployedTheLiveCommit(t *testing.T) {
+	task := releasedTask()
+	h := newHarness(t, task, domain.DeployTarget{Env: domain.DeployEnvProd})
+	completed := fixed.Add(-5 * time.Minute)
+	h.runs.byEnv[domain.DeployEnvProd] = []domain.DeploymentRun{{
+		RepositoryID: repoID,
+		Env:          domain.DeployEnvProd,
+		HeadSHA:      mergeSHA,
+		Status:       domain.RunStatusCompleted,
+		Conclusion:   domain.RunConclusionSuccess,
+		CompletedAt:  &completed,
+	}}
+
+	got, ok := h.svc.AttributeRelease(context.Background(), repoID, domain.DeployEnvProd, fixed)
+	if !ok {
+		t.Fatal("expected the incident to be attributed to T-7")
+	}
+	if got.TaskID != taskID || got.TaskKey != "T-7" {
+		t.Fatalf("attribution = %+v, want T-7", got)
+	}
+	if got.MergeSHA != mergeSHA {
+		t.Fatalf("merge sha = %q", got.MergeSHA)
+	}
+}
+
+func TestAttributeReleaseDeclinesOutsideTheHealthWindow(t *testing.T) {
+	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
+	completed := fixed.Add(-2 * time.Hour)
+	h.runs.byEnv[domain.DeployEnvProd] = []domain.DeploymentRun{{
+		HeadSHA: mergeSHA, Status: domain.RunStatusCompleted,
+		Conclusion: domain.RunConclusionSuccess, CompletedAt: &completed,
+	}}
+
+	if _, ok := h.svc.AttributeRelease(context.Background(), repoID, domain.DeployEnvProd, fixed); ok {
+		t.Fatal("a release two hours old must not be blamed for a fresh incident")
+	}
+}
+
+func TestAttributeReleaseIgnoresAFailedDeploy(t *testing.T) {
+	// A failed deploy left production on the PREVIOUS commit. Blaming the task
+	// whose deploy never landed would roll back a release that is not there.
+	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
+	completed := fixed.Add(-1 * time.Minute)
+	h.runs.byEnv[domain.DeployEnvProd] = []domain.DeploymentRun{{
+		HeadSHA: mergeSHA, Status: domain.RunStatusCompleted,
+		Conclusion: domain.RunConclusionFailure, CompletedAt: &completed,
+	}}
+
+	if _, ok := h.svc.AttributeRelease(context.Background(), repoID, domain.DeployEnvProd, fixed); ok {
+		t.Fatal("a FAILED deploy must not be attributed as the live release")
+	}
+}
+
+func TestAttributeReleaseDeclinesWhenNoTaskClaimsTheCommit(t *testing.T) {
+	// A human merged this one. Nothing to blame and nothing to wake.
+	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
+	completed := fixed.Add(-1 * time.Minute)
+	h.runs.byEnv[domain.DeployEnvProd] = []domain.DeploymentRun{{
+		HeadSHA: "0000000000000000000000000000000000000000",
+		Status:  domain.RunStatusCompleted, Conclusion: domain.RunConclusionSuccess, CompletedAt: &completed,
+	}}
+
+	if _, ok := h.svc.AttributeRelease(context.Background(), repoID, domain.DeployEnvProd, fixed); ok {
+		t.Fatal("a commit no task claims must not be attributed")
+	}
+}
+
+// ---------------------------------------------------------------- rollback
+
+func failedDeployHarness(t *testing.T, target domain.DeployTarget) *harness {
+	t.Helper()
+	h := newHarness(t, releasedTask(), target)
+	h.actions.runsForCommit = actionRuns(actionRun(31, ""))
+	h.actions.jobsByRun[31] = jobs(job(77, "deploy", "completed", "failure"))
+	h.runs.byEnv[domain.DeployEnvProd] = []domain.DeploymentRun{{HeadSHA: mergeSHA}}
+	return h
+}
+
+func rollbackReq() deploywatch.RollbackRequest {
+	return deploywatch.RollbackRequest{
+		RepositoryID: repoID,
+		TaskID:       taskID,
+		Env:          domain.DeployEnvProd,
+		Trigger:      deploywatch.RollbackTriggerDeployFailed,
+		AgentName:    "qa-agent",
+		Note:         "deploy job failed on the migration step",
+	}
+}
+
+func TestRollbackAutoDisabledProposesAndExecutesNothing(t *testing.T) {
+	h := failedDeployHarness(t, domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: false})
+
+	res, err := h.svc.Rollback(context.Background(), rollbackReq())
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if !res.Proposed || res.RolledBack {
+		t.Fatalf("result = %+v, want proposed and not rolled back", res)
+	}
+	if len(h.rollback.calls) != 0 {
+		t.Fatal("auto_rollback is off — nothing may be dispatched")
+	}
+	if len(h.git.reverted) != 0 {
+		t.Fatal("auto_rollback is off — nothing may be reverted")
+	}
+	if !strings.Contains(res.Message, "auto_rollback is off") {
+		t.Fatalf("message must say why nothing happened: %q", res.Message)
+	}
+	if len(h.incidents.ingests) == 0 {
+		t.Fatal("a proposed rollback must still open an incident")
+	}
+	if !strings.Contains(h.comments.all(), "PROPOSED") {
+		t.Fatalf("the proposal must land on the card:\n%s", h.comments.all())
+	}
+}
+
+func TestRollbackWorkflowMechanismDispatchesTheTag(t *testing.T) {
+	h := failedDeployHarness(t, domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: true})
+	h.rollback.dispatch = domain.DeployDispatch{
+		Ref: "rollback/prod/1700000000", WorkflowFile: "deploy-prod.yml",
+		RollbackOfSHA: "feedfacefeedfacefeedfacefeedfacefeedface",
+	}
+
+	res, err := h.svc.Rollback(context.Background(), rollbackReq())
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if !res.RolledBack || res.Mechanism != domain.RollbackMechanismWorkflow {
+		t.Fatalf("result = %+v, want a workflow_dispatch rollback", res)
+	}
+	if res.Ref != "rollback/prod/1700000000" {
+		t.Fatalf("ref = %q", res.Ref)
+	}
+	if len(h.git.reverted) != 0 {
+		t.Fatal("a repository with a deploy workflow must not be reverted")
+	}
+}
+
+func TestRollbackRevertMechanismWhenNoDeployWorkflow(t *testing.T) {
+	h := failedDeployHarness(t, domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: true})
+	// deployops refuses: nothing to dispatch. That is the push-to-deploy repo.
+	h.rollback.err = errNoWorkflow
+	h.git.hasGit = true
+	h.git.revertSHA = "9999999999999999999999999999999999999999"
+
+	res, err := h.svc.Rollback(context.Background(), rollbackReq())
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if !res.RolledBack || res.Mechanism != domain.RollbackMechanismRevert {
+		t.Fatalf("result = %+v, want a revert_push rollback", res)
+	}
+	if len(h.git.reverted) != 1 || h.git.reverted[0] != mergeSHA {
+		t.Fatalf("reverted %v, want exactly the merge commit", h.git.reverted)
+	}
+	if res.RevertSHA != "9999999999999999999999999999999999999999" {
+		t.Fatalf("revert sha = %q", res.RevertSHA)
+	}
+}
+
+func TestRollbackReportsManualStepsItCannotPerform(t *testing.T) {
+	h := failedDeployHarness(t, domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: true})
+
+	res, err := h.svc.Rollback(context.Background(), rollbackReq())
+	if err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	joined := strings.Join(res.ManualSteps, "\n")
+	if !strings.Contains(joined, "DATABASE SCHEMA") {
+		t.Fatalf("a task with has_migration must be told the migration is NOT reversed:\n%s", joined)
+	}
+	if !strings.Contains(joined, "new_pricing") {
+		t.Fatalf("the task's own rollback_plan must be handed back verbatim:\n%s", joined)
+	}
+	if !strings.Contains(h.comments.all(), "MECHANICAL half") {
+		t.Fatalf("the card must say the rollback was only the mechanical half:\n%s", h.comments.all())
+	}
+}
+
+// ------------------------------------------- agent-actor authorization path
+
+func TestRollbackRefusesWhenAnotherReleaseIsLive(t *testing.T) {
+	h := failedDeployHarness(t, domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: true})
+	// Somebody else released after this task. Rolling back now would undo THEIR
+	// change — this is the check that stands in for the human's typed
+	// confirmation.
+	h.runs.byEnv[domain.DeployEnvProd] = []domain.DeploymentRun{{HeadSHA: "1234512345123451234512345123451234512345"}}
+
+	_, err := h.svc.Rollback(context.Background(), rollbackReq())
+	if !errors.Is(err, domain.ErrRollbackNotOwner) {
+		t.Fatalf("err = %v, want ErrRollbackNotOwner", err)
+	}
+	if len(h.rollback.calls) != 0 {
+		t.Fatal("nothing may be dispatched when the task does not own the live release")
+	}
+}
+
+func TestRollbackCarriesTheAgentAuthorizationIntoDeployops(t *testing.T) {
+	h := failedDeployHarness(t, domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: true})
+
+	if _, err := h.svc.Rollback(context.Background(), rollbackReq()); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	if len(h.rollback.calls) != 1 {
+		t.Fatalf("expected exactly one authorized rollback, got %d", len(h.rollback.calls))
+	}
+	auth := h.rollback.calls[0]
+	if auth.TaskID != taskID || auth.TaskKey != "T-7" {
+		t.Fatalf("auth does not name the card: %+v", auth)
+	}
+	if auth.OwnedMergeSHA != mergeSHA {
+		t.Fatalf("auth.OwnedMergeSHA = %q, want the commit whose ownership was proven", auth.OwnedMergeSHA)
+	}
+	if auth.Trigger != deploywatch.RollbackTriggerDeployFailed || auth.AgentName != "qa-agent" {
+		t.Fatalf("auth loses the audit fields: %+v", auth)
+	}
+	// The human's Confirm field must stay empty on this path: the agent does not
+	// get to type the repository's name.
+	if h.rollback.inputs[0].Confirm != "" {
+		t.Fatalf("an agent rollback must not supply a confirmation phrase, got %q", h.rollback.inputs[0].Confirm)
+	}
+	if h.rollback.inputs[0].Actor != "agent:qa-agent" {
+		t.Fatalf("actor = %q, want the agent named in the audit", h.rollback.inputs[0].Actor)
+	}
+}
+
+func TestRollbackRefusesWithoutARealTrigger(t *testing.T) {
+	// The deploy succeeded. A model that reaches for the rollback tool anyway
+	// gets a refusal, not a reverted release.
+	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: true})
+	h.actions.runsForCommit = actionRuns(actionRun(41, ""))
+	h.actions.jobsByRun[41] = jobs(job(5, "deploy", "completed", "success"))
+	h.runs.byEnv[domain.DeployEnvProd] = []domain.DeploymentRun{{HeadSHA: mergeSHA}}
+
+	_, err := h.svc.Rollback(context.Background(), rollbackReq())
+	if !errors.Is(err, domain.ErrRollbackNoTrigger) {
+		t.Fatalf("err = %v, want ErrRollbackNoTrigger", err)
+	}
+}
+
+func TestRollbackRefusesAnUnmergedTask(t *testing.T) {
+	task := releasedTask()
+	task.MergeCommitSHA = ""
+	h := newHarness(t, task, domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: true})
+
+	_, err := h.svc.Rollback(context.Background(), rollbackReq())
+	if !errors.Is(err, domain.ErrRollbackNotMerged) {
+		t.Fatalf("err = %v, want ErrRollbackNotMerged", err)
+	}
+}
+
+func TestRollbackRefusesFromANonReleasedColumn(t *testing.T) {
+	task := releasedTask()
+	task.Column = domain.TaskColumnInQA
+	h := newHarness(t, task, domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: true})
+
+	_, err := h.svc.Rollback(context.Background(), rollbackReq())
+	if !errors.Is(err, domain.ErrRollbackColumn) {
+		t.Fatalf("err = %v, want ErrRollbackColumn", err)
+	}
+}

@@ -1,0 +1,193 @@
+// Package embeddedpg runs the Postgres this machine's single user needs, out
+// of a binary bundle downloaded on first start. It is what DATABASE_URL being
+// empty means.
+package embeddedpg
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	embedded "github.com/fergusstrange/embedded-postgres"
+	"github.com/rs/zerolog/log"
+)
+
+const (
+	user     = "tasktrooper"
+	password = "tasktrooper"
+	dbName   = "tasktrooper"
+
+	// The role initdb creates is a SUPERUSER, so it bypasses the RLS policies
+	// migration 114 installs. That is correct here and nowhere else: this
+	// process serves exactly one tenant (tenant.LocalTenantID) on one machine,
+	// so the policies have nothing to separate.
+	version = embedded.V17
+)
+
+// Start boots Postgres on a free loopback port and returns its DSN plus the
+// function that stops it. dataDir is DATA_DIR: the cluster lives in
+// dataDir/postgres. cacheDir holds the downloaded archive and the binaries
+// extracted from it; empty means dataDir/postgres-bin.
+func Start(ctx context.Context, dataDir, cacheDir string) (string, func(), error) {
+	if strings.TrimSpace(dataDir) == "" {
+		return "", nil, errors.New("embedded postgres needs a data directory")
+	}
+	pgData := filepath.Join(dataDir, "postgres")
+	if strings.TrimSpace(cacheDir) == "" {
+		cacheDir = filepath.Join(dataDir, "postgres-bin")
+	}
+	if err := os.MkdirAll(pgData, 0o700); err != nil {
+		return "", nil, fmt.Errorf("create postgres data dir: %w", err)
+	}
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return "", nil, fmt.Errorf("create postgres cache dir: %w", err)
+	}
+
+	if port, ok := liveCluster(ctx, pgData); ok {
+		log.Info().Uint32("port", port).Msg("reusing the embedded postgres already running on this data directory")
+		return dsn(port), func() {}, nil
+	}
+	// pg_ctl refuses to start while a postmaster.pid is present even when the
+	// process it names died with the machine, which is how a crash turns into a
+	// desktop that never starts again.
+	clearStalePID(pgData)
+
+	port, err := freePort()
+	if err != nil {
+		return "", nil, err
+	}
+
+	downloaded := binariesReady(cacheDir)
+	if !downloaded {
+		log.Info().Str("cache_dir", cacheDir).Str("version", string(version)).
+			Msg("downloading the postgres binaries (~30 MB, first start only)")
+	}
+
+	pg := embedded.NewDatabase(embedded.DefaultConfig().
+		Version(version).
+		Username(user).
+		Password(password).
+		Database(dbName).
+		Port(port).
+		DataPath(pgData).
+		// Separate from RuntimePath, which Start() wipes on every boot: the
+		// extracted binaries belong beside the archive so a second start skips
+		// both the download and the extraction.
+		BinariesPath(cacheDir).
+		CachePath(cacheDir).
+		RuntimePath(filepath.Join(cacheDir, "runtime")).
+		StartTimeout(90 * time.Second).
+		Logger(logWriter{}))
+
+	if err := pg.Start(); err != nil {
+		return "", nil, fmt.Errorf("start embedded postgres: %w", err)
+	}
+	if !downloaded {
+		log.Info().Str("cache_dir", cacheDir).Msg("postgres binaries ready")
+	}
+	log.Info().Uint32("port", port).Str("data_dir", pgData).Msg("embedded postgres started")
+
+	return dsn(port), func() {
+		if err := pg.Stop(); err != nil {
+			log.Error().Err(err).Msg("embedded postgres stop failed")
+		}
+	}, nil
+}
+
+func dsn(port uint32) string {
+	return fmt.Sprintf("postgres://%s:%s@127.0.0.1:%d/%s?sslmode=disable", user, password, port, dbName)
+}
+
+func freePort() (uint32, error) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return 0, fmt.Errorf("allocate postgres port: %w", err)
+	}
+	defer l.Close()
+	return uint32(l.Addr().(*net.TCPAddr).Port), nil
+}
+
+func binariesReady(cacheDir string) bool {
+	_, err := os.Stat(filepath.Join(cacheDir, "bin", "postgres"))
+	return err == nil
+}
+
+// liveCluster reports the port of a postmaster still serving this data
+// directory, which is what a restart after a hard kill of the parent finds.
+func liveCluster(ctx context.Context, pgData string) (uint32, bool) {
+	pid, port, ok := readPostmasterPID(pgData)
+	if !ok || !processAlive(pid) {
+		return 0, false
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	conn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return 0, false
+	}
+	_ = conn.Close()
+	return port, true
+}
+
+func clearStalePID(pgData string) {
+	pidFile := filepath.Join(pgData, "postmaster.pid")
+	pid, _, ok := readPostmasterPID(pgData)
+	if !ok {
+		_ = os.Remove(pidFile)
+		return
+	}
+	if processAlive(pid) {
+		return
+	}
+	log.Warn().Int("pid", pid).Msg("removing a stale postmaster.pid left by a previous crash")
+	_ = os.Remove(pidFile)
+}
+
+func readPostmasterPID(pgData string) (pid int, port uint32, ok bool) {
+	raw, err := os.ReadFile(filepath.Join(pgData, "postmaster.pid"))
+	if err != nil {
+		return 0, 0, false
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) < 4 {
+		return 0, 0, false
+	}
+	pid, err = strconv.Atoi(strings.TrimSpace(lines[0]))
+	if err != nil {
+		return 0, 0, false
+	}
+	p, err := strconv.ParseUint(strings.TrimSpace(lines[3]), 10, 32)
+	if err != nil {
+		return 0, 0, false
+	}
+	return pid, uint32(p), true
+}
+
+func processAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// logWriter carries the cluster's own stdout/stderr into the process log
+// instead of the terminal, where it would interleave with the LISTENING line
+// the desktop parses.
+type logWriter struct{}
+
+func (logWriter) Write(p []byte) (int, error) {
+	for _, line := range strings.Split(strings.TrimRight(string(p), "\n"), "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			log.Debug().Str("source", "postgres").Msg(line)
+		}
+	}
+	return len(p), nil
+}

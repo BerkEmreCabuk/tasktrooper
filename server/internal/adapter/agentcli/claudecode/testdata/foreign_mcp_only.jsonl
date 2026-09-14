@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"sess-noserver","model":"claude-opus-5","tools":["Read","Bash","ToolSearch"],"mcp_servers":[{"name":"clickup","status":"connected"},{"name":"figma","status":"pending"}],"cwd":"/tmp/task"}
+{"type":"assistant","session_id":"sess-noserver","message":{"role":"assistant","content":[{"type":"text","text":"Looking for the acceptance criteria tool."}]}}
+{"type":"result","subtype":"success","session_id":"sess-noserver","is_error":false,"num_turns":2,"result":"I could not find a tool to tick the criteria, so I stopped."}

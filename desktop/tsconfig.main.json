@@ -1,0 +1,23 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    // No "dom" here on purpose. The main process has no window, and a lib that
+    // hands it `fetch`, `document` and `localStorage` types is a lib that lets
+    // a browser-shaped mistake typecheck.
+    // Preload shares this config rather than getting a DOM-enabled one of its
+    // own: a preload script that reaches for `document` or `window` is already
+    // doing more than a bridge should, so the absence of those types is a rule,
+    // not an omission.
+    "lib": ["ES2023"],
+    "types": ["node"]
+  },
+  // src/shared holds renderer components only, so the main project does not
+  // include it: a main-process file reaching for one is a compile error rather
+  // than a convention.
+  //
+  // embedder/src is a separate child process with its own esbuild invocation
+  // (scripts/build-embedder.mjs) rather than part of the main bundle, but it is
+  // plain Node TypeScript with no DOM either, so it shares this project rather
+  // than getting a fourth tsconfig of its own.
+  "include": ["src/main", "src/preload", "src/ipc", "embedder/src"]
+}

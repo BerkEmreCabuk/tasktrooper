@@ -1,0 +1,43 @@
+import { Menu, Moon, Sun } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { HealthStatus } from "@/components/layout/HealthStatus";
+import { SidebarBrand } from "@/components/layout/SidebarBrand";
+import { useI18n } from "@/hooks/useI18n";
+import { useTheme } from "@/hooks/useTheme";
+
+interface HeaderProps {
+  title?: string;
+  onMenuClick?: () => void;
+}
+
+export function Header({ title, onMenuClick }: HeaderProps) {
+  const { t } = useI18n();
+  const { theme, toggleTheme } = useTheme();
+
+  return (
+    <header className="relative z-50 flex h-14 shrink-0 items-center justify-between border-b border-sidebar-border bg-background/80 px-4 backdrop-blur-sm">
+      <div className="flex min-w-0 items-center gap-3">
+        <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
+          <Menu className="h-5 w-5" />
+        </Button>
+        <SidebarBrand />
+        {title && <h1 className="truncate text-sm font-semibold">{title}</h1>}
+      </div>
+
+      <div className="min-w-0 flex-1 self-stretch" aria-hidden />
+
+      <div className="flex items-center gap-2">
+        <HealthStatus />
+
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={toggleTheme}
+          title={theme === "dark" ? t("frame.layout.header.lightTheme") : t("frame.layout.header.darkTheme")}
+        >
+          {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        </Button>
+      </div>
+    </header>
+  );
+}

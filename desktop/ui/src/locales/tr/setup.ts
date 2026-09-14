@@ -1,0 +1,68 @@
+// Turkish dictionary for the guided first-run sequence. Must mirror
+// en/setup.ts keys exactly.
+export const setup = {
+  title: "TaskTrooper'ı hazır hale getir",
+  description: "Sırayla dört adım. Her biri bir sonrakini açar.",
+  stepLabel: "Adım {index} / {total}",
+  later: "Bunu sonra yapacağım",
+  state: {
+    done: "Tamam",
+    todo: "Yapılacak",
+    unknown: "Kontrol edilemedi",
+    locked: "Kilitli",
+    desktopOnly: "Mac uygulaması gerekir",
+  },
+  unknownHint: "Bu az önce kontrol edilemedi; yani burada hiçbir şey 'yapılmadı' demiyor.",
+  desktopOnly: {
+    title: "Bu adım TaskTrooper Mac uygulamasında yapılır",
+    body: "Bu adım doğrudan kendi Mac'inizde çalışır — neyin kurulu olduğunu kontrol eder ve orada başsız bir Claude Code oturumu başlatır — ve bir tarayıcı sekmesi bunların hiçbirine erişemez. Uygulamayı indirin, aynı hesapla giriş yapın; bu akış orada devam eder.",
+  },
+  environment: {
+    title: "Bu Mac'i kontrol et",
+    description:
+      "TaskTrooper'ın bu makinede ihtiyaç duydukları: git, Claude Code CLI ve içinde giriş yapılmış bir hesap. Aşağıda kırmızı olan her satır neyin eksik olduğunu ve ne çalıştırmanız gerektiğini söyler.",
+    readyTitle: "Gerekli her şey yerinde",
+    readyBody: "Artık Claude Code'u bağlayabilirsiniz.",
+    notReadyTitle: "Gerekli bir şey eksik",
+    notReadyBody:
+      "Aşağıda işaretli maddeleri düzeltip Tekrar kontrol et'e basın. Hepsi yeşil olana kadar Bağlan kapalı kalır.",
+    continue: "Devam et",
+  },
+  claudeCode: {
+    title: "Claude Code'u bağla",
+    description:
+      "Bu, bu Mac'ten TaskTrooper'a giden tüneli başlatır ve ajan kataloğunu Claude Code CLI'nıza kurar. Bir iki dakika sürebilir.",
+    connect: "Claude Code'u bağla",
+    connecting: "Bağlanıyor…",
+    connectedTitle: "Claude Code bağlı",
+    connectedBody: "{binary}{version} — {agents} ajan ve {skills} beceri kuruldu.",
+    disconnectedTitle: "Henüz bağlı değil",
+    disconnectedBody: "Bu Mac çalışma alanınız için yanıt verene kadar hiçbir şey çalışmaz.",
+    blockedByEnvironment: "Önce ortam kontrolünün geçmesi gerekiyor — {item} hâlâ başarısız.",
+    failed: "Bağlanma başarısız",
+  },
+  github: {
+    title: "GitHub'ı bağla",
+    description:
+      "Ajanlar bu hesapla klonlar, dal açar, push eder ve pull request oluşturur. GitHub'ın kendi izin ekranına gideceksiniz; burada elle hiçbir şey yazılmaz.",
+    doneTitle: "GitHub bağlı",
+    doneBody: "Artık depo içe aktarabilirsiniz.",
+    todoTitle: "GitHub henüz bağlı değil",
+    todoBody: "Bağlanmadan içe aktarılacak bir şey ve bir ajanın push edebileceği bir yer olmaz.",
+    continue: "Devam et",
+  },
+  project: {
+    title: "İlk projen",
+    description:
+      "Bir proje, birlikte yayınlanan depoları gruplar. Bir tane oluşturun, sonra ilk deponuzu içine aktarın — türünün ne olduğu, nasıl deploy edildiği, nasıl derlenip test edildiği sorulacak.",
+    createProject: "Proje oluştur",
+    needsRepositoryTitle: "Şimdi bir depo içe aktarın",
+    needsRepositoryBody: "Aşağıdaki projedeki düğmelerden birini kullanın. Diğerlerini sonra ekleyebilirsiniz.",
+    doneTitle: "İlk deponuz eklendi",
+    doneBody: "Projeye bağlandı ve arka planda indeksleniyor. İstediğiniz zaman yenilerini ekleyin.",
+    loadFailed: "Projeleriniz yüklenemedi",
+  },
+  nav: {
+    finishSetup: "Kurulumu tamamla",
+  },
+};

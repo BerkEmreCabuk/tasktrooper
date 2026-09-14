@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# Go
+server/data/
+server/coverage.out
+server/*.test
+
+# Node
+node_modules/
+dist/
+*.tsbuildinfo
+desktop/bin/
+desktop/release/
+
+# Local env
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log

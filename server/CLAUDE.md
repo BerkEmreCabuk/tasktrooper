@@ -1,0 +1,79 @@
+## server
+
+The TaskTrooper backend: HTTP API + agent runtime, one Go binary. **Local is
+the only mode** — one machine, one user, one tenant, no control plane. The
+desktop app spawns this binary; `make dev` runs it in a terminal.
+
+Detailed docs:
+
+- [Architecture Overview](.ai/architecture.md)
+- [API Specification](.ai/api-spec.md)
+- [Tool Reference](.ai/tool-reference.md)
+- [Orchestration Agents](.ai/orchestration-agents.md)
+- [Configuration Reference](.ai/config-reference.md)
+- [Workspace](.ai/workspace.md)
+- [Repositories & Projects](.ai/projects.md)
+
+Those predate the move to local-only mode: accurate about the domain model, the
+tool surface and the orchestration agents, stale wherever they mention tenants,
+pods, the gateway or a control plane. This file and `README.md` are the current
+word on how the process is configured and started.
+
+## Code comments
+
+Do not add code comments unless truly necessary — a non-obvious invariant, a
+workaround, or a WHY that isn't clear from the code itself. Never explain WHAT
+the code does; well-named identifiers already do that.
+
+## Layout
+
+```
+cmd/agent-server/   server binary (env → internal/platform/runtime.Run)
+cmd/migrate/        migration runner; migrations/ must stay in this module
+                    because the embed path is relative to it
+internal/
+  domain/           entities and value objects
+  port/             interfaces (LLMClient, ToolExecutor, ToolRegistry, …)
+  application/      agent loop, config loading, registry, board/orchestration
+  adapter/          http, llm, agentcli/*, tools/*, mcp, mcpserver, github,
+                    postgres — anything external (agentcli = agent CLIs run as
+                    a local process, e.g. Claude Code; mcp = MCP client,
+                    mcpserver = the /mcp endpoint those CLIs call back on)
+  platform/         process plumbing: runtime wiring, embeddedpg, secrets,
+                    tenant
+migrations/         SQL migrations (embedded)
+resources/          config.yml, openapi.yaml (embedded into the binary)
+```
+
+Hexagonal rules apply: `domain` and `application` must not import adapters;
+new external integrations go behind a `port` interface with an adapter
+implementing it.
+
+## The local-mode invariants
+
+| Invariant | Where |
+|---|---|
+| Every request is `tenant.LocalTenantID` + `RoleOwner` | `adapter/http/middleware_tenant.go` |
+| Every background context carries the same identity | `platform/runtime/runtime.go` (`runCtx`, `localContext()`) |
+| Auth is the `SERVER_API_KEY` bearer token | `adapter/http/handler.go` (`authMiddleware`) |
+| The listener binds `127.0.0.1` only | `platform/runtime/runtime.go` |
+| Exactly one stdout line: `LISTENING http://127.0.0.1:<port>`; logs go to stderr | `platform/runtime/runtime.go` (`ConfigureLogger`) |
+| Empty `DATABASE_URL` ⇒ embedded Postgres 17 | `platform/embeddedpg` |
+| `SET LOCAL app.tenant_id` per store call | `adapter/store/postgres/db.go` |
+
+RLS (migration 114) stays in the schema as history. The embedded cluster runs
+as a superuser and bypasses it, which is correct with one tenant.
+
+`docs/cloud-leftovers.md` (repo root) lists the cloud-era code that is inert
+rather than deleted, and why.
+
+## Build
+
+`CGO_ENABLED=1` — `smacker/go-tree-sitter` is a cgo package.
+
+```sh
+go build ./... && go vet ./... && go test ./...
+```
+
+Tests that need Postgres start their own embedded instance
+(`platform/database.StartEmbedded`); nothing external has to be running.

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Local env overrides. .env.example is committed; the real values are not.
+.env
+.env.local
+.env.*.local
+
+.DS_Store
+*.log

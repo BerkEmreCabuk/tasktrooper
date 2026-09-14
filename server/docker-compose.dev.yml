@@ -1,0 +1,39 @@
+# Optional: Postgres in a container, for contributors who would rather not use
+# the embedded one.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# Then point the server at it (leave DATABASE_URL unset to get the embedded
+# cluster instead):
+#
+#   DATABASE_URL=postgres://tasktrooper:tasktrooper@127.0.0.1:5432/tasktrooper?sslmode=disable \
+#   SERVER_API_KEY=local-dev-key MCP_SECRETS_KEY=$(openssl rand -base64 32) \
+#     go run ./cmd/agent-server
+#
+# The server itself is deliberately NOT a service here. It binds 127.0.0.1 and
+# nothing else — one machine, one user — so a published container port would
+# reach nothing, and it runs the agent CLIs (`claude`, `cursor-agent`) against
+# working copies on this disk, which a container does not have.
+#
+# Stop with `down`; add `-v` to throw the database away too.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: tasktrooper
+      POSTGRES_PASSWORD: tasktrooper
+      POSTGRES_DB: tasktrooper
+    ports: ["5432:5432"]
+    # The server runs its migrations at boot and exits if they fail, so it must
+    # not start against a socket that is merely open.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tasktrooper -d tasktrooper"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

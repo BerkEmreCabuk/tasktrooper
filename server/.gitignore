@@ -1,0 +1,17 @@
+data/
+.env
+.DS_Store
+.superpowers/
+/superpowers/
+
+# Compiled command binaries. `go build ./cmd/...` drops them next to the
+# module, and one already reached a commit as a 12 MB Mach-O.
+/agent-server
+/migrate
+
+# Coverage profiles produced by CI and by the local test commands.
+coverage.out
+
+# Local development env, filled in per machine. Secrets live here —
+# .env.local.example is the committed template.
+.env.local

@@ -1,0 +1,372 @@
+openapi: 3.0.3
+info:
+  title: Local LLM Bridge API
+  version: 1.0.0
+  description: OpenAI-compatible bridge with agent loop, tools, sessions, jobs, and RAG.
+
+paths:
+  /v1/chat/completions:
+    post:
+      summary: Chat completions with agent loop
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model:
+                  type: string
+                messages:
+                  type: array
+                  items:
+                    type: object
+                stream:
+                  type: boolean
+                session_id:
+                  type: string
+                tool_policy:
+                  $ref: '#/components/schemas/ToolPolicy'
+                file_ids:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Completion response
+
+  /v1/sessions:
+    post:
+      summary: Create session
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: Session created
+
+  /v1/sessions/{id}:
+    get:
+      summary: Get session with messages
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+    delete:
+      summary: Delete session
+      security:
+        - bearerAuth: []
+
+  /v1/sessions/{id}/messages:
+    post:
+      summary: Send message to session
+      security:
+        - bearerAuth: []
+
+  /v1/sessions/{id}/cancel:
+    post:
+      summary: Stop the agent turn this session has in flight
+      description: >-
+        Returns {"cancelled": true} when a live turn was stopped and
+        {"cancelled": false} when there was nothing left to stop (the answer
+        landed first) — the latter is a normal outcome, not an error.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+
+  /v1/repositories/{id}/tasks/{taskId}/chat:
+    post:
+      summary: Open the chat thread about one board task
+      description: >-
+        Returns the session a human talks to an agent about this task in, plus
+        the agent answering there. Idempotent — a task keeps one thread for its
+        whole life, so this returns the existing session when there is one (and
+        adopts the task's clarification thread rather than opening a second
+        chat). The thread runs in the task's own branch checkout, not the shared
+        mirror clone, so the agent can commit and push into the task's pull
+        request. agent_id is "" when the task has no assignee and nobody is
+        subscribed to its column. 404 for an unknown repository or a task that
+        repository does not own; 503 on a build with no board.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: taskId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The task's chat session
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [session_id, agent_id]
+                properties:
+                  session_id:
+                    type: string
+                    format: uuid
+                  agent_id:
+                    type: string
+                    description: Agent uuid, or "" when the chat has no agent persona.
+
+  /v1/jobs:
+    post:
+      summary: Create async job
+      security:
+        - bearerAuth: []
+
+  /v1/jobs/{id}:
+    get:
+      summary: Get job status
+      security:
+        - bearerAuth: []
+    delete:
+      summary: Cancel or delete job
+      security:
+        - bearerAuth: []
+
+  /v1/jobs/{id}/result:
+    get:
+      summary: Get completed job result
+      security:
+        - bearerAuth: []
+
+  /v1/files:
+    get:
+      summary: List uploaded files
+      security:
+        - bearerAuth: []
+    post:
+      summary: Upload file for RAG
+      security:
+        - bearerAuth: []
+
+  /v1/audit:
+    get:
+      summary: List audit log entries
+      security:
+        - bearerAuth: []
+
+  /v1/tools/health:
+    get:
+      summary: MCP server health
+      security:
+        - bearerAuth: []
+
+  /v1/store/credentials/{provider}/apps:
+    get:
+      summary: List apps a saved store credential can see
+      description: >-
+        Picker source. Answers 200 with listing_available:false (never a
+        5xx) when the store cannot enumerate apps for this credential — the
+        Play Developer API has no listing endpoint at all, and a service
+        account may not reach the separate Reporting API that does.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [asc, google_play]
+      responses:
+        '200':
+          description: App listing
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [listing_available, apps]
+                properties:
+                  listing_available:
+                    type: boolean
+                  apps:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        store_app_id:
+                          type: string
+                        identifier:
+                          type: string
+                        name:
+                          type: string
+                        state:
+                          type: string
+
+  /v1/repositories/{id}/store/apps/{platform}/link:
+    put:
+      summary: Bind a repository/platform to one store app
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: platform
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [ios, android]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                identifier:
+                  type: string
+                store_app_id:
+                  type: string
+                name:
+                  type: string
+      responses:
+        '200':
+          description: The updated mobile store app row
+
+  /v1/repositories/{id}/store/apps/{platform}/tracks:
+    get:
+      summary: Read the three store channels live
+      description: >-
+        Refreshes the app row's tracks cache with what App Store Connect /
+        Google Play report right now for the internal, external and
+        production channels.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: platform
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [ios, android]
+      responses:
+        '200':
+          description: StoreTracks
+
+  /v1/repositories/{id}/store/apps/{platform}/promote:
+    post:
+      summary: Promote a store release one channel forward
+      description: >-
+        internal -> external -> production only, one step at a time.
+        to=production requires a matching confirm phrase. 409 when the app
+        is not yet ready for the move.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: platform
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [ios, android]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                from:
+                  type: string
+                to:
+                  type: string
+                confirm:
+                  type: string
+
+  /v1/repositories/{id}/store/apps/{platform}/build:
+    post:
+      summary: Start a mobile store release build
+      description: >-
+        engine defaults to the repository's release_engine ("auto" = GitHub
+        Actions, falling back to the paired Mac). 409 when no engine can run
+        it (domain.ErrNoReleaseEngine) — the task card is parked on
+        human_decision rather than retried.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: platform
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [ios, android]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                engine:
+                  type: string
+                  enum: [auto, github_actions, local]
+      responses:
+        '200':
+          description: BuildStart
+        '409':
+          description: No release engine available
+
+  /metrics:
+    get:
+      summary: Prometheus metrics
+
+  /admin/reload:
+    post:
+      summary: Hot-reload config and MCP servers
+      security:
+        - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    ToolPolicy:
+      type: object
+      properties:
+        allow_mcp_servers:
+          type: array
+          items:
+            type: string
+        allow_tools:
+          type: array
+          items:
+            type: string

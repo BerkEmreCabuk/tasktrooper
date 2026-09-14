@@ -1,0 +1,619 @@
+> `../server` is the source of truth for these endpoints; this copy exists so
+> UI work does not need to read Go.
+>
+> **Reading the paths from this app:** every `/v1/...`, `/admin/...` and
+> `/health` path below is called through `apiUrl()` (`src/lib/apiBase.ts`),
+> which prefixes `VITE_API_BASE` — the desktop shell states it at runtime
+> (`http://127.0.0.1:<port>`), and a browser dev build proxies it.
+
+# API Specification
+
+Every endpoint requires `Authorization: Bearer <SERVER_API_KEY>`.
+
+`X-Request-ID` is accepted on requests; if omitted, the bridge generates one and returns it in the response header.
+
+## POST /v1/chat/completions
+
+Runs the agent loop with optional tool policy, session continuity, and RAG context.
+
+**Request**
+
+```json
+{
+  "model": "local",
+  "messages": [{"role": "user", "content": "List files in /tmp"}],
+  "stream": false,
+  "session_id": "optional-uuid",
+  "tool_policy": {
+    "allow_tools": ["web_search"],
+    "deny_tools": ["run_terminal"]
+  },
+  "file_ids": ["uuid-of-uploaded-file"]
+}
+```
+
+**Response** — OpenAI-compatible `chat.completion` object.
+
+Streaming (`stream: true`) returns SSE chunks for the final assistant message.
+
+## GET /v1/models
+
+Proxies LM Studio model list.
+
+## GET /v1/tools
+
+Returns tool definitions filtered by merged policy (config default + API key policy + request policy).
+
+## GET /v1/tools/health
+
+```json
+{
+  "servers": [
+    {"id": "browser", "connected": true, "tool_count": 12},
+    {"id": "github", "connected": false, "last_error": "connect: ..."}
+  ]
+}
+```
+
+## POST /v1/sessions
+
+Creates a session. Requires PostgreSQL.
+
+```json
+{"title": "My chat", "model": "local"}
+```
+
+## GET /v1/sessions/{id}
+
+Returns `session` and `messages` arrays.
+
+## POST /v1/sessions/{id}/messages
+
+```json
+{
+  "role": "user",
+  "content": "Hello",
+  "model": "local",
+  "tool_policy": {},
+  "file_ids": []
+}
+```
+
+## POST /v1/sessions/{id}/cancel
+
+Stops the agent turn the session has in flight. Optional body `{"reason": "..."}`.
+
+```json
+{"cancelled": true}
+```
+
+`cancelled: false` means there was nothing left to stop (the answer landed
+before the request did) — a normal outcome, not an error. 404 for an unknown
+session, 400 for a malformed id.
+
+The stopped run's row ends as `cancelled` (and a later terminal write cannot
+overwrite it), whatever the agent had already streamed is persisted as the
+assistant message, and the SSE stream of the turn being stopped ends with a
+normal `finish_reason: "stop"` frame plus `[DONE]` instead of an error frame.
+
+## DELETE /v1/sessions/{id}
+
+Deletes session and messages. Returns 204.
+
+## POST /v1/jobs
+
+Enqueues an async agent run. Requires PostgreSQL.
+
+```json
+{
+  "model": "local",
+  "messages": [{"role": "user", "content": "Long task"}],
+  "tool_policy": {},
+  "callback_url": "https://example.com/webhook",
+  "file_ids": []
+}
+```
+
+Returns `202` with job object (`status: pending`).
+
+## GET /v1/jobs/{id}
+
+Returns job status: `pending`, `running`, `completed`, `failed`, `cancelled`.
+
+## GET /v1/jobs/{id}/result
+
+Returns job result JSON when `status` is `completed`.
+
+## DELETE /v1/jobs/{id}
+
+Cancels pending/running jobs or deletes completed jobs.
+
+## GET /v1/audit?limit=50
+
+Returns recent tool call audit entries. Requires PostgreSQL.
+
+## POST /v1/files
+
+Multipart upload with `file` field. Chunks and embeds via LM Studio `/v1/embeddings`.
+
+## GET /v1/files
+
+Lists uploaded files.
+
+## DELETE /v1/files/{id}
+
+Deletes file, chunks, and disk storage.
+
+## POST /v1/attachments
+
+Multipart upload with `file` field (+ optional `repository_id` form value).
+Binary attachments (images/documents) stored as BYTEA in Postgres — a parallel
+concept to `/v1/files`, which feeds the RAG text pipeline and writes to the
+pod's ephemeral disk. Max 10 MB (413 over the cap); content-type allowlist
+(png/jpeg/webp/gif, pdf, plain/markdown/csv, json, zip, docx, xlsx) validated
+after server-side sniffing (415 otherwise). Returns attachment metadata
+(`{id, filename, content_type, size_bytes, sha256, ...}`, never the bytes).
+
+## GET /v1/attachments/{id}
+
+Raw bytes with the stored `Content-Type`, `Content-Disposition: inline` and
+`Cache-Control: private, max-age=31536000, immutable` (rows are immutable).
+Requires the normal Authorization header — the web UI fetches blobs and uses
+object URLs instead of pointing `<img src>` at this endpoint.
+
+## DELETE /v1/attachments/{id}
+
+Deletes the attachment; task/message links cascade away.
+
+## GET /v1/repositories/{id}/tasks/{taskId}/attachments
+
+`{attachments: [AttachmentMeta], count}` for the task. `POST` to the same path
+with `{"attachment_id": "..."}` links an already-uploaded attachment (task
+existence is verified first); `DELETE .../attachments/{attachmentId}` unlinks
+without deleting the attachment row. Single-task detail responses also carry
+`attachments` alongside `documents`.
+
+Chat: `POST /v1/sessions/{id}/messages` accepts `attachment_ids` (linked to
+the persisted user message) and `GET /v1/sessions/{id}` returns each message's
+`attachments`. Attachments are not injected into the LLM context.
+
+## GET /metrics
+
+Prometheus metrics: `bridge_requests_total`, `bridge_tool_calls_total`, `bridge_agent_iterations`, `bridge_llm_latency_seconds`, `bridge_mcp_errors_total`.
+
+## GET /docs
+
+OpenAPI 3.0 YAML spec.
+
+## POST /admin/reload
+
+Reloads config file and reconnects MCP servers. Does not restart the HTTP server.
+
+## GET /health
+
+No auth. Returns bridge and LM Studio status.
+
+## GET /v1/usage?days=30
+
+LLM token usage aggregates for the cost dashboard: totals, by-model, and
+daily breakdowns (`llm_usage` table, recorded by the `application/usage`
+LLM-client decorator). `days` 1-365, default 30.
+
+## Embedding provider & model — removed from this SPA
+
+The embedding provider/model picker (Settings → LLM Connection) has been
+deleted from `web/`: the desktop app is moving to a bundled, self-downloading
+embedding engine that runs invisibly, with no user-facing settings and no
+provider/model choice. `LLMProvidersResponse` no longer carries
+`embedding_provider` / `embedding_model` / `embedding_on_member_mac`, and this
+SPA no longer calls `/v1/llm/embedding-provider`, `/v1/llm/embedding-models`,
+`/v1/llm/embedding-status`, or `/v1/llm/reindex-all`.
+
+Those four endpoints are **dead code on the `agent-server` side** pending
+removal there — that repository is not present here and was not changed by
+this task. Do not add new frontend callers of them.
+
+## Board run control
+
+The task drawer's stop / re-run buttons. Both return the run under a `run` key
+(`{"run": {...domain.TaskAgentRun...}}`) and answer `503 service_unavailable`
+when the build has no board runner wired.
+
+- `POST /v1/repositories/{id}/tasks/{taskId}/runs/{runId}/cancel` — stops a
+  `pending`/`running` run and parks the task as **blocked** with the reason;
+  recovery is a human dragging the task onto a column, which releases the block
+  and lets that column's agent take it through normal dispatch. Optional body
+  `{"reason": "..."}` (absent/empty is fine). Returns the **cancelled** run.
+  `409 conflict` when the run already stopped.
+- `POST /v1/repositories/{id}/tasks/{taskId}/runs/{runId}/rerun` — queues a new
+  run of the **same agent** on the task's **current** state. The task does not
+  move columns and the run named in the URL stays untouched history. Returns the
+  **new** (`pending`) run. `409 conflict` when the run is still going, or when
+  the task is blocked — a blocked task is recovered by moving it, not by
+  re-running in place.
+
+Both answer `404 not_found` when the run does not exist or belongs to a
+different task than the one in the URL. Neither goes through the board
+dispatcher: cancel would immediately fan fresh agents onto the task it just
+stopped, and re-run would start every agent configured for the column rather
+than the one asked for. Each records its own board event
+(`task.run_cancelled` / `task.rerun_requested`).
+
+## POST /v1/repositories/{id}/tasks/{taskId}/chat
+
+Opens — or reopens — the chat thread a human talks about ONE board task in, and
+returns the session to send messages to plus the agent answering there:
+
+```json
+{"session_id": "0f9b…", "agent_id": "3c4d…"}
+```
+
+Idempotent: a task has exactly one thread for its whole life, so pressing the
+drawer's "discuss" button again returns the same `session_id` rather than
+splitting the conversation across chats. If the task already has a clarification
+thread (the chat an agent asked its questions in), that thread becomes the task
+thread instead of a second one being opened. `agent_id` is `""` when no agent is
+assigned to the task and nobody is subscribed to its column — the chat still
+works, it just has no agent persona.
+
+The thread differs from an ordinary repository chat in two ways:
+
+- Its workspace is the task's own branch checkout
+  (`<workspace_root>/task-<taskId>` on `feature/<task-key>`), not the
+  shared mirror clone — so what the agent changes can be committed and pushed to
+  the task branch and reach the pull request. A branch checkout that cannot be
+  prepared fails the turn instead of silently falling back to the mirror.
+- Every turn carries a compact task + PR context message (key, title, column,
+  description, technical notes, acceptance criteria, branch, PR number/url) and
+  the three PR tools (`get_task_pull_request`, `commit_task_changes`,
+  `comment_on_pull_request`). The diff is deliberately NOT in the prompt; it is
+  fetched per request through the tool.
+
+`404 not_found` for an unknown repository or a task the repository does not own
+(the repository scope is the ownership check), `400` for a malformed id, `503
+service_unavailable` on a build with no board.
+
+The pull request itself is now a task field — `pr_url` / `pr_number` on
+`BoardTask` (migration 088) — written the moment a PR is opened
+(`createDraftPRAsync`, the pipeline's pre-gate PR ensure, the code-review PR
+ensure, and `commit_task_changes`). Before this it survived only as the text of a
+`"Draft PR: <url>"` system comment.
+
+## Repository registration
+
+- `POST /v1/repositories/open`, `POST /v1/repositories/import` and
+  `POST /v1/repositories` all accept an optional `kind`
+  (`backend|frontend|mobile|worker|monorepo`); an invalid value is a 400. Left
+  out, the kind is detected from the working copy (Flutter/Xcode markers →
+  mobile, several projects under `apps/`/`packages/` → monorepo, a
+  react/vue/svelte/vite/next `package.json` → frontend, otherwise backend) and
+  persisted with the row, instead of every repo landing on the column default.
+  When detection lands on `monorepo`, `sub_projects: [{path, kind}]` is
+  detected and persisted the same way — one row per sub-directory that looked
+  like a project of its own, each independently classified. Distinct from
+  `sub_repo_kinds` (a deduplicated set of kind values used only for GitHub
+  Actions pipeline job routing): `sub_projects` is the addressable,
+  human-curated list shown in the initial-setup dialog.
+- `PATCH /v1/repositories/{id}` also accepts `release_engine`
+  (`auto|github_actions|local`) — which machine builds/uploads a mobile store
+  release. `auto` (default) is GitHub Actions, falling back to the paired Mac;
+  see Store operations below for `domain.ErrNoReleaseEngine`.
+- `PATCH /v1/repositories/{id}` also accepts `kind` and now actually applies it
+  (the field existed on the request but was never forwarded to the store).
+  Note that `name` and `description` are applied unconditionally on this route:
+  an omitted description clears the stored one. It also accepts `sub_projects`
+  (replace-the-whole-list; applied only when the field is present, so omitting
+  it leaves the stored list untouched) — send `[]` to clear it, e.g. when the
+  kind is changed away from `monorepo` in the same request.
+- `GET /v1/repositories/{id}/directories?path=` — lists the immediate
+  subdirectories under `path` (repo-relative, root when omitted) inside the
+  repository's working copy, skipping the same noise directories detection
+  itself skips (`.git`, `node_modules`, `vendor`, `dist`, `build`, `.venv`,
+  `target`, any dotdir). Response: `{path, parent, kind, entries: [{name, path}]}`
+  — `parent` is `null` at the root, `kind` is `path`'s own detected kind
+  (backend/frontend/mobile). Backs the folder picker for manually
+  adding a `sub_projects` row when auto-detection found nothing or missed
+  one; `path` is invalid (escapes the root, doesn't exist) → 400.
+- `POST /v1/repositories/{id}/restore` — fetch a registered repository's code
+  onto the machine currently running the tenant, from the `remote_url` already
+  on its record. 202 with the repository; the clone runs server-side and is
+  watched through `git_restore` (`{status: running|completed|failed, root_path,
+  error}`) by polling `GET /v1/repositories/{id}`. Offer it only when the
+  repository read says `git_restorable` — the server refuses (400, message is
+  the reason) whenever the folder exists, holds something that is not a
+  repository, cannot be read, or no remote is recorded.
+
+## Deploy targets
+
+Four environments: `local`, `stage`, `preprod`, `prod` (`local` has no
+pipeline category — nothing in CI ships to a developer's own machine, it is
+just a recorded address + health check like any other).
+
+- `GET /v1/deploy/templates?kind=backend` — recipe catalog (bodies stripped).
+- `GET /v1/deploy/templates/{templateId}` — one recipe in full.
+- `GET /v1/repositories/{id}/deploy/config?sub_project_path=` — saved targets + fitting templates + missing vars per env, scoped to one monorepo sub-project (`""`/omitted = the repository itself).
+- `PUT /v1/repositories/{id}/deploy/targets` — upsert one (sub_project_path, env): `{sub_project_path, env, provider, template_id, vars, health_url, auto_rollback}`.
+- `DELETE /v1/repositories/{id}/deploy/targets/{env}?sub_project_path=`.
+- `GET /v1/repositories/{id}/deploy/targets/{env}/instructions` — recipe rendered with the target's vars (repository-scoped only, no sub_project_path).
+- `POST /v1/repositories/{id}/deploy/targets/{env}/setup-task` — open the board task that authors the deploy workflow (repository-scoped only).
+
+## Pipeline config
+
+- `GET /v1/repositories/{id}/pipeline/config` — repo kind, saved
+  `repository_pipeline_jobs` rows and category suggestions. Each row/suggestion
+  carries `sub_project_path` (`""` = the repository itself) alongside
+  `sub_repo_kind` — the path is what disambiguates two sub-projects that share
+  a kind; `sub_repo_kind` only picks the keyword set used for suggestions. A
+  monorepo with no `sub_projects` yet falls back to one group per checked
+  `sub_repo_kinds` entry, same as before this field existed.
+- `PUT /v1/repositories/{id}/pipeline/config` — `{kind, sub_repo_kinds, auto_release_on_done, jobs}`; replaces the whole repository's job set in one call (every sub-project's slots are submitted together).
+
+## GitHub connection
+
+Settings → Integrations (`admin/GitHubCard`). `GET /v1/settings/github` → `{connected, login?, detail?}`;
+`PUT /v1/settings/github {"token"}` verifies the personal access token against GitHub before storing
+it encrypted (scopes: `repo`, `admin:repo_hook`, `read:org`); `DELETE` removes it. There is no OAuth
+hop — nothing here can hold an OAuth app's client secret or receive GitHub's callback.
+
+## Vercel connection & hosting links
+
+Settings → Integrations (`admin/VercelCard`). `GET/PUT/DELETE /v1/settings/vercel` (pasted
+access token; `PUT {team_id}` re-scopes), `GET /v1/settings/vercel/teams`,
+`GET /v1/settings/vercel/projects?team_id=`. Per app:
+`GET /v1/repositories/{id}/hosting/detect` (areas with `confidence` exact/ambiguous/none,
+`candidates`, tree `hints`, `existing`), `PUT /v1/repositories/{id}/hosting/links`
+(`{area, provider, external_id, source}`), `DELETE …/hosting/links/{area|root}`.
+409 = Vercel not connected.
+
+## Task assignee — the person (agent-server)
+
+A board task carries TWO assignments: `assignee_agent_id` is the agent that works it,
+`assignee_user_id` is the PERSON it belongs to — runs go to that member's Mac and only
+their agents (plus the tenant's shared ones) pick it up. Empty on a solo tenant.
+
+| Call | Contract |
+|---|---|
+| `GET /v1/tenant/members` | `{members:[{user_id,email,display_name,role}]}` — the CANDIDATE SET, by construction exactly who assignment accepts. `email`/`display_name` may be `""`; an unlabelled candidate stays pickable. |
+| `POST /v1/repositories/{id}/tasks` | `assignee_user_id` optional; absent creates an unassigned card. |
+| `PATCH .../tasks/{taskId}` | BOTH assignees are `domain.Nullable`: omitted leaves it, `null` unassigns, a value assigns (`""` also unassigns the person). They were plain Go pointers until 2026-08-30, where `null` decoded to the same nil as omitted — so "clear the assignee" was a silent no-op on the wire, live in the drawer's agent control. Do not narrow either type to one spelling. |
+| Refusal | `400` `assignee_not_member`, in `error.type` AND a top-level `code`, when the uid is not in the roster. `isAssigneeRejectedError()` in `api.ts` switches on the code — it matched the sentence until the code landed. |
+
+## `sync_warning` on the index status (agent-server)
+
+One string, TWO causes, and no code to tell them apart — it is `err.Error()` from
+whichever failed:
+
+- a pull from origin that failed, so the index describes older code;
+- a push webhook (or the boot sweep) on a cloud tenant, which names no member and
+  therefore has no Mac to embed on, so the index is marked stale instead of running
+  a pass whose every embed would refuse.
+
+`ProjectSettingsPage` therefore renders the server's `reason` under a lead-in true of
+both ("This index is behind the code it describes: …"). It used to say the clone could
+not be updated from origin, which sent people to check a git remote that was fine.
+
+## Deploy metadata & deploy packages
+
+Three optional task fields carry the release runbook, and one relation type carries
+shipping order. Both are read by the release path, not just displayed.
+
+- Task fields (`before_deploy`, `after_deploy`, `rollback_plan`, all nullable markdown)
+  ride on `domain.BoardTask` and are accepted by `POST /v1/repositories/{id}/tasks` and
+  `PATCH /v1/repositories/{id}/tasks/{taskId}` — the PATCH follows the usual optional-pointer
+  contract (omitted leaves the value, `""` clears it). `before_deploy` + `rollback_plan` are
+  posted as ONE system comment when `TriggerRelease` dispatches the deploy; `after_deploy`
+  is posted when the prod deploy finalizes successfully. Nothing is posted when the fields
+  are empty.
+- `PATCH /v1/repositories/{id}/tasks/{taskId}` also accepts `deploy_depends_on:
+  [{target_task_id | target_key}]`, which REPLACES the task's `deploy_depends_on` relations
+  and leaves every other relation type alone (`[]` clears them, omitting the field changes
+  nothing). `POST .../tasks` accepts the same edges through the existing `relations` array
+  with `relation_type: "deploy_depends_on"`. A task may not depend on itself (400).
+- The relation is enforced at release time: `TriggerRelease` 400s with
+  `domain.ErrDeployDependencyNotReleased` (and posts a system comment naming the blocking
+  task keys) while any target lacks production evidence — a successful `prod_deploy`, a
+  successful `preprod_deploy` on a repo with no prod workflow mapped, or the `released`
+  column. It runs after the migration gate and before the mobile-store and release-target
+  gates.
+
+Deploy packages are the release path for a repository with `auto_release_on_done` off,
+which otherwise has none (`trigger_release` refuses it as "batched release"). A package
+release skips only that flag; every other release gate still applies per task.
+
+- `GET /v1/repositories/{id}/deploy-packages` — `{packages, count}`. **Not a pure read**: each
+  package is advanced first — members with production evidence are marked, a package whose
+  members are all live becomes `released`, and any member whose dependencies just became
+  satisfied is dispatched. Members carry `{task_id, position, key, title, column, released}`.
+- `POST /v1/repositories/{id}/deploy-packages` — `{name, description?}` → 201, status `draft`.
+- `PATCH /v1/repositories/{id}/deploy-packages/{pkgId}` — `{name?, description?, status?}`.
+  `status` accepts only `"cancelled"`; every other transition is evidence-driven and a client
+  claiming one 400s. Cancelling an already-`released` package 400s. 404 when no such package.
+- `DELETE /v1/repositories/{id}/deploy-packages/{pkgId}` — 204. Membership cascades; the tasks
+  themselves are untouched.
+- `PUT /v1/repositories/{id}/deploy-packages/{pkgId}/tasks` — `{task_ids: []}` replaces the
+  membership, array index becomes `position`. 400 on a task from another repository, or on a
+  package that is `releasing`/`released`.
+- `POST /v1/repositories/{id}/deploy-packages/{pkgId}/release` — 202 with the package. Allowed
+  from `draft` or `failed` (a retry). Members are topologically sorted by their in-package
+  `deploy_depends_on` edges, position breaking ties; a cycle fails the package with
+  `domain.ErrDeployPackageCycle` in `note` and dispatches nothing. Only the FIRST wave is
+  dispatched and the package stays `releasing` — deploys are async, so later waves go out of
+  the advancement that runs on each GET. A member that already has production evidence is
+  skipped, not an error; the first hard refusal moves the package to `failed` with
+  `note = "<task key>: <error>"`.
+
+## Production incidents
+
+- `POST /v1/repositories/{id}/incidents` — the alert webhook. Accepts Alertmanager, Sentry,
+  GCP Cloud Monitoring and generic `{title, severity, env, detail, fingerprint, resolved}`;
+  `?env=` and `?source=` fill what the payload omits. A recovery payload resolves the
+  matching incident (202 when nothing matched).
+- `GET /v1/incidents?repository_id=&env=&status=open,triaging` — list.
+- `GET /v1/incidents/{incidentId}` — incident with its timeline.
+- `POST /v1/incidents/{incidentId}/triage` — re-run the remedy engine.
+- `POST /v1/incidents/{incidentId}/remedy` — record a proposal `{kind, summary, steps, evidence, confidence, rollback}`.
+- `POST /v1/incidents/{incidentId}/resolve` · `POST /v1/incidents/{incidentId}/ignore`.
+- `PUT /v1/repositories/{id}/incident-policy` — `{incident_policy: off|suggest|auto_fix}`.
+
+## Store operations
+
+- `PUT /v1/store/credentials/{provider}` — save+validate a store console credential (`provider`:
+  `asc` or `google_play`). Body `{"data": {"key_id", "issuer_id", "p8"}}` for `asc`, or
+  `{"data": {"service_account_json"}}` for `google_play`. Validated against the console
+  (`ValidateAuth`) before anything is persisted; 204 on success, 400 when the input itself is
+  invalid (unknown provider, or the console rejects the credential), 500 on a backend/config
+  failure (e.g. the secrets cipher isn't configured).
+- `GET /v1/store/credentials` — `[{provider, configured, updated_at}]`, one row per known
+  provider (`asc`, `google_play`) even when never saved (`configured:false`, zero
+  `updated_at`) — never the payload.
+- `DELETE /v1/store/credentials/{provider}` — 204; 400 on an unknown provider, same
+  validation as the PUT.
+- `GET /v1/repositories/{id}/store/apps` — `[]domain.MobileStoreApp`, the repo's per-platform
+  store lifecycle rows.
+- `POST /v1/repositories/{id}/store/apps/{platform}/verify` — re-run `VerifyOnboarding` against
+  the store API right now (the "I did the console step, check it" button) instead of waiting
+  for the next monitor sweep; returns the resulting row.
+- `GET /v1/store/credentials/{provider}/apps` (`api.listStoreCredentialApps`) — the picker's
+  source: `{listing_available, apps: StoreAppRef[]}`. `listing_available:false` is a normal
+  200, never a 5xx — Play has no listing endpoint at all, only the separate Reporting API,
+  which a service account may not reach; the UI falls back to a manual identifier field.
+- `PUT /v1/repositories/{id}/store/apps/{platform}/link` (`api.linkStoreApp`) — body
+  `{identifier, store_app_id, name}`, binds the repo/platform to one picked app; returns the
+  updated `MobileStoreApp`.
+- `GET /v1/repositories/{id}/store/apps/{platform}/tracks` (`api.storeAppTracks`) — reads the
+  three channels live and refreshes the row's cache; returns `StoreTracks`.
+- `POST /v1/repositories/{id}/store/apps/{platform}/promote` (`api.promoteStoreChannel`) — body
+  `{from, to, confirm}`, one channel forward at a time (internal→external→production);
+  `to=production` needs `confirm`; 409 when the app isn't ready for the move.
+- `POST /v1/repositories/{id}/store/apps/{platform}/build` (`api.startStoreBuild`) — body
+  `{engine?}` (`auto|github_actions|local`, defaults to the repo's `release_engine`); 409 when
+  neither engine can run it (`domain.ErrNoReleaseEngine`) — the task card is parked on
+  `human_decision`, not retried.
+
+Mobile release now runs through a pipeline-generated `scripts/mobile-release.sh` (one script,
+a thin workflow calls it) instead of the four deleted platform deploy templates
+(`ios-app-store`/`android-google-play`/`flutter-app-store`/`flutter-google-play`) and
+`mobile-qa-build`; publishing is store-link + app-pick above, mobile QA is the repo's own
+`local_run` doc (`scripts/dev.sh`).
+
+## Verification settings & environment inventory
+
+- `PUT /v1/repositories/{id}/test-strategy` — `{test_strategy: local|stage|per_step}`.
+  `local` runs workspace tests only, `stage` (default) deploys to staging when a task
+  enters ready_for_qa, `per_step` also deploys at code_review.
+- `GET /v1/repositories/{id}/env-inventory` — variable **names** declared by the repo's
+  `.env.example`-style files (root + two levels for monorepos; real `.env` files are never
+  read) plus the deploy targets, so "what does this need and where does it answer" is one
+  call. Deploy targets carry `base_url` (the environment's DNS entry) next to `health_url`.
+- `PUT /v1/repositories/{id}/lifecycle-gates` — `{require_review_chain?: bool, require_release_deploy?: bool}`,
+  both optional; an omitted field is left as it was. Returns the updated `domain.Repository`
+  (both flags round-trip in the JSON body). Both default `false`. Fails 400 on an invalid `id`
+  or if the underlying update errors (the repository store being unavailable).
+
+  Arming either flag does not itself fail this call — it changes what a later
+  `PATCH .../tasks/{taskId}` move into `done`/`released` accepts. With `require_review_chain`
+  on, moving a task into `done` (or into `released` when that would skip `done`) 400s unless
+  the task's column-span history shows every review stage its type requires — `code_review`,
+  `in_qa`, `pm_uat` for `task`/`bug`; `analiz_review` for `analiz` — with none of those stages'
+  latest visit rejected. The message names the missing/rejected stage and the move that earns
+  it, e.g. `done means the task passed its review chain, and this one has not — cannot move
+  TASK-123 to done. Missing: QA (in_qa) — move it to ready_for_qa; QA takes it into in_qa and
+  tests it there`. With `require_release_deploy` on, moving a task into `released` 400s unless
+  `task_pipelines` has a successful `prod_deploy` for it (or a successful `preprod_deploy` on a
+  repo with no prod workflow mapped) — a `skipped` pipeline is never accepted; `analiz` tasks
+  are exempt. Both checks fail closed (400, not 200) if their evidence store can't be read, so
+  a repository should only enable a gate its board can actually satisfy — see
+  [orchestration-agents.md](orchestration-agents.md) and [architecture.md](architecture.md)
+  for the full semantics and the deadlock each flag can cause if turned on without the board
+  wiring it needs.
+
+## Project profile
+
+- `GET /v1/repositories/{id}/profile` — `{profile_md, profile_updated_at}`: the
+  agent-maintained markdown brief of the codebase (purpose, stack, layout,
+  commands, conventions). `profile_md` is `""` and `profile_updated_at` is
+  `null` until the first analysis lands. 404 on an unknown repository.
+- `POST /v1/repositories/{id}/profile/refresh` — 202 `{status: "started" |
+  "already_running"}`. Kicks a background analysis run (system-architect's
+  model, read-only code tools against `root_path`); per-repo in-flight dedup
+  makes a second request while one runs a no-op. The profile is also rebuilt
+  automatically on import and after a push-triggered reindex when it is missing
+  or older than 6h.
+
+## Embedding map (UMAP source data)
+
+The browser runs UMAP (umap-js); the backend's job is to pick the right chunk
+embeddings, L2-normalize them, and reduce them to a manageable number of
+dimensions before they cross the wire. A raw 3072-float embedding × 2000 chunks
+is ~25 MB of JSON; the same points at 50 dimensions are ~400 KB.
+
+- `GET /v1/embedding-map/sources` — what can be visualized, so the UI can build
+  its selectors.
+
+  ```json
+  {
+    "files": {"available": true, "chunk_count": 412, "document_count": 7},
+    "repositories": [
+      {"id": "uuid", "name": "local-llm", "branch": "main", "index_id": "uuid",
+       "chunk_count": 8321, "file_count": 640, "indexed_at": "2026-08-05T10:00:00Z"}
+    ]
+  }
+  ```
+
+  Only repositories with a workspace index holding at least one chunk appear. A
+  repository indexed on several branches contributes **one** row, picked
+  deterministically: most chunks, ties to the most recently indexed, then index
+  id. `indexed_at` is `null` for an index that never completed.
+
+- `GET /v1/embedding-map?source=files|code&repository_id=&limit=&dims=` — the
+  projection itself.
+
+  - `source` is required; anything other than `files`/`code` is `400`.
+  - `repository_id` is required (and must be a uuid) when `source=code`, else
+    `400`. Ignored for `files`.
+  - `limit` defaults to 2000, `dims` to 50. Out-of-range values are **clamped**
+    (limit 100…5000, dims 2…128), never rejected — they are viewer controls.
+  - `dims` is additionally capped by the source's own embedding width — a
+    64-wide embedding answers `dims=128` with `"dimensions": 64`. The response's
+    `dimensions` field is authoritative; never assume it equals what was asked.
+
+  ```json
+  {
+    "source": "code",
+    "repository_id": "uuid-or-empty-string",
+    "branch": "main",
+    "dimensions": 50,
+    "total": 8321,
+    "sampled": 2000,
+    "truncated": true,
+    "points": [
+      {"id": "uuid", "group_id": "uuid-or-path", "group_label": "src/api.ts",
+       "chunk_index": 0, "snippet": "first ~200 chars, whitespace-collapsed",
+       "language": "typescript", "symbol": "fetchTasks", "vector": [0.12, -0.4]}
+    ]
+  }
+  ```
+
+  `vector` is exactly `dimensions` long on every point. For `source=files`,
+  `group_id` is the `files.id` and `group_label` the filename; for
+  `source=code`, both are the repository-relative file path, `chunk_index` is a
+  0-based ordinal within that file (start line, then id), and `language` /
+  `symbol` carry the chunk's tree-sitter metadata (empty string when unknown).
+
+  `total` is what is stored, `sampled` is what came back. When `total > limit`
+  the rows are sampled **evenly** over a stable ordering — every point is a
+  step of `floor(rn·limit/total)` over `(path, start_line, id)` — not the first
+  N, which would show only the alphabetically-first files. The sample is stable:
+  the same request returns the same points. `sampled` can also fall below the
+  sampled row count when a stored embedding is unusable (zero, NaN/Inf, or of a
+  different width than its neighbours after an embedding-provider switch); such
+  rows are dropped rather than plotted at the origin.
+
+  An empty source is `200` with `"points": []` and `"total": 0`, not an error —
+  including `source=code` for a repository that has never been indexed.
+
+Reduction is PCA computed in-process (`application/embedmap`): L2-normalize,
+mean-center, then block power iteration with Gram-Schmidt deflation against the
+covariance action `Xᵀ(Xv)` — the d×d covariance matrix is never materialized.
+It is deterministic down to the last bit, including the parallel decomposition,
+so a client may cache a projection and diff it against a later one.

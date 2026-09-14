@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      The renderer's CSP. It loads nothing remote and connects nowhere: every
+      byte it needs is in the bundle next to it, and everything privileged goes
+      over IPC. `connect-src 'none'` is therefore not a restriction on this app
+      so much as a statement about it — a renderer that started making network
+      calls would be a renderer doing work the main process should be doing.
+
+      'unsafe-inline' for styles only, because Vite injects the stylesheet as an
+      inline <style> in dev and as a <link> to a local file in production.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-src 'none'; object-src 'none'"
+    />
+    <title>TaskTrooper</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/main.tsx"></script>
+  </body>
+</html>

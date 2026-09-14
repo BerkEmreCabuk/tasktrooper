@@ -1,0 +1,199 @@
+llm:
+  base_url: ""
+  model: ""
+  api_key: ""
+  max_iterations: 30
+  task_max_iterations: 80
+  timeout: "300s"
+
+server:
+  port: 8085
+  api_key: "${SERVER_API_KEY}"
+  public_base_url: "${PUBLIC_BASE_URL}"
+
+storage:
+  postgres:
+    dsn: "${POSTGRES_DSN}"
+    max_conns: 10
+  sessions:
+    ttl: "24h"
+    workspace_root: "./data/workspaces"
+
+jobs:
+  max_concurrent: 3
+  timeout: "10m"
+
+rag:
+  enabled: true
+  storage_dir: "./data/files"
+  chunk_size: 1000
+  chunk_overlap: 200
+  top_k: 5
+
+orchestration:
+  enabled: true
+  fast_path: true
+  max_parallel_tasks: 3
+  max_plan_tasks: 10
+  skill_retrieval_top_k: 5
+  subtask_history_mode: isolated
+  dependency_output_max_chars: 4000
+  synthesis_enabled: false
+  verification_enabled: true
+  max_replan_iterations: 2
+
+prod_ops:
+  monitor_enabled: true
+  probe_interval: "1m"
+
+# The deploy monitor mirrors GitHub Actions deploy runs into deployment_runs,
+# attributes console-triggered dispatches, and opens an incident for a failed
+# deploy.
+#
+# It had no block here at all, which meant monitor_enabled defaulted to false
+# and the table it fills was only ever written by a console dispatch. That is
+# now wrong in a way it was not before: deployment_runs is what the release
+# rollback reads to find the last known-good commit, and what the post-release
+# health window reads to decide which task's release production is running. With
+# the monitor off, both fall back to "no evidence" — the rollback refuses for
+# want of a target and the attribution declines to blame anyone.
+#
+# The cost is bounded and small: one GitHub API call per (repository ×
+# environment) that has BOTH a deploy target and a mapped deploy workflow, every
+# poll_interval. A repository with no deploy target is not polled at all.
+deploy_ops:
+  monitor_enabled: true
+  poll_interval: "2m"
+  # How long after a successful deploy an incident on that environment is
+  # attributed to the task that just released — and, where auto_rollback is on,
+  # rolled back. Short on purpose: it authorises undoing a specific card's
+  # release, so a coincidence must not reach it.
+  health_window: "15m"
+
+storeops:
+  poll_interval: "5m"
+
+board:
+  dispatch_enabled: true
+  max_concurrent_runs: 10
+  verification_enabled: true
+  verify_max_fix_attempts: 2
+  require_criteria_complete: true
+  reconcile_stale_after: "30m"
+  reconcile_interval: "5m"
+  # How long a task may wait in code_review for a build/test result before its
+  # reviewer is dispatched anyway, and how often unfinished pipelines are
+  # re-asked. The timeout must stay above the pipeline runner's own 30m poll,
+  # or a live pipeline would be given up on before it could answer.
+  pipeline_gate_timeout: "45m"
+  pipeline_gate_interval: "2m"
+
+context:
+  max_tokens: 32000
+  reserve_output: 4096
+  summarize_threshold: 16000
+  keep_recent_messages: 10
+
+mapping:
+  enabled: true
+  tree_max_depth: 4
+  max_files: 500
+  skeleton_max_tokens: 3000
+  inject_on_session_start: true
+
+indexer:
+  enabled: true
+  top_k: 5
+  reindex_on_change: true
+  chunk_max_lines: 150
+  # Extra roots a repository or a session may be pointed at, ON TOP OF the
+  # calling tenant's own subtree of workspace_root, which is always allowed.
+  # Empty means nothing extra — not "anywhere", which is what it used to mean
+  # and what made /v1/repositories/open able to index any directory on the pod.
+  # Set it only on a self-hosted install that keeps checkouts elsewhere.
+  allowed_roots: []
+  query_rewrite: true
+  concurrency: 1
+
+embedding:
+  requests_per_minute: 20
+  max_retries: 8
+  retry_backoff: 2s
+  max_retry_wait: 60s
+  request_timeout: 60s
+  query_cache_entries: 2048
+
+graph:
+  enabled: true
+  max_expansion_depth: 2
+  max_expanded_chunks: 8
+
+tools:
+  default_policy:
+    allow_tools: ["ask_user", "web_search", "fetch_url", "codebase_search", "grep_code", "get_repo_tree", "get_symbol_skeleton", "expand_symbol_context", "search_boilerplate_catalog", "read_file"]
+  max_tool_output_chars: 16000
+  search:
+    enabled: true
+    max_results: 5
+  terminal:
+    enabled: true
+    working_dir: "./data/workspaces"
+    timeout: "3m"
+    max_timeout: "15m"
+    sandbox:
+      mode: blocklist
+      allowed_commands: ["ls", "cat", "grep", "curl", "echo", "pwd", "find", "head", "tail", "mkdir", "touch", "go", "tee", "cd", "cp", "mv", "wc"]
+      blocked_patterns: ["rm -rf", "sudo", "chmod", "mkfs", "> /dev", "dd if=", "shutdown", "reboot", "| sh", "|sh", "| bash", "|bash"]
+      restrict_working_dir: true
+  web:
+    enabled: true
+    max_response_bytes: 1048576
+
+  browser:
+    enabled: true
+
+  mobile:
+    hub_url: "${MOBILE_APPIUM_HUB_URL}"
+    device_udid: "${MOBILE_DEVICE_UDID}"
+    platform_version: "${MOBILE_PLATFORM_VERSION}"
+    device_pin: "${MOBILE_DEVICE_PIN}"
+    auth_token: "${MOBILE_APPIUM_TOKEN}"
+    bridge_url: "${MOBILE_BRIDGE_URL}"
+    bridge_token: "${MOBILE_BRIDGE_TOKEN}"
+  boilerplate_catalog:
+    enabled: true
+
+# Local Claude Code CLI executor. Agents on the claude_code provider are run by
+# this binary instead of by the HTTP agent loop; an installation where it is not
+# on PATH registers no executor and those agents' runs fail with one clear
+# sentence saying so. max_turns / run_timeout are left unset: the executor owns
+# those defaults (100 turns, 1h per session). max_concurrent is raised above the
+# executor's default of 3 because a local runner is one developer's machine
+# serving one workspace — the ceiling that matters there is the Claude
+# subscription's own rate limit, which the quota park already handles, not a
+# number chosen for a shared cloud pod.
+claude_code:
+  binary: "${CLAUDE_CODE_BIN}"
+  max_concurrent: 10
+  # Which of the CLI's settings files a session loads. Unset means
+  # "project,local": the operator's own ~/.claude hooks and plugins stay out of
+  # a board run. Set "user,project,local" only if this host authenticates the
+  # CLI through a user-level apiKeyHelper.
+  # setting_sources: "project,local"
+
+evolution:
+  enabled: true
+  allow_web_research: true
+  tick_interval: "10m"
+  reflect_interval: "24h"
+  revision_debounce: "30m"
+  impact_window: "168h"
+  golden_gate: true        # degisiklik oncesi/sonrasi golden kosulur, kotulesirse geri alinir
+  max_skills_per_agent: 25 # ajan basina toplam skill butcesi (dolunca create reddedilir)
+  max_rules_per_agent: 15
+  # model: ""          # reflection + golden eval icin model override
+  # provider_type: ""
+  # judge_model: ""    # golden gate kararini veren ayri model
+  # judge_provider_type: ""
+  # Bos birakilirsa reflection ve judge, ajanin zor isler icin ayarlanan
+  # model_heavy'si ile calisir (model_heavy da bossa ajanin normal modeli).

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for everything inside the bundle that is not the .app itself.
+  electron-builder hands this file to `codesign` for:
+
+    - Contents/Frameworks/TaskTrooper Helper*.app — the renderer, GPU and
+      utility processes. These are Chromium; they are what actually needs JIT.
+    - Contents/Frameworks/Electron Framework.framework and the dylibs beside it.
+    - Contents/Resources/bin/agent-server — the Go backend the supervisor
+      spawns.
+
+  That last one is the awkward one: electron-builder has exactly two buckets
+  (the app, and everything else), so a plain Go binary that needs no entitlement
+  at all ends up carrying the helpers'. That is a known cost of the two-bucket
+  model and not a mistake — the alternative is signing it in a separate pass
+  outside electron-builder, which then has to be kept in step with it by hand.
+  What matters is that it IS signed with the hardened runtime and a secure
+  timestamp; notarization rejects any unsigned Mach-O in the bundle.
+-->
+<plist version="1.0">
+<dict>
+  <!--
+    A child of a sandboxed parent inherits the parent's sandbox rather than
+    declaring its own. This app is not sandboxed, so the key is inert here; it
+    is present so a helper can never end up with a *wider* grant than the app
+    if the sandbox is ever turned on, and because it is what @electron/osx-sign
+    and every Electron signing guide expect to find in this file.
+  -->
+  <key>com.apple.security.inherit</key>
+  <true/>
+
+  <!--
+    The renderer helper is where V8 actually runs. Same reasoning as the app
+    plist: without these the helper is killed the moment it JITs, which
+    presents as a window that renders nothing.
+  -->
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+
+  <!--
+    The helpers load Electron Framework.framework. Under an ad-hoc signature
+    that framework carries no team id, so library validation in the helper would
+    reject it and the app would launch to a blank window.
+  -->
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+
+  <!--
+    Same scrubbing rule as the app: a hardened-runtime process loses DYLD_*.
+    The helpers are spawned by the app and the backend is spawned by the
+    supervisor, so both sit downstream of the environment the app was given.
+  -->
+  <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+  <true/>
+</dict>
+</plist>

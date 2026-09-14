@@ -1,0 +1,42 @@
+import { NavLink } from "react-router-dom";
+import type { LucideIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+interface SidebarNavLinkProps {
+  to: string;
+  label: string;
+  icon: LucideIcon;
+  collapsed: boolean;
+  end?: boolean;
+  onClick?: () => void;
+}
+
+export function SidebarNavLink({
+  to,
+  label,
+  icon: Icon,
+  collapsed,
+  end,
+  onClick,
+}: SidebarNavLinkProps) {
+  return (
+    <NavLink
+      to={to}
+      end={end}
+      onClick={onClick}
+      className={({ isActive }) =>
+        cn(
+          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+          collapsed && "justify-center px-2",
+          isActive
+            ? "bg-sidebar-accent text-sidebar-accent-foreground"
+            : "text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+        )
+      }
+      title={collapsed ? label : undefined}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      {!collapsed && <span>{label}</span>}
+    </NavLink>
+  );
+}
