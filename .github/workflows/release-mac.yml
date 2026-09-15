@@ -108,7 +108,8 @@ jobs:
             [ -n "${!name:-}" ] || unset "$name"
           done
           npx electron-builder --mac --publish always \
-            -c.publish.provider=github -c.publish.owner=makifbaysal -c.publish.repo=tasktrooper-oss ${IDENTITY:+"$IDENTITY"}
+            -c.publish.provider=github -c.publish.owner=makifbaysal -c.publish.repo=tasktrooper-oss \
+            -c.publish.releaseType=release ${IDENTITY:+"$IDENTITY"}
 
       # electron-builder reporting success is not evidence. The failure that
       # matters is an app that packages and notarizes cleanly and is refused on
