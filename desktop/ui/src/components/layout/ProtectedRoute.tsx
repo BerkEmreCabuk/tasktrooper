@@ -1,4 +1,5 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { Spinner } from "@/components/ui/spinner";
 import { useSetup } from "@/hooks/useSetup";
 import { SETUP_PATH } from "@/lib/setup";
 
@@ -9,10 +10,10 @@ import { SETUP_PATH } from "@/lib/setup";
  * no GitHub and no repository, and is expected to find the three unrelated
  * screens that fix that.
  *
- * The whole policy — something DEFINITELY undone, not dismissed, and not during
- * the seconds a launching supervisor spends looking exactly like one nobody has
- * started — lives in `useSetup` as `redirectToSetup`, so this file cannot hold a
- * second opinion about it.
+ * The whole policy — something DEFINITELY undone and not dismissed — lives in
+ * `useSetup` as `redirectToSetup`, so this file cannot hold a second opinion
+ * about it. Until that is known (`deciding`) the first screen waits rather than
+ * rendering a workspace the gate may be about to leave.
  */
 export function ProtectedRoute() {
   const setup = useSetup();
@@ -23,6 +24,13 @@ export function ProtectedRoute() {
     // The search string travels: the GitHub callback lands on /settings?github=…
     // and this is the hop that has to carry that answer to the step waiting for it.
     return <Navigate to={SETUP_PATH + location.search} replace />;
+  }
+  if (!onSetup && setup.deciding) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <Spinner size="lg" />
+      </div>
+    );
   }
 
   return <Outlet />;

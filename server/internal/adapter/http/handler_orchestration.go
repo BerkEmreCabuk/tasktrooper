@@ -8,6 +8,7 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/catalog"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 func (h *Handler) registerOrchestrationRoutes(app *fiber.App) {
@@ -328,7 +329,16 @@ func (h *Handler) ListAgents(c *fiber.Ctx) error {
 	if err != nil {
 		return internalError(c, err)
 	}
-	return c.JSON(fiber.Map{"agents": agents, "count": len(agents), "seeding": h.catalogSvc.SeedingInProgress()})
+	// The role agent seed is scheduled at boot but may not have started yet;
+	// reporting only the catalog's own flag let the first read answer "done,
+	// and empty", and the sidebar stopped waiting.
+	seeding := h.catalogSvc.SeedingInProgress()
+	if !seeding && h.tenantOnboarder != nil {
+		if id, ok := tenant.ID(c.UserContext()); ok && h.tenantOnboarder.Booting(id) {
+			seeding = true
+		}
+	}
+	return c.JSON(fiber.Map{"agents": agents, "count": len(agents), "seeding": seeding})
 }
 
 func (h *Handler) CreateAgent(c *fiber.Ctx) error {

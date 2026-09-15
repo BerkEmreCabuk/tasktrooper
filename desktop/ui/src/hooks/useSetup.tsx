@@ -43,14 +43,15 @@ import {
 const PREFLIGHT_POLL_MS = 30_000;
 
 /**
- * How long the route gate waits before it is allowed to move anyone.
- *
- * A desktop launch starts with a supervisor that has reported nothing, so for
- * the first seconds of every launch the honest reading of "is the backend up"
- * is "not yet", which for an already-set-up user is not an invitation to redo
- * their setup.
+ * The longest the route gate holds the first screen while the server-backed
+ * steps are still being read. Past it the workspace opens: a read that never
+ * answers must not leave the app on a spinner. The desktop attaches this page
+ * only once the backend answers /health, so the reads normally return in well
+ * under a second.
  */
-const GATE_GRACE_MS = 6_000;
+const GATE_DECIDE_TIMEOUT_MS = 8_000;
+
+const SERVER_STEP_IDS = ["claude-code", "github", "project"] as const;
 
 /** What a piece of derived state can say. `null` = not read yet, not "absent". */
 type Read<T> = { value: T; error: "" } | { value: null; error: string } | null;
@@ -88,10 +89,16 @@ interface SetupContextValue {
   dismiss: () => void;
   /**
    * The whole gate policy, in one place so `ProtectedRoute` cannot hold a
-   * second opinion about it. See `GATE_GRACE_MS` for why it is not simply
-   * `needsWork`.
+   * second opinion about it: something is undone and the sequence was not
+   * dismissed.
    */
   redirectToSetup: boolean;
+  /**
+   * Not enough is known yet to choose between the setup sequence and the
+   * workspace. `ProtectedRoute` holds the first screen while it is true, so a
+   * first launch opens on setup instead of showing the board and then leaving it.
+   */
+  deciding: boolean;
 }
 
 const SetupContext = createContext<SetupContextValue | null>(null);
@@ -191,9 +198,9 @@ export function SetupProvider({ children }: { children: ReactNode }) {
     setDismissed(true);
   }, []);
 
-  const [graceOver, setGraceOver] = useState(false);
+  const [decideTimedOut, setDecideTimedOut] = useState(false);
   useEffect(() => {
-    const id = window.setTimeout(() => setGraceOver(true), GATE_GRACE_MS);
+    const id = window.setTimeout(() => setDecideTimedOut(true), GATE_DECIDE_TIMEOUT_MS);
     return () => window.clearTimeout(id);
   }, []);
 
@@ -249,13 +256,22 @@ export function SetupProvider({ children }: { children: ReactNode }) {
   }, [host, backendUp, settledHost, preflight, cli, github, work]);
 
   const complete = setupComplete(steps);
+  const needsWork = setupNeedsWork(steps);
+  // Only the server-backed steps are waited for. The environment probe runs
+  // local binaries and can take seconds, and a missing CLI already surfaces as
+  // an undone Claude Code step, so the gate loses nothing by not waiting on it.
+  const deciding =
+    !dismissed &&
+    !needsWork &&
+    !decideTimedOut &&
+    SERVER_STEP_IDS.some((id) => steps[id].state === "unknown" && !steps[id].error);
 
   const value = useMemo<SetupContextValue>(
     () => ({
       steps,
       activeId: activeSetupStep(steps),
       complete,
-      needsWork: setupNeedsWork(steps),
+      needsWork,
       inShell: host !== null,
       host,
       snapshot,
@@ -265,7 +281,8 @@ export function SetupProvider({ children }: { children: ReactNode }) {
       reportGitHub,
       dismissed,
       dismiss,
-      redirectToSetup: graceOver && !dismissed && setupNeedsWork(steps),
+      redirectToSetup: !dismissed && needsWork,
+      deciding,
     }),
     [
       steps,
@@ -278,7 +295,8 @@ export function SetupProvider({ children }: { children: ReactNode }) {
       reportGitHub,
       dismissed,
       dismiss,
-      graceOver,
+      needsWork,
+      deciding,
     ],
   );
 

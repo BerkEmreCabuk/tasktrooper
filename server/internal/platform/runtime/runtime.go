@@ -420,6 +420,14 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 	}
 
 	handler := e.buildHandler(runCtx, opts)
+	// One machine, one tenant: seed it now rather than on the first request, so
+	// the board exists and the role agents are already being written when the
+	// desktop's first /health answers and the window opens.
+	if e.tenantOnboarder != nil {
+		if err := e.tenantOnboarder.Sight(localContext(), tenant.Identity{TenantID: tenant.LocalTenantID, Role: tenant.RoleOwner}); err != nil {
+			log.Warn().Err(err).Msg("seeding the local tenant at boot failed; the first request retries the board seed")
+		}
+	}
 
 	log.Info().Str("addr", addr).Msg("listening")
 	if e.mcpServer != nil {
@@ -1101,7 +1109,32 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		// catalog. It is still background work for the reason it always was (a
 		// dozen writes must not hold up anything), just background work that
 		// knows whose catalog it is seeding.
-		e.tenantOnboarder.AddStep("role_agents", catalogSvc.EnsureRoleAgents)
+		e.tenantOnboarder.AddStep("role_agents", func(stepCtx context.Context) error {
+			err := catalogSvc.EnsureRoleAgents(stepCtx)
+			// The seed stores skills without vectors so it never waits on the
+			// embedder. The backfill outlives the boot step's deadline on
+			// purpose: a first launch is still downloading the model.
+			go func() {
+				backfillCtx, cancel := context.WithTimeout(context.WithoutCancel(stepCtx), 30*time.Minute)
+				defer cancel()
+				for {
+					n, bfErr := catalogSvc.BackfillSkillEmbeddings(backfillCtx)
+					if bfErr == nil {
+						if n > 0 {
+							log.Info().Int("updated", n).Msg("skill embeddings backfilled")
+						}
+						return
+					}
+					select {
+					case <-backfillCtx.Done():
+						log.Warn().Err(bfErr).Msg("skill embedding backfill gave up; skills without a vector are not found by semantic search")
+						return
+					case <-time.After(30 * time.Second):
+					}
+				}
+			}()
+			return err
+		})
 		orchSvc = orchestrator.NewService(llmClient, catalogStore, nil, e.agentRouter, cfg.Orchestration, contextBuilder)
 		// Intake and the planner run without tools; the snapshot is what keeps
 		// them from asking the stakeholder about repositories the system knows.

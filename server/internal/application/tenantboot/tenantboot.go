@@ -106,6 +106,9 @@ type Service struct {
 	// booted is "has THIS process run its ensure-steps for this tenant" (local,
 	// and correctly re-done by the next pod).
 	booted sync.Map
+	// running holds the tenants whose steps are in flight in this process, so a
+	// caller can tell an empty roster from one that is still being written.
+	running sync.Map
 }
 
 func NewService(registry Registry, seeds SeedStore) *Service {
@@ -139,6 +142,16 @@ func (s *Service) Sight(ctx context.Context, id tenant.Identity) error {
 	return nil
 }
 
+// Booting reports whether this process is still running the registered steps
+// for the tenant.
+func (s *Service) Booting(id uuid.UUID) bool {
+	if s == nil {
+		return false
+	}
+	_, ok := s.running.Load(id)
+	return ok
+}
+
 // stepTimeout bounds one tenant's whole step run. It is generous because the
 // steps are seeds rather than requests — the role agent seed alone writes a
 // dozen rows — and it exists only so a wedged database cannot leave a goroutine
@@ -165,6 +178,7 @@ func (s *Service) runSteps(ctx context.Context, id tenant.Identity) {
 	if _, done := s.booted.LoadOrStore(id.TenantID, struct{}{}); done {
 		return
 	}
+	s.running.Store(id.TenantID, struct{}{})
 	// Least privilege, matching tenant.EachTenant: a seed has no human behind
 	// it and makes no role decisions, so if one ever grows a role check it gets
 	// the answer a stranger would rather than the answer this caller happens to
@@ -176,6 +190,7 @@ func (s *Service) runSteps(ctx context.Context, id tenant.Identity) {
 	go func() {
 		stepCtx, cancel := context.WithTimeout(stepCtx, stepTimeout)
 		defer cancel()
+		defer s.running.Delete(id.TenantID)
 		for _, step := range s.steps {
 			if err := step.Run(stepCtx); err != nil {
 				// Logged and continued, never fatal and never retried: one
