@@ -212,7 +212,7 @@ that worked; otherwise the error signature classifies it as config / dependency 
 
 `incident_policy` decides what follows: `off` records only, `suggest` (default) opens a
 diagnosis task that must stop at a written proposal, `auto_fix` lets the task carry the fix
-through the board. High and critical incidents also push to the user's devices.
+through the board.
 
 ## Run lifetime vs process lifetime (drain, heartbeat, stale sweep)
 

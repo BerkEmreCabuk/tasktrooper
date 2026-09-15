@@ -11,7 +11,7 @@ Skills and orchestrator rules are **agent-scoped**. Each skill and rule belongs 
 
 ## Default role agents
 
-On startup, `EnsureRoleAgents` creates any missing role agents (by name) and fills in missing skills/rules for partially seeded agents. Embedding failures during seed do not block skill creation.
+At boot the local tenant is seeded and `EnsureRoleAgents` creates any missing role agents (by name) and fills in missing skills/rules for partially seeded agents. The seed stores skills without embeddings, so it never waits on the embedder; `catalog.BackfillSkillEmbeddings` embeds them in the background (retried for up to 30 min). `/admin/agents` reports `seeding: true` until the boot steps finish (`tenantboot.Booting`).
 
 | Name | Subagent type | Effort | Purpose |
 |------|---------------|--------|---------|
@@ -22,7 +22,7 @@ On startup, `EnsureRoleAgents` creates any missing role agents (by name) and fil
 | `qa-agent` | `generalPurpose` | medium | Manual test rounds, QA columns, read-only code tools |
 | `system-architect` | `system-architect` | high | Analysis (`analiz`) tasks, code review, task decomposition |
 
-Each role agent is seeded with 6–17 skills and 3–10 rules. Skill embeddings are computed on insert via the catalog service. Seed reconciliation updates existing skill/rule content on restart when the markdown under `internal/application/catalog/seeddata/` changes; renamed/removed entries must be listed in `deprecatedRoleSkills`/`deprecatedRoleRules` (`seed.go`) to be deleted from existing installs. Tool policies and effort are applied on agent CREATE only — admin customizations survive restarts, so policy additions reach existing installs via the admin UI.
+Each role agent is seeded with 6–17 skills and 3–10 rules. Skill embeddings are filled in after the seed by the backfill above. Seed reconciliation updates existing skill/rule content on restart when the markdown under `internal/application/catalog/seeddata/` changes; renamed/removed entries must be listed in `deprecatedRoleSkills`/`deprecatedRoleRules` (`seed.go`) to be deleted from existing installs. Tool policies and effort are applied on agent CREATE only — admin customizations survive restarts, so policy additions reach existing installs via the admin UI.
 
 ### Seeded models
 

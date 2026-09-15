@@ -9,6 +9,115 @@ Everything runs on your Mac: the desktop app starts an embedded Postgres and the
 Go backend, serves the UI, and runs the agent sessions locally. No account, no
 cloud, no login.
 
+## Features
+
+### Board
+
+- A Kanban board with thirteen columns out of the box, from Backlog to Released,
+  including analysis review, code review, QA, PM UAT and human UAT. The columns,
+  and which agents pick up work in each, are configurable.
+- Tasks carry acceptance criteria. A task cannot move forward out of a review
+  column until every criterion has a verdict.
+- Tasks can block each other; a blocked task waits until its blocker is done.
+- Every task gets its own branch and pull request. Code review reads the PR,
+  Done merges it, and Done and Released watch the deploy and can roll it back.
+- When Claude Code hits its usage limit, the task is parked on Blocked and
+  resumes by itself once the limit resets.
+
+### Role agents
+
+Six agents ship with a library of 95 seeded skills plus rules. They run on
+Claude Code with `sonnet` by default and `opus` for subtasks rated hard.
+
+| Agent | Works on |
+|---|---|
+| `product-manager` | backlog, requirements, PM UAT |
+| `system-architect` | analysis tasks, task breakdown, code review |
+| `backend-developer` | APIs, databases and tests (Go, Java/Quarkus) |
+| `frontend-developer` | React, Vite and Tailwind UIs |
+| `mobile-developer` | Flutter, SwiftUI, Compose, store releases |
+| `qa-agent` | manual test rounds with real requests and headless-browser screenshots; it cannot pass a task without running something |
+
+Every agent is editable: provider and model, tool policy, effort, skills, rules,
+the columns it works, and its memory. You can chat with any agent directly, or
+about a specific task.
+
+### Self-evolution
+
+Agents rewrite their own playbooks from how their work actually went.
+
+- **Reflection.** On a schedule, whenever a task is sent back to Need Revision,
+  or on demand, an agent reviews everything since its last reflection: its
+  runs, chat messages, revision comments, scores, KPI results and its current
+  skills, rules and memories. It proposes changes to all three. Skill and rule
+  changes are applied only for agents with self-evolution turned on.
+- **Golden gate.** With the gate enabled, a golden task suite runs before and
+  after a proposed change, and an independent judge model decides whether to
+  keep it. If the pass rate drops, the whole change set is reverted
+  automatically.
+- **Impact tracking.** Each applied change is later classified as effective,
+  regressed or neutral by comparing scores before and after it. Regressions are
+  put in front of the agent's next reflection, which decides whether to revert.
+- **Budgets and history.** Skills and rules are capped per agent (25 and 15 by
+  default), so an agent merges and updates instead of piling up. Every write to
+  a skill or rule is versioned with its source (you, self-evolution or the seed)
+  and any version can be restored.
+- **KPIs.** Each agent has targets such as tasks completed, first-pass rate,
+  revisions received, UAT failures, failed runs and time spent per column,
+  measured per day, week or month. The targets are part of the agent's prompt,
+  and the Performance page shows how it is doing.
+
+### Memory and code understanding
+
+- Agents save and search memories in four scopes: personal or team-wide, for one
+  repository or for every repository. Notes about a single run are refused, and
+  a near-duplicate is not saved twice.
+- Repositories are parsed with tree-sitter and embedded on your machine with the
+  bundled `nomic-embed-text-v1.5` model, so agents search code semantically and
+  see uncommitted edits without a re-index.
+- Skills are loaded on demand, so a long skill list does not fill the prompt.
+- Files uploaded to a workspace are available to agents through retrieval.
+
+### Runtimes, models and tools
+
+- Agent CLIs run as local processes: Claude Code, Cursor, Antigravity and
+  OpenCode. A Claude Code session gets TaskTrooper's board tools over MCP with a
+  per-run token, and never loads a repository's `.mcp.json` or your personal
+  Claude Code settings.
+- API providers for agents that do not use a CLI: OpenAI, Anthropic, Google
+  Gemini, Groq, or any OpenAI-compatible endpoint such as LM Studio, Ollama or
+  vLLM.
+- Connect your own MCP servers.
+- Built-in tools: terminal, file editing, web search with no API key, page
+  fetch, headless-browser QA, and a boilerplate catalog to start new projects
+  from.
+- A repository's own version pins (`.tool-versions`, `go.mod`, `.nvmrc` and
+  others) are honoured in the agent session.
+
+### Integrations and operations
+
+- **GitHub:** clone, branches, pull requests, review comments, merge, and CI
+  status from GitHub Actions.
+- **Deploys:** a recipe catalog for Google Cloud Run and GKE, AWS ECS and Lambda,
+  Vercel and Fly, rendered into a workflow per environment with a health check,
+  plus a deployment matrix. Vercel and Google Cloud accounts can be connected to
+  bind existing services.
+- **Production incidents:** alerts from Alertmanager, Sentry, Cloud Monitoring or
+  any JSON webhook, together with a health monitor, fold into deduplicated
+  incidents with a suggested remedy: a rollback, a config, dependency or
+  capacity fix, or a code defect. Per repository you choose whether an incident
+  is only recorded, becomes a diagnosis task, or is fixed through the board.
+- **Mobile releases:** connect App Store Connect and Google Play and promote
+  builds through internal, external and production channels. QA can drive iOS
+  simulators and Android emulators on this Mac through Appium.
+- **Usage:** token usage per model and an optional spending budget.
+
+### First run
+
+A guided setup checks this Mac (git, the Claude Code CLI and its plan, and
+optionally Chrome, Xcode, Appium and the Android SDK), connects Claude Code and
+GitHub, and imports your first project.
+
 ## Install
 
 ```sh
