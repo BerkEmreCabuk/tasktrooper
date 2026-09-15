@@ -102,6 +102,11 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
           IDENTITY: ${{ steps.sign.outputs.args }}
         run: |
+          # An absent secret arrives as an empty string, and electron-builder
+          # reads an empty CSC_LINK as a certificate path: the working directory.
+          for name in CSC_LINK CSC_KEY_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER; do
+            [ -n "${!name:-}" ] || unset "$name"
+          done
           npx electron-builder --mac --publish always \
             -c.publish.provider=github -c.publish.owner=makifbaysal -c.publish.repo=tasktrooper-oss ${IDENTITY:+"$IDENTITY"}
 
