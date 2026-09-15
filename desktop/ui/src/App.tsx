@@ -18,7 +18,6 @@ import { FilesPage } from "@/pages/FilesPage";
 import { RulesPage } from "@/pages/RulesPage";
 import { IntegrationsSettingsPage } from "@/pages/IntegrationsSettingsPage";
 import { MCPServersPage } from "@/pages/MCPServersPage";
-import { MobileDeviceSettingsPage } from "@/pages/MobileDeviceSettingsPage";
 import { SettingsLayout } from "@/components/layout/SettingsLayout";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { BoardSettingsPage } from "@/pages/BoardSettingsPage";
@@ -91,7 +90,7 @@ export default function App() {
                   <Route path="memory" element={<Navigate to="/memory" replace />} />
                   <Route path="mcp" element={<MCPServersPage />} />
                   <Route path="integrations" element={<IntegrationsSettingsPage />} />
-                  <Route path="device" element={<MobileDeviceSettingsPage />} />
+                  <Route path="device" element={<Navigate to="/settings" replace />} />
                   {/* The Local Runner page is gone — everything it offered now lives on
                       the Claude Code card under LLM Connection. This redirect stays
                       because old bookmarks and already-installed desktop builds (whose

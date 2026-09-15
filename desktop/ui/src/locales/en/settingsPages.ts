@@ -277,42 +277,11 @@ export const settingsPages = {
     presetCustom: "Custom / own IP",
   },
   usage: {
-    // Billing panel
-    planLimitTitle: "Plan & Limit",
-    manage: "Manage",
-    close: "Close",
-    unlimited: "No limit is defined for this tenant (unlimited).",
-    packageLabel: "Plan:",
-    budgetUsage: "{used} / {budget} tokens",
-    remaining: "Remaining: {tokens} tokens",
-    renewal: "Renews: {date}",
-    concurrentTasks: "Concurrent tasks: {count}",
-    exhausted:
-      "Limit reached. Unfinished tasks will resume automatically on {date}.",
-    planLoadFailed: "Failed to load plan info",
-    planUpdated: "Plan updated",
-    planSaveFailed: "Failed to save plan",
-    priceSaved: "Model price saved",
-    priceSaveFailed: "Failed to save price",
-    priceDeleteFailed: "Failed to delete price",
 
-    // Admin plan editor
-    planNameLabel: "Plan name",
-    usdBudgetLabel: "USD budget (per period, 0 = unlimited)",
-    concurrentTasksLabel: "Concurrent tasks",
-    periodDaysLabel: "Period (days)",
-    tokenRateLabel: "Token display rate (USD/token)",
-    savePlan: "Save plan",
-    modelPricesTitle: "Model prices (USD / 1M tokens)",
     inputColumn: "Input",
     outputColumn: "Output",
     modelColumn: "Model",
     callsColumn: "Calls",
-    delete: "Delete",
-    modelPlaceholder: "model",
-    inputPlaceholder: "input/1M",
-    outputPlaceholder: "output/1M",
-    addOrUpdate: "Add / Update",
 
     // Usage summary page
     usageLoadFailed: "Failed to load usage data",
@@ -356,93 +325,6 @@ export const settingsPages = {
     add: "Add",
   },
 
-  mobileDevice: {
-    title: "Test devices",
-    description: "Attach Android phones so QA, the mobile developer and PM UAT can test the app on real devices.",
-    add: "Add device",
-    empty: {
-      title: "No devices registered",
-      description: "Until a phone is attached the mobile_* tools are not offered to any agent.",
-    },
-    status: {
-      online: "Online",
-      offline: "Offline",
-      busy: "In use by a run",
-      notConfigured: "Registration incomplete",
-      lastConnected: "Last connected",
-      lastConnectedNever: "Never connected",
-      fromEnv: "Coming from environment config",
-      hubDown:
-        "This is not the phone: the Appium bridge is unreachable. Leave the phone alone and tell your administrator.",
-    },
-    managed: {
-      badge: "From configuration",
-      help: "This device comes from the cluster's environment configuration, so it cannot be renamed or removed here. Changing it means changing the cluster configuration.",
-    },
-    addDialog: {
-      title: "Add device",
-      description: "Pick the platform first, then give the phone's tailnet address.",
-      platform: "Platform",
-      android: "Android",
-      ios: "iOS",
-      iosSoon: "Coming soon",
-      iosWhy:
-        "iOS cannot work in this installation: Appium's XCUITest driver only ever runs on a macOS machine, and the cluster has no macOS host. That is a platform limitation, not an oversight.",
-      submit: "Add",
-    },
-    prep: {
-      title: "Prepare the phone",
-      hint: "On the phone itself — about two minutes, once per phone.",
-      body: "1) Install Tailscale and sign in with the same account as the cluster; turn battery optimisation off for it. 2) Settings → About phone → tap Build number seven times to unlock Developer options. 3) Settings → System → Developer options → turn on Wireless debugging. 4) Keep the phone on a charger. Note the Tailscale IP shown in the Tailscale app — you need it when you add the device.",
-    },
-    address: {
-      title: "Address and PIN",
-      hint: "Saved encrypted and applied immediately — no restart.",
-    },
-    pairing: {
-      title: "Pair over wireless debugging",
-      hint: "Once per phone. The code expires when the dialog closes, so do this with the phone in your hand.",
-    },
-    repo: {
-      title: "Point a repository at its build",
-      hint: "Per repository, not per device.",
-      body: "Open the repository's deploy target and set the Android package name (and, if CI publishes one, the APK URL). mobile_launch_app can only ever open a package registered there — that is the guard that keeps an agent from opening anything else on a real phone.",
-    },
-    hub: {
-      missing:
-        "This installation has no Appium hub configured, so no phone can be attached yet. Whoever deployed the cluster has to set MOBILE_APPIUM_HUB_URL.",
-    },
-    remove: {
-      title: "Remove this device?",
-      description:
-        "{name} is unregistered. The phone itself is untouched, but runs that use it stop working, and re-adding it means pairing again.",
-    },
-    fields: {
-      name: "Device name",
-      nameHelp: "This is what you see in the list. Name it so you can tell which phone in the room it is.",
-      namePlaceholder: "e.g. Pixel 7 – QA desk",
-      deviceAddr: "Device address",
-      deviceAddrHelp:
-        "The Tailscale IP from the Tailscale app on the phone, plus the port from its Wireless debugging screen — e.g. 100.84.12.7:37241. That port changes every time the phone reboots; when it does, type the new one here, save, and press Reconnect.",
-      pin: "Screen-lock PIN",
-      pinHelp: "The PIN that unlocks the phone. Leave empty if it has no lock. Stored encrypted, never shown again, never given to an agent.",
-      pinStored: "A PIN is stored. Leave empty to keep it, or type a new one to replace it.",
-      pairAddr: "Pairing address",
-      pairAddrHelp: "Phone → Wireless debugging → Pair device with pairing code. Use the IP:PORT in that dialog — its port is NOT 5555 and changes each time.",
-      pairCode: "Pairing code",
-      pairCodeHelp: "The six digits in the same dialog. It stops working when the dialog closes.",
-    },
-    pair: "Pair",
-    reconnect: "Reconnect",
-    unregister: "Unregister",
-    added: "Device added",
-    addFailed: "Could not add the device",
-    paired: "Phone paired",
-    pairFailed: "Pairing failed",
-    connected: "Phone connected",
-    connectFailed: "Could not connect",
-    unregistered: "Device unregistered",
-  },
 
 };
 

@@ -34,7 +34,6 @@ export const frame: FrameDict = {
       llm: "LLM Bağlantısı",
       mcp: "MCP Sunucuları",
       integrations: "Entegrasyonlar",
-      device: "Test cihazı",
       usage: "Kullanım",
     },
     sidebar: {

@@ -1,4 +1,4 @@
-import { BarChart3, Bot, Globe, Kanban, Plug, Server, Smartphone } from "lucide-react";
+import { BarChart3, Bot, Globe, Kanban, Plug, Server } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { PageContent } from "@/components/layout/PageContent";
 import { PageHeader } from "@/components/admin/PageHeader";
@@ -18,7 +18,6 @@ export function SettingsLayout() {
       icon: Plug,
       end: true,
     },
-    { to: "/settings/device", label: t("frame.layout.settingsTabs.device"), icon: Smartphone, end: true },
     { to: "/settings/usage", label: t("frame.layout.settingsTabs.usage"), icon: BarChart3, end: true },
   ];
 

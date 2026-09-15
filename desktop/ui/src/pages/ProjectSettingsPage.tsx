@@ -1,12 +1,9 @@
-import { AlertTriangle, ArrowLeft, FolderTree, Plus, RefreshCw, Rocket, Save, Square, Trash2 } from "lucide-react";
+import { AlertTriangle, ArrowLeft, FolderTree, Plus, RefreshCw, Save, Square, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   api,
-  type BoardTask,
-  type DeployPackage,
-  type DeployPackageStatus,
   type InitiativeProject,
   type MobilePlatform,
   type PipelineCategory,
@@ -17,8 +14,6 @@ import {
   type RepoSubProject,
 } from "@/api";
 import { MultiSelectPicker } from "@/components/admin/MultiSelectPicker";
-import { DeployTargetsSection } from "@/components/projects/DeployTargetsSection";
-import { GCloudResourcePanel } from "@/components/projects/GCloudResourcePanel";
 import { MobileStorePanel } from "@/components/projects/MobileStorePanel";
 import { VercelProjectPanel } from "@/components/projects/VercelProjectPanel";
 import { DirectoryPickerDialog } from "@/components/projects/DirectoryPickerDialog";
@@ -59,25 +54,6 @@ const slotKey = (path: string, sub: string, cat: string) => `${path}|${sub}|${ca
 // with one.
 const ROOT_TAB = "";
 
-// A release train's status pill. releasing is amber rather than green: deploys
-// are in flight and nothing has landed yet.
-function deployPackageBadgeVariant(
-  status: DeployPackageStatus,
-): "default" | "secondary" | "destructive" | "outline" | "success" | "warning" {
-  switch (status) {
-    case "released":
-      return "success";
-    case "releasing":
-      return "warning";
-    case "failed":
-      return "destructive";
-    case "cancelled":
-      return "secondary";
-    default:
-      return "outline";
-  }
-}
-
 export function ProjectSettingsPage() {
   const { t } = useI18n();
   const { repositoryId } = useParams();
@@ -89,20 +65,6 @@ export function ProjectSettingsPage() {
   const [description, setDescription] = useState("");
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const [requireHumanReview, setRequireHumanReview] = useState(false);
-  const [requireReviewChain, setRequireReviewChain] = useState(false);
-  const [requireReleaseDeploy, setRequireReleaseDeploy] = useState(false);
-  // Defaults to true, matching the server column default: this switch turns an
-  // existing gate OFF, so an unloaded page must not read as "already off".
-  const [requirePipelineForReview, setRequirePipelineForReview] = useState(true);
-  // Whole-repo coverage: whether it blocks, and the bar. New-code coverage is
-  // always enforced at 90% and is deliberately not exposed — it is the bar every
-  // change is held to, not a per-repository choice.
-  const [requireOverallCoverage, setRequireOverallCoverage] = useState(false);
-  const [coverageThreshold, setCoverageThreshold] = useState("");
-  // The mutation-score gate is the coverage gate's twin — same shape, different
-  // measure — but it rides the repository PATCH rather than the gates PUT.
-  const [mutationEnabled, setMutationEnabled] = useState(false);
-  const [mutationThreshold, setMutationThreshold] = useState("");
   const [mobilePlatform, setMobilePlatform] = useState<MobilePlatform>("");
   const [pipelineConfig, setPipelineConfig] = useState<PipelineConfigView | null>(null);
   const [kind, setKind] = useState<RepoKind>("backend");
@@ -118,25 +80,11 @@ export function ProjectSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [watchingIndex, setWatchingIndex] = useState(false);
-  const [settingUpWebhook, setSettingUpWebhook] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [profile, setProfile] = useState<RepositoryProfile | null>(null);
   const [profileRefreshing, setProfileRefreshing] = useState(false);
   const profilePollTimer = useRef<number | null>(null);
-  // Deploy packages: release trains for a repository that turned per-task auto
-  // release off. Listing them is what advances them server-side, so every
-  // action here reloads rather than patching local state.
-  const [deployPackages, setDeployPackages] = useState<DeployPackage[]>([]);
-  const [repoTasks, setRepoTasks] = useState<BoardTask[]>([]);
-  const [newPackageName, setNewPackageName] = useState("");
-  const [newPackageDescription, setNewPackageDescription] = useState("");
-  const [creatingPackage, setCreatingPackage] = useState(false);
-  const [membershipPackageId, setMembershipPackageId] = useState<string | null>(null);
-  const [membershipDraft, setMembershipDraft] = useState<string[]>([]);
-  const [packageBusyId, setPackageBusyId] = useState<string | null>(null);
-  const [releaseTarget, setReleaseTarget] = useState<DeployPackage | null>(null);
-  const [releasing, setReleasing] = useState(false);
   const { index, percent, refresh: refreshIndex } = useIndexProgress(repoId, {
     forcePoll: watchingIndex,
     onIndexingFinished: () => setWatchingIndex(false),
@@ -152,15 +100,6 @@ export function ProjectSettingsPage() {
       setDescription(data.description);
       setProjectIds(data.project_ids ?? []);
       setRequireHumanReview(data.require_human_review ?? false);
-      setRequireReviewChain(data.require_review_chain ?? false);
-      setRequireReleaseDeploy(data.require_release_deploy ?? false);
-      setRequirePipelineForReview(data.require_pipeline_for_review ?? true);
-      setRequireOverallCoverage(data.require_overall_coverage ?? false);
-      // 0 means "use the default", which the placeholder shows — an empty box
-      // says that better than a literal 0 the owner never typed.
-      setCoverageThreshold(data.coverage_threshold ? String(data.coverage_threshold) : "");
-      setMutationEnabled(data.mutation_enabled ?? false);
-      setMutationThreshold(data.mutation_threshold ? String(data.mutation_threshold) : "");
       setMobilePlatform(data.mobile_platform ?? "");
       setSubProjectsList(data.sub_projects ?? []);
       const projects = await api.listInitiativeProjects();
@@ -208,29 +147,14 @@ export function ProjectSettingsPage() {
     }
   }, [repoId]);
 
-  const loadDeployPackages = useCallback(async () => {
-    if (!repoId) return;
-    try {
-      const [packages, tasks] = await Promise.all([
-        api.listDeployPackages(repoId),
-        api.listRepositoryTasks(repoId),
-      ]);
-      setDeployPackages(packages.packages ?? []);
-      setRepoTasks(tasks.tasks ?? []);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("projectAdmin.projectSettings.deployPackages.loadFailed"));
-    }
-  }, [repoId]);
-
   useEffect(() => {
     load();
     loadPipelineConfig();
     loadProfile();
-    loadDeployPackages();
     return () => {
       if (profilePollTimer.current !== null) window.clearTimeout(profilePollTimer.current);
     };
-  }, [load, loadPipelineConfig, loadProfile, loadDeployPackages]);
+  }, [load, loadPipelineConfig, loadProfile]);
 
   // Applying a proposal writes a repository setting, so the whole settings
   // view is reloaded after it lands — the repo kind or build command the user
@@ -289,81 +213,6 @@ export function ProjectSettingsPage() {
     }
   };
 
-  const handleCreatePackage = async () => {
-    if (!repoId || !newPackageName.trim()) return;
-    setCreatingPackage(true);
-    try {
-      await api.createDeployPackage(repoId, {
-        name: newPackageName.trim(),
-        description: newPackageDescription.trim() || undefined,
-      });
-      setNewPackageName("");
-      setNewPackageDescription("");
-      await loadDeployPackages();
-      toast.success(t("projectAdmin.projectSettings.deployPackages.created"));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("common.saveFailed"));
-    } finally {
-      setCreatingPackage(false);
-    }
-  };
-
-  const handleSaveMembership = async (packageId: string) => {
-    if (!repoId) return;
-    setPackageBusyId(packageId);
-    try {
-      await api.setDeployPackageTasks(repoId, packageId, membershipDraft);
-      setMembershipPackageId(null);
-      await loadDeployPackages();
-      toast.success(t("projectAdmin.projectSettings.deployPackages.membershipSaved"));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("common.saveFailed"));
-    } finally {
-      setPackageBusyId(null);
-    }
-  };
-
-  const handleReleasePackage = async () => {
-    if (!repoId || !releaseTarget) return;
-    setReleasing(true);
-    try {
-      await api.releaseDeployPackage(repoId, releaseTarget.id);
-      setReleaseTarget(null);
-      await loadDeployPackages();
-      toast.success(t("projectAdmin.projectSettings.deployPackages.releaseStarted"));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("projectAdmin.projectSettings.deployPackages.releaseFailed"));
-    } finally {
-      setReleasing(false);
-    }
-  };
-
-  const handleCancelPackage = async (packageId: string) => {
-    if (!repoId) return;
-    setPackageBusyId(packageId);
-    try {
-      await api.updateDeployPackage(repoId, packageId, { status: "cancelled" });
-      await loadDeployPackages();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("common.saveFailed"));
-    } finally {
-      setPackageBusyId(null);
-    }
-  };
-
-  const handleDeletePackage = async (packageId: string) => {
-    if (!repoId) return;
-    setPackageBusyId(packageId);
-    try {
-      await api.deleteDeployPackage(repoId, packageId);
-      await loadDeployPackages();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("common.saveFailed"));
-    } finally {
-      setPackageBusyId(null);
-    }
-  };
-
   const handleSave = async () => {
     if (!repoId) return;
     setSaving(true);
@@ -372,20 +221,9 @@ export function ProjectSettingsPage() {
         name,
         description,
         require_human_review: requireHumanReview,
-        mutation_enabled: mutationEnabled,
-        // Blank means "use the default", which the server stores as 0.
-        mutation_threshold: mutationThreshold.trim() === "" ? 0 : Number(mutationThreshold),
       });
       const withProjects = await api.setRepositoryProjects(repoId, projectIds);
-      const withGates = await api.setLifecycleGates(repoId, {
-        require_review_chain: requireReviewChain,
-        require_release_deploy: requireReleaseDeploy,
-        require_pipeline_for_review: requirePipelineForReview,
-        require_overall_coverage: requireOverallCoverage,
-        // Blank means "use the default", which the server stores as 0.
-        coverage_threshold: coverageThreshold.trim() === "" ? 0 : Number(coverageThreshold),
-      });
-      setRepository({ ...updated, ...withGates, project_ids: withProjects.project_ids });
+      setRepository({ ...updated, project_ids: withProjects.project_ids });
       toast.success(t("projectAdmin.projectSettings.repoUpdated"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("common.saveFailed"));
@@ -545,20 +383,6 @@ export function ProjectSettingsPage() {
     }
   };
 
-  const handleSetupWebhook = async () => {
-    if (!repoId) return;
-    setSettingUpWebhook(true);
-    try {
-      const updated = await api.setupRepositoryWebhook(repoId);
-      setRepository(updated);
-      toast.success(t("projectAdmin.projectSettings.webhookSetupDone"));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("projectAdmin.projectSettings.webhookSetupFailed"));
-    } finally {
-      setSettingUpWebhook(false);
-    }
-  };
-
   const handleDelete = async () => {
     if (!repoId) return;
     setDeleting(true);
@@ -630,95 +454,6 @@ export function ProjectSettingsPage() {
             </div>
             <Switch id="require-human-review" checked={requireHumanReview} onCheckedChange={setRequireHumanReview} />
           </div>
-          <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="require-review-chain">{t("projectAdmin.projectSettings.requireReviewChain")}</Label>
-              <HelpTooltip text={t("projectAdmin.projectSettings.requireReviewChainHelp")} />
-            </div>
-            <Switch id="require-review-chain" checked={requireReviewChain} onCheckedChange={setRequireReviewChain} />
-          </div>
-          <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="require-release-deploy">{t("projectAdmin.projectSettings.requireReleaseDeploy")}</Label>
-              <HelpTooltip text={t("projectAdmin.projectSettings.requireReleaseDeployHelp")} />
-            </div>
-            <Switch id="require-release-deploy" checked={requireReleaseDeploy} onCheckedChange={setRequireReleaseDeploy} />
-          </div>
-          <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="require-pipeline-for-review">
-                {t("projectAdmin.projectSettings.requirePipelineForReview")}
-              </Label>
-              <HelpTooltip text={t("projectAdmin.projectSettings.requirePipelineForReviewHelp")} />
-            </div>
-            <Switch
-              id="require-pipeline-for-review"
-              checked={requirePipelineForReview}
-              onCheckedChange={setRequirePipelineForReview}
-            />
-          </div>
-          <div className="space-y-3 rounded-md border p-3">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="require-overall-coverage">
-                  {t("projectAdmin.projectSettings.requireOverallCoverage")}
-                </Label>
-                <HelpTooltip text={t("projectAdmin.projectSettings.requireOverallCoverageHelp")} />
-              </div>
-              <Switch
-                id="require-overall-coverage"
-                checked={requireOverallCoverage}
-                onCheckedChange={setRequireOverallCoverage}
-              />
-            </div>
-            {/* The bar is only meaningful once the gate is armed; showing the
-                input while it is off invites setting a number that does nothing. */}
-            {requireOverallCoverage && (
-              <div className="space-y-1">
-                <Label htmlFor="coverage-threshold">{t("projectAdmin.projectSettings.coverageThreshold")}</Label>
-                <Input
-                  id="coverage-threshold"
-                  type="number"
-                  min={0}
-                  max={100}
-                  placeholder="90"
-                  value={coverageThreshold}
-                  onChange={(e) => setCoverageThreshold(e.target.value)}
-                  className="max-w-32"
-                />
-                <p className="text-xs text-muted-foreground">
-                  {t("projectAdmin.projectSettings.coverageThresholdHelp")}
-                </p>
-              </div>
-            )}
-          </div>
-          <div className="space-y-3 rounded-md border p-3">
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-1.5">
-                <Label htmlFor="mutation-enabled">{t("projectAdmin.projectSettings.mutationGate")}</Label>
-                <HelpTooltip text={t("projectAdmin.projectSettings.mutationGateHelp")} />
-              </div>
-              <Switch id="mutation-enabled" checked={mutationEnabled} onCheckedChange={setMutationEnabled} />
-            </div>
-            {mutationEnabled && (
-              <div className="space-y-1">
-                <Label htmlFor="mutation-threshold">{t("projectAdmin.projectSettings.mutationThreshold")}</Label>
-                <Input
-                  id="mutation-threshold"
-                  type="number"
-                  min={0}
-                  max={100}
-                  placeholder="60"
-                  value={mutationThreshold}
-                  onChange={(e) => setMutationThreshold(e.target.value)}
-                  className="max-w-32"
-                />
-                <p className="text-xs text-muted-foreground">
-                  {t("projectAdmin.projectSettings.mutationThresholdHelp")}
-                </p>
-              </div>
-            )}
-          </div>
           <div className="flex justify-end">
             <Button onClick={handleSave} disabled={saving}>
               <Save className="mr-2 h-4 w-4" />
@@ -743,22 +478,6 @@ export function ProjectSettingsPage() {
               </Button>
             </div>
           </div>
-          {repository && !repository.webhook_installed && (
-            <div className="flex items-center justify-between gap-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-4 w-4 shrink-0" />
-                <span>{t("projectAdmin.projectSettings.webhookMissing")}</span>
-              </div>
-              <Button variant="outline" size="sm" className="shrink-0" onClick={handleSetupWebhook} disabled={settingUpWebhook}>
-                {settingUpWebhook
-                  ? t("projectAdmin.projectSettings.webhookSettingUp")
-                  : t("projectAdmin.projectSettings.webhookSetup")}
-              </Button>
-            </div>
-          )}
-          {repository?.webhook_installed && (
-            <p className="text-xs text-muted-foreground">{t("projectAdmin.projectSettings.webhookActive")}</p>
-          )}
           {index ? (
             <>
               <div className="space-y-2">
@@ -993,10 +712,6 @@ export function ProjectSettingsPage() {
                       repositoryId={repoId}
                       subProject={sp}
                       label={subRepoLabel(sp.path)}
-                      repoCoverageEnabled={requireOverallCoverage}
-                      repoCoverageThreshold={coverageThreshold}
-                      repoMutationEnabled={mutationEnabled}
-                      repoMutationThreshold={mutationThreshold}
                       onChange={(next) =>
                         setSubProjectsList((prev) => prev.map((row) => (row.path === sp.path ? next : row)))
                       }
@@ -1043,18 +758,6 @@ export function ProjectSettingsPage() {
               {repoId && kind === "frontend" && (
                 <VercelProjectPanel repositoryId={repoId} className="xl:col-span-2" />
               )}
-              {repoId && (kind === "backend" || kind === "worker") && (
-                <GCloudResourcePanel repositoryId={repoId} className="xl:col-span-2" />
-              )}
-              {repoId && (
-                <DeployTargetsSection
-                  repositoryId={repoId}
-                  className="xl:col-span-2"
-                  moreHref={`/repositories/${repoId}/deploy`}
-                  kind={kind}
-                  mobilePlatform={mobilePlatform}
-                />
-              )}
             </div>
           )}
 
@@ -1073,162 +776,6 @@ export function ProjectSettingsPage() {
           )}
         </div>
 
-        <Card className="w-full space-y-4 p-6 xl:col-span-2">
-          <div>
-            <h2 className="font-semibold">{t("projectAdmin.projectSettings.deployPackages.title")}</h2>
-            <p className="text-sm text-muted-foreground">
-              {t("projectAdmin.projectSettings.deployPackages.subtitle")}
-            </p>
-          </div>
-
-          {deployPackages.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {t("projectAdmin.projectSettings.deployPackages.empty")}
-            </p>
-          ) : (
-            <div className="divide-y rounded-md border">
-              {deployPackages.map((pkg) => {
-                const editingMembership = membershipPackageId === pkg.id;
-                const busy = packageBusyId === pkg.id;
-                const releasable = pkg.status === "draft" || pkg.status === "failed";
-                return (
-                  <div key={pkg.id} className="space-y-3 px-4 py-3">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-medium">{pkg.name}</span>
-                          <Badge variant={deployPackageBadgeVariant(pkg.status)}>
-                            {t(`projectAdmin.projectSettings.deployPackages.status.${pkg.status}`)}
-                          </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {t("projectAdmin.projectSettings.deployPackages.memberCount", {
-                              count: pkg.tasks?.length ?? 0,
-                            })}
-                          </span>
-                        </div>
-                        {pkg.description && (
-                          <p className="mt-1 text-sm text-muted-foreground">{pkg.description}</p>
-                        )}
-                        {pkg.status === "failed" && pkg.note && (
-                          <p className="mt-1 text-xs text-destructive">{pkg.note}</p>
-                        )}
-                      </div>
-                      <div className="flex shrink-0 items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          disabled={busy}
-                          onClick={() => {
-                            if (editingMembership) {
-                              setMembershipPackageId(null);
-                            } else {
-                              setMembershipDraft((pkg.tasks ?? []).map((m) => m.task_id));
-                              setMembershipPackageId(pkg.id);
-                            }
-                          }}
-                        >
-                          {editingMembership
-                            ? t("common.cancel")
-                            : t("projectAdmin.projectSettings.deployPackages.editMembers")}
-                        </Button>
-                        {releasable && (
-                          <Button size="sm" disabled={busy} onClick={() => setReleaseTarget(pkg)}>
-                            <Rocket className="mr-2 h-3.5 w-3.5" />
-                            {t("projectAdmin.projectSettings.deployPackages.release")}
-                          </Button>
-                        )}
-                        {pkg.status === "draft" && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            disabled={busy}
-                            onClick={() => handleCancelPackage(pkg.id)}
-                          >
-                            {t("projectAdmin.projectSettings.deployPackages.cancelPackage")}
-                          </Button>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          disabled={busy}
-                          onClick={() => handleDeletePackage(pkg.id)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </div>
-
-                    {editingMembership ? (
-                      <div className="space-y-3">
-                        <MultiSelectPicker
-                          label={t("projectAdmin.projectSettings.deployPackages.membersLabel")}
-                          options={repoTasks.map((task) => ({
-                            value: task.id,
-                            label: `${task.key} · ${task.title}`,
-                            description: task.column,
-                          }))}
-                          selected={membershipDraft}
-                          onChange={setMembershipDraft}
-                          emptyText={t("projectAdmin.projectSettings.deployPackages.noTasks")}
-                        />
-                        <Button size="sm" disabled={busy} onClick={() => handleSaveMembership(pkg.id)}>
-                          <Save className="mr-2 h-3.5 w-3.5" />
-                          {t("projectAdmin.projectSettings.deployPackages.saveMembers")}
-                        </Button>
-                      </div>
-                    ) : (
-                      (pkg.tasks ?? []).length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {(pkg.tasks ?? []).map((member) => (
-                            <Badge key={member.task_id} variant={member.released ? "success" : "outline"}>
-                              {member.key ?? member.task_id}
-                            </Badge>
-                          ))}
-                        </div>
-                      )
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="space-y-3 rounded-md border border-dashed p-4">
-            <div className="space-y-2">
-              <Label htmlFor="deploy-package-name">
-                {t("projectAdmin.projectSettings.deployPackages.nameLabel")}
-              </Label>
-              <Input
-                id="deploy-package-name"
-                value={newPackageName}
-                onChange={(e) => setNewPackageName(e.target.value)}
-                placeholder={t("projectAdmin.projectSettings.deployPackages.namePlaceholder")}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="deploy-package-description">
-                {t("projectAdmin.projectSettings.deployPackages.descriptionLabel")}
-              </Label>
-              <Textarea
-                id="deploy-package-description"
-                value={newPackageDescription}
-                onChange={(e) => setNewPackageDescription(e.target.value)}
-                rows={2}
-                placeholder={t("projectAdmin.projectSettings.deployPackages.descriptionPlaceholder")}
-              />
-            </div>
-            <Button
-              onClick={handleCreatePackage}
-              disabled={creatingPackage || !newPackageName.trim()}
-              className="gap-2"
-            >
-              <Plus className="h-4 w-4" />
-              {t("projectAdmin.projectSettings.deployPackages.create")}
-            </Button>
-          </div>
-        </Card>
-
         <Card className="w-full space-y-4 border-destructive/30 p-6 xl:col-span-2">
           <h2 className="font-semibold text-destructive">{t("projectAdmin.projectSettings.dangerZone")}</h2>
           <p className="text-sm text-muted-foreground">
@@ -1240,20 +787,6 @@ export function ProjectSettingsPage() {
           </Button>
         </Card>
       </PageContent>
-
-      <ConfirmDialog
-        open={releaseTarget !== null}
-        onOpenChange={(open) => !open && setReleaseTarget(null)}
-        title={t("projectAdmin.projectSettings.deployPackages.releaseConfirmTitle")}
-        description={t("projectAdmin.projectSettings.deployPackages.releaseConfirmDesc", {
-          name: releaseTarget?.name ?? "",
-          count: releaseTarget?.tasks?.length ?? 0,
-        })}
-        confirmLabel={t("projectAdmin.projectSettings.deployPackages.release")}
-        variant="default"
-        loading={releasing}
-        onConfirm={handleReleasePackage}
-      />
 
       <ConfirmDialog
         open={deleteOpen}

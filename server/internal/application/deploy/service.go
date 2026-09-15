@@ -469,7 +469,7 @@ func (s *Service) CreateSetupTask(ctx context.Context, repositoryID uuid.UUID, e
 		Priority:        domain.TaskPriorityHigh,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
-		AssigneeAgentID: s.roleAgent(ctx, repo.Kind),
+		AssigneeAgentID: s.roleAgent(ctx, domain.DeveloperAgentForKind(repo.Kind, repo.SubProjects)),
 	})
 }
 
@@ -531,14 +531,14 @@ func (s *Service) CreateLocalSetupTask(ctx context.Context, repositoryID uuid.UU
 		Priority:        domain.TaskPriorityMedium,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
-		AssigneeAgentID: s.roleAgent(ctx, kind),
+		AssigneeAgentID: s.roleAgent(ctx, domain.DeveloperAgentForKind(kind, repo.SubProjects)),
 	})
 }
 
-// roleAgent resolves the agent that owns deploy work for a repo kind. Deploy
-// authoring is infrastructure work, so a monorepo goes to the architect rather
-// than to one of its sub-project developers.
-func (s *Service) roleAgent(ctx context.Context, kind string) *uuid.UUID {
+// roleAgent resolves the named role agent (see domain.DeveloperAgentForKind).
+// Deploy setup writes workflow files into a branch, so even a monorepo's goes
+// to a developer: the system architect refuses to author files.
+func (s *Service) roleAgent(ctx context.Context, role string) *uuid.UUID {
 	if s.agents == nil {
 		return nil
 	}
@@ -546,7 +546,7 @@ func (s *Service) roleAgent(ctx context.Context, kind string) *uuid.UUID {
 	if err != nil {
 		return nil
 	}
-	want := deployRole(kind)
+	want := role
 	for i := range agents {
 		if agents[i].Name == want {
 			id := agents[i].ID
@@ -554,19 +554,6 @@ func (s *Service) roleAgent(ctx context.Context, kind string) *uuid.UUID {
 		}
 	}
 	return nil
-}
-
-func deployRole(kind string) string {
-	switch kind {
-	case domain.RepoKindFrontend:
-		return "frontend-developer"
-	case domain.RepoKindMobile:
-		return "mobile-developer"
-	case domain.RepoKindMonorepo:
-		return "system-architect"
-	default:
-		return "backend-developer"
-	}
 }
 
 // firstNonEmpty returns the first value that is not blank, or "".

@@ -9,6 +9,16 @@ Everything runs on your Mac: the desktop app starts an embedded Postgres and the
 Go backend, serves the UI, and runs the agent sessions locally. No account, no
 cloud, no login.
 
+**You don't drive the agents, the board does.** Put a task on the board and the
+agent that owns its column picks it up on its own, does the work and hands the
+task on to the next column, where the next agent takes over. Nobody has to press
+run.
+
+**A usage limit doesn't lose work.** When Claude Code runs out of its usage
+limit in the middle of a task, the agent stops and the task waits on Blocked.
+Once the limit resets, TaskTrooper resumes the same Claude Code session, so the
+agent carries on from where it stopped instead of starting over.
+
 ## Features
 
 ### Board
@@ -16,13 +26,17 @@ cloud, no login.
 - A Kanban board with thirteen columns out of the box, from Backlog to Released,
   including analysis review, code review, QA, PM UAT and human UAT. The columns,
   and which agents pick up work in each, are configurable.
+- Agents take tasks by themselves. A task that lands in a column is dispatched
+  to that column's agent automatically and moves on when the agent is done.
 - Tasks carry acceptance criteria. A task cannot move forward out of a review
   column until every criterion has a verdict.
 - Tasks can block each other; a blocked task waits until its blocker is done.
 - Every task gets its own branch and pull request. Code review reads the PR,
   Done merges it, and Done and Released watch the deploy and can roll it back.
-- When Claude Code hits its usage limit, the task is parked on Blocked and
-  resumes by itself once the limit resets.
+- When Claude Code hits its usage limit, the task is parked on Blocked until the
+  limit resets. Then it resumes by itself with `claude --resume` on the parked
+  session, so the agent keeps what it already read and wrote and continues from
+  where it stopped.
 
 ### Role agents
 
@@ -100,8 +114,8 @@ Agents rewrite their own playbooks from how their work actually went.
   status from GitHub Actions.
 - **Deploys:** a recipe catalog for Google Cloud Run and GKE, AWS ECS and Lambda,
   Vercel and Fly, rendered into a workflow per environment with a health check,
-  plus a deployment matrix. Vercel and Google Cloud accounts can be connected to
-  bind existing services.
+  plus a deployment matrix. A Vercel account can be connected to bind existing
+  projects.
 - **Production incidents:** alerts from Alertmanager, Sentry, Cloud Monitoring or
   any JSON webhook, together with a health monitor, fold into deduplicated
   incidents with a suggested remedy: a rollback, a config, dependency or
@@ -110,7 +124,7 @@ Agents rewrite their own playbooks from how their work actually went.
 - **Mobile releases:** connect App Store Connect and Google Play and promote
   builds through internal, external and production channels. QA can drive iOS
   simulators and Android emulators on this Mac through Appium.
-- **Usage:** token usage per model and an optional spending budget.
+- **Usage:** token usage per model and per day.
 
 ### First run
 

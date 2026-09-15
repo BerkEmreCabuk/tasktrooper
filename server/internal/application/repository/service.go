@@ -525,20 +525,6 @@ func (s *Service) resolveAssignee(userID string) (string, error) {
 	return "", domain.AssigneeNotMemberError(userID)
 }
 
-// workflowSetupRole picks who authors the CI/CD workflows for a repo kind.
-func workflowSetupRole(kind string) string {
-	switch kind {
-	case domain.RepoKindFrontend:
-		return "frontend-developer"
-	case domain.RepoKindMobile:
-		return "mobile-developer"
-	case domain.RepoKindMonorepo:
-		return "system-architect"
-	default: // backend, worker
-		return "backend-developer"
-	}
-}
-
 // CreateWorkflowSetupTask opens a board task (assigned by repo kind) to author
 // the repo's GitHub Actions CI/CD workflows, for repos that have none yet.
 func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid.UUID) (domain.BoardTask, error) {
@@ -546,7 +532,7 @@ func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid
 	if err != nil {
 		return domain.BoardTask{}, err
 	}
-	role := workflowSetupRole(repo.Kind)
+	role := domain.DeveloperAgentForKind(repo.Kind, repo.SubProjects)
 	var assignee *uuid.UUID
 	if s.agentLister != nil {
 		if agents, aerr := s.agentLister(ctx); aerr == nil {
@@ -1427,6 +1413,13 @@ func (s *Service) ensureIndexFresh(ctx context.Context, repo domain.Repository, 
 			Msg("index is behind origin; rebuilding")
 		// The pull already ran, so this restart must not repeat it.
 		s.restartIndex(freshCtx, repo.ID, repo.RootPath)
+		// Same follow-up a push webhook triggers: refresh only the profile
+		// sections the new commits touched. On an instance GitHub cannot
+		// deliver webhooks to, this sweep is the only way a push reaches the
+		// profile at all.
+		if s.profiles != nil {
+			s.profiles.RefreshAfterPush(freshCtx, repo.ID, "poll")
+		}
 	}()
 }
 

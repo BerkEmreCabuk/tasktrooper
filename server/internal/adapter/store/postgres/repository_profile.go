@@ -82,11 +82,15 @@ func (s *RepositoryProfileStore) UpsertSections(ctx context.Context, repositoryI
 		if paths == nil {
 			paths = []string{}
 		}
+		// sub_project_path is part of the unique key since migration 119 and
+		// defaults to '' (the repository itself). The conflict target has to
+		// name it, or Postgres rejects every upsert with SQLSTATE 42P10 and no
+		// profile section is ever stored.
 		batch.Queue(`
 			INSERT INTO repository_profile_sections
 				(repository_id, section, body_md, evidence, source_paths, source_commit, origin, stale, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, now())
-			ON CONFLICT (tenant_id, repository_id, section) DO UPDATE SET
+			ON CONFLICT (tenant_id, repository_id, sub_project_path, section) DO UPDATE SET
 				body_md = EXCLUDED.body_md,
 				evidence = EXCLUDED.evidence,
 				source_paths = EXCLUDED.source_paths,
@@ -178,14 +182,23 @@ func (s *RepositoryProfileStore) ReplaceProposals(ctx context.Context, repositor
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	keep := make([]string, 0, len(proposals))
+	// The (field, slot) pairs to keep travel as two parallel arrays. They used
+	// to be joined with a NUL byte, which Postgres text cannot hold, so every
+	// call with at least one proposal failed before writing anything.
+	fields := make([]string, 0, len(proposals))
+	slots := make([]string, 0, len(proposals))
 	for _, p := range proposals {
-		keep = append(keep, p.Field+"\x00"+p.Slot)
+		fields = append(fields, p.Field)
+		slots = append(slots, p.Slot)
 	}
 	if _, err := tx.Exec(ctx, `
-		DELETE FROM repository_profile_proposals
-		WHERE repository_id = $1 AND status = 'pending' AND (field || E'\\000' || slot) <> ALL($2::text[])
-	`, repositoryID, keep); err != nil {
+		DELETE FROM repository_profile_proposals AS rp
+		WHERE rp.repository_id = $1 AND rp.status = 'pending'
+		  AND NOT EXISTS (
+			SELECT 1 FROM unnest($2::text[], $3::text[]) AS k(field, slot)
+			WHERE k.field = rp.field AND k.slot = rp.slot
+		  )
+	`, repositoryID, fields, slots); err != nil {
 		return fmt.Errorf("clear stale proposals: %w", err)
 	}
 
@@ -201,7 +214,7 @@ func (s *RepositoryProfileStore) ReplaceProposals(ctx context.Context, repositor
 			INSERT INTO repository_profile_proposals
 				(repository_id, field, slot, value, current_value, label, evidence, status, created_at, applied_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), $9)
-			ON CONFLICT (tenant_id, repository_id, field, slot) DO UPDATE SET
+			ON CONFLICT (tenant_id, repository_id, sub_project_path, field, slot) DO UPDATE SET
 				value = EXCLUDED.value,
 				current_value = EXCLUDED.current_value,
 				label = EXCLUDED.label,

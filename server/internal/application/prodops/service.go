@@ -483,7 +483,7 @@ func (s *Service) roleAgent(ctx context.Context, repositoryID uuid.UUID) *uuid.U
 	if err != nil {
 		return nil
 	}
-	want := incidentRole(repo.Kind)
+	want := domain.DeveloperAgentForKind(repo.Kind, repo.SubProjects)
 	for i := range agents {
 		if agents[i].Name == want {
 			id := agents[i].ID
@@ -491,19 +491,6 @@ func (s *Service) roleAgent(ctx context.Context, repositoryID uuid.UUID) *uuid.U
 		}
 	}
 	return nil
-}
-
-func incidentRole(kind string) string {
-	switch kind {
-	case domain.RepoKindFrontend:
-		return "frontend-developer"
-	case domain.RepoKindMobile:
-		return "mobile-developer"
-	case domain.RepoKindMonorepo:
-		return "system-architect"
-	default:
-		return "backend-developer"
-	}
 }
 
 func (s *Service) event(ctx context.Context, incidentID uuid.UUID, kind, message string) {

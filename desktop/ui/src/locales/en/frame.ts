@@ -33,7 +33,6 @@ export const frame = {
       llm: "LLM Connection",
       mcp: "MCP Servers",
       integrations: "Integrations",
-      device: "Test device",
       usage: "Usage",
     },
     sidebar: {

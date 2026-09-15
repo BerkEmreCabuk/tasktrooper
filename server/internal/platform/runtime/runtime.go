@@ -542,6 +542,10 @@ func (s *Server) URL() string {
 // that runs out is retried by the next pod, and nothing waits on it.
 const bootConvergeTimeout = 15 * time.Minute
 
+// localPushPollInterval is how often an instance GitHub cannot deliver
+// webhooks to checks its clones for new commits on the default branch.
+const localPushPollInterval = 5 * time.Minute
+
 // httpDrainTimeout bounds step 1 of Shutdown. HTTP requests are short; the
 // drain budget belongs to the agent runs in step 2.
 const httpDrainTimeout = 15 * time.Second
@@ -1829,6 +1833,25 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				tenant.Sweep(bootCtx, "webhook_reconcile", repositorySvc.ReconcileWebhooks)
 				tenant.Sweep(bootCtx, "index_freshness", repositorySvc.SweepIndexFreshness)
 			}()
+			// GitHub will not deliver webhooks to a loopback or private address,
+			// and a desktop install listens on 127.0.0.1. Poll instead: the
+			// sweep pulls each clone's default branch, reindexes when it moved
+			// and refreshes the profile sections the new commits touched.
+			// freshnessCheckInterval still throttles each repository.
+			if !repositorySvc.WebhooksReachable() {
+				go func() {
+					t := time.NewTicker(localPushPollInterval)
+					defer t.Stop()
+					for {
+						select {
+						case <-ctx.Done():
+							return
+						case <-t.C:
+							tenant.Sweep(ctx, "index_freshness", repositorySvc.SweepIndexFreshness)
+						}
+					}
+				}()
+			}
 			if catalogStore != nil {
 				repositorySvc.SetAgentLister(catalogStore.ListAgents)
 			}

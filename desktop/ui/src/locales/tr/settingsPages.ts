@@ -261,40 +261,11 @@ export const settingsPages: SettingsPagesDict = {
     presetCustom: "Özel / kendi IP",
   },
   usage: {
-    planLimitTitle: "Plan & Limit",
-    manage: "Yönet",
-    close: "Kapat",
-    unlimited: "Bu tenant için limit tanımlı değil (sınırsız).",
-    packageLabel: "Paket:",
-    budgetUsage: "{used} / {budget} token",
-    remaining: "Kalan: {tokens} token",
-    renewal: "Yenilenme: {date}",
-    concurrentTasks: "Eşzamanlı görev: {count}",
-    exhausted:
-      "Limit doldu. Yarım kalan görevler {date} tarihinde otomatik devam edecek.",
-    planLoadFailed: "Plan bilgisi alınamadı",
-    planUpdated: "Plan güncellendi",
-    planSaveFailed: "Plan kaydedilemedi",
-    priceSaved: "Model fiyatı kaydedildi",
-    priceSaveFailed: "Fiyat kaydedilemedi",
-    priceDeleteFailed: "Fiyat silinemedi",
 
-    planNameLabel: "Paket adı",
-    usdBudgetLabel: "USD bütçe (dönemlik, 0 = sınırsız)",
-    concurrentTasksLabel: "Eşzamanlı görev",
-    periodDaysLabel: "Dönem (gün)",
-    tokenRateLabel: "Token gösterim oranı (USD/token)",
-    savePlan: "Planı kaydet",
-    modelPricesTitle: "Model fiyatları (USD / 1M token)",
     inputColumn: "Girdi",
     outputColumn: "Çıktı",
     modelColumn: "Model",
     callsColumn: "Çağrı",
-    delete: "Sil",
-    modelPlaceholder: "model",
-    inputPlaceholder: "girdi/1M",
-    outputPlaceholder: "çıktı/1M",
-    addOrUpdate: "Ekle / Güncelle",
 
     usageLoadFailed: "Kullanım verisi alınamadı",
     lastNDays: "Son {days} gün",
@@ -337,92 +308,5 @@ export const settingsPages: SettingsPagesDict = {
     add: "Ekle",
   },
 
-  mobileDevice: {
-    title: "Test cihazları",
-    description: "QA, mobil geliştirici ve PM UAT'ın uygulamayı gerçek cihazda test edebilmesi için Android telefonları bağlayın.",
-    add: "Cihaz ekle",
-    empty: {
-      title: "Kayıtlı cihaz yok",
-      description: "Bir telefon bağlanana kadar mobile_* tool'ları hiçbir ajana verilmez.",
-    },
-    status: {
-      online: "Çevrimiçi",
-      offline: "Çevrimdışı",
-      busy: "Bir koşu kullanıyor",
-      notConfigured: "Kaydı tamamlanmadı",
-      lastConnected: "Son bağlantı",
-      lastConnectedNever: "Hiç bağlanmadı",
-      fromEnv: "Ortam yapılandırmasından geliyor",
-      hubDown:
-        "Telefon değil, sistem tarafında bir sorun var: Appium köprüsüne ulaşılamıyor. Telefonla uğraşmayın, yöneticinize bildirin.",
-    },
-    managed: {
-      badge: "Yapılandırmadan",
-      help: "Bu cihaz cluster ortam yapılandırmasından geliyor; adı buradan değiştirilemez, kaydı buradan silinemez. Değiştirmek için cluster yapılandırmasını güncellemek gerekir.",
-    },
-    addDialog: {
-      title: "Cihaz ekle",
-      description: "Önce platformu seçin, sonra telefonun tailnet adresini girin.",
-      platform: "Platform",
-      android: "Android",
-      ios: "iOS",
-      iosSoon: "Yakında",
-      iosWhy:
-        "Bu kurulumda iOS çalışamaz: Appium'un XCUITest sürücüsü zorunlu olarak bir macOS makinesi üzerinde çalışır, cluster'da ise macOS host yok. Bu bir eksiklik değil, platform kısıtı.",
-      submit: "Ekle",
-    },
-    prep: {
-      title: "Telefonu hazırla",
-      hint: "Telefonun kendisinde — telefon başına bir kereliğine, iki dakika.",
-      body: "1) Tailscale'i kur, cluster ile aynı hesapla giriş yap; pil optimizasyonunu bu uygulama için kapat. 2) Ayarlar → Telefon hakkında → Yapı numarasına yedi kez dokunup Geliştirici seçeneklerini aç. 3) Ayarlar → Sistem → Geliştirici seçenekleri → Kablosuz hata ayıklama'yı aç. 4) Telefonu şarjda tut. Tailscale uygulamasındaki IP'yi not et — cihazı eklerken gerekiyor.",
-    },
-    address: {
-      title: "Adres ve PIN",
-      hint: "Şifreli saklanır ve anında uygulanır — yeniden başlatma yok.",
-    },
-    pairing: {
-      title: "Kablosuz hata ayıklama ile eşleştir",
-      hint: "Telefon başına bir kez. Kod, pencere kapanınca geçersiz olur; telefon elindeyken yap.",
-    },
-    repo: {
-      title: "Depoyu kendi build'ine bağla",
-      hint: "Cihaz başına değil, depo başına.",
-      body: "Deponun deploy target'ını açıp Android paket adını (CI bir APK yayınlıyorsa APK adresini de) gir. mobile_launch_app yalnızca orada kayıtlı paketi açabilir — gerçek bir telefonda ajanın başka bir şey açmasını engelleyen guard budur.",
-    },
-    hub: {
-      missing:
-        "Bu kurulumda yapılandırılmış bir Appium köprüsü yok, dolayısıyla henüz telefon bağlanamaz. Cluster'ı kuran kişinin MOBILE_APPIUM_HUB_URL'i tanımlaması gerekiyor.",
-    },
-    remove: {
-      title: "Cihaz kaydı silinsin mi?",
-      description:
-        "{name} kaydı silinir; telefonun kendisine dokunulmaz, ama bu telefonu kullanan koşular çalışamaz hale gelir. Yeniden eklemek için tekrar eşleştirmek gerekir.",
-    },
-    fields: {
-      name: "Cihaz adı",
-      nameHelp: "Listede bunu göreceksiniz. Telefonu odada tanıyabileceğiniz bir ad verin.",
-      namePlaceholder: "Ör. Pixel 7 – QA masası",
-      deviceAddr: "Cihaz adresi",
-      deviceAddrHelp:
-        "Telefondaki Tailscale uygulamasında yazan IP + Kablosuz hata ayıklama ekranındaki port — örn. 100.84.12.7:37241. Telefon her yeniden başladığında bu port değişir; değiştiğinde buraya yenisini yazıp kaydedin ve Yeniden bağlan'a basın.",
-      pin: "Ekran kilidi PIN'i",
-      pinHelp: "Telefonu açan PIN. Kilit yoksa boş bırakın. Şifreli saklanır, bir daha gösterilmez, ajana asla verilmez.",
-      pinStored: "Kayıtlı bir PIN var. Korumak için boş bırakın, değiştirmek için yenisini yazın.",
-      pairAddr: "Eşleştirme adresi",
-      pairAddrHelp: "Telefon → Kablosuz hata ayıklama → Cihazı eşleştirme koduyla eşleştir. O penceredeki IP:PORT — portu 5555 DEĞİL ve her seferinde değişir.",
-      pairCode: "Eşleştirme kodu",
-      pairCodeHelp: "Aynı penceredeki altı hane. Pencere kapanınca çalışmaz.",
-    },
-    pair: "Eşleştir",
-    reconnect: "Yeniden bağlan",
-    unregister: "Kaydı sil",
-    added: "Cihaz eklendi",
-    addFailed: "Cihaz eklenemedi",
-    paired: "Telefon eşleştirildi",
-    pairFailed: "Eşleştirme başarısız",
-    connected: "Telefon bağlandı",
-    connectFailed: "Bağlanılamadı",
-    unregistered: "Cihaz kaydı silindi",
-  },
 
 };

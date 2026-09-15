@@ -104,7 +104,7 @@ func (s *Service) CreateDocTask(ctx context.Context, repositoryID uuid.UUID, sub
 		Priority:        domain.TaskPriorityMedium,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
-		AssigneeAgentID: s.roleAgent(ctx, doc.kindLabel),
+		AssigneeAgentID: s.roleAgent(ctx, domain.DeveloperAgentForKind(doc.kindLabel, repo.SubProjects)),
 	})
 }
 
@@ -243,7 +243,7 @@ func (s *Service) CreateDocsBundleTask(ctx context.Context, repositoryID uuid.UU
 		Priority:        domain.TaskPriorityMedium,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
-		AssigneeAgentID: s.roleAgent(ctx, repo.Kind),
+		AssigneeAgentID: s.roleAgent(ctx, bundleRole(repo, docs)),
 	})
 	if err != nil {
 		return domain.BoardTask{}, err
@@ -427,7 +427,7 @@ func setDocKind(docs *domain.RepositoryDocs, kind, path string) {
 // roleAgent resolves the agent that owns doc-authoring work for a repo kind.
 // Doc work is repo-wide, so a monorepo goes to the architect rather than to
 // one of its sub-project developers — same rule as deploy.Service.roleAgent.
-func (s *Service) roleAgent(ctx context.Context, kind string) *uuid.UUID {
+func (s *Service) roleAgent(ctx context.Context, role string) *uuid.UUID {
 	if s.agents == nil {
 		return nil
 	}
@@ -435,7 +435,7 @@ func (s *Service) roleAgent(ctx context.Context, kind string) *uuid.UUID {
 	if err != nil {
 		return nil
 	}
-	want := docsRole(kind)
+	want := role
 	for i := range agents {
 		if agents[i].Name == want {
 			id := agents[i].ID
@@ -445,15 +445,19 @@ func (s *Service) roleAgent(ctx context.Context, kind string) *uuid.UUID {
 	return nil
 }
 
-func docsRole(kind string) string {
-	switch kind {
-	case domain.RepoKindFrontend:
-		return "frontend-developer"
-	case domain.RepoKindMobile:
-		return "mobile-developer"
-	case domain.RepoKindMonorepo:
-		return "system-architect"
-	default:
-		return "backend-developer"
+// bundleRole picks who authors a docs bundle: the developer owning most of the
+// docs in it. A sub-project doc counts as that sub-project's kind and a
+// monorepo-level doc counts as every sub-project, so a bundle of backend docs
+// goes to backend-developer. It used to go to the system architect for any
+// monorepo, and the architect refuses to author files into a branch.
+func bundleRole(repo domain.Repository, docs []resolvedDoc) string {
+	owners := make([]domain.RepoSubProject, 0, len(docs))
+	for _, doc := range docs {
+		if doc.kindLabel == domain.RepoKindMonorepo {
+			owners = append(owners, repo.SubProjects...)
+			continue
+		}
+		owners = append(owners, domain.RepoSubProject{Kind: doc.kindLabel})
 	}
+	return domain.DeveloperAgentForKind(domain.RepoKindMonorepo, owners)
 }

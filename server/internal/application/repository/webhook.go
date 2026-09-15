@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/url"
 	"strings"
 	"time"
@@ -70,6 +71,35 @@ func (s *Service) SetPublicBaseURL(u string) {
 	s.publicBaseURL = strings.TrimSuffix(strings.TrimSpace(u), "/")
 }
 
+// WebhooksReachable reports whether GitHub can deliver webhooks to this
+// instance. When it cannot, pushes reach the index and the project profile
+// through the periodic freshness sweep instead (see SweepIndexFreshness).
+func (s *Service) WebhooksReachable() bool {
+	return webhooksReachable(s.publicBaseURL)
+}
+
+// webhooksReachable is false for an empty, loopback, private or link-local
+// base URL. GitHub refuses to register a hook on such an address with 422
+// Validation Failed, and a desktop install is exactly that: the backend
+// listens on 127.0.0.1.
+func webhooksReachable(base string) bool {
+	if base == "" {
+		return false
+	}
+	u, err := url.Parse(base)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "" || host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return false
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsUnspecified() && !ip.IsLinkLocalUnicast()
+	}
+	return true
+}
+
 // webhookTargetURL is the delivery URL registered with GitHub.
 //
 // The ?t=<tenant> query parameter is how the gateway knows which tenant a
@@ -126,6 +156,9 @@ func (s *Service) SetupWebhook(ctx context.Context, repositoryID uuid.UUID) (dom
 	if s.publicBaseURL == "" {
 		return domain.Repository{}, fmt.Errorf("public base URL is not configured (server.public_base_url), GitHub cannot reach this instance")
 	}
+	if !webhooksReachable(s.publicBaseURL) {
+		return domain.Repository{}, fmt.Errorf("GitHub cannot deliver webhooks to %s; pushes are picked up by polling instead", s.publicBaseURL)
+	}
 	secret, err := generateWebhookSecret()
 	if err != nil {
 		return domain.Repository{}, fmt.Errorf("generate webhook secret: %w", err)
@@ -161,7 +194,7 @@ func generateWebhookSecret() (string, error) {
 // failed: tenant: no tenant in context" on every repository import and no
 // tenant ever got a push webhook.
 func (s *Service) setupWebhookAsync(ctx context.Context, repositoryID uuid.UUID) {
-	if s.githubToken == nil || s.publicBaseURL == "" {
+	if s.githubToken == nil || !webhooksReachable(s.publicBaseURL) {
 		return
 	}
 	go func() {
@@ -202,7 +235,7 @@ func (s *Service) setupWebhookAsync(ctx context.Context, repositoryID uuid.UUID)
 // The fan-out over tenants and the goroutine are the caller's, the same way
 // they are for every other sweep.
 func (s *Service) ReconcileWebhooks(ctx context.Context) {
-	if s.githubToken == nil || s.publicBaseURL == "" {
+	if s.githubToken == nil || !webhooksReachable(s.publicBaseURL) {
 		return
 	}
 	func() {
