@@ -141,11 +141,20 @@ if ! command -v git > /dev/null 2>&1; then
   say "git is missing. TaskTrooper needs it. Install it with:"
   say "    xcode-select --install"
 fi
-if ! command -v claude > /dev/null 2>&1; then
+found_cli=""
+for cli in claude cursor-agent agy opencode; do
+  if command -v "$cli" > /dev/null 2>&1; then
+    found_cli="$cli"
+    break
+  fi
+done
+if [ -z "$found_cli" ]; then
   say ""
-  say "The claude CLI is missing. TaskTrooper needs it. Install it with:"
-  say "    curl -fsSL https://claude.ai/install.sh | bash"
-  say "then run 'claude' once to sign in to a plan that includes Claude Code."
+  say "No agent CLI found. Agents run on any one of these, or on an API key you add in Settings:"
+  say "    Claude Code:  curl -fsSL https://claude.ai/install.sh | bash"
+  say "    Cursor:       curl https://cursor.com/install -fsS | bash"
+  say "    OpenCode:     npm install -g opencode-ai"
+  say "    Antigravity:  see antigravity.google/docs/cli"
 fi
 
 say ""
