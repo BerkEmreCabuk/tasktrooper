@@ -25,7 +25,7 @@ With Homebrew, once this repository is public:
 brew tap makifbaysal/tasktrooper && brew install --cask tasktrooper
 ```
 
-The app is signed with a Developer ID but is not notarized yet, so a copy you
+The app is ad-hoc signed and not notarized yet, so a copy you
 install by hand may need right-click → Open the first time; the install script
 and the cask both clear the quarantine flag for you.
 

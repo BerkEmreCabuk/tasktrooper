@@ -53,7 +53,9 @@ die() {
 # terminal to ask on, so every caller decides what an unanswerable question means.
 ask() {
   $ASSUME_YES && return 0
-  [ -r /dev/tty ] || return 1
+  # /dev/tty can exist and be readable with no controlling terminal behind it
+  # (cron, CI, a detached shell); only opening it tells the two apart.
+  { : < /dev/tty; } 2> /dev/null || return 1
   printf '%s [y/N] ' "$1" > /dev/tty
   local answer
   read -r answer < /dev/tty
@@ -77,17 +79,17 @@ trap cleanup EXIT
 dmg=""
 if command -v gh > /dev/null 2>&1 && gh auth status > /dev/null 2>&1; then
   tag="$(gh release view --repo "$REPO" --json tagName --jq .tagName)"
-  say "Downloading TaskTrooper $tag…"
+  say "Downloading TaskTrooper $tag..."
   gh release download --repo "$REPO" "$tag" --pattern "*-universal.dmg" --dir "$tmp"
   dmg="$(find "$tmp" -maxdepth 1 -name "*-universal.dmg" | head -1)"
 else
-  say "Looking up the latest release…"
+  say "Looking up the latest release..."
   url="$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" \
     | grep -o '"browser_download_url": *"[^"]*-universal\.dmg"' \
     | head -1 | sed 's/.*"\(https[^"]*\)"/\1/')"
   [ -n "$url" ] || die "No universal .dmg on the latest release of $REPO. While the repository is private, install the GitHub CLI and run 'gh auth login' first."
   dmg="$tmp/${url##*/}"
-  say "Downloading ${url##*/}…"
+  say "Downloading ${url##*/}..."
   curl -fL --progress-bar -o "$dmg" "$url"
 fi
 [ -n "$dmg" ] && [ -f "$dmg" ] || die "The download produced no .dmg."
@@ -107,7 +109,7 @@ fi
 if [ -e "$APPS/$APP" ]; then
   ask "$APPS/$APP already exists. Replace it?" || die "Nothing was changed. Re-run with -y to replace it."
   if pgrep -f "$APPS/$APP/Contents/MacOS/TaskTrooper" > /dev/null 2>&1; then
-    say "Quitting the running copy first…"
+    say "Quitting the running copy first..."
     osascript -e 'quit app "TaskTrooper"' > /dev/null 2>&1 || true
     sleep 3
   fi
@@ -117,20 +119,20 @@ if [ -e "$APPS/$APP" ]; then
   $sudo rm -rf "$APPS/$APP"
 fi
 
-say "Copying $APP into $APPS…"
+say "Copying $APP into $APPS..."
 # shellcheck disable=SC2086
 $sudo ditto "$mnt/$APP" "$APPS/$APP"
 hdiutil detach "$mnt" -quiet
 mnt=""
 
-# Signed with a Developer ID but not notarized yet: Gatekeeper refuses a
+# Not notarized yet (release builds are ad-hoc signed): Gatekeeper refuses a
 # quarantined copy on first launch, with a dialog that offers no way past it.
 # These are the bytes this script just downloaded from the project's own
 # release, so the attribute goes rather than the right-click → Open nobody guesses.
 if ! spctl --assess --type exec "$APPS/$APP" > /dev/null 2>&1; then
   # shellcheck disable=SC2086
   $sudo xattr -dr com.apple.quarantine "$APPS/$APP" 2> /dev/null || true
-  say "This build is signed but not notarized yet, so the quarantine flag was removed — otherwise macOS refuses the first launch."
+  say "This build is not notarized yet, so the quarantine flag was removed - otherwise macOS refuses the first launch."
 fi
 
 # --- what the app needs -----------------------------------------------------
@@ -149,7 +151,7 @@ fi
 say ""
 say "TaskTrooper is installed in $APPS."
 if ask "Open it now?"; then
-  open -a TaskTrooper
+  open "$APPS/$APP"
 else
-  say "Start it whenever you like with:  open -a TaskTrooper"
+  say "Start it whenever you like with:  open \"$APPS/$APP\""
 fi

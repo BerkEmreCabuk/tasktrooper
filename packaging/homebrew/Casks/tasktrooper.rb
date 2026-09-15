@@ -19,7 +19,7 @@ cask "tasktrooper" do
 
   app "TaskTrooper.app"
 
-  # The app is signed with a Developer ID but is not notarized yet, and
+  # The app is ad-hoc signed and not notarized yet, and
   # Gatekeeper refuses a quarantined copy of that on first launch with a dialog
   # that offers no way past it.
   postflight do
