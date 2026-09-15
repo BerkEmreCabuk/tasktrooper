@@ -17,16 +17,16 @@ import (
 
 // restoreCloneTimeout bounds one restore. It is generous on purpose: this is a
 // full clone of a repository the user already owns, over whatever connection
-// the machine running the tenant happens to have, and a monorepo on hotel wifi
+// the machine running the server happens to have, and a monorepo on hotel wifi
 // is not a hung process.
 const restoreCloneTimeout = 30 * time.Minute
 
 // RestoreWorkingCopy fetches a registered repository's code onto the machine
-// that is running the tenant right now, then re-points root_path at where it
+// that is running the server right now, then re-points root_path at where it
 // actually landed.
 //
-// It exists because a tenant's runtime can move — a cloud pod today, the user's
-// own Mac tomorrow — while the repository rows stay. Every row written by the
+// It exists because the repository rows can outlive the checkout they point at
+// — a data directory moved to another machine, a deleted workspace. Every row written by the
 // previous runtime names a directory that does not exist here, which the board
 // already says out loud (domain.GitPresence). What was missing was the next
 // step: each of those rows also carries the remote it came from, so the code is
@@ -106,13 +106,8 @@ func (s *Service) RestoreWorkingCopy(ctx context.Context, repositoryID uuid.UUID
 		Status: domain.RepositoryRestoreRunning, RootPath: dest, StartedAt: time.Now(),
 	})
 	cloneURL := repo.RemoteURL
-	// The request's tenant travels with the background half. Its deadline does
-	// not: a clone is minutes long and the HTTP response has already gone. What
-	// runs down there still writes to this tenant's rows (UpdateRootPath, and
-	// the index pass it starts), and those writes are scoped by the identity on
-	// the context — from a bare context.Background() they fail with
-	// tenant.ErrNoTenant, so the code would land on disk and the record would
-	// never be re-pointed at it.
+	// The background half keeps the request's values but not its deadline: a
+	// clone is minutes long and the HTTP response has already gone.
 	restoreCtx := context.WithoutCancel(ctx)
 	s.launchRestore(func() { s.runRestore(restoreCtx, repositoryID, cloneURL, dest) })
 	return s.withGitWarning(repo), nil

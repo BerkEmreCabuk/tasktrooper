@@ -90,12 +90,8 @@ func (h *Handler) isPublicPath(path string) bool {
 	// GitHub cannot send a bearer token; the webhook authenticates every
 	// request itself via the per-repo HMAC signature.
 	//
-	// Public here means "no gateway signature required" and nothing more.
-	// tenantMiddleware deliberately does NOT skip this path — it resolves the
-	// tenant from the X-Internal-Tenant the control plane attaches to the
-	// delivery — because the repository lookup that finds the HMAC secret is
-	// itself tenant-scoped. Both sites match this same constant so they cannot
-	// disagree about which path they are talking about.
+	// The route matches this same constant, so the two cannot disagree about
+	// which path they are talking about.
 	if path == githubWebhookPath {
 		return true
 	}
@@ -103,19 +99,11 @@ func (h *Handler) isPublicPath(path string) bool {
 	// bearer token it was handed (adapter/mcpserver). Its caller is a CLI
 	// session — a child process on this host, or one on a member's Mac reaching
 	// in through the control plane — and it deliberately holds none of this
-	// server's credentials: no tenant API key, no gateway signature, no
+	// server's credentials: no API key, no gateway signature, no
 	// Firebase token. Demanding one here would lock out the only client the
 	// route exists for. Named explicitly rather than relying on the prefix rule
 	// below, because it is a decision, not a side effect of the path we
 	// happened to pick.
-	//
-	// Public here means "no gateway signature required" and, unlike the webhook
-	// above, ALSO means tenantMiddleware does not run — there is no signed
-	// header on this path to resolve one from. The tenant comes off the run
-	// token instead, bound when this process minted it (mcpserver.Run.Tenant),
-	// which is the only claim about tenancy on this path the caller did not get
-	// to make. A request with no valid token is refused by the endpoint itself;
-	// nothing here or there falls back to a default tenant.
 	if path == mcpserver.Path {
 		return true
 	}

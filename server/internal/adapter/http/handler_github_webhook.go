@@ -11,25 +11,16 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// githubWebhookPath is the delivery endpoint, named once because three
-// separate decisions key off it and a disagreement between any two of them is a
-// security bug rather than a 404:
+// githubWebhookPath is the delivery endpoint, named once because two separate
+// decisions key off it and a disagreement between them is a security bug rather
+// than a 404:
 //
 //   - the route itself (handler_repository.go),
-//   - isPublicPath (handler_ui.go), which exempts it from the gateway
-//     signature because GitHub holds none of our credentials,
-//   - tenantMiddleware (middleware_tenant.go), which must NOT exempt it, or
-//     the delivery arrives with no tenant and every store call under it
-//     refuses.
+//   - isPublicPath (handler_ui.go), which exempts it from the API key because
+//     GitHub holds none of our credentials.
 //
-// Two of those say "no gateway auth here" and one says "a tenant is still
-// required here"; a literal that drifted in one file would silently produce
-// either an unauthenticated endpoint or a webhook that quietly does nothing.
-//
-// Note that the registered URL carries a ?t=<tenant uuid> query hint
-// (repository.Service.webhookTargetURL). It is not part of this constant and
-// not read by this server: fiber matches on the path, and the hint is for the
-// control plane, which turns it into the signed tenant header.
+// A literal that drifted in one file would silently produce either a public
+// path that is not the webhook or a webhook GitHub can never reach.
 const githubWebhookPath = "/v1/github/webhook"
 
 // githubPushPayload is the slice of GitHub's push event we act on.
@@ -87,13 +78,6 @@ func (p githubWorkflowPayload) status() string {
 // entire authentication story: nothing that costs anything (a pull, an
 // embedding call, a GitHub round-trip) may happen before the signature over the
 // raw body verifies.
-//
-// "No bearer auth" is not "no tenant". By the time this runs, tenantMiddleware
-// has put a tenant on c.UserContext() — from the control plane's signed
-// X-Internal-Tenant in cloud, from tenant.LocalTenantID self-hosted — and every
-// c.UserContext() below is scoped to it, starting with the repository lookup
-// that finds the secret this signature is checked against. A delivery that
-// could not be attributed to a tenant never reaches this handler at all.
 //
 // The body is read here, after the middleware chain, and the middleware chain
 // is required not to have touched it: the HMAC is computed over the exact bytes

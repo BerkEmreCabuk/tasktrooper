@@ -463,32 +463,26 @@ func (s *MigrateSuite) TestCorrectiveIndexMigrationIsTransactionSafe() {
 }
 
 // ---------------------------------------------------------------------------
-// DSN guard
+// DSN parsing
 // ---------------------------------------------------------------------------
 
-func (s *MigrateSuite) TestTenantDatabaseNameGuard() {
+func (s *MigrateSuite) TestDatabaseName() {
 	cases := []struct {
 		name string
 		dsn  string
 		want string // "" means the DSN must be rejected
 	}{
-		{"tenant url", "postgres://u:p@h:5432/team_abc123?sslmode=disable", "team_abc123"},
-		{"tenant with hash suffix", "postgres://u:p@h:5432/team_someuid_0a1b2c3d4e", "team_someuid_0a1b2c3d4e"},
-		{"tenant keyword dsn", "host=h user=u password=p dbname=team_u1 sslmode=disable", "team_u1"},
-		{"control database", "postgres://u:p@h:5432/control?sslmode=disable", ""},
-		{"maintenance database", "postgres://u:p@h:5432/postgres?sslmode=disable", ""},
-		{"desktop database", "postgres://u:p@h:5432/local_llm?sslmode=disable", ""},
-		{"prefix lookalike", "postgres://u:p@h:5432/teams?sslmode=disable", ""},
-		{"bare prefix", "postgres://u:p@h:5432/team_?sslmode=disable", ""},
-		{"uppercase", "postgres://u:p@h:5432/TEAM_ABC?sslmode=disable", ""},
+		{"url", "postgres://u:p@h:5432/tasktrooper?sslmode=disable", "tasktrooper"},
+		{"keyword dsn", "host=h user=u password=p dbname=local_llm sslmode=disable", "local_llm"},
+		{"any name", "postgres://u:p@h:5432/my_own_db", "my_own_db"},
 		{"empty dsn", "", ""},
 		{"garbage", "://nope", ""},
 	}
 	for _, tc := range cases {
 		s.Run(tc.name, func() {
-			got, err := TenantDatabaseName(tc.dsn)
+			got, err := DatabaseName(tc.dsn)
 			if tc.want == "" {
-				s.Require().Error(err, "must refuse to migrate %q", tc.dsn)
+				s.Require().Error(err, "must refuse %q", tc.dsn)
 				s.Empty(got)
 				return
 			}

@@ -13,7 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/secrets"
 
 	pgstore "github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 // wireRepositoryStore is the composition buildHandler used to skip: construct
@@ -41,12 +40,7 @@ func TestWireRepositoryStoreInjectsTheBootCipher(t *testing.T) {
 
 	store := wireRepositoryStore(pgstore.NewDB(pool), cfg, cipher, nil)
 
-	// The store reaches the database through a tenant-scoped handle now, so
-	// the context has to carry one - otherwise SetWebhook fails on the
-	// missing tenant instead of on the unreachable pool this test is about.
-	ctx, cancel := context.WithTimeout(
-		tenant.With(context.Background(), tenant.Identity{TenantID: uuid.New(), Role: tenant.RoleOwner}),
-		5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	err = store.SetWebhook(ctx, uuid.New(), "secret", 1)
 	if err == nil {

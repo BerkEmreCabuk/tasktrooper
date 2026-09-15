@@ -7,13 +7,13 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// TenantSeedStore runs the default board seed and records in install_state
+// BoardSeedStore runs the default board seed and records in install_state
 // that it ran, so a board the user has since edited is never seeded again.
-type TenantSeedStore struct {
+type BoardSeedStore struct {
 	pool *DB
 }
 
-func NewTenantSeedStore(pool *DB) *TenantSeedStore { return &TenantSeedStore{pool: pool} }
+func NewBoardSeedStore(pool *DB) *BoardSeedStore { return &BoardSeedStore{pool: pool} }
 
 // SeedBoardOnce runs sql unless install_state says the board is already seeded,
 // and stamps board_seeded_at in the same transaction, so a half-seeded board
@@ -21,7 +21,7 @@ func NewTenantSeedStore(pool *DB) *TenantSeedStore { return &TenantSeedStore{poo
 //
 // The conditional upsert doubles as the lock: a concurrent caller waits on the
 // row, then finds board_seeded_at set and skips.
-func (s *TenantSeedStore) SeedBoardOnce(ctx context.Context, sql string) (bool, error) {
+func (s *BoardSeedStore) SeedBoardOnce(ctx context.Context, sql string) (bool, error) {
 	var ran bool
 	err := s.pool.InTx(ctx, func(tx pgx.Tx) error {
 		err := tx.QueryRow(ctx, `

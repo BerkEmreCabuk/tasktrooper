@@ -936,28 +936,3 @@ func TestStoreAppTracksRouteReturnsAllThreeChannels(t *testing.T) {
 		}
 	}
 }
-
-// The store binding routes reconfigure what a repository ships and where from,
-// so they belong to the admin surface — and the reads beside them do not, which
-// is the whole shape adminRoutes encodes. This asserts the new routes landed on
-// the right side of that line rather than quietly inheriting nothing.
-func TestStoreBindingRoutesAreAdminGated(t *testing.T) {
-	id := uuid.New().String()
-	for _, path := range []string{
-		"/v1/repositories/" + id + "/store/apps/android/link",
-		"/v1/repositories/" + id + "/store/apps/android/promote",
-		"/v1/repositories/" + id + "/store/apps/android/build",
-		"/v1/store/credentials/asc",
-	} {
-		if _, ok := matchAdminRoute(path); !ok {
-			t.Errorf("%s is not admin-gated; a member could re-point what a repository ships", path)
-		}
-	}
-	// Reads are never gated (roleMiddleware exits on the method before it ever
-	// asks matchAdminRoute), so the listing and tracks routes need no exemption
-	// here — but a member must still be able to reach them. isReadMethod is the
-	// one place that is decided.
-	if !isReadMethod(fiber.MethodGet) {
-		t.Error("GET must stay a read, or the picker and the channel panel 403 for members")
-	}
-}

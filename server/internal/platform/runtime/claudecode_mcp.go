@@ -7,12 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/claudecode"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/mcpserver"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -75,22 +73,9 @@ type claudeCodeMCP struct {
 	// exercise minting, which then get no manifest — the same as an install
 	// whose registry has not been wired.
 	registry port.ToolRegistry
-	// offHost says the credential this provider mints LEAVES this machine: it
-	// is written into a config file in somebody's home directory and presented
-	// from there over the public internet. Two rules follow from it, and
-	// neither is worth applying to a loopback token:
-	//
-	//   - the tenant must be known. A loopback token that somehow carried none
-	//     would fail closed at the first database statement on this same
-	//     process; one that travels is a credential this process is publishing,
-	//     and publishing an unscoped one is not a thing to do and then discover
-	//     later. So minting is refused instead.
-	//   - the token expires. Its run's own lifetime bounds it either way, but
-	//     "the run ended" is a fact only this process observes; the absolute
-	//     ceiling is the part that holds if the copy on the laptop outlives
-	//     everything else.
-	offHost bool
-	// ttl is that ceiling. 0 means none, which is what a loopback token gets.
+	// ttl is the absolute ceiling on a credential that leaves this machine: its
+	// run's own lifetime bounds it either way, but "the run ended" is a fact only
+	// this process observes. 0 means none, which is what a loopback token gets.
 	ttl time.Duration
 	// now is time.Now, overridden in tests.
 	now func() time.Time
@@ -141,27 +126,6 @@ func (m *claudeCodeMCP) ForRun(ctx context.Context, run claudecode.MCPRun) (clau
 		return claudecode.MCPConfig{}, noop, nil
 	}
 
-	// WHOSE run this is, read once, here, and bound to the credential.
-	//
-	// It is the only place the answer is available: /mcp is a public path (its
-	// caller holds no gateway signature and no tenant API key, by design), so
-	// no signed X-Internal-Tenant reaches the endpoint and tenantMiddleware
-	// never runs for it. ctx is the board runner's runCtx, which carries the
-	// dispatching tenant (board.RunJob.Tenant), so minting is the moment where
-	// "which tenant" is still a fact rather than a claim.
-	//
-	// uuid.Nil is the single-tenant case — a self-hosted or desktop install
-	// whose run context carries no identity — and is passed through unchanged
-	// for the loopback path. For a credential that leaves this machine it is
-	// refused: see claudeCodeMCP.offHost.
-	id, _ := tenant.From(ctx)
-	if m.offHost && id.TenantID == uuid.Nil {
-		log.Error().Str("task_key", run.Label).
-			Msg("refusing to mint an mcp run token with no tenant; a credential that leaves this machine must name exactly one tenant")
-		return claudecode.MCPConfig{}, noop, fmt.Errorf(
-			"this %s run has no tenant on its context, so no tasktrooper tool credential can be issued for it", run.Label)
-	}
-
 	// ctx is the caller's run context — the board runner's runCtx, or a chat
 	// turn's: the endpoint executes this session's tool calls under it, so they
 	// are attributed exactly as the agent loop's would be. run.Policy is the
@@ -175,7 +139,6 @@ func (m *claudeCodeMCP) ForRun(ctx context.Context, run claudecode.MCPRun) (clau
 	// it learns the policy.
 	served := mcpserver.Run{
 		Ctx:          ctx,
-		Tenant:       id,
 		Policy:       run.Policy,
 		TaskKey:      run.Label,
 		SkillsOnDisk: run.SkillsOnDisk,

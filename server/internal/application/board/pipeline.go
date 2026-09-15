@@ -13,7 +13,6 @@ import (
 	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
 )
@@ -101,22 +100,6 @@ type pipelineJob struct {
 	Pipeline     domain.TaskPipeline
 	RepositoryID uuid.UUID
 	Task         domain.BoardTask
-	// Tenant travels ON THE JOB for the same reason RunJob.Tenant does: the
-	// queue severs the triggering request from the worker that drains it. The
-	// workers are started once, at boot, on the process context, and every row
-	// a pipeline touches — the pipeline itself, its job rows, the task it
-	// bounces, the comment it posts — is row-level-security protected.
-	Tenant tenant.Identity
-}
-
-// scope re-attaches the triggering tenant to a worker's context. A job that
-// carries none (self-hosted, desktop, tests) is left alone, which keeps the
-// single-tenant path exactly as it was.
-func (j pipelineJob) scope(ctx context.Context) context.Context {
-	if j.Tenant.TenantID == uuid.Nil {
-		return ctx
-	}
-	return tenant.With(ctx, j.Tenant)
 }
 
 // PipelineRunner reads the QA-gate build/test results (and dispatches deploy
@@ -239,7 +222,7 @@ func (p *PipelineRunner) trigger(ctx context.Context, repositoryID uuid.UUID, ta
 	}
 
 	select {
-	case p.queue <- pipelineJob{Pipeline: created, RepositoryID: repositoryID, Task: task, Tenant: tenantOf(ctx)}:
+	case p.queue <- pipelineJob{Pipeline: created, RepositoryID: repositoryID, Task: task}:
 	default:
 		log.Warn().Str("task_id", task.ID.String()).Msg("pipeline queue full, dropping job")
 	}
@@ -255,7 +238,7 @@ func (p *PipelineRunner) Start(ctx context.Context) {
 	// No boot-time FailStaleRunning any more, and its removal is the point.
 	//
 	// It ran with a cutoff of zero minutes — "fail every pending or running
-	// pipeline in this tenant" — on the premise that a process starting up was
+	// pipeline" — on the premise that a process starting up was
 	// the only process there was, so anything unfinished had been abandoned by
 	// the process it replaced. With several replicas that premise inverts into
 	// the worst thing a new pod can do: every deploy would mark every pipeline
@@ -287,10 +270,7 @@ func (p *PipelineRunner) worker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case job := <-p.queue:
-			// Everything below this line talks to a policy-protected table, so
-			// the triggering tenant is put back on the context first.
-			jobCtx := job.scope(ctx)
-			if err := p.execute(jobCtx, job); err != nil {
+			if err := p.execute(ctx, job); err != nil {
 				log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("pipeline execution failed")
 			}
 		}
@@ -763,10 +743,9 @@ func hasRealSuccessJob(jobs []domain.TaskPipelineJob) bool {
 // finalize persists the terminal pipeline state and fires side effects unless a
 // newer pipeline superseded this one.
 func (p *PipelineRunner) finalize(ctx context.Context, job pipelineJob, pipeline domain.TaskPipeline, status domain.PipelineStatus, jobs []domain.TaskPipelineJob) error {
-	// context.WithoutCancel, not context.Background(): this has to outlive a cancelled
-	// run context (a pipeline that settles during shutdown still owes its row a
-	// terminal status) but it must not lose the tenant with it — every write
-	// below is policy-protected. finishNoWorkspace already had this right.
+	// context.WithoutCancel: this has to outlive a cancelled run context (a
+	// pipeline that settles during shutdown still owes its row a terminal
+	// status) while keeping the run context's values.
 	finCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 

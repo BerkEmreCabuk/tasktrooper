@@ -587,14 +587,3 @@ func TestGetGCloudResourceReportsAnAbsentBindingAs404(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
-
-// TestGCloudCredentialRoutesAreAdminGated proves the vault sits behind the
-// role middleware — the check the task asked for, made a test so a later route
-// rename cannot silently drop it.
-func TestGCloudCredentialRoutesAreAdminGated(t *testing.T) {
-	for _, path := range []string{"/v1/gcloud/credential", "/v1/gcloud/resources"} {
-		if _, ok := matchAdminRoute(path); !ok {
-			t.Fatalf("%s matches no admin rule — its mutations would be open to members", path)
-		}
-	}
-}

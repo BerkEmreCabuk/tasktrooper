@@ -60,7 +60,7 @@ import (
 // Deliberately NOT under /v1 or /admin: those two prefixes are what
 // adapter/http's auth middlewares gate (see isPublicPath), and this endpoint
 // authenticates itself with the per-run bearer token instead. Putting it under
-// /v1 would demand the tenant's API key or a gateway signature from a child
+// /v1 would demand the API key or a gateway signature from a child
 // process that has neither — and must never be given either, since the whole
 // point of the env scrub is that the CLI session holds no credential of this
 // server's.
@@ -174,7 +174,7 @@ func New(registry port.ToolRegistry, tokens *RunTokenRegistry) *Server {
 //     calls in through the control plane; every legitimate request then arrives
 //     from the gateway's address and a loopback check would refuse all of them.
 //     The token is the whole of the authentication on that path, which is why
-//     it is minted per run, carries its own tenant, expires, and dies with the
+//     it is minted per run, expires, and dies with the
 //     run (see Run and RunTokenRegistry).
 //   - desktop / self-hosted — either; the listener binds 127.0.0.1 and the
 //     kernel already refuses everyone else.
@@ -295,7 +295,7 @@ func (s *Server) callerAllowed(c *fiber.Ctx) bool {
 	ip := net.ParseIP(strings.TrimSpace(c.IP()))
 	// An unparseable address is refused rather than allowed: this gate only runs
 	// where the endpoint is on a shared network, and "I could not tell where
-	// this came from" is not a reason to serve a tenant's board tools.
+	// this came from" is not a reason to serve the board tools.
 	return ip != nil && ip.IsLoopback()
 }
 
@@ -401,7 +401,6 @@ func (s *Server) logExposedTools(run Run, tools []toolInfo) {
 	}
 	log.Info().
 		Str("task_key", run.TaskKey).
-		Str("tenant_id", run.Tenant.TenantID.String()).
 		Int("tools", len(tools)).
 		Msg("mcp: serving tasktrooper tools to a claude code session")
 	log.Debug().
@@ -456,20 +455,12 @@ func (s *Server) callTool(run Run, params json.RawMessage) (any, *rpcError) {
 		args = "{}"
 	}
 
-	// The run's context with the TOKEN's tenant applied. Not the HTTP request's
-	// context, and not run.Ctx bare:
-	//
-	//   - the call is the RUN's, and every decorator between here and the tool
-	//     (audit, action ledger, tool-usage counters, the activity recorder)
-	//     reads its attribution off that context. It also carries the run's
-	//     cancellation, so a stopped run's in-flight tool call dies with it;
-	//   - the tenant comes off the credential rather than off the request.
-	//     /mcp is a public path — its caller holds no gateway signature — so
-	//     tenantMiddleware never ran and there is no signed header here to
-	//     read. Run.Tenant was bound when this process minted the token, which
-	//     makes it the one claim about tenancy on this path that the caller did
-	//     not get to make. See Run.Scoped.
-	ctx := run.Scoped()
+	// The run's context, not the HTTP request's: the call is the RUN's, and every
+	// decorator between here and the tool (audit, action ledger, tool-usage
+	// counters, the activity recorder) reads its attribution off that context.
+	// It also carries the run's cancellation, so a stopped run's in-flight tool
+	// call dies with it.
+	ctx := run.Ctx
 
 	// The trace is opened BEFORE the gate below, so a call this endpoint refuses
 	// is as visible as one it runs. A session that spent a turn on a tool its

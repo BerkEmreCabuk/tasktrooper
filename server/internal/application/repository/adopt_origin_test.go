@@ -10,14 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
-
-var repoTenantA = uuid.MustParse("aaaaaaaa-0000-0000-0000-00000000000a")
-
-func repoCtx(id uuid.UUID) context.Context {
-	return tenant.With(context.Background(), tenant.Identity{TenantID: id, Role: tenant.RoleOwner})
-}
 
 // originGit answers OriginURL per path, which is what every adoption check
 // turns on: two checkouts can both be repositories and only one of them can be
@@ -51,7 +44,7 @@ func TestRepoPathRefusesATraversingName(t *testing.T) {
 // EnsureIndexMirror is the adoption path that needs no user action at all — a
 // webhook or a freshness check reaches it. It used to return nil for any
 // directory with a .git in it, so an index pass walked whatever was at the
-// shared path and wrote its contents into this tenant's chunks.
+// shared path and wrote its contents into this repository's chunks.
 func TestIndexMirrorRefusesADifferentRepository(t *testing.T) {
 	root := t.TempDir()
 	repo := domain.Repository{
@@ -65,7 +58,7 @@ func TestIndexMirrorRefusesADifferentRepository(t *testing.T) {
 	svc := newMirrorService(t, repo, &git.fakeRestoreGit)
 	svc.git = git
 
-	err := svc.EnsureIndexMirror(repoCtx(repoTenantA), repo.ID, root)
+	err := svc.EnsureIndexMirror(context.Background(), repo.ID, root)
 	if err == nil {
 		t.Fatal("an index pass adopted a checkout of a different repository")
 	}
@@ -95,7 +88,7 @@ func TestIndexMirrorAdoptsTheSameRepositoryInAnotherSpelling(t *testing.T) {
 	svc := newMirrorService(t, repo, &git.fakeRestoreGit)
 	svc.git = git
 
-	if err := svc.EnsureIndexMirror(repoCtx(repoTenantA), repo.ID, root); err != nil {
+	if err := svc.EnsureIndexMirror(context.Background(), repo.ID, root); err != nil {
 		t.Fatalf("the same repository in ssh spelling was refused: %v", err)
 	}
 }
@@ -116,7 +109,7 @@ func TestRestoreRefusesToAdoptADifferentRepository(t *testing.T) {
 	git.repoPaths = map[string]bool{dest: true}
 	git.origins[dest] = "https://github.com/rival/app.git"
 
-	_, err := svc.RestoreWorkingCopy(repoCtx(repoTenantA), repo.ID)
+	_, err := svc.RestoreWorkingCopy(context.Background(), repo.ID)
 	if err == nil {
 		t.Fatal("restore re-pointed a repository at a checkout of something else")
 	}

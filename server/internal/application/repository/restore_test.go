@@ -80,13 +80,13 @@ func missingRepo() domain.Repository {
 	return domain.Repository{
 		ID:   uuid.New(),
 		Name: "app",
-		// A path written by the runtime this tenant used to run on.
+		// A path written by a runtime this install used to run on.
 		RootPath:  "/data/workspaces/repos/app",
 		RemoteURL: "https://github.com/acme/app.git",
 	}
 }
 
-// The case the whole feature is for: the folder is gone because the tenant
+// The case the whole feature is for: the folder is gone because the data
 // moved to another machine, the remote is on the record, so the code is fetched
 // into THIS runtime's layout and the row is re-pointed at where it landed.
 func TestRestoreClonesMissingWorkingCopyIntoThisRuntimesWorkspace(t *testing.T) {
@@ -96,7 +96,7 @@ func TestRestoreClonesMissingWorkingCopyIntoThisRuntimesWorkspace(t *testing.T) 
 	}}
 	svc, store, workspaceRoot := newRestoreService(t, repo, git)
 
-	got, err := svc.RestoreWorkingCopy(repoCtx(repoTenantA), repo.ID)
+	got, err := svc.RestoreWorkingCopy(context.Background(), repo.ID)
 	if err != nil {
 		t.Fatalf("RestoreWorkingCopy: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestRestoreRefusedWhenWorkingCopyIsPresent(t *testing.T) {
 	}}
 	svc, store, _ := newRestoreService(t, repo, git)
 
-	_, err := svc.RestoreWorkingCopy(repoCtx(repoTenantA), repo.ID)
+	_, err := svc.RestoreWorkingCopy(context.Background(), repo.ID)
 	if err == nil {
 		t.Fatal("restore was allowed over an existing working copy")
 	}
@@ -152,7 +152,7 @@ func TestRestoreRefusedWithoutARemote(t *testing.T) {
 	}}
 	svc, store, _ := newRestoreService(t, repo, git)
 
-	_, err := svc.RestoreWorkingCopy(repoCtx(repoTenantA), repo.ID)
+	_, err := svc.RestoreWorkingCopy(context.Background(), repo.ID)
 	if err == nil || !strings.Contains(err.Error(), "No git remote is recorded") {
 		t.Fatalf("err = %v, want a refusal naming the missing remote", err)
 	}
@@ -177,7 +177,7 @@ func TestRestoreRefusesNonRepositoryPathAndDeletesNothing(t *testing.T) {
 	git := &fakeRestoreGit{}
 	svc, store, _ := newRestoreService(t, repo, git)
 
-	_, err := svc.RestoreWorkingCopy(repoCtx(repoTenantA), repo.ID)
+	_, err := svc.RestoreWorkingCopy(context.Background(), repo.ID)
 	if err == nil {
 		t.Fatal("restore was allowed onto a folder that is not a repository")
 	}
@@ -214,7 +214,7 @@ func TestRestoreRefusesOccupiedDestinationAndDeletesNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := svc.RestoreWorkingCopy(repoCtx(repoTenantA), repo.ID)
+	_, err := svc.RestoreWorkingCopy(context.Background(), repo.ID)
 	if err == nil || !strings.Contains(err.Error(), "Nothing was changed or deleted") {
 		t.Fatalf("err = %v, want a refusal that promises nothing was deleted", err)
 	}
@@ -244,7 +244,7 @@ func TestRestoreAdoptsAnExistingCheckoutAtTheDestination(t *testing.T) {
 	}
 	git.repoPaths = map[string]bool{dest: true}
 
-	got, err := svc.RestoreWorkingCopy(repoCtx(repoTenantA), repo.ID)
+	got, err := svc.RestoreWorkingCopy(context.Background(), repo.ID)
 	if err != nil {
 		t.Fatalf("RestoreWorkingCopy: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestRestoreReportsCloneFailureAndLeavesTheRecordAlone(t *testing.T) {
 	}
 	svc, store, _ := newRestoreService(t, repo, git)
 
-	if _, err := svc.RestoreWorkingCopy(repoCtx(repoTenantA), repo.ID); err != nil {
+	if _, err := svc.RestoreWorkingCopy(context.Background(), repo.ID); err != nil {
 		t.Fatalf("starting the restore should succeed; the failure is reported on the state: %v", err)
 	}
 	state := svc.restoreState(repo.ID)
@@ -387,7 +387,7 @@ func TestRestoreNeedsAWorkspaceRoot(t *testing.T) {
 		restoreRun:  func(fn func()) { fn() },
 	}
 
-	_, err := svc.RestoreWorkingCopy(repoCtx(repoTenantA), repo.ID)
+	_, err := svc.RestoreWorkingCopy(context.Background(), repo.ID)
 	if err == nil || !strings.Contains(err.Error(), "workspace root") {
 		t.Fatalf("err = %v, want a refusal naming the missing workspace root", err)
 	}

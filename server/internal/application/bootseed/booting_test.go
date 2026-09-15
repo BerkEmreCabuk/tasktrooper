@@ -1,13 +1,9 @@
-package tenantboot
+package bootseed
 
 import (
 	"context"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
-
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 // Booting is what lets the agents endpoint tell an empty roster from one that is
@@ -25,12 +21,11 @@ func TestBootingIsTrueOnlyWhileStepsRun(t *testing.T) {
 		return nil
 	})
 
-	id := uuid.New()
 	if svc.Booting() {
-		t.Fatal("booting before the tenant was sighted")
+		t.Fatal("booting before Ensure was called")
 	}
-	if err := svc.Sight(context.Background(), tenant.Identity{TenantID: id, Role: tenant.RoleOwner}); err != nil {
-		t.Fatalf("Sight: %v", err)
+	if err := svc.Ensure(context.Background()); err != nil {
+		t.Fatalf("Ensure: %v", err)
 	}
 	if !svc.Booting() {
 		t.Fatal("not booting while a step is still running")

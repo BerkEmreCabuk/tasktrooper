@@ -438,22 +438,3 @@ func TestRegisterVercelOpsRoutesNoopWithoutService(t *testing.T) {
 		t.Fatalf("status = %d, want 404 (route must not be registered)", resp.StatusCode)
 	}
 }
-
-// TestVercelOpsRoutesAreAdminGatedForMutations pins the middleware_role.go
-// half: matchAdminRoute lowercases the path it is handed, so a route spelled
-// with a capital could never match a rule. These paths are all lowercase, and
-// the mutation must land under the "/v1/repositories" rule with no member
-// exemption while the picker read stays open to every member.
-func TestVercelOpsRoutesAreAdminGatedForMutations(t *testing.T) {
-	repoID := uuid.New().String()
-	rule, ok := matchAdminRoute("/v1/repositories/" + repoID + "/vercel/project")
-	if !ok {
-		t.Fatal("PUT /v1/repositories/:id/vercel/project must be admin-gated: it reconfigures the tenant")
-	}
-	if rule.prefix != "/v1/repositories" {
-		t.Fatalf("matched %q, want the repository configuration rule", rule.prefix)
-	}
-	if _, ok := matchAdminRoute("/v1/vercel/projects"); ok {
-		t.Fatal("the picker listing is a read and must not sit under an admin rule")
-	}
-}

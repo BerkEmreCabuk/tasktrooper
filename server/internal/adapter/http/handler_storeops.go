@@ -199,7 +199,7 @@ func (h *Handler) SubmitIOSForReview(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return badRequest(c, "invalid request body")
 	}
-	if err := h.storeOpsSvc.SubmitIOS(h.enrichContext(c), id, req.Confirm, actor(c)); err != nil {
+	if err := h.storeOpsSvc.SubmitIOS(h.enrichContext(c), id, req.Confirm, consoleActor); err != nil {
 		return storeOpsActionError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -216,7 +216,7 @@ func (h *Handler) ReleaseIOSVersion(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return badRequest(c, "invalid request body")
 	}
-	if err := h.storeOpsSvc.ReleaseIOS(h.enrichContext(c), id, req.Confirm, actor(c)); err != nil {
+	if err := h.storeOpsSvc.ReleaseIOS(h.enrichContext(c), id, req.Confirm, consoleActor); err != nil {
 		return storeOpsActionError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -258,7 +258,7 @@ func (h *Handler) PromoteAndroidTrack(c *fiber.Ctx) error {
 	if req.From != "" || req.To != "" {
 		return h.promoteChannel(c, id, domain.MobileStorePlatformAndroid, req.From, req.To, req.Confirm)
 	}
-	if err := h.storeOpsSvc.PromoteAndroid(h.enrichContext(c), id, req.ToTrack, req.UserFraction, req.Confirm, actor(c)); err != nil {
+	if err := h.storeOpsSvc.PromoteAndroid(h.enrichContext(c), id, req.ToTrack, req.UserFraction, req.Confirm, consoleActor); err != nil {
 		return storeOpsActionError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -282,7 +282,7 @@ func (h *Handler) SetAndroidRollout(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return badRequest(c, "invalid request body")
 	}
-	if err := h.storeOpsSvc.SetAndroidRollout(h.enrichContext(c), id, req.UserFraction, actor(c)); err != nil {
+	if err := h.storeOpsSvc.SetAndroidRollout(h.enrichContext(c), id, req.UserFraction, consoleActor); err != nil {
 		return storeOpsActionError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -299,7 +299,7 @@ func (h *Handler) HaltAndroidRollout(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return badRequest(c, "invalid request body")
 	}
-	if err := h.storeOpsSvc.HaltAndroid(h.enrichContext(c), id, req.Confirm, actor(c)); err != nil {
+	if err := h.storeOpsSvc.HaltAndroid(h.enrichContext(c), id, req.Confirm, consoleActor); err != nil {
 		return storeOpsActionError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -313,7 +313,7 @@ func (h *Handler) ResumeAndroidRollout(c *fiber.Ctx) error {
 	if err != nil {
 		return badRequest(c, "invalid repository id")
 	}
-	if err := h.storeOpsSvc.ResumeAndroid(h.enrichContext(c), id, actor(c)); err != nil {
+	if err := h.storeOpsSvc.ResumeAndroid(h.enrichContext(c), id, consoleActor); err != nil {
 		return storeOpsActionError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -437,7 +437,7 @@ func (h *Handler) PromoteStoreChannel(c *fiber.Ctx) error {
 // promoteChannel is the shared tail of the two routes that can carry a channel
 // promotion: the generic one, and the literal Android one that shadows it.
 func (h *Handler) promoteChannel(c *fiber.Ctx, id uuid.UUID, platform, from, to, confirm string) error {
-	if err := h.storeOpsSvc.PromoteChannel(h.enrichContext(c), id, platform, from, to, confirm, actor(c)); err != nil {
+	if err := h.storeOpsSvc.PromoteChannel(h.enrichContext(c), id, platform, from, to, confirm, consoleActor); err != nil {
 		return storeOpsActionError(c, err)
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -466,7 +466,7 @@ func (h *Handler) StartStoreBuild(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return badRequest(c, "invalid request body")
 	}
-	start, err := h.storeOpsSvc.StartBuild(h.enrichContext(c), id, c.Params("platform"), req.Engine, actor(c))
+	start, err := h.storeOpsSvc.StartBuild(h.enrichContext(c), id, c.Params("platform"), req.Engine, consoleActor)
 	if err != nil {
 		return storeOpsBuildError(c, err)
 	}

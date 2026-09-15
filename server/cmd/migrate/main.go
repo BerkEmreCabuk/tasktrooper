@@ -45,7 +45,7 @@ func run() error {
 		dsn = started
 	}
 
-	dbName, err := database.TenantDatabaseName(dsn)
+	dbName, err := database.DatabaseName(dsn)
 	if err != nil {
 		return fmt.Errorf("invalid DATABASE_URL: %w", err)
 	}

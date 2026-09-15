@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -24,7 +23,7 @@ import (
 // internal/control/store (5212026001): the two guard different databases so
 // they cannot actually collide, but keeping them adjacent and distinct means
 // both are found by one grep and a future shared database cannot deadlock them.
-// Never reuse this value for anything else in a tenant database.
+// Never reuse this value for anything else in this database.
 const migrationAdvisoryLockKey int64 = 5212026002
 
 const (
@@ -43,7 +42,7 @@ const (
 	// once it *has* its locks. Generous on purpose: a migration legitimately
 	// rewrites or backfills a table, and a btree build measures ~0.3s per
 	// million rows on Postgres 16, so five minutes is roughly a thousandfold
-	// headroom over the largest realistic tenant table. Its job is not to be
+	// headroom over the largest realistic table. Its job is not to be
 	// tight, it is to make a runaway migration fail with a clear error instead
 	// of pinning locks forever.
 	migrationStatementTimeout = "5min"
@@ -74,22 +73,6 @@ var retryBaseDelay = 250 * time.Millisecond
 // pgLockNotAvailable is SQLSTATE 55P03, raised when lock_timeout fires.
 const pgLockNotAvailable = "55P03"
 
-// tenantDBPattern matches the databases these migrations may be applied to.
-//
-// Two shapes, because the fleet has both. `team_<uid>` is the per-tenant
-// database of the old architecture, still present until those are retired.
-// `agents`/`agent_server`/`tasktrooper` are the SHARED database of the new one
-// (migration 114): one schema, every tenant, isolated by row-level security
-// rather than by a database name.
-//
-// The list stays a list rather than becoming "anything": the control database
-// ("control") and the maintenance database ("postgres") carry a completely
-// different, hand-rolled schema, and pointing these migrations at either would
-// create a second conflicting set of tables in the database the whole fleet
-// depends on. That is what this check is for, and widening it to allow the
-// shared database must not widen it to allow those.
-var tenantDBPattern = regexp.MustCompile(`^(team_[a-z0-9_]+|agents|agent_server|tasktrooper)$`)
-
 // migrationConn is the subset of *pgxpool.Conn the runner needs. Declaring it
 // keeps the retry and timeout logic exercisable without a live database.
 type migrationConn interface {
@@ -101,13 +84,10 @@ type migrationConn interface {
 // RunMigrations applies every pending embedded migration, once, under a
 // database-wide advisory lock.
 //
-// Tenant Deployments are Recreate/replicas:1, but the reaper scales tenants to
-// zero and back and a replacement pod can start while the old one is still
-// draining its 600s grace period, so two RunMigrations really can race on one
-// tenant database. Unserialised, the loser of that race failed the
-// INSERT INTO schema_migrations with 23505, and cmd/agent-server turns any
-// error here into log.Fatal -> CrashLoopBackOff, i.e. the tenant is down for
-// minutes because two pods agreed on what to do.
+// Two processes can migrate one database at once — a server starting while the
+// previous one is still shutting down, or cmd/migrate run beside a server.
+// Unserialised, the loser of that race failed the INSERT INTO schema_migrations
+// with 23505, and cmd/agent-server turns any error here into log.Fatal.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	return runMigrationsPool(ctx, pool, "")
 }
@@ -232,7 +212,7 @@ func acquireMigrationLock(ctx context.Context, conn migrationConn) error {
 		log.Warn().
 			Int("attempt", attempt).
 			Int("max_attempts", advisoryLockAttempts).
-			Msg("tenant migration advisory lock held by another pod, waiting")
+			Msg("migration advisory lock held by another process, waiting")
 		if err := sleepCtx(ctx, backoffFor(attempt)); err != nil {
 			return err
 		}
@@ -247,7 +227,7 @@ func releaseMigrationLock(ctx context.Context, conn migrationConn, discard func(
 	// already cancelled, otherwise an aborted boot parks the lock on a pooled
 	// session and stalls the next pod for as long as this process lives.
 	if _, err := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrationAdvisoryLockKey); err != nil {
-		log.Warn().Err(err).Msg("release tenant migration advisory lock failed")
+		log.Warn().Err(err).Msg("release migration advisory lock failed")
 		if discard != nil {
 			discard()
 		}
@@ -403,15 +383,13 @@ func MigrationVersion(name string) string {
 	return migrationVersion(name)
 }
 
-// TenantDatabaseName parses dsn and returns its database name, rejecting any
-// target that is not a tenant database.
+// DatabaseName parses dsn and returns its database name, for the line
+// cmd/migrate prints when it is done.
 //
-// The embedded migrations are the tenant schema; the control plane keeps its
-// own hand-rolled schema in internal/control/store. Applying these migrations
-// to "control" or "postgres" would create a second, conflicting set of tables
-// in the database the whole fleet depends on, so the name is checked before a
-// single statement runs.
-func TenantDatabaseName(dsn string) (string, error) {
+// Any name is accepted: the server applies these same migrations at boot to
+// whatever DATABASE_URL names, so a name check in this binary alone would guard
+// nothing.
+func DatabaseName(dsn string) (string, error) {
 	if strings.TrimSpace(dsn) == "" {
 		return "", errors.New("empty postgres DSN")
 	}
@@ -422,13 +400,6 @@ func TenantDatabaseName(dsn string) (string, error) {
 	name := cfg.ConnConfig.Database
 	if name == "" {
 		return "", errors.New("postgres DSN has no database name")
-	}
-	if !tenantDBPattern.MatchString(name) {
-		return "", fmt.Errorf(
-			"refusing to migrate database %q: these migrations apply to a team_* database "+
-				"or to the shared multi-tenant one (agents / agent_server / tasktrooper)",
-			name,
-		)
 	}
 	return name, nil
 }

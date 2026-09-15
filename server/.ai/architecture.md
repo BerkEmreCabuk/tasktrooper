@@ -915,7 +915,6 @@ exactly one tenant, `tenant.LocalTenantID`.
 | Piece | Where | Rule |
 |---|---|---|
 | identity in | `adapter/http/middleware_tenant.go` | every request is stamped `tenant.LocalTenantID` + `RoleOwner` after the bearer `SERVER_API_KEY` check — no per-request identity header exists |
-| identity through | `platform/tenant` | `tenant.Identity` on the context; 469 store methods take no tenant argument |
 | identity down | `adapter/store/postgres/db.go` | every statement in its own tx opening `SET LOCAL app.tenant_id`; no un-scoped path exists |
 | isolation | migration 114 | 85 tables carry `tenant_id NOT NULL DEFAULT current_setting('app.tenant_id')::uuid`, `ENABLE`+`FORCE` RLS, one `tenant_isolation` policy each |
 | global | `schema_migrations`, `tenants` | one schema, and the registry OF tenants — neither is a tenant's data |

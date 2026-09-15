@@ -24,7 +24,6 @@ import (
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
 )
@@ -40,24 +39,6 @@ type RunJob struct {
 	// (correctly) been moved to in_progress: the instruction, the reviewer's
 	// comments and the failed pipeline are all chosen from it.
 	EnteredFrom domain.TaskColumn
-	// Tenant travels ON THE JOB rather than on a context, because the queue
-	// severs the two: Enqueue is called from a tenant-scoped dispatch, the
-	// worker that picks the job up was started at boot with the process
-	// context, and everything a run touches afterwards - the run row, the
-	// board event, the workspace index, the memories - is row-level-security
-	// protected. Without this the run would reach the database with no tenant
-	// and fail closed on its first statement.
-	Tenant tenant.Identity
-}
-
-// scope re-attaches the dispatching tenant to a worker's context. A job that
-// carries no tenant (self-hosted, desktop, tests) is left alone, which keeps
-// the single-tenant path exactly as it was.
-func (j RunJob) scope(ctx context.Context) context.Context {
-	if j.Tenant.TenantID == uuid.Nil {
-		return ctx
-	}
-	return tenant.With(ctx, j.Tenant)
 }
 
 // isRevision reports whether this run is fixing review feedback, whether the
@@ -92,9 +73,8 @@ type IndexInjector interface {
 // BranchIndexer refreshes a task branch's workspace index after the agent
 // pushes, so the next run's retrieval sees the branch's own tree.
 //
-// ctx is passed for its TENANT, not its deadline: the refresh is asynchronous
-// and outlives this run, but every row it writes is scoped by the identity on
-// the context it was started from. The indexer strips the cancellation itself.
+// ctx is passed for its values, not its deadline: the refresh is asynchronous
+// and outlives this run. The indexer strips the cancellation itself.
 type BranchIndexer interface {
 	StartIndexBranch(ctx context.Context, projectID uuid.UUID, branch, workspacePath string)
 }
@@ -114,7 +94,7 @@ type AgentCLIConnections interface {
 	Connected(ctx context.Context, flavor domain.AgentCLIFlavor) (*domain.AgentCLIConnection, error)
 }
 
-// BillingGate blocks agent runs once the tenant's USD budget is exhausted and
+// BillingGate blocks agent runs once the USD budget is exhausted and
 // records the task so it can be auto-resumed when the period renews. Nil-safe:
 // a runner with no gate never blocks.
 type BillingGate interface {
@@ -788,9 +768,6 @@ func (r *Runner) dispatch(ctx context.Context) {
 }
 
 func (r *Runner) runJob(ctx context.Context, job RunJob) {
-	// Everything below this line talks to a policy-protected table, so the
-	// dispatching scope is put back on the context first.
-	ctx = job.scope(ctx)
 	// A job can sit in the queue for a moment, and a stop that arrived meanwhile
 	// was recorded on the row, not in this queue. Read the row before claiming
 	// anything: a run stopped while it waited must not start now.
@@ -887,7 +864,7 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 		return r.failRun(ctx, run, cause)
 	}
 
-	// Budget gate: if the tenant's USD budget is exhausted, do not start the
+	// Budget gate: if the USD budget is exhausted, do not start the
 	// agent. Record the task so it auto-resumes when the period renews, and end
 	// this run cleanly (not an error — nothing failed, the work is deferred).
 	if r.billing != nil {
@@ -1360,10 +1337,10 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 				"claude code binary not available on this host: agent %q runs on the %s provider, which needs the `claude` CLI installed where agent-server runs (set CLAUDE_CODE_BIN if it is not on PATH). Move the agent to an API provider or install the CLI",
 				agentRec.Name, agentRec.ProviderType))
 		}
-		// And the tenant has to have CONNECTED this CLI. A registered executor
+		// And this CLI has to be CONNECTED. A registered executor
 		// says the binary resolved at boot; it does not say anybody verified it
 		// is signed in, and it says nothing at all about which of the two CLIs
-		// this tenant chose — only one may be connected at a time
+		// was chosen — only one may be connected at a time
 		// (application/agentcli).
 		//
 		// Asked here, at the point of dispatch, for the same reason the
@@ -3189,13 +3166,4 @@ func cliFlavor(t domain.LLMProviderType) (agentfs.Flavor, bool) {
 	default:
 		return "", false
 	}
-}
-
-// tenantOf reads the dispatching tenant off a context, returning the zero
-// identity when there is none. A zero identity means "leave the worker's
-// context alone", which is what a self-hosted or desktop run wants: it has one
-// tenant and already carries it.
-func tenantOf(ctx context.Context) tenant.Identity {
-	id, _ := tenant.From(ctx)
-	return id
 }

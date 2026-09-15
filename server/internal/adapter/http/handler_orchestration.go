@@ -332,7 +332,7 @@ func (h *Handler) ListAgents(c *fiber.Ctx) error {
 	// reporting only the catalog's own flag let the first read answer "done,
 	// and empty", and the sidebar stopped waiting.
 	seeding := h.catalogSvc.SeedingInProgress()
-	if !seeding && h.tenantOnboarder != nil && h.tenantOnboarder.Booting() {
+	if !seeding && h.bootSeed != nil && h.bootSeed.Booting() {
 		seeding = true
 	}
 	return c.JSON(fiber.Map{"agents": agents, "count": len(agents), "seeding": seeding})

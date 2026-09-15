@@ -81,9 +81,9 @@ type Handler struct {
 	legacyAPIKey  string
 	apiKeys       []domain.APIKeyConfig
 	apiKeySvc     *apikey.Service
-	// tenantOnboarder seeds a first-seen tenant's board. Nil on a build with no
-	// database.
-	tenantOnboarder   TenantOnboarder
+	// bootSeed retries a board seed that failed at boot and reports whether the
+	// boot steps are still running. Nil on a build with no database.
+	bootSeed          BootSeed
 	sessionSvc        *session.Service
 	settingsSvc       *settings.Service
 	mobileDeviceSvc   *mobiledevice.Service
@@ -181,7 +181,7 @@ type Config struct {
 	VercelOpsSvc      *vercelops.Service
 	GCloudOpsSvc      *gcloudops.Service
 	MCPToolServer     *mcpserver.Server
-	TenantOnboarder   TenantOnboarder
+	BootSeed          BootSeed
 }
 
 func NewHandler(cfg Config) *Handler {
@@ -236,7 +236,7 @@ func NewHandler(cfg Config) *Handler {
 		vercelOpsSvc:      cfg.VercelOpsSvc,
 		gcloudOpsSvc:      cfg.GCloudOpsSvc,
 		mcpToolServer:     cfg.MCPToolServer,
-		tenantOnboarder:   cfg.TenantOnboarder,
+		bootSeed:          cfg.BootSeed,
 	}
 }
 
@@ -246,13 +246,7 @@ func NewHandler(cfg Config) *Handler {
 func (h *Handler) RegisterRoutes(app *fiber.App) {
 	app.Use(h.requestIDMiddleware)
 	app.Use(h.authMiddleware)
-	// Order is the design, not the alphabet. Authentication proves the caller
-	// holds the API key; tenantMiddleware then puts the tenant on the request
-	// context, because every store method below opens its transaction from that
-	// value. roleMiddleware comes last of the three, since a role means nothing
-	// until there is a tenant to hold it in.
-	app.Use(h.tenantMiddleware)
-	app.Use(h.roleMiddleware)
+	app.Use(h.bootSeedMiddleware)
 	app.Use(h.metricsMiddleware)
 
 	app.Post("/v1/chat/completions", h.ChatCompletions)
@@ -327,13 +321,13 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	// through the control plane at /api/mcp.
 	//
 	// Mounted WITHOUT either auth middleware, and it stays that way on purpose:
-	// the caller holds none of this server's credentials — not the tenant's API
+	// the caller holds none of this server's credentials — not the API
 	// key, not INTERNAL_AUTH_KEY, not a Firebase token — which for a local
 	// session is the whole point of the environment scrub (platform/childenv,
 	// claudecode.claudeEnvPassthrough) and for a remote one is simply true of
 	// somebody's laptop. It presents the per-run bearer token instead, which
-	// the endpoint verifies for itself, which carries the tenant this process
-	// bound to it, and which is worthless the moment the run ends. isPublicPath
+	// the endpoint verifies for itself, which names the run this process
+	// bound it to, and which is worthless the moment the run ends. isPublicPath
 	// already lets /mcp past both middlewares because it is neither /v1 nor
 	// /admin; that is spelled out there rather than left to the default.
 	//
@@ -398,6 +392,26 @@ func (h *Handler) metricsMiddleware(c *fiber.Ctx) error {
 	return err
 }
 
+// bootSeedMiddleware retries a board seed that failed at boot; once the seed has
+// succeeded it costs a couple of atomic reads. Public paths are skipped: their
+// callers (GitHub, a Claude Code session) hold no API key and must not be able
+// to trigger a seed.
+func (h *Handler) bootSeedMiddleware(c *fiber.Ctx) error {
+	if h.bootSeed != nil && !h.isPublicPath(c.Path()) {
+		if err := h.bootSeed.Ensure(c.UserContext()); err != nil {
+			log.Warn().Err(err).Msg("board seed failed; the next request retries it")
+		}
+	}
+	return c.Next()
+}
+
+// BootSeed is the half of bootseed.Service this layer needs, declared here so
+// the handler stays testable without a database.
+type BootSeed interface {
+	Ensure(ctx context.Context) error
+	Booting() bool
+}
+
 func (h *Handler) enrichContext(c *fiber.Ctx) context.Context {
 	ctx := c.UserContext()
 	if rid, ok := c.Locals("request_id").(string); ok {
@@ -405,9 +419,6 @@ func (h *Handler) enrichContext(c *fiber.Ctx) context.Context {
 	}
 	if name, ok := c.Locals("client_name").(string); ok {
 		ctx = registry.ContextWithAPIKeyName(ctx, name)
-	}
-	if uid, ok := c.Locals("actor_user_id").(string); ok && uid != "" {
-		ctx = registry.ContextWithActorUserID(ctx, uid)
 	}
 	return ctx
 }
@@ -428,7 +439,7 @@ func (h *Handler) resolvePolicy(c *fiber.Ctx, reqPolicy domain.ToolPolicy) domai
 	return domain.IntersectToolPolicy(base, reqPolicy.AllowTools)
 }
 
-// budgetGate refuses a request that would start an agent run once the tenant's
+// budgetGate refuses a request that would start an agent run once the
 // USD budget for the period is spent. The board runner has enforced this since
 // the budget shipped, but the documented API entry points (chat completions,
 // session messages, jobs) ran the same agent loop with no check at all — an API
@@ -541,7 +552,7 @@ func (h *Handler) chatCompletionsStream(c *fiber.Ctx, messages []domain.Message,
 	ctx := h.enrichContext(c)
 
 	// The body stream writer runs after this handler returns, so the request
-	// context is already cancelled by then — carry its values (request id, tenant,
+	// context is already cancelled by then — carry its values (request id,
 	// workspace scope) without its cancellation. Passing a bare Background() here
 	// also meant the loop ran unscoped, losing tool/attribution context.
 	streamCtx, streamCancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -895,7 +906,7 @@ func (h *Handler) sessionMessageStream(c *fiber.Ctx, sessionID uuid.UUID, req do
 	}
 
 	// The body stream writer runs after this handler returns, so the request
-	// context is already cancelled by then — carry its values (request id, tenant,
+	// context is already cancelled by then — carry its values (request id,
 	// workspace scope) without its cancellation. Passing a bare Background() here
 	// also meant the loop ran unscoped, losing tool/attribution context.
 	streamCtx, streamCancel := context.WithCancel(context.WithoutCancel(ctx))
@@ -979,7 +990,7 @@ func (h *Handler) sessionMessageStream(c *fiber.Ctx, sessionID uuid.UUID, req do
 			// unrecognised error by every one of them.
 			//
 			// err.Error() is already the localised sentence naming the reset
-			// time: the session service built it while it still had the tenant's
+			// time: the session service built it while it still had the
 			// settings loaded, so nothing here has to read the database on an
 			// error path to find out what language to say it in.
 			if _, ok := domain.QuotaBlockOf(err); ok {

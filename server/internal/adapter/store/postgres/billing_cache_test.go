@@ -11,10 +11,9 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
-	"github.com/makifbaysal/tasktrooper/server/internal/application/tenantboot"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/bootseed"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/database"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 // BillingCacheSuite covers the cost arithmetic, which lives entirely in SQL:
@@ -30,13 +29,9 @@ type BillingCacheSuite struct {
 	db     *postgres.DB
 	store  *postgres.BillingStore
 	usage  *postgres.LLMUsageStore
-	// seeded is the tenant's starting price list, captured before the per-test
-	// wipe so the seed itself can still be asserted on.
-	//
-	// It comes from tenantboot rather than from a migration now: migration 114
-	// moved every per-install seed to a per-TENANT one, because a migration
-	// runs once for the whole shared database and its rows would belong to
-	// nobody.
+	// seeded is the starting price list, captured before the per-test wipe so
+	// the seed itself can still be asserted on. It comes from bootseed, not from
+	// a migration.
 	seeded []domain.ModelPrice
 }
 
@@ -64,8 +59,7 @@ func (s *BillingCacheSuite) SetupSuite() {
 	s.usage = postgres.NewLLMUsageStore(s.db)
 
 	// Seed the default board exactly as boot does.
-	s.Require().NoError(tenantboot.NewService(postgres.NewTenantSeedStore(s.db)).
-		Sight(s.ctx, tenant.Identity{TenantID: tenant.LocalTenantID, Role: tenant.RoleOwner}))
+	s.Require().NoError(bootseed.NewService(postgres.NewBoardSeedStore(s.db)).Ensure(s.ctx))
 
 	s.seeded, err = s.store.ListModelPrices(s.ctx)
 	s.Require().NoError(err)
@@ -137,7 +131,7 @@ func (s *BillingCacheSuite) TestMixedCacheUsageIsPricedPerRate() {
 
 // The safety property: an operator who prices a model but leaves the cache
 // columns NULL must be charged the full prompt rate on every token. Charging
-// less would let a tenant spend past the budget for free.
+// less would let spend slip past the budget for free.
 func (s *BillingCacheSuite) TestNullCacheRatesChargeTheFullPromptPrice() {
 	_, err := s.store.UpsertModelPrice(s.ctx, domain.ModelPrice{
 		Model:              "gpt-oss",
@@ -251,7 +245,7 @@ func (s *BillingCacheSuite) TestCacheTokensExceedingPromptNeverGoNegative() {
 	s.assertUSD(s.spent(), 0)
 }
 
-// A fresh TENANT must account for cache spend without an operator touching
+// A fresh install must account for cache spend without an operator touching
 // anything, so the seed prices every Claude row off that row's own prompt rate
 // (0.10x read, 1.25x write) the way migration 094 did when the seed lived in a
 // migration.
@@ -267,5 +261,5 @@ func (s *BillingCacheSuite) TestMigrationSeedsClaudeCacheRates() {
 		s.assertUSD(*p.UsdPer1MCacheRead, 0.10*p.UsdPer1MPrompt)
 		s.assertUSD(*p.UsdPer1MCacheWrite, 1.25*p.UsdPer1MPrompt)
 	}
-	s.Require().NotZero(checked, "tenantboot seeds Claude rows; they must carry cache rates")
+	s.Require().NotZero(checked, "bootseed seeds Claude rows; they must carry cache rates")
 }

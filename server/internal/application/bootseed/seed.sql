@@ -32,14 +32,13 @@ INSERT INTO board_task_counters (task_type, last_number) VALUES
     ('task', 0), ('bug', 0), ('analiz', 0)
 ON CONFLICT DO NOTHING;
 
--- The single-row tables. Their CHECK (id = 1) now means one row per tenant
--- (migration 114), so `id` is still literally 1 here.
+-- The single-row tables, CHECK (id = 1).
 INSERT INTO board_settings (id) VALUES (1) ON CONFLICT DO NOTHING;
 INSERT INTO billing_plan (id) VALUES (1) ON CONFLICT DO NOTHING;
 
--- Settings a tenant needs a value for before anything can be configured.
--- workspace_root is a path on whichever host serves this tenant; the host-root
--- translation in the stores makes a foreign value harmless (see .ai/workspace.md).
+-- Settings that need a value before anything can be configured. workspace_root
+-- is a path on this host; the host-root translation in the stores makes a
+-- foreign value harmless (see .ai/workspace.md).
 INSERT INTO app_settings (key, value) VALUES
     ('workspace_root',      './data/workspaces'),
     ('default_language',    'tr'),
@@ -47,7 +46,7 @@ INSERT INTO app_settings (key, value) VALUES
 ON CONFLICT DO NOTHING;
 
 -- The provider catalog, all unconfigured: the row is the offer, `configured`
--- is whether this tenant has supplied a key.
+-- is whether a key has been supplied.
 INSERT INTO llm_provider_configs (provider_type, base_url, default_model) VALUES
     ('local',     'http://127.0.0.1:1234/v1',                                  ''),
     ('openai',    'https://api.openai.com/v1',                                 'gpt-4o'),
@@ -56,8 +55,7 @@ INSERT INTO llm_provider_configs (provider_type, base_url, default_model) VALUES
     ('groq',      'https://api.groq.com/openai/v1',                            'llama-3.3-70b-versatile')
 ON CONFLICT DO NOTHING;
 
--- Token prices, per tenant because the admin billing routes let a tenant edit
--- them. These are the defaults every tenant starts from.
+-- Token prices. The admin billing routes can edit them; these are the defaults.
 INSERT INTO model_prices (model, usd_per_1m_prompt, usd_per_1m_completion, usd_per_1m_cache_read, usd_per_1m_cache_write) VALUES
     ('claude-opus-5',     5,  25, 0.5,  6.25),
     ('claude-sonnet-5',   3,  15, 0.3,  3.75),

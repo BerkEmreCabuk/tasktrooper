@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -18,7 +19,7 @@ func TestUpdateSetsTheMobilePlatformOnAMobileRepo(t *testing.T) {
 	svc, repos := newUpdateTestService(domain.Repository{ID: uuid.New(), Kind: domain.RepoKindMobile})
 	platform := domain.MobilePlatformAndroid
 
-	repo, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{MobilePlatform: &platform})
+	repo, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{MobilePlatform: &platform})
 	require.NoError(t, err)
 	require.Equal(t, domain.MobilePlatformAndroid, repo.MobilePlatform)
 	require.Equal(t, []string{domain.MobilePlatformAndroid}, repos.mobilePlatformWrites)
@@ -31,7 +32,7 @@ func TestUpdateAcceptsAPlatformAlongsideTheKindThatJustifiesIt(t *testing.T) {
 	kind := domain.RepoKindMobile
 	platform := domain.MobilePlatformIOS
 
-	repo, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{
+	repo, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{
 		Kind: &kind, MobilePlatform: &platform,
 	})
 	require.NoError(t, err)
@@ -42,7 +43,7 @@ func TestUpdateRejectsAPlatformOnANonMobileRepo(t *testing.T) {
 	svc, repos := newUpdateTestService(domain.Repository{ID: uuid.New(), Kind: domain.RepoKindBackend})
 	platform := domain.MobilePlatformIOS
 
-	_, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{MobilePlatform: &platform})
+	_, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{MobilePlatform: &platform})
 	require.ErrorContains(t, err, "only meaningful on a mobile project")
 	require.Empty(t, repos.mobilePlatformWrites)
 }
@@ -51,7 +52,7 @@ func TestUpdateRejectsAnUnknownPlatform(t *testing.T) {
 	svc, repos := newUpdateTestService(domain.Repository{ID: uuid.New(), Kind: domain.RepoKindMobile})
 	platform := "symbian"
 
-	_, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{MobilePlatform: &platform})
+	_, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{MobilePlatform: &platform})
 	require.ErrorContains(t, err, "invalid mobile platform")
 	require.Empty(t, repos.mobilePlatformWrites)
 }
@@ -63,7 +64,7 @@ func TestUpdateClearsThePlatformOnAnyKind(t *testing.T) {
 	})
 	empty := ""
 
-	repo, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{MobilePlatform: &empty})
+	repo, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{MobilePlatform: &empty})
 	require.NoError(t, err)
 	require.Empty(t, repo.MobilePlatform)
 	require.Equal(t, []string{""}, repos.mobilePlatformWrites)
@@ -74,7 +75,7 @@ func TestUpdateSetsTheMutationGate(t *testing.T) {
 	on := true
 	threshold := 65.0
 
-	repo, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{
+	repo, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{
 		MutationEnabled: &on, MutationThreshold: &threshold,
 	})
 	require.NoError(t, err)
@@ -86,7 +87,7 @@ func TestUpdateRejectsAMutationThresholdOutside0To100(t *testing.T) {
 	svc, repos := newUpdateTestService(domain.Repository{ID: uuid.New(), Kind: domain.RepoKindBackend})
 	bad := 140.0
 
-	_, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{MutationThreshold: &bad})
+	_, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{MutationThreshold: &bad})
 	require.ErrorContains(t, err, "must be between 0 and 100")
 	require.Zero(t, repos.repo.MutationThreshold)
 }
@@ -96,7 +97,7 @@ func TestUpdateValidatesSubProjectQualityGates(t *testing.T) {
 	bad := -5.0
 	subs := []domain.RepoSubProject{{Path: "apps/api", Kind: domain.RepoKindBackend, MutationThreshold: &bad}}
 
-	_, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{SubProjects: &subs})
+	_, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{SubProjects: &subs})
 	require.ErrorContains(t, err, "mutation_threshold must be between 0 and 100")
 	require.Empty(t, repos.subProjectWrites)
 }
@@ -105,7 +106,7 @@ func TestUpdateSetsTheReleaseEngineOnAMobileRepo(t *testing.T) {
 	svc, repos := newUpdateTestService(domain.Repository{ID: uuid.New(), Kind: domain.RepoKindMobile})
 	engine := domain.ReleaseEngineLocal
 
-	repo, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{ReleaseEngine: &engine})
+	repo, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{ReleaseEngine: &engine})
 	require.NoError(t, err)
 	require.Equal(t, domain.ReleaseEngineLocal, repo.ReleaseEngine)
 	require.Equal(t, []string{domain.ReleaseEngineLocal}, repos.releaseEngineWrites)
@@ -115,7 +116,7 @@ func TestUpdateRejectsAPinnedEngineOnANonMobileRepo(t *testing.T) {
 	svc, repos := newUpdateTestService(domain.Repository{ID: uuid.New(), Kind: domain.RepoKindBackend})
 	engine := domain.ReleaseEngineActions
 
-	_, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{ReleaseEngine: &engine})
+	_, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{ReleaseEngine: &engine})
 	require.ErrorContains(t, err, "only meaningful on a mobile project")
 	require.Empty(t, repos.releaseEngineWrites)
 }
@@ -124,7 +125,7 @@ func TestUpdateRejectsAnUnknownReleaseEngine(t *testing.T) {
 	svc, repos := newUpdateTestService(domain.Repository{ID: uuid.New(), Kind: domain.RepoKindMobile})
 	engine := "jenkins"
 
-	_, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{ReleaseEngine: &engine})
+	_, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{ReleaseEngine: &engine})
 	require.ErrorContains(t, err, "invalid release engine")
 	require.Empty(t, repos.releaseEngineWrites)
 }
@@ -138,7 +139,7 @@ func TestUpdateWritesAutoForAnEmptyReleaseEngine(t *testing.T) {
 	})
 	empty := ""
 
-	repo, err := svc.Update(repoCtx(repoTenantA), repos.repo.ID, domain.UpdateRepositoryRequest{ReleaseEngine: &empty})
+	repo, err := svc.Update(context.Background(), repos.repo.ID, domain.UpdateRepositoryRequest{ReleaseEngine: &empty})
 	require.NoError(t, err)
 	require.Equal(t, domain.ReleaseEngineAuto, repo.ReleaseEngine)
 	require.Equal(t, []string{domain.ReleaseEngineAuto}, repos.releaseEngineWrites)

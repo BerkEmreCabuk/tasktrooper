@@ -15,7 +15,6 @@ import (
 
 	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 // defaultPushReindexInterval is the per-repo floor between webhook-triggered
@@ -36,32 +35,6 @@ type pushRepoState struct {
 	pending   bool
 	lastStart time.Time
 	timer     *time.Timer
-	// actor is the identity the reindex this state schedules must run as.
-	//
-	// Stored for the same reason board.RunJob carries one: the delivery that
-	// proved which tenant this push belongs to is long gone by the time the
-	// debounce timer fires, and everything the pass then does — reading the
-	// repository row, restoring the mirror, writing index status — is scoped by
-	// the identity on its context. Without it the pass runs on a bare
-	// context.Background() and every store call answers tenant.ErrNoTenant, so
-	// a push-triggered reindex silently does nothing at all.
-	//
-	// The identity, not a context: a stored context would carry a dead deadline
-	// and a cancellation belonging to a request that has already been answered.
-	// Last delivery wins, which is safe because a repository row belongs to
-	// exactly one tenant, so consecutive pushes to it are all the same one.
-	actor tenant.Identity
-}
-
-// pushContext rebuilds the context a debounced reindex runs on: no deadline (a
-// pass over a large repository is long) and the tenant the delivery arrived
-// for.
-func (st *pushRepoState) pushContext() context.Context {
-	ctx := context.Background()
-	if st != nil && st.actor.TenantID != uuid.Nil {
-		ctx = tenant.With(ctx, st.actor)
-	}
-	return ctx
 }
 
 // SetPublicBaseURL wires the externally reachable base URL GitHub webhooks
@@ -101,22 +74,8 @@ func webhooksReachable(base string) bool {
 }
 
 // webhookTargetURL is the delivery URL registered with GitHub.
-//
-// The ?t=<tenant> query parameter is how the gateway knows which tenant a
-// delivery belongs to: GitHub signs the body with the per-repository secret and
-// carries no identity of ours, and /v1/github/webhook is a public path, so the
-// URL registered at import time is the only place the tenant can be recorded.
-//
-// It is read off the REQUEST that registers the hook rather than from a
-// pod-wide value. It used to come from TENANT_UID, which was correct while a
-// pod served one tenant; one shared Deployment has no such value, and the
-// tenant importing the repository is right there on the context.
-func (s *Service) webhookTargetURL(ctx context.Context) string {
-	target := s.publicBaseURL + "/v1/github/webhook"
-	if id, ok := tenant.ID(ctx); ok {
-		target += "?t=" + url.QueryEscape(id.String())
-	}
-	return target
+func (s *Service) webhookTargetURL() string {
+	return s.publicBaseURL + "/v1/github/webhook"
 }
 
 func (s *Service) pushInterval() time.Duration {
@@ -163,7 +122,7 @@ func (s *Service) SetupWebhook(ctx context.Context, repositoryID uuid.UUID) (dom
 	if err != nil {
 		return domain.Repository{}, fmt.Errorf("generate webhook secret: %w", err)
 	}
-	hookID, err := githubapi.EnsureRepoWebhookAt(ctx, s.githubAPIBase, token, owner, name, s.webhookTargetURL(ctx), secret)
+	hookID, err := githubapi.EnsureRepoWebhookAt(ctx, s.githubAPIBase, token, owner, name, s.webhookTargetURL(), secret)
 	if err != nil {
 		return domain.Repository{}, fmt.Errorf("github webhook setup: %w", err)
 	}
@@ -186,13 +145,9 @@ func generateWebhookSecret() (string, error) {
 // setupWebhookAsync is the best-effort install at repo registration time. A
 // failure only costs the automation: the UI shows a warning with a retry
 // button as long as the repo has no webhook.
-// It takes the caller's context for its IDENTITY only (context.WithoutCancel). The
-// install reads the repository row, resolves the tenant's GitHub token and
-// stores the webhook secret, all policy-protected, and it stamps the delivery
-// URL with ?t=<tenant> (webhookTargetURL). On a bare context.Background() every
-// one of those failed, so a live stack logged "github push webhook setup
-// failed: tenant: no tenant in context" on every repository import and no
-// tenant ever got a push webhook.
+// It keeps the caller's context values but not its cancellation
+// (context.WithoutCancel): the request that imported the repository is answered
+// before the install finishes.
 func (s *Service) setupWebhookAsync(ctx context.Context, repositoryID uuid.UUID) {
 	if s.githubToken == nil || !webhooksReachable(s.publicBaseURL) {
 		return
@@ -226,14 +181,7 @@ func (s *Service) setupWebhookAsync(ctx context.Context, repositoryID uuid.UUID)
 // run on every boot. Failures cost only the automation; the UI's warning with
 // its retry button stays until a setup succeeds.
 //
-// It takes a context and runs ONE tenant, because everything it does is
-// per-tenant: the repository list, the GitHub token, and — decisively — the
-// ?t=<tenant> the delivery URL carries, which is the only place a webhook
-// records who it belongs to (webhookTargetURL). It used to build its own
-// context.Background(), so every read raised tenant.ErrNoTenant and the pass
-// logged "could not list repositories" once per boot and converged nothing.
-// The fan-out over tenants and the goroutine are the caller's, the same way
-// they are for every other sweep.
+// The goroutine is the caller's, the same way it is for every other sweep.
 func (s *Service) ReconcileWebhooks(ctx context.Context) {
 	if s.githubToken == nil || !webhooksReachable(s.publicBaseURL) {
 		return
@@ -249,7 +197,7 @@ func (s *Service) ReconcileWebhooks(ctx context.Context) {
 			log.Warn().Err(err).Msg("webhook reconcile: could not list repositories")
 			return
 		}
-		target := s.webhookTargetURL(ctx)
+		target := s.webhookTargetURL()
 		for _, repo := range repos {
 			owner, name, ok := githubapi.ParseOwnerRepo(repo.RemoteURL)
 			if !ok {
@@ -332,7 +280,7 @@ func (s *Service) HandleGitHubPush(ctx context.Context, repositoryID uuid.UUID, 
 			return false, "index already at pushed commit"
 		}
 	}
-	return true, s.schedulePushReindex(ctx, repositoryID)
+	return true, s.schedulePushReindex(repositoryID)
 }
 
 // HandleGitHubWorkflowEvent is called after the HTTP layer has verified the
@@ -442,15 +390,9 @@ func (s *Service) pushStateLocked(repositoryID uuid.UUID) *pushRepoState {
 
 // schedulePushReindex is the debounce gate: at most one pass per repo per
 // interval, one pass in flight, and at most one queued rerun behind it.
-func (s *Service) schedulePushReindex(ctx context.Context, repositoryID uuid.UUID) string {
+func (s *Service) schedulePushReindex(repositoryID uuid.UUID) string {
 	s.pushMu.Lock()
 	st := s.pushStateLocked(repositoryID)
-	// Recorded on every delivery, including the ones that are only queued or
-	// debounced: whichever of them eventually fires the pass has to know who it
-	// is acting for, and this delivery is the last moment that is on a context.
-	if id, ok := tenant.From(ctx); ok {
-		st.actor = id
-	}
 	if st.running {
 		st.pending = true
 		s.pushMu.Unlock()
@@ -503,11 +445,10 @@ func (s *Service) firePushReindex(repositoryID uuid.UUID) {
 // touched, so push spam cannot turn into an LLM bill while a commit that does
 // change the deploy workflow or the build command is picked up immediately.
 func (s *Service) startPushReindex(repositoryID uuid.UUID) {
-	s.pushMu.Lock()
-	tenantCtx := s.pushStateLocked(repositoryID).pushContext()
-	s.pushMu.Unlock()
+	// No deadline on the pass itself: a reindex of a large repository is long.
+	pushCtx := context.Background()
 
-	ctx, cancel := context.WithTimeout(tenantCtx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(pushCtx, 30*time.Second)
 	repo, err := s.repos.Get(ctx, repositoryID)
 	cancel()
 	if err != nil {
@@ -515,10 +456,10 @@ func (s *Service) startPushReindex(repositoryID uuid.UUID) {
 		s.pushReindexDone(repositoryID)
 		return
 	}
-	s.pullAndRestartIndexNotify(tenantCtx, repo.ID, repo.RootPath, func() {
+	s.pullAndRestartIndexNotify(pushCtx, repo.ID, repo.RootPath, func() {
 		s.pushReindexDone(repositoryID)
 		if s.profiles != nil {
-			pctx, pcancel := context.WithTimeout(tenantCtx, 30*time.Second)
+			pctx, pcancel := context.WithTimeout(pushCtx, 30*time.Second)
 			defer pcancel()
 			s.profiles.RefreshAfterPush(pctx, repositoryID, "push")
 		}

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -41,12 +42,12 @@ func TestServiceOpen_DetectsAndPersistsSubProjectsForANewMonorepo(t *testing.T) 
 	svc, repos := newOpenTestService(errors.New("not found"))
 	root := monorepoLayout(t)
 
-	// Open validates the root against this tenant's own subtree plus the
+	// Open validates the root against the workspace root's own subtree plus the
 	// operator's allowed_roots (workspace.ValidateProjectRoot), so a checkout
 	// in a temp dir has to be declared rather than waved through.
 	svc.allowedRoots = []string{root}
 
-	repo, err := svc.Open(repoCtx(repoTenantA), domain.OpenRepositoryRequest{RootPath: root})
+	repo, err := svc.Open(context.Background(), domain.OpenRepositoryRequest{RootPath: root})
 	require.NoError(t, err)
 
 	require.Equal(t, domain.RepoKindMonorepo, repo.Kind)
@@ -64,7 +65,7 @@ func TestServiceOpen_DoesNotDetectWhenKindIsExplicit(t *testing.T) {
 
 	svc.allowedRoots = []string{root}
 
-	repo, err := svc.Open(repoCtx(repoTenantA), domain.OpenRepositoryRequest{RootPath: root, Kind: domain.RepoKindBackend})
+	repo, err := svc.Open(context.Background(), domain.OpenRepositoryRequest{RootPath: root, Kind: domain.RepoKindBackend})
 	require.NoError(t, err)
 
 	require.Equal(t, domain.RepoKindBackend, repo.Kind)
@@ -79,7 +80,7 @@ func TestServiceOpen_DoesNotDetectForANonMonorepo(t *testing.T) {
 
 	svc.allowedRoots = []string{root}
 
-	repo, err := svc.Open(repoCtx(repoTenantA), domain.OpenRepositoryRequest{RootPath: root})
+	repo, err := svc.Open(context.Background(), domain.OpenRepositoryRequest{RootPath: root})
 	require.NoError(t, err)
 
 	require.Equal(t, domain.RepoKindBackend, repo.Kind)
@@ -95,7 +96,7 @@ func TestServiceOpen_DetectsAndPersistsTheMobilePlatform(t *testing.T) {
 
 	svc.allowedRoots = []string{root}
 
-	repo, err := svc.Open(repoCtx(repoTenantA), domain.OpenRepositoryRequest{RootPath: root})
+	repo, err := svc.Open(context.Background(), domain.OpenRepositoryRequest{RootPath: root})
 	require.NoError(t, err)
 
 	require.Equal(t, domain.RepoKindMobile, repo.Kind)
@@ -112,7 +113,7 @@ func TestServiceOpen_DetectsThePlatformForAnExplicitMobileKind(t *testing.T) {
 
 	svc.allowedRoots = []string{root}
 
-	repo, err := svc.Open(repoCtx(repoTenantA), domain.OpenRepositoryRequest{RootPath: root, Kind: domain.RepoKindMobile})
+	repo, err := svc.Open(context.Background(), domain.OpenRepositoryRequest{RootPath: root, Kind: domain.RepoKindMobile})
 	require.NoError(t, err)
 
 	require.Equal(t, domain.MobilePlatformIOS, repo.MobilePlatform)
@@ -126,7 +127,7 @@ func TestServiceOpen_WritesNoPlatformForANonMobileRepo(t *testing.T) {
 
 	svc.allowedRoots = []string{root}
 
-	repo, err := svc.Open(repoCtx(repoTenantA), domain.OpenRepositoryRequest{RootPath: root})
+	repo, err := svc.Open(context.Background(), domain.OpenRepositoryRequest{RootPath: root})
 	require.NoError(t, err)
 
 	require.Empty(t, repo.MobilePlatform)
@@ -154,7 +155,7 @@ func TestServiceOpen_DetectsAndPersistsTheAppIdentity(t *testing.T) {
 
 	svc.allowedRoots = []string{root}
 
-	repo, err := svc.Open(repoCtx(repoTenantA), domain.OpenRepositoryRequest{RootPath: root})
+	repo, err := svc.Open(context.Background(), domain.OpenRepositoryRequest{RootPath: root})
 	require.NoError(t, err)
 
 	want := domain.AppIdentity{BundleID: "com.acme.app", PackageName: "com.acme.app"}
@@ -182,7 +183,7 @@ func TestServiceOpen_DetectsAndPersistsTheBuildTargets(t *testing.T) {
 
 	svc.allowedRoots = []string{root}
 
-	repo, err := svc.Open(repoCtx(repoTenantA), domain.OpenRepositoryRequest{RootPath: root})
+	repo, err := svc.Open(context.Background(), domain.OpenRepositoryRequest{RootPath: root})
 	require.NoError(t, err)
 
 	want := domain.BuildTargets{XcodeScheme: "Runner", GradleModule: "app"}
@@ -200,7 +201,7 @@ func TestServiceOpen_WritesNoBuildTargetsWhenNothingIsReadable(t *testing.T) {
 
 	svc.allowedRoots = []string{root}
 
-	repo, err := svc.Open(repoCtx(repoTenantA), domain.OpenRepositoryRequest{RootPath: root})
+	repo, err := svc.Open(context.Background(), domain.OpenRepositoryRequest{RootPath: root})
 	require.NoError(t, err)
 
 	require.Equal(t, domain.RepoKindMobile, repo.Kind)
@@ -219,7 +220,7 @@ func TestServiceOpen_WritesNoAppIdentityWhenNothingIsReadable(t *testing.T) {
 
 	svc.allowedRoots = []string{root}
 
-	repo, err := svc.Open(repoCtx(repoTenantA), domain.OpenRepositoryRequest{RootPath: root})
+	repo, err := svc.Open(context.Background(), domain.OpenRepositoryRequest{RootPath: root})
 	require.NoError(t, err)
 
 	require.Equal(t, domain.RepoKindMobile, repo.Kind)

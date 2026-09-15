@@ -12,13 +12,11 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
-	"github.com/makifbaysal/tasktrooper/server/internal/application/tenantboot"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/bootseed"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/database"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
-// BootSeedSuite runs the real board seed on a context that carries no
-// identity, which is all the store layer needs now.
+// BootSeedSuite runs the real board seed against an embedded database.
 type BootSeedSuite struct {
 	suite.Suite
 	ctx    context.Context
@@ -65,7 +63,7 @@ func (s *BootSeedSuite) TearDownSuite() {
 // seeded before migration 133 (install_state carried over from
 // tenants.bootstrapped_at), a fresh install, and every later start.
 func (s *BootSeedSuite) TestBoardIsSeededOnce() {
-	seeds := postgres.NewTenantSeedStore(s.db)
+	seeds := postgres.NewBoardSeedStore(s.db)
 
 	s.setSeeded(true)
 	ran, err := seeds.SeedBoardOnce(s.ctx, `INSERT INTO board_columns (slug, label, position) VALUES ('probe', 'Probe', 99)`)
@@ -74,7 +72,7 @@ func (s *BootSeedSuite) TestBoardIsSeededOnce() {
 	s.Zero(s.count("board_columns"))
 
 	s.setSeeded(false)
-	s.Require().NoError(tenantboot.NewService(seeds).Sight(s.ctx, localIdentity()))
+	s.Require().NoError(bootseed.NewService(seeds).Ensure(s.ctx))
 	s.Equal(13, s.count("board_columns"), "the 13-column default board")
 	s.Equal(3, s.count("board_task_counters"), "one counter per task type")
 	s.Equal(1, s.count("board_settings"))
@@ -91,7 +89,7 @@ func (s *BootSeedSuite) TestBoardIsSeededOnce() {
 	}, s.slugs())
 
 	// A restarted process has an empty cache, so only install_state stops it.
-	s.Require().NoError(tenantboot.NewService(seeds).Sight(s.ctx, localIdentity()))
+	s.Require().NoError(bootseed.NewService(seeds).Ensure(s.ctx))
 	s.Equal(13, s.count("board_columns"), "a second start duplicated the board")
 	s.Equal(1, s.count("board_settings"))
 	var seeded bool
@@ -102,7 +100,7 @@ func (s *BootSeedSuite) TestBoardIsSeededOnce() {
 // TestConcurrentStartsSeedOnce: the gate's upsert is also its lock, so starts
 // racing on an unseeded install seed it exactly once.
 func (s *BootSeedSuite) TestConcurrentStartsSeedOnce() {
-	seeds := postgres.NewTenantSeedStore(s.db)
+	seeds := postgres.NewBoardSeedStore(s.db)
 	s.setSeeded(false)
 
 	var ran atomic.Int32
@@ -120,10 +118,6 @@ func (s *BootSeedSuite) TestConcurrentStartsSeedOnce() {
 	}
 	wg.Wait()
 	s.EqualValues(1, ran.Load())
-}
-
-func localIdentity() tenant.Identity {
-	return tenant.Identity{TenantID: tenant.LocalTenantID, Role: tenant.RoleOwner}
 }
 
 func (s *BootSeedSuite) setSeeded(seeded bool) {

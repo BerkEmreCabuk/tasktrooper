@@ -223,7 +223,6 @@ func (d *Dispatcher) Dispatch(ctx context.Context, input DispatchInput) error {
 			Event:        event,
 			Task:         input.Task,
 			RepositoryID: input.RepositoryID,
-			Tenant:       tenantOf(ctx),
 		})
 	}
 	return nil

@@ -9,10 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 // Run is everything one live claude_code session needs for its tool calls to be
@@ -33,24 +30,6 @@ import (
 //     makes that happen without a second mechanism.
 type Run struct {
 	Ctx context.Context
-	// Tenant is WHOSE run this is, captured at mint time and re-applied to Ctx
-	// on every call this token makes (see Scoped).
-	//
-	// It is on the token rather than left to whatever Ctx happens to carry
-	// because the token is now the ONLY thing the caller presents. /mcp is a
-	// public path — it must be, since the client holds no gateway signature and
-	// no tenant API key — so tenantMiddleware never runs for it and there is no
-	// signed X-Internal-Tenant header on the request to read. Binding the
-	// tenant to the credential at the moment it is minted is what makes the
-	// answer to "which tenant is this call for" a fact this process wrote
-	// rather than a claim the caller made.
-	//
-	// Zero (uuid.Nil TenantID) is the single-tenant case — a self-hosted or
-	// desktop install whose run context carries no identity — and leaves Ctx
-	// untouched, which is exactly what those deployments did before. A cloud
-	// mint with no tenant is refused at the provider, not here: see
-	// platform/runtime/claudecode_mcp.go.
-	Tenant tenant.Identity
 	// Policy is the run's tool policy — the same one the loop would have
 	// enforced. It decides both what tools/list advertises and what tools/call
 	// will execute.
@@ -81,21 +60,6 @@ type Run struct {
 	ExpiresAt time.Time
 }
 
-// Scoped is Ctx with this token's tenant applied.
-//
-// Every tool call runs on this rather than on Ctx directly, so the tenant a
-// call executes under is the one that was bound when the credential was minted
-// — not one read from a header the caller sent, and not whatever a context
-// assembled elsewhere happened to carry. On the single-tenant path (zero
-// Tenant) it is Ctx unchanged and the database's own fail-closed check
-// (tenant.ErrNoTenant) still applies.
-func (r Run) Scoped() context.Context {
-	if r.Ctx == nil || r.Tenant.TenantID == uuid.Nil {
-		return r.Ctx
-	}
-	return tenant.With(r.Ctx, r.Tenant)
-}
-
 // live reports whether this token is still usable.
 //
 // Two ways to be dead: revoked (handled by the caller — the entry is simply
@@ -120,7 +84,7 @@ func (r Run) live(now time.Time) bool {
 
 // tokenBytes is the size of a run token before base64url. 32 bytes is 256 bits
 // of crypto/rand: the token is the ONLY thing standing between a caller and
-// this tenant's board tools, and it travels in a file rather than a command
+// the board tools, and it travels in a file rather than a command
 // line precisely because it is a credential.
 const tokenBytes = 32
 

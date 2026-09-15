@@ -60,6 +60,7 @@ import (
 	attachmentapp "github.com/makifbaysal/tasktrooper/server/internal/application/attachment"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/billing"
 	boardapp "github.com/makifbaysal/tasktrooper/server/internal/application/board"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/bootseed"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/catalog"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/chunker"
 	appconfig "github.com/makifbaysal/tasktrooper/server/internal/application/config"
@@ -91,13 +92,11 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/settings"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops/pipeline"
-	"github.com/makifbaysal/tasktrooper/server/internal/application/tenantboot"
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/vercelops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/secrets"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -249,15 +248,15 @@ type engine struct {
 	deployWatchSvc *deploywatch.Service
 	deployMonitor  *deployops.Monitor
 	evolutionSvc   *evolution.Service
-	// pgPool is kept beside pgDB for the two jobs that are NOT tenant data:
+	// pgPool is kept beside pgDB for the two jobs that are not row data:
 	// closing the pool, and the pgvector bootstrap (CREATE EXTENSION plus the
-	// index DDL below), which is schema work with no tenant to scope it to.
+	// index DDL below), which is schema work.
 	// Everything else in the process reaches Postgres through pgDB.
 	pgPool *pgxpool.Pool
 	pgDB   *pgstore.DB
-	// tenantOnboarder seeds the default board once and runs the boot steps.
-	tenantOnboarder *tenantboot.Service
-	pendingMCP      []domain.MCPServerConfig
+	// bootSeed seeds the default board once and runs the boot steps.
+	bootSeed   *bootseed.Service
+	pendingMCP []domain.MCPServerConfig
 	// mcpServer and mcpEndpoint are the two halves of the per-run tool endpoint
 	// the Claude Code CLI calls back on. mcpServer is nil unless the executor
 	// was registered (see buildHandler): with no CLI on the host there is no
@@ -296,21 +295,6 @@ func ConfigureLogger(debug bool) {
 	// LISTENING address the desktop supervisor parses) and a log line landing
 	// beside it would have to be told apart from it.
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
-}
-
-// configuredPort is the port the HTTP listener will ask for: the Options
-// override when there is one, the config's otherwise. 0 means "let the kernel
-// pick", which is what desktop installs and every test get — and the reason the
-// MCP endpoint's URL cannot be known before the listener exists.
-// localContext is the identity for work with no request behind it that starts
-// from a fresh root — a reload, the background MCP connect. runCtx already
-// carries the same identity for everything descended from boot; this is for the
-// handful of places that deliberately outlive their caller and so cannot.
-func localContext() context.Context {
-	return tenant.With(context.Background(), tenant.Identity{
-		TenantID: tenant.LocalTenantID,
-		Role:     tenant.RoleOwner,
-	})
 }
 
 // flattenLegacyWorkspaces moves an install still on the per-tenant workspace
@@ -359,6 +343,10 @@ func corsOrigins(opts Options) []string {
 	return DefaultCORSOrigins
 }
 
+// configuredPort is the port the HTTP listener will ask for: the Options
+// override when there is one, the config's otherwise. 0 means "let the kernel
+// pick", which is what desktop installs and every test get — and the reason the
+// MCP endpoint's URL cannot be known before the listener exists.
 func configuredPort(cfg *domain.Config, opts Options) int {
 	if opts.Port > 0 {
 		return opts.Port
@@ -391,19 +379,6 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
-
-	// The tenant every background context inherits.
-	//
-	// Boot steps, sweepers, monitors and the job worker all descend from runCtx
-	// and all read tenant-scoped tables. Without an identity here each of them
-	// raises tenant.ErrNoTenant on its first query and then degrades quietly —
-	// stored MCP servers never resolve, "auto" embeddings fall back to the
-	// configured chat default — with one Warn at boot as the only sign. There is
-	// exactly one tenant on this machine, so there is nothing to choose wrongly.
-	runCtx = tenant.With(runCtx, tenant.Identity{
-		TenantID: tenant.LocalTenantID,
-		Role:     tenant.RoleOwner,
-	})
 
 	// The listener is opened BEFORE the handler is built, and that order is
 	// load-bearing rather than tidy.
@@ -453,12 +428,12 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 	flattenLegacyWorkspaces(runCtx, e.cfg)
 
 	handler := e.buildHandler(runCtx, opts)
-	// One machine, one tenant: seed it now rather than on the first request, so
-	// the board exists and the role agents are already being written when the
-	// desktop's first /health answers and the window opens.
-	if e.tenantOnboarder != nil {
-		if err := e.tenantOnboarder.Sight(localContext(), tenant.Identity{TenantID: tenant.LocalTenantID, Role: tenant.RoleOwner}); err != nil {
-			log.Warn().Err(err).Msg("seeding the local tenant at boot failed; the first request retries the board seed")
+	// Seed now rather than on the first request, so the board exists and the
+	// role agents are already being written when the desktop's first /health
+	// answers and the window opens.
+	if e.bootSeed != nil {
+		if err := e.bootSeed.Ensure(context.Background()); err != nil {
+			log.Warn().Err(err).Msg("seeding the board at boot failed; the first request retries it")
 		}
 	}
 
@@ -479,11 +454,10 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 
 	app := fiber.New(fiber.Config{
 		// Off (the default) the router matches a lowercased path while c.Path()
-		// returns the raw one, so `/V1/settings` reached the admin handler while
-		// isPublicPath, tenantMiddleware and roleMiddleware all read a path that
-		// matched none of their `/v1`/`/admin` rules — an unauthenticated,
-		// untenanted, unroled request onto a tenant-configuration endpoint. On,
-		// the router refuses the spelling outright. StrictRouting stays off: a
+		// returns the raw one, so `/V1/settings` reached the settings handler
+		// while isPublicPath read a path that matched neither its `/v1` nor its
+		// `/admin` rule — an unauthenticated request onto a configuration
+		// endpoint. On, the router refuses the spelling outright. StrictRouting stays off: a
 		// trailing slash never desynced anything, and turning it on would break
 		// clients that send one.
 		CaseSensitive: true,
@@ -559,11 +533,10 @@ func (s *Server) URL() string {
 	return "http://" + s.addr
 }
 
-// bootConvergeTimeout bounds the whole boot-time convergence pass — every
-// tenant's webhook reconcile and index-freshness check together. It was five
-// minutes per pass when a pass meant one tenant; a fleet-wide sweep needs more
-// room, and it is still a bound rather than a budget nobody may exceed: a pass
-// that runs out is retried by the next pod, and nothing waits on it.
+// bootConvergeTimeout bounds the whole boot-time convergence pass — the webhook
+// reconcile and index-freshness check together. It is a bound rather than a
+// budget nobody may exceed: a pass that runs out is retried on the next start,
+// and nothing waits on it.
 const bootConvergeTimeout = 15 * time.Minute
 
 // localPushPollInterval is how often an instance GitHub cannot deliver
@@ -574,8 +547,8 @@ const localPushPollInterval = 5 * time.Minute
 // drain budget belongs to the agent runs in step 2.
 const httpDrainTimeout = 15 * time.Second
 
-// Shutdown drains rather than severs. Order matters: tenant pods are scaled to
-// zero routinely, so a SIGTERM lands on a workspace that is very likely mid-run.
+// Shutdown drains rather than severs. Order matters: a SIGTERM (the desktop
+// quitting, an update) very likely lands on a workspace mid-run.
 // Previously the run context was cancelled and the DB pool closed before HTTP
 // was drained, which failed every in-flight request and abandoned the board
 // runner's queue outright.
@@ -755,14 +728,13 @@ func (e *engine) bootstrapLLMFromYAML(baseURL, model, apiKey string, timeout tim
 	if e.multiLLM == nil {
 		// No resolver yet: it needs the database, which does not exist this
 		// early. Until buildHandler installs one, every call uses the fallback
-		// above — the client built from config.yml, which belongs to the
-		// deployment rather than to any tenant.
+		// above — the client built from config.yml.
 		//
 		// The old code also registered that same fallback as the `local`
 		// PROVIDER here. That is gone with the rest of the shared client map:
-		// `local` is a per-tenant row like every other provider, and a tenant
-		// who has not configured one must not inherit whatever base_url the
-		// operator put in the file.
+		// `local` is a stored provider row like every other, and an install that
+		// has not configured one must not inherit whatever base_url is in the
+		// file.
 		e.multiLLM = llm.NewMultiProviderClient(fallback, nil)
 	}
 	e.llmClient = e.multiLLM
@@ -838,7 +810,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			e.pgDB = pgDB
 			// Seeds the default board once per install (install_state) and runs
 			// the boot steps; built here because it needs the database.
-			e.tenantOnboarder = tenantboot.NewService(pgstore.NewTenantSeedStore(pgDB))
+			e.bootSeed = bootseed.NewService(pgstore.NewBoardSeedStore(pgDB))
 			// SetHostRoots, same reason as the repository store below:
 			// sessions.workspace_dir and sessions.project_root are absolute
 			// paths belonging to whichever host wrote the row. Resuming a
@@ -864,7 +836,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				SetHostRoots(cfg.Storage.Sessions.WorkspaceRoot, cfg.Indexer.AllowedRoots)
 			embedMapStore = pgstore.NewEmbeddingMapStore(pgDB)
 			// SetHostRoots: repositories.root_path is an absolute path written
-			// by whichever host imported the repo, and one tenant database is
+			// by whichever host imported the repo, and one database is
 			// now served by two (the cloud pod's PVC at /data and the user's
 			// Mac behind a reverse tunnel). The store re-anchors a foreign
 			// path onto this host's workspace root on read; without it a board
@@ -918,9 +890,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}
 		// The reload hook is a SIBLING of the LLM credential leak: mcp.Service
 		// calls it after every create/update/delete — a request path — and it
-		// rebuilds the process-wide manager from the CALLING tenant's servers,
-		// registering their tools into the one process-wide registry with that
-		// tenant's secrets in the child environment.
+		// rebuilds the process-wide manager from the stored servers, registering
+		// their tools into the one process-wide registry with their secrets in the
+		// child environment.
 		//
 		// Wired unconditionally, because the refusal now lives in reloadMCP
 		// itself. It used to live here, and that was the mistake: the other
@@ -929,7 +901,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		mcpService = mcpsvc.NewService(mcpStore, e.secretsCipher, e.reloadMCP)
 		// The default catalog of stdio/http MCP servers, seeded as a boot step
 		// so it runs after the board seed, once per process.
-		e.tenantOnboarder.AddStep("mcp_servers", mcpService.SeedDefaultsIfEmpty)
+		e.bootSeed.AddStep("mcp_servers", mcpService.SeedDefaultsIfEmpty)
 		resolved, err := mcpService.ResolvedConfigs(ctx)
 		if err != nil {
 			log.Warn().Err(err).Msg("mcp server config resolve failed")
@@ -1110,15 +1082,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			e.reg.Register(tool)
 		}
 		// Orchestration is always on, and the role agents it dispatches to are
-		// per-tenant rows.
-		//
-		// This used to be a goroutine on context.Background() — no identity at
-		// all, not even the boot context's — so it raised tenant.ErrNoTenant on
-		// its first read and every tenant's board dispatched to an empty
-		// catalog. It is still background work for the reason it always was (a
-		// dozen writes must not hold up anything), just background work that
-		// knows whose catalog it is seeding.
-		e.tenantOnboarder.AddStep("role_agents", func(stepCtx context.Context) error {
+		// seeded as a boot step: background work, because a dozen writes must
+		// not hold up anything.
+		e.bootSeed.AddStep("role_agents", func(stepCtx context.Context) error {
 			err := catalogSvc.EnsureRoleAgents(stepCtx)
 			// The seed stores skills without vectors so it never waits on the
 			// embedder. The backfill outlives the boot step's deadline on
@@ -1197,7 +1163,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	if githubTokens != nil {
 		gitClient.SetTokenSource(githubTokens.GitHubToken)
 	}
-	// Billing: per-tenant USD budget (shown as tokens).
+	// Billing: USD budget (shown as tokens).
 	var billingSvc *billing.Service
 	if e.pgDB != nil {
 		billingSvc = billing.NewService(pgstore.NewBillingStore(e.pgDB))
@@ -1478,12 +1444,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					})
 				})
 			}
-			// Resume on startup and every 15 minutes after: a tenant whose
-			// budget period rolled over has tasks parked on a budget that is no
-			// longer spent, and nothing else will wake them.
-			//
-			// Tick reads billing_plan and the paused tasks, so it runs on ctx,
-			// which carries the local identity (see Run).
+			// Resume on startup and every 15 minutes after: once a budget period
+			// rolls over, tasks parked on the spent budget have nothing else to
+			// wake them.
 			activateBoard = append(activateBoard, func() {
 				billingSvc.Tick(ctx)
 				go func() {
@@ -1769,9 +1732,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			if githubTokens != nil {
 				repositorySvc.SetGitHubTokenSource(githubTokens.GitHubToken)
 			}
-			// Two boot-time convergence passes, both now fanned out over every
-			// tenant instead of running once with no tenant and converging
-			// nothing:
+			// Two boot-time convergence passes:
 			//
 			//   webhook_reconcile — repos registered before webhook support get
 			//     one installed, and repos whose hook predates the Actions
@@ -1877,7 +1838,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				Repos:       repositoryStore,
 			})
 
-			// The tenant's own Google Cloud account, read-only: Cloud Run
+			// The user's own Google Cloud account, read-only: Cloud Run
 			// services and GKE clusters behind a service account they saved.
 			// Repos is handed over so a bind can check the sub-project path it
 			// is given actually exists; nil would accept any path silently.
@@ -1961,10 +1922,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			})
 
 			// Whatever is registered (or, failing that, in the environment)
-			// is what the agents drive from the first run — read on the
-			// tenant's first request rather than at boot, because
-			// mobile_devices is a per-tenant table and boot has no tenant.
-			e.tenantOnboarder.AddStep("mobile_devices", func(stepCtx context.Context) error {
+			// is what the agents drive from the first run — read as a boot
+			// step, after the board seed.
+			e.bootSeed.AddStep("mobile_devices", func(stepCtx context.Context) error {
 				devices, source, derr := mobileDeviceSvc.Effective(stepCtx)
 				if derr != nil {
 					return derr
@@ -2249,17 +2209,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// whoever triggered them, and turns a failed deploy into an
 			// incident.
 			//
-			// Gated on the token STORE, not on a token. It used to resolve one
-			// here and build the console only if that succeeded, which is two
-			// bugs in one line: the read is per-tenant and boot has no tenant,
-			// so it raised tenant.ErrNoTenant and the console, the deploy
-			// monitor, the deploy watch and the three board tools that hang off
-			// it were never built for anybody; and had it succeeded it would
-			// have baked ONE tenant's GitHub token into a client every other
-			// tenant then called GitHub with. NewActionsAPIFor resolves the
-			// acting tenant's token per call instead, so an unconnected tenant
-			// gets GitHub's own answer rather than a capability that silently
-			// does not exist.
+			// Gated on the token STORE, not on a token: NewActionsAPIFor
+			// resolves the stored token per call, so an unconnected install gets
+			// GitHub's own answer rather than a capability that silently does
+			// not exist.
 			if githubTokens != nil {
 				deployToken := githubapi.TokenSource(githubTokens.GitHubToken)
 				deploymentRunStore := pgstore.NewDeploymentRunStore(e.pgDB)
@@ -2417,14 +2370,12 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if e.multiLLM != nil {
 			e.multiLLM.SetResolver(providers)
 		}
-		// The operator, the tenant and the machine are the same person here, so
+		// The operator and the user are the same person here, so
 		// config.yml's llm.base_url and ANTHROPIC_API_KEY/OPENAI_API_KEY/
 		// GOOGLE_API_KEY out of the environment are that person's own
-		// credentials and seeding them saves a trip to the settings page.
-		//
-		// A step rather than a call: llm_provider_configs is tenant-scoped and
-		// there is no tenant on the boot context.
-		e.tenantOnboarder.AddStep("llm_providers", func(stepCtx context.Context) error {
+		// credentials and seeding them saves a trip to the settings page. A boot
+		// step, so it runs after the board seed has written the provider list.
+		e.bootSeed.AddStep("llm_providers", func(stepCtx context.Context) error {
 			if err := llmProviderSvc.BootstrapFromYAML(stepCtx, cfg.LLM); err != nil {
 				return err
 			}
@@ -2433,7 +2384,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		})
 		if opts.EmbeddingsBaseURL != "" {
 			embeddingsBaseURL := opts.EmbeddingsBaseURL
-			e.tenantOnboarder.AddStep("embeddings_endpoint", func(stepCtx context.Context) error {
+			e.bootSeed.AddStep("embeddings_endpoint", func(stepCtx context.Context) error {
 				return llmProviderSvc.BootstrapEmbeddings(stepCtx, embeddingsBaseURL)
 			})
 			log.Info().Str("embeddings_base_url", embeddingsBaseURL).
@@ -2586,8 +2537,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		UIFS:              opts.UIFS,
 		// Nil unless the Claude Code executor registered, in which case no /mcp
 		// route is mounted at all.
-		MCPToolServer:   e.mcpServer,
-		TenantOnboarder: e.tenantOnboarder,
+		MCPToolServer: e.mcpServer,
+		BootSeed:      e.bootSeed,
 	})
 	if scoreTracker != nil {
 		scoreTracker.OnScoreUpdated = handler.RecordAgentScore
@@ -2608,7 +2559,7 @@ func (e *engine) reloadMCP(configs []domain.MCPServerConfig) error {
 	if e.browserSession != nil {
 		e.browserSession.Close()
 	}
-	ctx, cancel := context.WithTimeout(localContext(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	e.mcpManager = &mcpadapter.Manager{}
 	e.mcpManager.LoadAndRegister(ctx, configs, e.reg)
@@ -2638,7 +2589,7 @@ func (e *engine) reload() error {
 
 	mcpConfigs := []domain.MCPServerConfig{}
 	if cfg.Storage.Postgres.DSN != "" {
-		ctx, cancel := context.WithTimeout(localContext(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		pgPool, err := pgstore.NewPool(ctx, cfg.Storage.Postgres.DSN, cfg.Storage.Postgres.MaxConns)
 		if err == nil {
@@ -2661,7 +2612,7 @@ func (e *engine) reload() error {
 }
 
 func (e *engine) loadMCPAsync(configs []domain.MCPServerConfig) {
-	ctx, cancel := context.WithTimeout(localContext(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	log.Info().Int("count", len(configs)).Msg("connecting mcp servers in background")
 	e.mcpManager.LoadAndRegister(ctx, configs, e.reg)

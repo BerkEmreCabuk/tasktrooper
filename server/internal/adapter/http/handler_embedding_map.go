@@ -11,7 +11,7 @@ import (
 )
 
 // registerEmbeddingMapRoutes exposes the projection the web UI feeds to UMAP.
-// Same router group — and therefore the same auth/tenant middleware — as every
+// Same router group — and therefore the same auth middleware — as every
 // other /v1 data route.
 func (h *Handler) registerEmbeddingMapRoutes(app fiber.Router) {
 	if h.embedMapSvc == nil {

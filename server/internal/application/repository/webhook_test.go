@@ -15,7 +15,6 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -57,16 +56,16 @@ func TestSchedulePushReindexDebounce(t *testing.T) {
 	}
 	repoID := uuid.New()
 
-	if got := s.schedulePushReindex(context.Background(), repoID); got != "reindex started" {
+	if got := s.schedulePushReindex(repoID); got != "reindex started" {
 		t.Fatalf("first trigger: %q", got)
 	}
 	waitRun(t, runCh)
 
 	// Pass still running (done not called yet): triggers only queue.
-	if got := s.schedulePushReindex(context.Background(), repoID); got != "queued behind the running reindex" {
+	if got := s.schedulePushReindex(repoID); got != "queued behind the running reindex" {
 		t.Fatalf("trigger during run: %q", got)
 	}
-	if got := s.schedulePushReindex(context.Background(), repoID); got != "queued behind the running reindex" {
+	if got := s.schedulePushReindex(repoID); got != "queued behind the running reindex" {
 		t.Fatalf("second trigger during run: %q", got)
 	}
 
@@ -79,11 +78,11 @@ func TestSchedulePushReindexDebounce(t *testing.T) {
 	}
 
 	// Inside the interval after the rerun: trigger schedules, repeat is a no-op.
-	got := s.schedulePushReindex(context.Background(), repoID)
+	got := s.schedulePushReindex(repoID)
 	if got == "reindex started" {
 		t.Fatalf("trigger inside the interval must debounce, got %q", got)
 	}
-	if got := s.schedulePushReindex(context.Background(), repoID); got != "reindex already scheduled" {
+	if got := s.schedulePushReindex(repoID); got != "reindex already scheduled" {
 		t.Fatalf("trigger with a timer pending: %q", got)
 	}
 	waitRun(t, runCh)
@@ -93,20 +92,13 @@ func TestSchedulePushReindexDebounce(t *testing.T) {
 	}
 }
 
-// TestWebhookTargetURL pins the delivery URL shape: bare when there is no
-// tenant on the context (desktop/local), ?t=<tenant uuid> otherwise, so the
-// gateway can route GitHub's push to the tenant that registered the hook.
+// TestWebhookTargetURL pins the delivery URL shape: the public base with its
+// trailing slash trimmed, plus the webhook path, and no query string.
 func TestWebhookTargetURL(t *testing.T) {
 	s := &Service{}
 	s.SetPublicBaseURL("https://tasktrooper.ai/")
-	if got := s.webhookTargetURL(context.Background()); got != "https://tasktrooper.ai/v1/github/webhook" {
-		t.Fatalf("bare url = %q", got)
-	}
-	id := uuid.MustParse("11111111-2222-3333-4444-555555555555")
-	ctx := tenant.With(context.Background(), tenant.Identity{TenantID: id, Role: tenant.RoleOwner})
-	want := "https://tasktrooper.ai/v1/github/webhook?t=" + id.String()
-	if got := s.webhookTargetURL(ctx); got != want {
-		t.Fatalf("tenant url = %q, want %q", got, want)
+	if got := s.webhookTargetURL(); got != "https://tasktrooper.ai/v1/github/webhook" {
+		t.Fatalf("url = %q", got)
 	}
 }
 

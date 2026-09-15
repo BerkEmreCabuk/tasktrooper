@@ -44,14 +44,9 @@ func deployOpsError(c *fiber.Ctx, err error) error {
 	}
 }
 
-// actor identifies who pushed the button. The internal-auth middleware puts
-// the tenant on the context; an unauthenticated internal call is 'system'.
-func actor(c *fiber.Ctx) string {
-	if uid, ok := c.Locals("tenant_uid").(string); ok && uid != "" {
-		return uid
-	}
-	return "system"
-}
+// consoleActor is who a console dispatch is recorded as. Requests carry no user
+// identity, so it is always the system.
+const consoleActor = "system"
 
 // parseDeployRouteParams parses the repository UUID and validates the :env
 // path segment against domain.DeployEnvs() — the guard every deploy-console
@@ -131,7 +126,7 @@ func (h *Handler) DispatchDeploy(c *fiber.Ctx) error {
 		Env:          env,
 		Ref:          req.Ref,
 		Confirm:      req.Confirm,
-		Actor:        actor(c),
+		Actor:        consoleActor,
 	})
 	if err != nil {
 		return deployOpsError(c, err)
@@ -160,7 +155,7 @@ func (h *Handler) RollbackDeploy(c *fiber.Ctx) error {
 		RepositoryID: id,
 		Env:          env,
 		Confirm:      req.Confirm,
-		Actor:        actor(c),
+		Actor:        consoleActor,
 	})
 	if err != nil {
 		return deployOpsError(c, err)

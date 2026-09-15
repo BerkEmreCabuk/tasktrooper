@@ -14,13 +14,6 @@ import (
 // registerVercelOpsRoutes exposes the Vercel project picker and each
 // repository's (and sub-project's) Vercel project binding. Same auth/middleware
 // chain as every other route — none of these invent a new one.
-//
-// Paths are lowercase because roleMiddleware/matchAdminRoute normalise the
-// request path to lowercase before matching, so a rule (or a route) spelled
-// with a capital could never match. The two repository routes fall under the
-// existing "/v1/repositories" admin rule with no member exemption, which is
-// correct: binding a repository to a Vercel project reconfigures the tenant.
-// The picker is a GET and isReadMethod lets every read past regardless.
 func (h *Handler) registerVercelOpsRoutes(app fiber.Router) {
 	if h.vercelOpsSvc == nil {
 		return
@@ -78,7 +71,7 @@ type vercelProjectListing struct {
 // The picker's source: every project the connected token can see, across the
 // personal account and each team it belongs to.
 //
-// Neither empty case is a 5xx. No token is the state every tenant starts in,
+// Neither empty case is a 5xx. No token is the state every install starts in,
 // and a token Vercel refuses is a stable property of that token — the
 // operator's next step is Settings, not a retry, and a 500 would tell them to
 // wait for something that will never start working on its own.

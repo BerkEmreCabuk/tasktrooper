@@ -14,7 +14,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/mcpserver"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -216,58 +215,9 @@ func TestForRunCarriesSkillsOnDiskToTheEndpointAndTheManifest(t *testing.T) {
 	assert.Contains(t, chat.Tools, "load_skill", "a chat turn has no skill files to read instead")
 }
 
-// The tenant is bound to the credential at mint time, because that is the only
-// moment it is available: /mcp is a public path, so no signed tenant header
-// reaches the endpoint and tenantMiddleware never runs for it.
-func TestForRunBindsTheDispatchingTenantToTheToken(t *testing.T) {
-	tenantID := uuid.New()
-	tokens := mcpserver.NewRunTokenRegistry()
-	endpoint := &mcpEndpoint{}
-	endpoint.publish("127.0.0.1:8080")
-	provider := &claudeCodeMCP{endpoint: endpoint, tokens: tokens}
-
-	runCtx := tenant.With(context.Background(), tenant.Identity{
-		TenantID: tenantID, Role: tenant.RoleMember, UserID: "uid-7",
-	})
-	cfg, release, err := provider.ForRun(runCtx, claudecode.MCPRun{Label: "tt-42"})
-	require.NoError(t, err)
-	defer release()
-
-	run, ok := tokens.Lookup(cfg.Token)
-	require.True(t, ok)
-	assert.Equal(t, tenantID, run.Tenant.TenantID)
-
-	id, ok := tenant.From(run.Scoped())
-	require.True(t, ok, "every tool call this token makes must be tenant-scoped")
-	assert.Equal(t, tenantID, id.TenantID)
-	assert.Equal(t, "uid-7", id.UserID)
-}
-
-// A credential that leaves this machine must name a tenant. Refused at the
-// mint rather than discovered later: a token published to somebody's laptop is
-// not a thing to issue unscoped and fix afterwards.
-func TestOffHostForRunRefusesARunWithNoTenant(t *testing.T) {
-	provider := &claudeCodeMCP{
-		endpoint: publicEndpoint("https://app.example.com/api/mcp"),
-		tokens:   mcpserver.NewRunTokenRegistry(),
-		offHost:  true,
-	}
-
-	cfg, release, err := provider.ForRun(context.Background(), claudecode.MCPRun{Label: "tt-42"})
-	require.Error(t, err)
-	require.NotNil(t, release, "the release must be safe to defer even on the error path")
-	assert.Empty(t, cfg.Token)
-	assert.Contains(t, err.Error(), "tt-42")
-	assert.Equal(t, 0, provider.tokens.Live())
-	release()
-}
-
-// The same run on the LOOPBACK path is not refused: a self-hosted or desktop
-// install carries no identity on its run context and worked that way before
-// tenants existed. Its failure mode, if the deployment is in fact multi-tenant,
-// is the database's own fail-closed check on this same process — not a token
-// published to a stranger's machine.
-func TestLoopbackForRunAllowsASingleTenantInstall(t *testing.T) {
+// A token that never leaves this host gets no ceiling: its run's lifetime is
+// its lifetime, ended by the executor's revoke.
+func TestLoopbackForRunMintsATokenWithNoCeiling(t *testing.T) {
 	endpoint := &mcpEndpoint{}
 	endpoint.publish("127.0.0.1:8080")
 	provider := &claudeCodeMCP{endpoint: endpoint, tokens: mcpserver.NewRunTokenRegistry()}
@@ -279,7 +229,6 @@ func TestLoopbackForRunAllowsASingleTenantInstall(t *testing.T) {
 
 	run, ok := provider.tokens.Lookup(cfg.Token)
 	require.True(t, ok)
-	assert.Equal(t, uuid.Nil, run.Tenant.TenantID)
 	assert.True(t, run.ExpiresAt.IsZero(), "a token that never leaves this host needs no ceiling")
 }
 
@@ -293,13 +242,11 @@ func TestOffHostForRunStampsAnExpiryPastTheRunTimeout(t *testing.T) {
 	provider := &claudeCodeMCP{
 		endpoint: publicEndpoint("https://app.example.com/api/mcp"),
 		tokens:   mcpserver.NewRunTokenRegistry(),
-		offHost:  true,
 		ttl:      runTimeout + mcpTokenGrace,
 		now:      func() time.Time { return now },
 	}
 
-	runCtx := tenant.With(context.Background(), tenant.Identity{TenantID: uuid.New()})
-	cfg, release, err := provider.ForRun(runCtx, claudecode.MCPRun{Label: "tt-42"})
+	cfg, release, err := provider.ForRun(context.Background(), claudecode.MCPRun{Label: "tt-42"})
 	require.NoError(t, err)
 	defer release()
 	assert.Equal(t, "https://app.example.com/api/mcp", cfg.URL)
@@ -319,7 +266,6 @@ func TestOffHostForRunWithNoPublicAddressDegrades(t *testing.T) {
 	provider := &claudeCodeMCP{
 		endpoint: publicEndpoint(""),
 		tokens:   mcpserver.NewRunTokenRegistry(),
-		offHost:  true,
 	}
 
 	cfg, release, err := provider.ForRun(context.Background(), claudecode.MCPRun{Label: "tt-42"})

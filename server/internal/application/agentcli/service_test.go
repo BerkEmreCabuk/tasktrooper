@@ -12,15 +12,8 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agentcli"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
-
-var testTenant = uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
-
-func testCtx() context.Context {
-	return tenant.With(context.Background(), tenant.Identity{TenantID: testTenant, Role: tenant.RoleOwner})
-}
 
 type memStore struct {
 	conns map[domain.AgentCLIFlavor]domain.AgentCLIConnection
@@ -113,7 +106,7 @@ func TestConnectRefusesAnUnknownFlavor(t *testing.T) {
 		return okProbe(ctx, f)
 	})
 
-	_, err := svc.Connect(testCtx(), domain.AgentCLIFlavor("not-a-real-cli"))
+	_, err := svc.Connect(context.Background(), domain.AgentCLIFlavor("not-a-real-cli"))
 	require.ErrorContains(t, err, "unknown agent cli flavor")
 	require.False(t, probed, "an unrecognised flavor must not reach the probe")
 	require.Empty(t, store.conns, "a refused connect must not leave a connection behind")
@@ -126,7 +119,7 @@ func TestConnectReportsAMissingBinaryDistinctly(t *testing.T) {
 		return agentcli.Probe{}, fmt.Errorf("claude not found on PATH: %w", domain.ErrAgentCLIBinaryMissing)
 	})
 
-	_, err := svc.Connect(testCtx(), domain.AgentCLIFlavorClaude)
+	_, err := svc.Connect(context.Background(), domain.AgentCLIFlavorClaude)
 	require.ErrorIs(t, err, domain.ErrAgentCLIBinaryMissing)
 	require.NotErrorIs(t, err, domain.ErrAgentCLIUnauthenticated,
 		"the two failures must not collapse into one: they are fixed in different places")
@@ -140,7 +133,7 @@ func TestConnectReportsAnUnauthenticatedBinaryDistinctly(t *testing.T) {
 		return agentcli.Probe{}, fmt.Errorf("please run /login: %w", domain.ErrAgentCLIUnauthenticated)
 	})
 
-	_, err := svc.Connect(testCtx(), domain.AgentCLIFlavorClaude)
+	_, err := svc.Connect(context.Background(), domain.AgentCLIFlavorClaude)
 	require.ErrorIs(t, err, domain.ErrAgentCLIUnauthenticated)
 	require.NotErrorIs(t, err, domain.ErrAgentCLIBinaryMissing)
 	require.Empty(t, store.conns)
@@ -151,7 +144,7 @@ func TestConnectWritesTheCatalogAndRecordsTheFlavor(t *testing.T) {
 	catalog, agent := oneAgentCatalog()
 	svc := newService(t, store, catalog, okProbe)
 
-	state, err := svc.Connect(testCtx(), domain.AgentCLIFlavorClaude)
+	state, err := svc.Connect(context.Background(), domain.AgentCLIFlavorClaude)
 	require.NoError(t, err)
 
 	require.Len(t, state.Connections, 1)
@@ -160,7 +153,7 @@ func TestConnectWritesTheCatalogAndRecordsTheFlavor(t *testing.T) {
 	require.Equal(t, domain.LLMProviderClaudeCode, conn.ProviderType)
 	require.Equal(t, "1.2.3", conn.BinaryVersion, "the evidence travels with the connection")
 	require.Equal(t, 1, conn.AgentCount)
-	require.Equal(t, 1, conn.SkillCount, "a disabled skill is not written: the CLI would offer a role the tenant switched off")
+	require.Equal(t, 1, conn.SkillCount, "a disabled skill is not written: the CLI would offer a role the user switched off")
 
 	agentRoot := filepath.Join(conn.CatalogPath, agent.ID.String())
 	body, err := os.ReadFile(filepath.Join(agentRoot, ".claude", "skills", "tt-code-review", "SKILL.md"))
@@ -184,14 +177,14 @@ func TestConnectWritesTheCatalogAndRecordsTheFlavor(t *testing.T) {
 
 func TestConnectingASecondFlavorLeavesTheFirstConnected(t *testing.T) {
 	store := &memStore{}
-	require.NoError(t, store.Set(testCtx(), domain.AgentCLIConnection{
+	require.NoError(t, store.Set(context.Background(), domain.AgentCLIConnection{
 		Flavor:       domain.AgentCLIFlavorCursor,
 		ProviderType: domain.LLMProviderCursorAgent,
 	}))
 	catalog, _ := oneAgentCatalog()
 	svc := newService(t, store, catalog, okProbe)
 
-	state, err := svc.Connect(testCtx(), domain.AgentCLIFlavorClaude)
+	state, err := svc.Connect(context.Background(), domain.AgentCLIFlavorClaude)
 	require.NoError(t, err)
 
 	require.Len(t, state.Connections, 2, "connecting one flavor must not disconnect another")
@@ -203,12 +196,12 @@ func TestConnectingASecondFlavorLeavesTheFirstConnected(t *testing.T) {
 	}
 	require.Equal(t, 2, connectedCount, "both flavors stay connected")
 
-	claude, ok, err := store.Get(testCtx(), domain.AgentCLIFlavorClaude)
+	claude, ok, err := store.Get(context.Background(), domain.AgentCLIFlavorClaude)
 	require.NoError(t, err)
 	require.True(t, ok)
 	require.Equal(t, domain.AgentCLIFlavorClaude, claude.Flavor)
 
-	cursor, ok, err := store.Get(testCtx(), domain.AgentCLIFlavorCursor)
+	cursor, ok, err := store.Get(context.Background(), domain.AgentCLIFlavorCursor)
 	require.NoError(t, err)
 	require.True(t, ok, "the flavor connected before must still be in the store")
 	require.Equal(t, domain.AgentCLIFlavorCursor, cursor.Flavor)
@@ -219,11 +212,11 @@ func TestDisconnectClearsTheConnectionAndItsSnapshot(t *testing.T) {
 	catalog, _ := oneAgentCatalog()
 	svc := newService(t, store, catalog, okProbe)
 
-	connected, err := svc.Connect(testCtx(), domain.AgentCLIFlavorClaude)
+	connected, err := svc.Connect(context.Background(), domain.AgentCLIFlavorClaude)
 	require.NoError(t, err)
 	root := connected.Connections[0].CatalogPath
 
-	state, err := svc.Disconnect(testCtx(), domain.AgentCLIFlavorClaude)
+	state, err := svc.Disconnect(context.Background(), domain.AgentCLIFlavorClaude)
 	require.NoError(t, err)
 	require.Empty(t, state.Connections)
 
@@ -236,13 +229,13 @@ func TestConnectPrunesAgentsThatLeftTheCatalog(t *testing.T) {
 	catalog, first := oneAgentCatalog()
 	svc := newService(t, store, catalog, okProbe)
 
-	state, err := svc.Connect(testCtx(), domain.AgentCLIFlavorClaude)
+	state, err := svc.Connect(context.Background(), domain.AgentCLIFlavorClaude)
 	require.NoError(t, err)
 	root := state.Connections[0].CatalogPath
 	require.DirExists(t, filepath.Join(root, first.ID.String()))
 
 	catalog.agents = nil
-	state, err = svc.Connect(testCtx(), domain.AgentCLIFlavorClaude)
+	state, err = svc.Connect(context.Background(), domain.AgentCLIFlavorClaude)
 	require.NoError(t, err)
 	require.Equal(t, 0, state.Connections[0].AgentCount)
 	require.NoDirExists(t, filepath.Join(root, first.ID.String()),
@@ -254,7 +247,7 @@ func TestConnectRefusesWithoutAWorkspaceRoot(t *testing.T) {
 	catalog, _ := oneAgentCatalog()
 	svc := agentcli.NewService(agentcli.Deps{Store: store, Catalog: catalog, Probe: okProbe})
 
-	_, err := svc.Connect(testCtx(), domain.AgentCLIFlavorClaude)
+	_, err := svc.Connect(context.Background(), domain.AgentCLIFlavorClaude)
 	require.ErrorContains(t, err, "workspace root")
 	require.Empty(t, store.conns)
 }

@@ -143,7 +143,6 @@ func (c *Controller) RerunRun(ctx context.Context, repositoryID, taskID, runID u
 		Event:        event,
 		Task:         task,
 		RepositoryID: repositoryID,
-		Tenant:       tenantOf(ctx),
 	})
 	return fresh, nil
 }

@@ -23,64 +23,50 @@ type ProviderHealth struct {
 	Message      string                 `json:"message,omitempty"`
 }
 
-// ProviderSet is ONE TENANT's LLM configuration, resolved for one call: the
-// clients their credentials build, the provider they made active, and the
-// embedding provider and model they pinned.
+// ProviderSet is the stored LLM configuration, resolved for one call: the
+// clients the saved credentials build, the active provider, and the pinned
+// embedding provider and model.
 //
-// It is a value, handed to the call that asked for it and then dropped. That is
-// the whole point of the type existing. This client used to hold the same four
-// things as FIELDS, mutated by whichever tenant last saved LLM settings — so a
-// tenant who connected Anthropic replaced the process's Anthropic client, key
-// included, and the next tenant to send a message spent that key. There was no
-// lock to add: a mutex makes the race deterministic and leaves the leak.
+// It is a value, handed to the call that asked for it and then dropped, so a
+// settings save never mutates a client another call is still using.
 type ProviderSet struct {
 	// Clients is keyed by provider type, or by a named endpoint's uuid. Every
-	// client in it was built from THIS tenant's stored credentials.
+	// client in it was built from the stored credentials.
 	Clients map[domain.LLMProviderType]port.LLMClient
-	// Default is the tenant's active provider (app_settings.active_llm_provider).
+	// Default is the active provider (app_settings.active_llm_provider).
 	Default domain.LLMProviderType
 	// EmbeddingProvider is the pinned embedding provider; "" is auto.
 	EmbeddingProvider domain.LLMProviderType
 	// EmbeddingModel overrides the model a caller passes, so one configured
-	// model is used everywhere for this tenant.
+	// model is used everywhere.
 	EmbeddingModel string
 }
 
-// ProviderResolver answers "which providers does the tenant on this context
-// have, and with whose credentials".
-//
-// The context is the seam, and it is the only one: the tenant identity is
-// already on it by the time any LLM call is made (platform/tenant), so the
-// answer can be derived per request instead of being written into a location
-// one tenant can set and another can read.
+// ProviderResolver answers "which providers are configured, and with which
+// credentials", per call, from the stored settings.
 type ProviderResolver interface {
 	ResolveProviders(ctx context.Context) (ProviderSet, error)
 }
 
-// ResolverFunc adapts a plain function, and is what tests and the single-tenant
-// bootstrap use.
+// ResolverFunc adapts a plain function, and is what tests and the bootstrap use.
 type ResolverFunc func(context.Context) (ProviderSet, error)
 
 func (f ResolverFunc) ResolveProviders(ctx context.Context) (ProviderSet, error) { return f(ctx) }
 
-// StaticResolver serves one fixed set to every caller. It is correct for a
-// process that serves exactly one tenant — a test, or a bootstrap before the
-// database is reachable — and it is NOT correct for a shared deployment, which
-// is why it has to be asked for by name.
+// StaticResolver serves one fixed set to every caller: a test, or a bootstrap
+// before the database is reachable.
 func StaticResolver(set ProviderSet) ProviderResolver {
 	return ResolverFunc(func(context.Context) (ProviderSet, error) { return set, nil })
 }
 
 type MultiProviderClient struct {
 	mu sync.RWMutex
-	// resolver supplies the acting tenant's ProviderSet. Nil until wired, which
-	// is the boot window: until then every call falls back to the client built
-	// from config.yml, exactly as it did before any tenant had been read.
+	// resolver supplies the stored ProviderSet. Nil until wired, which is the
+	// boot window: until then every call falls back to the client built from
+	// config.yml.
 	resolver ProviderResolver
-	// fallback is the client built from config.yml. It belongs to the
-	// DEPLOYMENT rather than to a tenant — it holds whatever the operator put
-	// in the file, which on a shared deployment is nothing — so it stays a
-	// field while the per-tenant clients do not.
+	// fallback is the client built from config.yml. It stays a field while the
+	// stored clients do not, because nothing a request saves can change it.
 	fallback port.LLMClient
 	// limits holds one limiter per provider. Chat and embedding calls to the
 	// same provider share theirs, because they share its quota.
@@ -102,27 +88,25 @@ func NewMultiProviderClient(fallback port.LLMClient, resolver ProviderResolver) 
 	}
 }
 
-// SetResolver installs the per-tenant resolution, after construction.
+// SetResolver installs the stored-settings resolution, after construction.
 //
 // Late-wired because the resolver needs the database and this client is built
 // long before it — the same reason the board runner's executor arrives through
 // a setter. Until it is installed every call uses the config.yml fallback,
-// which is what a process with no tenants yet should do.
+// which is what a process that has not read its settings yet should do.
 func (m *MultiProviderClient) SetResolver(r ProviderResolver) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.resolver = r
 }
 
-// providers resolves the acting tenant's set.
+// providers resolves the stored set.
 //
 // A resolution failure is an EMPTY set rather than an error, and the call then
 // falls through to the config.yml fallback or to "no client configured" — the
-// same two outcomes a tenant with nothing connected already gets. Returning the
-// error instead would be worse than it looks: every caller would have to
-// distinguish "this tenant has no providers" from "the settings table did not
-// answer", and the one thing that must never happen — serving somebody else's
-// client — is not among the outcomes either way.
+// same two outcomes an install with nothing connected already gets. Returning
+// the error instead would make every caller tell "no providers" apart from "the
+// settings table did not answer".
 func (m *MultiProviderClient) providers(ctx context.Context) ProviderSet {
 	m.mu.RLock()
 	resolver := m.resolver
@@ -132,7 +116,7 @@ func (m *MultiProviderClient) providers(ctx context.Context) ProviderSet {
 	}
 	set, err := resolver.ResolveProviders(ctx)
 	if err != nil {
-		log.Warn().Err(err).Msg("llm: could not resolve this tenant's providers; falling back to the configured default")
+		log.Warn().Err(err).Msg("llm: could not resolve the stored providers; falling back to the configured default")
 		return ProviderSet{}
 	}
 	return set
@@ -141,20 +125,13 @@ func (m *MultiProviderClient) providers(ctx context.Context) ProviderSet {
 // Prune, SetProvider, SetDefault, SetEmbeddingProvider and SetEmbeddingModel
 // are deliberately absent.
 //
-// They were the leak. Each one wrote a process-wide field from a per-tenant
-// request path — llmprovider.Service called all of them on every save — so the
-// last tenant to touch LLM settings decided which clients, which default and
-// which embedding model every other tenant then used. Removing them rather
-// than guarding them is what makes the invariant structural: there is no longer
-// a location a request can write and another tenant can read, so no future
-// caller can reintroduce the bug by using the API as it was designed.
-//
-// What replaced them is ProviderResolver: the same four values, resolved from
-// the acting tenant's rows, per call.
+// Each wrote a process-wide field from a request path — llmprovider.Service
+// called all of them on every save. What replaced them is ProviderResolver: the
+// same four values, resolved from the stored rows, per call.
 
-// EmbeddingProvider reports which provider serves this tenant's embeddings ("" =
-// auto). It takes a context because the answer is the tenant's, not the
-// process's — see usage.CachingEmbedder, which uses it to partition its cache.
+// EmbeddingProvider reports which provider serves embeddings ("" = auto). It is
+// resolved per call from the stored settings — see usage.CachingEmbedder, which
+// uses it to partition its cache.
 func (m *MultiProviderClient) EmbeddingProvider(ctx context.Context) domain.LLMProviderType {
 	return m.providers(ctx).EmbeddingProvider
 }
@@ -210,13 +187,13 @@ func (m *MultiProviderClient) limiterFor(set ProviderSet, pt domain.LLMProviderT
 	return lim
 }
 
-// DefaultProvider is the acting tenant's active provider.
+// DefaultProvider is the active provider.
 func (m *MultiProviderClient) DefaultProvider(ctx context.Context) domain.LLMProviderType {
 	return m.providers(ctx).Default
 }
 
-// ClientFor returns the acting tenant's client for a provider. An empty
-// providerType means their active one.
+// ClientFor returns the stored client for a provider. An empty providerType
+// means the active one.
 func (m *MultiProviderClient) ClientFor(ctx context.Context, providerType domain.LLMProviderType) (port.LLMClient, bool) {
 	return m.clientFrom(m.providers(ctx), providerType)
 }
@@ -267,14 +244,14 @@ func (m *MultiProviderClient) resolve(set ProviderSet, req domain.AgentRequest) 
 // carrying Tools) was refused, because sending it to another provider's
 // endpoint would run the user's task on an engine they did not choose, under
 // another vendor's key. A UTILITY request (a JSON-schema extraction, a summary,
-// a commit message, a judge's verdict) was REROUTED to the tenant's active
+// a commit message, a judge's verdict) was REROUTED to the active
 // default HTTP provider with the model blanked, on the reasoning that the CLI
 // could not serve it anyway so a refusal only deleted the feature.
 //
 // The reasoning was sound and the conclusion was wrong, for a reason no amount
 // of care inside this function could fix: the fallback provider is a provider
 // the operator did not choose FOR THIS AGENT, and its health is unrelated to
-// the health of anything they did choose. The tenant this was written for had a
+// the health of anything they did choose. The install this was written for had a
 // dead `gemini-2.0-flash` as its default and an unpaid Mistral before that, so
 // every reroute converted "this agent cannot serve this step" — true, specific,
 // fixable — into a 404 or a 402 from a provider the operator was not thinking
@@ -484,7 +461,7 @@ func (m *MultiProviderClient) embedOnce(ctx context.Context, set ProviderSet, in
 	fallback := m.fallback
 	m.mu.RUnlock()
 
-	// Embedding sağlayıcısı açıkça seçildiyse (ya da "auto" bu tenant'ın kendi
+	// Embedding sağlayıcısı açıkça seçildiyse (ya da "auto" kullanıcının kendi
 	// Mac'ine karar verdiyse) yalnızca onu kullan — sessizce claude/cursor
 	// CLI'a düşüp yanıltıcı "embedding desteklemiyor" hatası verme.
 	if pinned != "" {

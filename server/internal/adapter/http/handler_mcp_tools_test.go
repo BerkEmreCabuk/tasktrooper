@@ -74,7 +74,7 @@ func TestMCPToolEndpointBypassesTheAuthMiddleware(t *testing.T) {
 	// With an API key configured, the middleware would otherwise demand a
 	// credential the child has not got.
 	for name, h := range map[string]*Handler{
-		"api key mode": {legacyAPIKey: "tenant-api-key"},
+		"api key mode": {legacyAPIKey: "server-api-key"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			app := fiber.New()
@@ -95,10 +95,10 @@ func TestMCPToolEndpointBypassesTheAuthMiddleware(t *testing.T) {
 			// And that credential is the one that decides: whatever else a
 			// caller holds, without a live run token it gets nothing.
 			req = httptest.NewRequest("POST", mcpserver.Path, strings.NewReader(body))
-			req.Header.Set("Authorization", "Bearer tenant-api-key")
+			req.Header.Set("Authorization", "Bearer server-api-key")
 			resp, err = app.Test(req)
 			require.NoError(t, err)
-			assert.Equal(t, fiber.StatusUnauthorized, resp.StatusCode, "the tenant API key is not a run credential")
+			assert.Equal(t, fiber.StatusUnauthorized, resp.StatusCode, "the server API key is not a run credential")
 		})
 	}
 }

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -32,7 +33,7 @@ func TestIndexMirrorIsRestoredWhenMissing(t *testing.T) {
 	git := &fakeRestoreGit{}
 	svc := newMirrorService(t, repo, git)
 
-	if err := svc.EnsureIndexMirror(repoCtx(repoTenantA), repo.ID, root); err != nil {
+	if err := svc.EnsureIndexMirror(context.Background(), repo.ID, root); err != nil {
 		t.Fatalf("restore refused a restorable mirror: %v", err)
 	}
 	if len(git.clones) != 1 {
@@ -55,7 +56,7 @@ func TestIndexMirrorPresentIsLeftAlone(t *testing.T) {
 	git := &fakeRestoreGit{repoPaths: map[string]bool{root: true}}
 	svc := newMirrorService(t, repo, git)
 
-	if err := svc.EnsureIndexMirror(repoCtx(repoTenantA), repo.ID, root); err != nil {
+	if err := svc.EnsureIndexMirror(context.Background(), repo.ID, root); err != nil {
 		t.Fatalf("present mirror was refused: %v", err)
 	}
 	if len(git.clones) != 0 {
@@ -72,7 +73,7 @@ func TestIndexMirrorWithoutRemoteFailsLoudly(t *testing.T) {
 	git := &fakeRestoreGit{}
 	svc := newMirrorService(t, repo, git)
 
-	err := svc.EnsureIndexMirror(repoCtx(repoTenantA), repo.ID, root)
+	err := svc.EnsureIndexMirror(context.Background(), repo.ID, root)
 	if err == nil {
 		t.Fatal("a repository with no remote_url was allowed to index nothing")
 	}
@@ -96,7 +97,7 @@ func TestIndexMirrorRefusesANonRepositoryFolder(t *testing.T) {
 	git := &fakeRestoreGit{}
 	svc := newMirrorService(t, repo, git)
 
-	err := svc.EnsureIndexMirror(repoCtx(repoTenantA), repo.ID, root)
+	err := svc.EnsureIndexMirror(context.Background(), repo.ID, root)
 	if err == nil {
 		t.Fatal("a non-repository folder was accepted as a mirror")
 	}
@@ -118,7 +119,7 @@ func TestIndexMirrorCloneFailureFailsThePass(t *testing.T) {
 	git := &fakeRestoreGit{cloneErr: errors.New("authentication failed")}
 	svc := newMirrorService(t, repo, git)
 
-	err := svc.EnsureIndexMirror(repoCtx(repoTenantA), repo.ID, root)
+	err := svc.EnsureIndexMirror(context.Background(), repo.ID, root)
 	if err == nil {
 		t.Fatal("a failed clone was reported as a usable mirror")
 	}

@@ -2,8 +2,6 @@ package usage
 
 import (
 	"context"
-	"github.com/google/uuid"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"sync"
 	"testing"
 	"time"
@@ -124,54 +122,9 @@ func TestCachingEmbedder_HitsSkipRecordingMissesRecord(t *testing.T) {
 	require.Equal(t, 1, inner.callCount(), "a cache hit must not reach the provider")
 }
 
-// The two confirmations that matter, and they concern money.
-//
-// record() used to detach onto context.Background(), so every chat and every
-// embedding call wrote its tokens with no tenant on the context — which the
-// store answers with tenant.ErrNoTenant. Nothing accrued, so the budget gate
-// (billing.Service.Allow) compared spend against a period that was always
-// empty and never tripped, and no tenant was ever billed. One Warn line per
-// call, in a goroutine, was the whole signal.
-
-// tenantUsageStore records what tenant each write arrived under, refusing an
-// unscoped one exactly as the postgres store does.
-type tenantUsageStore struct {
-	mu      sync.Mutex
-	byTenat map[uuid.UUID][]domain.LLMUsageRecord
-	unscope int
-}
-
-func newTenantUsageStore() *tenantUsageStore {
-	return &tenantUsageStore{byTenat: map[uuid.UUID][]domain.LLMUsageRecord{}}
-}
-
-func (s *tenantUsageStore) Record(ctx context.Context, rec domain.LLMUsageRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	id, ok := tenant.ID(ctx)
-	if !ok {
-		s.unscope++
-		return tenant.ErrNoTenant
-	}
-	s.byTenat[id] = append(s.byTenat[id], rec)
-	return nil
-}
-
-func (s *tenantUsageStore) Summary(context.Context, int) (domain.LLMUsageSummary, error) {
-	return domain.LLMUsageSummary{}, nil
-}
-
-func (s *tenantUsageStore) recorded(id uuid.UUID) []domain.LLMUsageRecord {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]domain.LLMUsageRecord(nil), s.byTenat[id]...)
-}
-
-func (s *tenantUsageStore) unscopedWrites() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.unscope
-}
+// record() writes after the call has returned, in a goroutine. A write that
+// never lands leaves the budget gate (billing.Service.Allow) comparing spend
+// against an empty period, so a chat and an embedding must both reach the store.
 
 // usageInner answers both a chat and an embedding with a fixed usage.
 type usageInner struct{}
@@ -187,38 +140,19 @@ func (usageInner) Embed(context.Context, string, string) ([]float32, error) {
 	return []float32{1, 2, 3}, nil
 }
 
-func waitForRecords(t *testing.T, store *tenantUsageStore, id uuid.UUID, want int) []domain.LLMUsageRecord {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if got := store.recorded(id); len(got) >= want {
-			return got
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("only %d usage records for %s, want %d", len(store.recorded(id)), id, want)
-	return nil
-}
-
-func TestChatAndEmbedUsageRecordAgainstTheCallingTenant(t *testing.T) {
-	store := newTenantUsageStore()
+func TestChatAndEmbedUsageIsRecorded(t *testing.T) {
+	store := &fakeUsageStore{}
 	client := NewRecordingClient(usageInner{}, store)
 
-	id := uuid.New()
-	ctx := tenant.With(context.Background(), tenant.Identity{TenantID: id, Role: tenant.RoleOwner})
-
-	if _, err := client.Chat(ctx, domain.AgentRequest{Model: "gpt-4o"}); err != nil {
+	if _, err := client.Chat(context.Background(), domain.AgentRequest{Model: "gpt-4o"}); err != nil {
 		t.Fatalf("chat: %v", err)
 	}
-	if _, err := client.Embed(ctx, "some text", "text-embedding-3-small"); err != nil {
+	if _, err := client.Embed(context.Background(), "some text", "text-embedding-3-small"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 
-	got := waitForRecords(t, store, id, 2)
-	if store.unscopedWrites() != 0 {
-		t.Fatalf("%d usage writes arrived with no tenant — they would be dropped in production",
-			store.unscopedWrites())
-	}
+	require.Eventually(t, func() bool { return len(store.snapshot()) >= 2 }, 2*time.Second, 5*time.Millisecond)
+	got := store.snapshot()
 
 	var sawChat, sawEmbed bool
 	for _, rec := range got {

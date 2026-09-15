@@ -34,8 +34,7 @@ func (h *Handler) registerRepositoryRoutes(app fiber.Router) {
 	app.Post("/v1/repositories/:id/profile/proposals/:proposalId/apply", h.ApplyRepositoryProfileProposal)
 	app.Post("/v1/repositories/:id/profile/proposals/:proposalId/dismiss", h.DismissRepositoryProfileProposal)
 	app.Post("/v1/repositories/:id/webhook", h.SetupRepositoryWebhook)
-	// Public (signature-authenticated) — see isPublicPath. Still tenant-scoped:
-	// see githubWebhookPath and tenantMiddleware.
+	// Public (signature-authenticated) — see isPublicPath and githubWebhookPath.
 	app.Post(githubWebhookPath, h.GitHubWebhook)
 	app.Post("/v1/repositories/:id/index/search", h.SearchRepositoryIndex)
 	app.Get("/v1/repositories/:id/tasks", h.ListRepositoryTasks)
