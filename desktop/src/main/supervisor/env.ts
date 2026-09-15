@@ -42,8 +42,11 @@ export function childEnv(preflight: PreflightReport): NodeJS.ProcessEnv {
   delete env.ELECTRON_IS_DEV;
   delete env.NODE_OPTIONS;
 
-  const parts = (env.PATH ?? "").split(":").filter((p) => p !== "");
-  for (const extra of ["/opt/homebrew/bin", "/usr/local/bin"]) {
+  // Windows spells it Path, and a spread of process.env loses the
+  // case-insensitive lookup that made the spelling not matter.
+  const pathKey = Object.keys(env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  const parts = (env[pathKey] ?? "").split(path.delimiter).filter((p) => p !== "");
+  for (const extra of process.platform === "darwin" ? ["/opt/homebrew/bin", "/usr/local/bin"] : []) {
     if (!parts.includes(extra)) parts.push(extra);
   }
 
@@ -57,13 +60,14 @@ export function childEnv(preflight: PreflightReport): NodeJS.ProcessEnv {
     parts.unshift(path.join(root, "platform-tools"), path.join(root, "emulator"));
   }
 
-  env.PATH = parts.join(":");
+  env[pathKey] = parts.join(path.delimiter);
   return env;
 }
 
 export const SERVER_CONTRACT_KEYS = [
   "DATABASE_URL",
   "PORT",
+  "SHUTDOWN_ON_STDIN_CLOSE",
   "DATA_DIR",
   "CONFIG_PATH",
   "SERVER_API_KEY",
@@ -125,6 +129,7 @@ export function agentServerEnv(inputs: AgentServerEnvInputs): NodeJS.ProcessEnv 
   return {
     ...inherited,
     PORT: "0",
+    SHUTDOWN_ON_STDIN_CLOSE: "1",
     DATA_DIR: inputs.dataDir,
     EMBEDDED_POSTGRES_CACHE_DIR: inputs.postgresCacheDir,
     SERVER_API_KEY: inputs.apiToken,

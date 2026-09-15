@@ -9,7 +9,7 @@ help:
 	@echo "make setup     install Go modules and npm packages"
 	@echo "make dev       backend (embedded Postgres) + UI dev server in the terminal"
 	@echo "make desktop   run the Electron app in dev mode (builds the backend binary + UI)"
-	@echo "make package   build the distributable macOS app into desktop/release"
+	@echo "make package   build the installer for this OS into desktop/release"
 	@echo "make build     compile everything without running"
 	@echo "make test      go test + typecheck/lint/test for the UI and the shell"
 	@echo "make clean     remove build output (keeps server/data)"
@@ -26,7 +26,13 @@ desktop:
 	npm --prefix desktop run dev
 
 package:
+ifeq ($(OS),Windows_NT)
+	npm --prefix desktop run package:win
+else ifeq ($(shell uname -s),Linux)
+	npm --prefix desktop run package:linux
+else
 	npm --prefix desktop run package
+endif
 
 build:
 	cd server && go build ./...

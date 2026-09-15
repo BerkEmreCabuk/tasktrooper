@@ -421,6 +421,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
         id: "agent-server",
         command: server.path,
         args: [],
+        stdinPipe: true,
         env: agentServerEnv({
           preflight: this.#preflight,
           dataDir: dataDir(),

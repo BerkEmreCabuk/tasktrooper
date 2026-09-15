@@ -62,6 +62,7 @@ Optional:
 | `DATABASE_URL` | — | External Postgres DSN. **Empty ⇒ embedded Postgres** under `$DATA_DIR/postgres`. |
 | `DATA_DIR` | `./data` | Workspaces, RAG files, embedded Postgres data |
 | `PORT` | `8085` | HTTP port; `0` picks a free one |
+| `SHUTDOWN_ON_STDIN_CLOSE` | no | `1` makes stdin EOF start the same drain as SIGTERM. The desktop app sets it so the server stops cleanly on Windows and never outlives the app. |
 | `EMBEDDED_POSTGRES_CACHE_DIR` | `$DATA_DIR/postgres-bin` | Where the Postgres binaries are downloaded and extracted (~30 MB, first start only) |
 | `EMBEDDINGS_BASE_URL` | — | OpenAI-compatible host exposing `POST /v1/embeddings`. Set, an embedding provider pointing at it (`nomic-embed-text-v1.5`, 768 dims) is created at boot. Idempotent. |
 | `CORS_ORIGINS` | `app://tasktrooper,http://localhost:3200,http://127.0.0.1:3200` | Origins allowed to call this server |

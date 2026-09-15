@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { accessSync, constants, existsSync } from "node:fs";
+import { statSync, accessSync, constants, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { app } from "electron";
@@ -87,6 +87,8 @@ const APPIUM_STATUS_TIMEOUT_MS = 1_500;
 
 function isExecutable(candidate: string): boolean {
   try {
+    // Windows has no execute bit; X_OK there only says the file exists.
+    if (process.platform === "win32") return statSync(candidate).isFile();
     accessSync(candidate, constants.X_OK);
     return true;
   } catch {
@@ -107,29 +109,46 @@ function isExecutable(candidate: string): boolean {
 function searchDirs(): { dir: string; source: PreflightSource }[] {
   const home = os.homedir();
   const out: { dir: string; source: PreflightSource }[] = [];
-  for (const dir of (process.env.PATH ?? "").split(":")) {
+  for (const dir of pathValue().split(path.delimiter)) {
     if (dir !== "") out.push({ dir, source: "path" });
   }
-  out.push({ dir: "/opt/homebrew/bin", source: "homebrew" });
-  out.push({ dir: "/usr/local/bin", source: "homebrew" });
+  if (process.platform === "darwin") {
+    out.push({ dir: "/opt/homebrew/bin", source: "homebrew" });
+    out.push({ dir: "/usr/local/bin", source: "homebrew" });
+  }
+  if (process.platform === "linux") out.push({ dir: "/snap/bin", source: "path" });
+  if (process.platform === "win32") out.push({ dir: path.join(home, "AppData", "Roaming", "npm"), source: "npm-prefix" });
   out.push({ dir: path.join(home, ".local", "bin"), source: "home" });
   out.push({ dir: path.join(home, ".claude", "local"), source: "home" });
   out.push({ dir: path.join(home, ".bun", "bin"), source: "home" });
   // npm's global prefix. `npm prefix -g` would be authoritative but costs a
   // node startup per call; these are the three locations it actually uses.
-  out.push({ dir: "/opt/homebrew/lib/node_modules/.bin", source: "npm-prefix" });
+  if (process.platform === "darwin") out.push({ dir: "/opt/homebrew/lib/node_modules/.bin", source: "npm-prefix" });
   out.push({ dir: path.join(home, ".npm-global", "bin"), source: "npm-prefix" });
   out.push({ dir: path.join(home, ".nvm", "versions"), source: "npm-prefix" });
   return out;
 }
 
 export function which(name: string): { path: string; source: PreflightSource } | null {
-  if (name.includes("/")) return isExecutable(name) ? { path: name, source: "override" } : null;
+  if (name.includes("/") || name.includes("\\")) return isExecutable(name) ? { path: name, source: "override" } : null;
+  // On Windows a command is found by its extension: PATHEXT, .exe before .cmd.
+  const names =
+    process.platform === "win32"
+      ? [...(process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";").filter(Boolean).map((ext) => name + ext.toLowerCase()), name]
+      : [name];
   for (const { dir, source } of searchDirs()) {
-    const candidate = path.join(dir, name);
-    if (isExecutable(candidate)) return { path: candidate, source };
+    for (const candidateName of names) {
+      const candidate = path.join(dir, candidateName);
+      if (isExecutable(candidate)) return { path: candidate, source };
+    }
   }
   return null;
+}
+
+/** PATH under whatever spelling this platform's environment uses. */
+function pathValue(): string {
+  const key = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH");
+  return (key ? process.env[key] : undefined) ?? "";
 }
 
 /**
@@ -147,11 +166,12 @@ export function which(name: string): { path: string; source: PreflightSource } |
  * read as absent.
  */
 export function probeEnv(): NodeJS.ProcessEnv {
-  const parts = (process.env.PATH ?? "").split(":").filter((p) => p !== "");
-  for (const extra of ["/opt/homebrew/bin", "/usr/local/bin"]) {
+  const parts = pathValue().split(path.delimiter).filter((p) => p !== "");
+  for (const extra of process.platform === "darwin" ? ["/opt/homebrew/bin", "/usr/local/bin"] : []) {
     if (!parts.includes(extra)) parts.push(extra);
   }
-  return { ...process.env, PATH: parts.join(":") };
+  const key = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+  return { ...process.env, [key]: parts.join(path.delimiter) };
 }
 
 interface RunResult {
@@ -214,6 +234,9 @@ export function compareVersions(a: string, b: string): number {
  *
  * Dev: `desktop/bin`, which is what `npm run build:server` writes into.
  */
+/** The bundled backend's file name on this platform. */
+export const SERVER_BINARY = process.platform === "win32" ? "agent-server.exe" : "agent-server";
+
 export function binDir(): string {
   return app.isPackaged ? path.join(process.resourcesPath, "bin") : path.join(app.getAppPath(), "bin");
 }
@@ -273,7 +296,7 @@ export function embedderScriptPath(): string {
  * remediation says so rather than offering a command that would not help.
  */
 function probeAgentServer(): PreflightItem {
-  const bundled = path.join(binDir(), "agent-server");
+  const bundled = path.join(binDir(), SERVER_BINARY);
   if (isExecutable(bundled)) {
     return {
       id: "agent-server",
@@ -761,7 +784,7 @@ const probeOpencode = (): Promise<PreflightItem> =>
  * The five app bundles the old setup script probed, in its order. Reused
  * rather than reinvented so the two agree about what counts as Chrome.
  */
-const CHROME_CANDIDATES = [
+const MAC_CHROME_CANDIDATES = [
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
   "/Applications/Chromium.app/Contents/MacOS/Chromium",
   "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta",
@@ -769,10 +792,32 @@ const CHROME_CANDIDATES = [
   "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
 ];
 
+const CHROME_CANDIDATES =
+  process.platform === "darwin"
+    ? MAC_CHROME_CANDIDATES
+    : process.platform === "win32"
+      ? [
+          path.join(process.env.PROGRAMFILES ?? "C:\\Program Files", "Google", "Chrome", "Application", "chrome.exe"),
+          path.join(process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)", "Google", "Chrome", "Application", "chrome.exe"),
+          path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "Google", "Chrome", "Application", "chrome.exe"),
+          path.join(process.env["PROGRAMFILES(X86)"] ?? "C:\\Program Files (x86)", "Microsoft", "Edge", "Application", "msedge.exe"),
+        ]
+      : [
+          "/usr/bin/google-chrome",
+          "/usr/bin/google-chrome-stable",
+          "/usr/bin/chromium",
+          "/usr/bin/chromium-browser",
+          "/snap/bin/chromium",
+          "/usr/bin/microsoft-edge",
+        ];
+
 function probeChrome(override?: string): PreflightItem {
   const candidates = override && override !== "" ? [override] : CHROME_CANDIDATES;
   const home = os.homedir();
-  const all = [...candidates, ...CHROME_CANDIDATES.map((c) => path.join(home, c.replace(/^\//, "")))];
+  const all = [
+    ...candidates,
+    ...(process.platform === "darwin" ? MAC_CHROME_CANDIDATES.map((c) => path.join(home, c.replace(/^\//, ""))) : []),
+  ];
   const found = all.find((c) => isExecutable(c));
   if (!found) {
     return {

@@ -47,6 +47,16 @@ export class SecretStoreUnavailableError extends Error {
   }
 }
 
+/**
+ * A Linux session with no keyring (a bare window manager, a container) has no OS
+ * secret store. Electron can still encrypt there with its fallback key, which is
+ * weaker than a keyring and better than refusing to start. No-op elsewhere.
+ */
+function allowLinuxFallback(): void {
+  if (process.platform !== "linux" || typeof safeStorage.getSelectedStorageBackend !== "function") return;
+  if (safeStorage.getSelectedStorageBackend() === "basic_text") safeStorage.setUsePlainTextEncryption(true);
+}
+
 export class SecretStore {
   readonly #dir: string;
 
@@ -59,6 +69,7 @@ export class SecretStore {
   }
 
   available(): boolean {
+    allowLinuxFallback();
     return safeStorage.isEncryptionAvailable();
   }
 
@@ -74,6 +85,7 @@ export class SecretStore {
   ensure(): LocalSecrets {
     const existing = this.read();
     if (existing) return existing;
+    allowLinuxFallback();
     if (!safeStorage.isEncryptionAvailable()) throw new SecretStoreUnavailableError();
 
     const next: LocalSecrets = {
@@ -94,6 +106,7 @@ export class SecretStore {
     } catch {
       return null;
     }
+    allowLinuxFallback();
     if (!safeStorage.isEncryptionAvailable()) return null;
     try {
       return asSecrets(JSON.parse(safeStorage.decryptString(ciphertext)));

@@ -5,6 +5,9 @@ import { Button } from "@shared/ui/button.js";
 import { StatusDot, type Tone } from "@shared/components/StatusDot.js";
 import { api } from "./bridge";
 
+// Only macOS draws traffic lights inside the window, over the title bar.
+const IS_MAC = navigator.userAgent.includes("Macintosh");
+
 /**
  * The shell: a title bar, and a hole where the product is.
  *
@@ -49,7 +52,7 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
-      <nav className="drag-region flex h-11 shrink-0 items-center gap-2 border-b border-border pl-20 pr-3">
+      <nav className={`drag-region flex h-11 shrink-0 items-center gap-2 border-b border-border pr-3 ${IS_MAC ? "pl-20" : "pl-3"}`}>
         <span className="text-sm font-medium">TaskTrooper</span>
 
         <div className="flex-1" />

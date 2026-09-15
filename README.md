@@ -148,13 +148,19 @@ exact command for anything missing.
 
 Or grab the `.dmg` from [Releases](https://github.com/makifbaysal/tasktrooper/releases) and drag TaskTrooper to Applications.
 
+On **Windows**, download `TaskTrooper-<version>-setup.exe` from Releases and run
+it. On **Linux**, use `TaskTrooper-<version>-x86_64.AppImage` (`chmod +x`, then
+run it) or install the `.deb`. Neither is code-signed yet, so Windows SmartScreen
+asks you to confirm the first time. The install script and Homebrew are
+macOS-only.
+
 ## Run from source
 
 ```sh
 make setup      # go mod download + npm ci (desktop, desktop/ui)
 make desktop    # Electron app in dev mode
 make dev        # or: backend + UI dev server, open http://localhost:3200
-make package    # build the .dmg into desktop/release
+make package    # build the installer for this OS into desktop/release
 ```
 
 ## Layout

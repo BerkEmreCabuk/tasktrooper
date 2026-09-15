@@ -97,7 +97,7 @@ export class Shell {
       minHeight: 600,
       show: false,
       title: "TaskTrooper",
-      titleBarStyle: "hiddenInset",
+      ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset" as const } : {}),
       backgroundColor: "#0b0d13",
       webPreferences: {
         preload: path.join(app.getAppPath(), "dist", "preload", "index.cjs"),

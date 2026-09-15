@@ -120,7 +120,7 @@ does not cover it and notarization rejects an unsigned Mach-O.
 
 `publish: null`, so electron-builder cannot infer a feed from the git remote. A
 build updates itself only if it was packaged with a `publish` configuration
-passed on the command line — which is what `.github/workflows/release-mac.yml`
+passed on the command line — which is what `.github/workflows/release.yml`
 does. `services/updater.ts` reads the bundled `app-update.yml` and accepts two
 shapes: `provider: generic` with a trustworthy URL, and `provider: github` for
 `makifbaysal/tasktrooper` and no other repository. A dev run and a plain

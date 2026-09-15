@@ -38,6 +38,14 @@ describe("agentServerEnv", () => {
   });
 
   /**
+   * Closing stdin is how the backend is stopped on every platform, so the watch
+   * must be switched on for the spawn that gets the pipe.
+   */
+  it("tells the backend to stop when its stdin closes", () => {
+    expect(env().SHUTDOWN_ON_STDIN_CLOSE).toBe("1");
+  });
+
+  /**
    * Empty DATABASE_URL is what selects embedded Postgres. Setting one here —
    * even to something harmless — would quietly turn the local mode off.
    */
@@ -153,7 +161,7 @@ describe("childEnv", () => {
     try {
       const e = childEnv(report());
       expect(e.ELECTRON_RUN_AS_NODE).toBeUndefined();
-      expect(e.PATH).toContain("/opt/homebrew/bin");
+      if (process.platform === "darwin") expect(e.PATH).toContain("/opt/homebrew/bin");
     } finally {
       delete process.env.ELECTRON_RUN_AS_NODE;
     }

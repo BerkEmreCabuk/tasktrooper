@@ -49,7 +49,16 @@ function go(args, env) {
 // The universal path below still works because this only ever cross-compiles
 // darwin → darwin: clang takes -arch from Go, so an amd64 build on an Apple
 // Silicon Mac needs nothing but the Xcode command line tools.
-const buildEnv = { CGO_ENABLED: "1", GOOS: "darwin" };
+const goos = { darwin: "darwin", linux: "linux", win32: "windows" }[process.platform];
+if (!goos) {
+  console.error(`build-server: no Go target for ${process.platform}.`);
+  process.exit(1);
+}
+const goarch = { x64: "amd64", arm64: "arm64" }[process.arch] ?? "amd64";
+const exe = goos === "windows" ? ".exe" : "";
+// cgo: go-tree-sitter's grammars are C, so the backend is built on the platform
+// it runs on, never cross-compiled from another one.
+const buildEnv = { CGO_ENABLED: "1", GOOS: goos };
 // -s -w strips the symbol table and DWARF. Nothing debugs this binary in the
 // field, and the app is smaller for it.
 const ldflags = "-s -w";
@@ -66,11 +75,15 @@ const pkg = "./cmd/agent-server";
  * either way.
  */
 if (!universal) {
-  const out = path.join(outDir, "agent-server");
+  const out = path.join(outDir, `agent-server${exe}`);
   rmSync(out, { force: true });
-  go(["build", "-trimpath", "-ldflags", ldflags, "-o", out, pkg], buildEnv);
+  go(["build", "-trimpath", "-ldflags", ldflags, "-o", out, pkg], { ...buildEnv, GOARCH: goarch });
   console.log(`agent-server -> ${out}`);
 } else {
+  if (goos !== "darwin") {
+    console.error("build-server: --universal is a macOS build; build on each platform without it.");
+    process.exit(1);
+  }
   const arm = path.join(outDir, "agent-server-arm64");
   const amd = path.join(outDir, "agent-server-amd64");
   go(["build", "-trimpath", "-ldflags", ldflags, "-o", arm, pkg], { ...buildEnv, GOARCH: "arm64" });

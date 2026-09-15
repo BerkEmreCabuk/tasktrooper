@@ -23,6 +23,11 @@ export interface ChildSpec {
   args: string[];
   env: NodeJS.ProcessEnv;
   cwd?: string;
+  /**
+   * Give the child a stdin pipe and close it to ask the child to stop. Only for
+   * a child that watches its stdin (the backend, via SHUTDOWN_ON_STDIN_CLOSE).
+   */
+  stdinPipe?: boolean;
   /** Restart on an unexpected exit. False for one-shot children (none today). */
   restart: boolean;
 }
@@ -137,7 +142,7 @@ export class SupervisedChild extends EventEmitter<ChildEvents> {
         proc = spawn(this.#spec.command, this.#spec.args, {
           env: this.#spec.env,
           ...(this.#spec.cwd !== undefined ? { cwd: this.#spec.cwd } : {}),
-          stdio: ["ignore", "pipe", "pipe"],
+          stdio: [this.#spec.stdinPipe ? "pipe" : "ignore", "pipe", "pipe"],
           // No shell, ever. Values in env and args include generated secrets
           // and detected paths; handing any of them to /bin/sh would make a
           // backtick in one of them a command again — the exact failure the old
@@ -145,7 +150,9 @@ export class SupervisedChild extends EventEmitter<ChildEvents> {
           shell: false,
           // Its own process group, so a stray SIGINT reaching this app does
           // not race the ordered teardown by killing the children first.
-          detached: true,
+          detached: process.platform !== "win32",
+          // Without it a GUI app gets a console window per child on Windows.
+          windowsHide: true,
         });
       } catch (err) {
         this.#setState("failed", err instanceof Error ? err.message : String(err));
@@ -154,6 +161,8 @@ export class SupervisedChild extends EventEmitter<ChildEvents> {
       }
 
       this.#proc = proc;
+      // The child exiting first turns the eventual end() into EPIPE.
+      proc.stdin?.on("error", () => undefined);
       this.#stopping = false;
       this.#startedAt = Date.now();
       this.#exitedAt = undefined;
@@ -285,18 +294,25 @@ export class SupervisedChild extends EventEmitter<ChildEvents> {
     this.#setState("stopping");
 
     const exited = new Promise<void>((resolve) => proc.once("exit", () => resolve()));
-    try {
-      proc.kill("SIGTERM");
-    } catch {
-      // Already gone between the check and the signal.
+    // Closing stdin is the request that works everywhere. Windows has no
+    // SIGTERM: kill() there is TerminateProcess, which would skip the backend's
+    // drain and orphan its Postgres.
+    proc.stdin?.end();
+    if (process.platform !== "win32") {
+      try {
+        proc.kill("SIGTERM");
+      } catch {
+        // Already gone between the check and the signal.
+      }
     }
 
     const timer = new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), TERM_GRACE_MS));
     const outcome = await Promise.race([exited.then(() => "exited" as const), timer]);
     if (outcome === "timeout") {
-      this.emit("log", "stderr", `[supervisor] ${this.id} ignored SIGTERM for ${TERM_GRACE_MS / 1000}s; sending SIGKILL`);
+      this.emit("log", "stderr", `[supervisor] ${this.id} did not stop within ${TERM_GRACE_MS / 1000}s; killing it`);
       try {
-        proc.kill("SIGKILL");
+        if (process.platform === "win32") proc.kill();
+        else proc.kill("SIGKILL");
       } catch {
         // Raced with its own exit; the await below settles either way.
       }

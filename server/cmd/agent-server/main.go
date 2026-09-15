@@ -70,7 +70,11 @@ func main() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
-	<-quit
+	select {
+	case <-quit:
+	case <-stdinClosed(os.Getenv("SHUTDOWN_ON_STDIN_CLOSE") == "1", os.Stdin):
+		log.Info().Msg("stdin closed by the supervisor")
+	}
 
 	// Shutdown drains, cancel severs — so Shutdown runs FIRST and cancel only
 	// mops up afterwards. Calling cancel() here killed the run context before

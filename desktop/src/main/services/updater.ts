@@ -68,7 +68,7 @@ const BUNDLED_CONFIG_FILE = "app-update.yml";
 
 /**
  * The one repository this app accepts a GitHub feed for: the releases the
- * `release-mac` workflow publishes. Anything else in a bundled config was
+ * `release` workflow publishes. Anything else in a bundled config was
  * inferred from somebody's git remote rather than chosen — see `resolveFeed`.
  */
 const GITHUB_OWNER = "makifbaysal";
