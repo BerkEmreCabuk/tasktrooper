@@ -4,14 +4,14 @@
 #
 #   scripts/update-cask.sh 0.1.1 desktop/release/TaskTrooper-0.1.1-universal.dmg
 #
-# Rewrites `version` and `sha256` in packaging/homebrew/Casks/tasktrooper.rb.
-# Copying the result into the tap (makifbaysal/homebrew-tasktrooper) is a
-# separate, deliberate step — this script never pushes anything.
+# Rewrites `version` and `sha256` in Casks/tasktrooper.rb. This repository is
+# the tap, so committing and pushing that file publishes the update; the script
+# itself never pushes anything.
 set -euo pipefail
 
 version="${1:-}"
 dmg="${2:-}"
-cask="$(cd "$(dirname "$0")/.." && pwd)/packaging/homebrew/Casks/tasktrooper.rb"
+cask="$(cd "$(dirname "$0")/.." && pwd)/Casks/tasktrooper.rb"
 
 if [ -z "$version" ] || [ -z "$dmg" ]; then
   echo "usage: $(basename "$0") <version> <dmg>" >&2

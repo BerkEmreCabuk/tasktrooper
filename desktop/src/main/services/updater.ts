@@ -72,7 +72,7 @@ const BUNDLED_CONFIG_FILE = "app-update.yml";
  * inferred from somebody's git remote rather than chosen — see `resolveFeed`.
  */
 const GITHUB_OWNER = "makifbaysal";
-const GITHUB_REPO = "tasktrooper-oss";
+const GITHUB_REPO = "tasktrooper";
 
 // --- the feed ---------------------------------------------------------------
 

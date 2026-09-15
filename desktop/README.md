@@ -122,7 +122,7 @@ build updates itself only if it was packaged with a `publish` configuration
 passed on the command line — which is what `.github/workflows/release-mac.yml`
 does. `services/updater.ts` reads the bundled `app-update.yml` and accepts two
 shapes: `provider: generic` with a trustworthy URL, and `provider: github` for
-`makifbaysal/tasktrooper-oss` and no other repository. A dev run and a plain
+`makifbaysal/tasktrooper` and no other repository. A dev run and a plain
 `npm run package` build report `unsupported`, which is the honest state.
 
 The GitHub provider reads the releases feed unauthenticated, so it answers 404

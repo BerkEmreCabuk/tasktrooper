@@ -121,17 +121,18 @@ GitHub, and imports your first project.
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/makifbaysal/tasktrooper-oss/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/makifbaysal/tasktrooper/main/scripts/install.sh | bash
 ```
 
 It downloads the latest release's universal `.dmg`, copies TaskTrooper into
 `/Applications`, and prints the commands for anything else you need. Pass `-y`
 to replace an existing install without being asked.
 
-With Homebrew, once this repository is public:
+With Homebrew once this repository is public; the repository is its own tap:
 
 ```sh
-brew tap makifbaysal/tasktrooper && brew install --cask tasktrooper
+brew tap makifbaysal/tasktrooper https://github.com/makifbaysal/tasktrooper
+brew install --cask tasktrooper
 ```
 
 The app is ad-hoc signed and not notarized yet, so a copy you
@@ -143,7 +144,7 @@ binaries (~30 MB) and the embedding model (~140 MB). You need `git` and the
 `claude` CLI signed in to a plan that includes Claude Code — the app checks both
 and shows the exact command if one is missing.
 
-Or grab the `.dmg` from [Releases](https://github.com/makifbaysal/tasktrooper-oss/releases) and drag TaskTrooper to Applications.
+Or grab the `.dmg` from [Releases](https://github.com/makifbaysal/tasktrooper/releases) and drag TaskTrooper to Applications.
 
 ## Run from source
 

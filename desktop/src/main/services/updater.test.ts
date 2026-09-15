@@ -132,11 +132,11 @@ describe("resolveFeed", () => {
 
   /** What the release workflow packages: `-c.publish.provider=github` and this repository. */
   it("uses the GitHub releases of this repository", () => {
-    bundledConfig("provider: github\nowner: makifbaysal\nrepo: tasktrooper-oss\nupdaterCacheDirName: tasktrooper-desktop-updater\n");
+    bundledConfig("provider: github\nowner: makifbaysal\nrepo: tasktrooper\nupdaterCacheDirName: tasktrooper-desktop-updater\n");
     expect(resolveFeed(paths())).toEqual({
       kind: "bundled",
       provider: "github",
-      url: "https://github.com/makifbaysal/tasktrooper-oss/releases",
+      url: "https://github.com/makifbaysal/tasktrooper/releases",
     });
   });
 
@@ -178,7 +178,7 @@ describe("feedNotFound", () => {
   const github: Feed = {
     kind: "bundled",
     provider: "github",
-    url: "https://github.com/makifbaysal/tasktrooper-oss/releases",
+    url: "https://github.com/makifbaysal/tasktrooper/releases",
   };
 
   it("recognises the answers a private or release-less repository gives", () => {
@@ -203,7 +203,7 @@ describe("UpdateService", () => {
       feedKind === "ok"
         ? { kind: "bundled", provider: "generic", url: "https://example.com/mac/" }
         : feedKind === "github"
-          ? { kind: "bundled", provider: "github", url: "https://github.com/makifbaysal/tasktrooper-oss/releases" }
+          ? { kind: "bundled", provider: "github", url: "https://github.com/makifbaysal/tasktrooper/releases" }
           : { kind: "none", reason: "no feed here" };
     const svc = new UpdateService({
       backend,

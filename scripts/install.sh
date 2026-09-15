@@ -2,14 +2,14 @@
 #
 # Install TaskTrooper on this Mac.
 #
-#   curl -fsSL https://raw.githubusercontent.com/makifbaysal/tasktrooper-oss/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/makifbaysal/tasktrooper/main/scripts/install.sh | bash
 #
 # Downloads the latest release's universal .dmg, copies TaskTrooper.app into
 # /Applications, and tells you what else the app needs. It never installs
 # anything else for you — the commands are printed and you run them.
 set -euo pipefail
 
-REPO="makifbaysal/tasktrooper-oss"
+REPO="makifbaysal/tasktrooper"
 APP="TaskTrooper.app"
 APPS="${TASKTROOPER_INSTALL_DIR:-/Applications}"
 ASSUME_YES=false
@@ -18,7 +18,7 @@ usage() {
   cat <<'USAGE'
 install.sh — install TaskTrooper into /Applications
 
-  curl -fsSL https://raw.githubusercontent.com/makifbaysal/tasktrooper-oss/main/scripts/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/makifbaysal/tasktrooper/main/scripts/install.sh | bash
 
   -y, --yes   replace an existing install and answer every prompt with yes
   -h, --help  this
