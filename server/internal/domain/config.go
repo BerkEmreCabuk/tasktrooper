@@ -284,6 +284,10 @@ type IndexerConfig struct {
 	// request rate too — the embedding rate limiter is what keeps that from
 	// turning into 429s. 0 falls back to defaultIndexConcurrency.
 	Concurrency int `koanf:"concurrency"`
+	// EmbedConcurrency bounds embedding calls across every index job at once,
+	// so indexing two repositories does not multiply the load on a local
+	// embedding model. 0 falls back to the indexer's default (2).
+	EmbedConcurrency int `koanf:"embed_concurrency"`
 }
 
 // EmbeddingConfig paces embedding requests. Indexing a repository fires one

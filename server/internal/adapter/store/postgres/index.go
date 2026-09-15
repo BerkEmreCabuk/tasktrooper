@@ -342,6 +342,12 @@ func (s *IndexStore) SaveChunks(ctx context.Context, indexID uuid.UUID, chunks [
 			if err != nil {
 				return nil, 0, fmt.Errorf("marshal embedding: %w", err)
 			}
+			if len(ch.Embedding) == 0 {
+				// A chunk the embedder could not take is stored with SQL NULL,
+				// not JSON null: every search reads NULL as "no vector" and
+				// skips it, where JSON null scored 0 and could still rank.
+				emb = nil
+			}
 			if s.caps.Vector && len(ch.Embedding) > 0 {
 				dim = len(ch.Embedding)
 				batch.Queue(`

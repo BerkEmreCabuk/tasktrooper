@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { Tokenizer } from "@huggingface/tokenizers";
+import { SerialQueue, truncateEncoding } from "./limits.js";
 import type * as OrtModule from "onnxruntime-web";
 
 /**
@@ -47,6 +48,8 @@ export class Engine {
   // `OrtModule.InferenceSession` is usable as a type here.
   readonly #session: OrtModule.InferenceSession;
   readonly #tokenizer: Tokenizer;
+  // One inference at a time; see SerialQueue.
+  readonly #queue = new SerialQueue();
 
   constructor(session: OrtModule.InferenceSession, tokenizer: Tokenizer) {
     this.#session = session;
@@ -55,9 +58,11 @@ export class Engine {
 
   /** Full pipeline: text -> tokenize -> run -> mean-pool -> L2-normalize -> a 768-dim unit vector. */
   async embed(text: string): Promise<Float64Array> {
-    const { lastHiddenState, attentionMask, seqLen, hidden } = await this.#run(text);
-    const pooled = meanPool(lastHiddenState, attentionMask, seqLen, hidden);
-    return l2Normalize(pooled);
+    return this.#queue.run(async () => {
+      const { lastHiddenState, attentionMask, seqLen, hidden } = await this.#run(text);
+      const pooled = meanPool(lastHiddenState, attentionMask, seqLen, hidden);
+      return l2Normalize(pooled);
+    });
   }
 
   /**
@@ -73,7 +78,8 @@ export class Engine {
   async #run(
     text: string,
   ): Promise<{ lastHiddenState: Float32Array; attentionMask: number[]; seqLen: number; hidden: number }> {
-    const encoded = this.#tokenizer.encode(text, { return_token_type_ids: true });
+    // Capped before inference: see MAX_SEQUENCE_TOKENS.
+    const encoded = truncateEncoding(this.#tokenizer.encode(text, { return_token_type_ids: true }));
     const seqLen = encoded.ids.length;
 
     const inputIds = BigInt64Array.from(encoded.ids.map((id) => BigInt(id)));

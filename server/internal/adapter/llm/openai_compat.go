@@ -24,6 +24,19 @@ type openAICompatClient struct {
 	httpClient   *http.Client
 }
 
+// idleConnTimeout closes an idle keep-alive connection before the server on
+// the other end does. The local embedder keeps idle sockets for 65 seconds (an
+// older one for Node's default five), and a request written onto a socket the
+// server already closed fails with "connection reset by peer" - a POST is not
+// retried by net/http, so that race used to fail a whole index.
+const idleConnTimeout = 30 * time.Second
+
+func newIdleSafeTransport() *http.Transport {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.IdleConnTimeout = idleConnTimeout
+	return t
+}
+
 func NewOpenAICompatClient(baseURL, model, apiKey string, timeout time.Duration) port.LLMClient {
 	return newOpenAICompatClientExt(baseURL, model, apiKey, timeout, nil)
 }
@@ -38,7 +51,7 @@ func newOpenAICompatClientExt(baseURL, model, apiKey string, timeout time.Durati
 		model:        model,
 		apiKey:       apiKey,
 		extraHeaders: extraHeaders,
-		httpClient:   &http.Client{Timeout: timeout},
+		httpClient:   &http.Client{Timeout: timeout, Transport: newIdleSafeTransport()},
 	}
 }
 

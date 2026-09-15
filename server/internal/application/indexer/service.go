@@ -29,6 +29,23 @@ const (
 	defaultEmbedRetryWait = 60 * time.Second
 )
 
+const (
+	// defaultEmbedConcurrency bounds embedding calls across every index job of
+	// the service. File workers still read and parse in parallel and only wait
+	// here for a slot. It protects a local CPU model: two repositories indexed
+	// at once used to send eight requests into one embedder that answers them
+	// all slower, not more of them.
+	defaultEmbedConcurrency = 2
+	// maxTransientEmbedAttempts is how often one chunk is tried when the
+	// embedder was briefly unreachable (a reset or refused connection, a 502,
+	// 503 or 504), and transientEmbedBackoff the first wait between tries.
+	maxTransientEmbedAttempts = 4
+	transientEmbedBackoff     = time.Second
+	// maxConsecutiveEmbedFailures is how many chunks in a row may fail before
+	// the pass gives up on an embedder that is evidently not coming back.
+	maxConsecutiveEmbedFailures = 10
+)
+
 type Service struct {
 	store          port.IndexStore
 	llm            port.LLMClient
@@ -42,7 +59,10 @@ type Service struct {
 	// rate-limited call would be cut off by the deadline that was sized for a
 	// single request.
 	embedBudget time.Duration
-	projectMu   sync.Mutex
+	// embedSlots is the shared limit on concurrent embedding calls; nil means
+	// unlimited, which is what a Service built by hand in a test gets.
+	embedSlots chan struct{}
+	projectMu  sync.Mutex
 	// projectRunning maps a project to the cancel func of its running pass, so
 	// an operator can stop an index that is chewing through a huge repository
 	// instead of waiting it out. A stopped pass keeps every file it already
@@ -182,6 +202,7 @@ func NewService(
 		graphCfg:       graphCfg,
 		embeddingModel: embeddingModel,
 		embedBudget:    perChunkEmbedTimeout,
+		embedSlots:     make(chan struct{}, embedConcurrency(cfg)),
 		projectRunning: make(map[uuid.UUID]context.CancelFunc),
 	}
 	// Installed here, not only in SetEmbeddingResolver, so a deployment that
@@ -835,6 +856,7 @@ func isRateLimited(err error) bool {
 // kept.
 func (s *Service) embedWithBackoff(ctx context.Context, input string, budget time.Duration) ([]float32, error) {
 	wait := rateLimitBackoff
+	transient := 0
 	for attempt := 1; ; attempt++ {
 		embedCtx, cancel := context.WithTimeout(ctx, budget)
 		emb, err := s.llm.Embed(embedCtx, input, s.embeddingModel)
@@ -849,7 +871,21 @@ func (s *Service) embedWithBackoff(ctx context.Context, input string, budget tim
 			return nil, ctx.Err()
 		}
 		if !isRateLimited(err) {
-			return nil, err
+			if !isTransientEmbedError(err) || transient >= maxTransientEmbedAttempts-1 {
+				return nil, err
+			}
+			transient++
+			backoff := transientEmbedBackoff << (transient - 1)
+			log.Info().Err(err).Dur("wait", backoff).Int("attempt", transient+1).
+				Msg("embedder briefly unreachable; retrying the same chunk")
+			retry := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				retry.Stop()
+				return nil, ctx.Err()
+			case <-retry.C:
+			}
+			continue
 		}
 		sleep := wait
 		if hinted := retryAfterHint(err); hinted > 0 {
@@ -915,21 +951,32 @@ func (s *Service) persistFile(
 	edges []domain.WorkspaceEdge,
 	prov *passProvenance,
 ) error {
+	unembedded := 0
 	for i := range chunks {
-		input := FormatEmbedInput(chunks[i].FilePath, chunks[i].SymbolName, chunks[i].Signature, chunks[i].Content)
+		input := FormatEmbedInput(chunks[i].FilePath, chunks[i].SymbolName, chunks[i].Signature, capEmbedContent(chunks[i].Content))
 		budget := s.embedBudget
 		if budget <= 0 {
 			budget = perChunkEmbedTimeout
 		}
-		emb, err := s.embedWithBackoff(ctx, input, budget)
-		if err != nil {
+		emb, err := s.embedChunk(ctx, input, budget)
+		switch {
+		case err == nil:
+			prov.embedSucceeded()
+			prov.observe(emb)
+			chunks[i].Embedding = emb
+		case ctx.Err() != nil:
 			return fmt.Errorf("embed chunk: %w", err)
+		default:
+			// One chunk the embedder cannot take is stored without a vector:
+			// search skips it, and the rest of the repository still gets
+			// indexed. Only a long run of failures stops the pass.
+			if streak := prov.embedFailed(); streak >= maxConsecutiveEmbedFailures {
+				return fmt.Errorf("embed chunk: %d chunks in a row could not be embedded: %w", streak, err)
+			}
+			unembedded++
+			log.Warn().Err(err).Str("file", chunks[i].FilePath).Str("symbol", chunks[i].SymbolName).
+				Msg("chunk stored without an embedding")
 		}
-		// The vector's own length is the truest thing this pass will ever know
-		// about its embedding dimension — better than any configured number,
-		// because it came back from the model that is actually answering.
-		prov.observe(emb)
-		chunks[i].Embedding = emb
 		chunks[i].IndexID = indexID
 	}
 	for i := range symbols {
@@ -952,6 +999,12 @@ func (s *Service) persistFile(
 		if err := s.store.SaveEdges(ctx, indexID, edges); err != nil {
 			return fmt.Errorf("save edges: %w", err)
 		}
+	}
+	if unembedded > 0 {
+		// No hash for a file that has a chunk without a vector: the next pass
+		// sees the file as new, clears its rows and embeds it again, so a
+		// failure does not leave the chunk unsearchable for good.
+		return nil
 	}
 	hash, err := HashFile(absRoot, relPath)
 	if err != nil {
@@ -1163,4 +1216,44 @@ func DefaultChunkerRegistry() *chunker.Registry {
 
 func NewInjectorFromService(s *Service, mapperSvc *mapper.Service) *Injector {
 	return NewInjector(s.store, s.llm, mapperSvc, s.embeddingModel, s.graphCfg)
+}
+
+// isTransientEmbedError reports an embedder that did not answer this time but
+// may on the next try: a connection reset or refused (the local embedder's
+// socket closed under a request), or a gateway status. A 500 or a 4xx is an
+// answer about this input and is not retried.
+func isTransientEmbedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, marker := range []string{
+		"embeddings unreachable", "connection reset", "connection refused", "broken pipe",
+		"unexpected eof", "embeddings returned 502", "embeddings returned 503", "embeddings returned 504",
+	} {
+		if strings.Contains(msg, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func embedConcurrency(cfg domain.IndexerConfig) int {
+	if cfg.EmbedConcurrency > 0 {
+		return cfg.EmbedConcurrency
+	}
+	return defaultEmbedConcurrency
+}
+
+// embedChunk embeds one chunk inside the service-wide embedding limit.
+func (s *Service) embedChunk(ctx context.Context, input string, budget time.Duration) ([]float32, error) {
+	if s.embedSlots != nil {
+		select {
+		case s.embedSlots <- struct{}{}:
+			defer func() { <-s.embedSlots }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return s.embedWithBackoff(ctx, input, budget)
 }

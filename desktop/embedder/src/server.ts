@@ -33,6 +33,16 @@ const DEFAULT_MODEL = "nomic-embed-text-v1.5";
 /** A JSON body larger than this is refused before it is parsed. Generous for a batch of strings, not unbounded. */
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
 
+/**
+ * How long an idle keep-alive connection stays open. Node's default is five
+ * seconds, shorter than the Go client keeps its idle connections, so the client
+ * wrote requests onto sockets this server had just closed and an index failed
+ * with "connection reset by peer". This outlives the client's 30 seconds.
+ */
+export const KEEP_ALIVE_TIMEOUT_MS = 65_000;
+/** Must exceed the keep-alive timeout, or Node closes the socket first anyway. */
+export const HEADERS_TIMEOUT_MS = 66_000;
+
 interface EmbeddingsRequestBody {
   input?: unknown;
   model?: unknown;
@@ -57,6 +67,8 @@ export function createEmbeddingsServer(): EmbedderServer {
     });
   });
 
+  server.keepAliveTimeout = KEEP_ALIVE_TIMEOUT_MS;
+  server.headersTimeout = HEADERS_TIMEOUT_MS;
   return {
     server,
     setEngine: (next) => {

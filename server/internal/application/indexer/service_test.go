@@ -79,22 +79,28 @@ func (s *ServiceSuite) TestIndexSessionIncrementalSkipsUnchanged() {
 // were written only at the very end, so a run that died at file N left nothing
 // behind and the next run started from zero — forever, if it kept dying.
 func (s *ServiceSuite) TestInterruptedPassKeepsFinishedFilesAndResumes() {
-	// Fail on the SECOND file: the embed input starts with the file path, so
-	// the first file completes and is persisted, and the pass dies after it.
+	// Stop the pass on the SECOND file: the embed input starts with the file
+	// path, so the first file completes and is persisted, and the pass is
+	// cancelled after it. A single chunk the embedder rejects no longer ends a
+	// pass (it is stored without a vector), so the interruption here is a real
+	// cancellation, the way a shutdown or a stop request ends one.
+	passCtx, cancelPass := context.WithCancel(context.Background())
+	defer cancelPass()
 	var firstFile string
-	s.llm.embedFn = func(_ context.Context, input string, _ string) ([]float32, error) {
+	s.llm.embedFn = func(ctx context.Context, input string, _ string) ([]float32, error) {
 		path := strings.Fields(input)[0]
 		if firstFile == "" {
 			firstFile = path
 		}
 		if path != firstFile {
-			return nil, context.DeadlineExceeded
+			cancelPass()
+			return nil, ctx.Err()
 		}
 		return []float32{float32(len(input))}, nil
 	}
 
-	_, err := s.svc.IndexSession(context.Background(), s.sessionID, mapperFixtureRoot())
-	s.Require().Error(err, "the pass must fail, not paper over the embedding failure")
+	_, err := s.svc.IndexSession(passCtx, s.sessionID, mapperFixtureRoot())
+	s.Require().Error(err, "a cancelled pass must fail, not report a finished index")
 
 	idx, err := s.store.GetIndexBySession(context.Background(), s.sessionID)
 	s.Require().NoError(err)

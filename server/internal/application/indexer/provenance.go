@@ -40,6 +40,11 @@ type passProvenance struct {
 	// good as any, and CompareAndSwap avoids the lock a mutex would put on the
 	// hot path of every chunk.
 	observedDims atomic.Int64
+	// embedFailStreak counts chunks in a row that could not be embedded, across
+	// all workers of the pass. One failure is stored without a vector; a long
+	// run of them means the embedder is gone, and the pass stops instead of
+	// filling a repository with chunks nothing can find by meaning.
+	embedFailStreak atomic.Int64
 }
 
 // newPassProvenance resolves what this pass will embed with, through the same
@@ -166,4 +171,20 @@ func (s *Service) AnnotateEmbeddingProvenance(ctx context.Context, index *domain
 	}
 	index.EmbeddingStale = true
 	index.EmbeddingWarning = domain.EmbeddingStaleMessage(index.EmbeddingModel, index.EmbeddingDims, model, dims)
+}
+
+// embedFailed records one chunk that could not be embedded and returns how
+// many failed in a row. Nil-safe: without provenance the streak never trips.
+func (p *passProvenance) embedFailed() int64 {
+	if p == nil {
+		return 0
+	}
+	return p.embedFailStreak.Add(1)
+}
+
+// embedSucceeded ends a failure streak.
+func (p *passProvenance) embedSucceeded() {
+	if p != nil {
+		p.embedFailStreak.Store(0)
+	}
 }

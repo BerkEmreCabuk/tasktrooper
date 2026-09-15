@@ -1753,6 +1753,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				defer cancel()
 				repositorySvc.ReconcileWebhooks(bootCtx)
 				repositorySvc.SweepIndexFreshness(bootCtx)
+				repositorySvc.ResumeUnfinishedIndexes(bootCtx)
 			}()
 			// GitHub will not deliver webhooks to a loopback or private address,
 			// and a desktop install listens on 127.0.0.1. Poll instead: the

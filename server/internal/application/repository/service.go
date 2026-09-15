@@ -2838,3 +2838,35 @@ func (s *Service) SetIncidentPolicy(ctx context.Context, repositoryID uuid.UUID,
 	}
 	return s.repos.UpdateIncidentPolicy(ctx, repositoryID, policy)
 }
+
+// ResumeUnfinishedIndexes restarts, once at startup, every repository index a
+// previous process left running or failed. Nothing else picks up a failed
+// index, and one that failed because the embedder dropped a connection would
+// otherwise sit at a few percent until someone pressed reindex. The pass is not
+// forced, so files already indexed are skipped by their stored hashes.
+func (s *Service) ResumeUnfinishedIndexes(ctx context.Context) {
+	if s.indexer == nil {
+		return
+	}
+	repos, err := s.repos.List(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("index resume: repository list failed")
+		return
+	}
+	for _, repo := range repos {
+		idx, err := s.indexer.GetProjectStatus(ctx, repo.ID)
+		if err != nil {
+			continue
+		}
+		if idx.Status != domain.IndexStatusRunning && idx.Status != domain.IndexStatusFailed {
+			continue
+		}
+		if s.indexer.IsProjectIndexActive(repo.ID) {
+			continue
+		}
+		log.Info().Str("repository_id", repo.ID.String()).Str("status", string(idx.Status)).
+			Int("files_processed", idx.FilesProcessed).Int("files_total", idx.FilesTotal).
+			Msg("resuming an index the previous run did not finish")
+		s.startIndex(ctx, repo.ID, repo.RootPath)
+	}
+}
