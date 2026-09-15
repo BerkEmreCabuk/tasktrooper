@@ -17,7 +17,7 @@ cask "tasktrooper" do
   desc "Local-first agent platform that runs Claude Code on your own Mac"
   homepage "https://github.com/makifbaysal/tasktrooper"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "TaskTrooper.app"
 
