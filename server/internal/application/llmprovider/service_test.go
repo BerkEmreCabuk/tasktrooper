@@ -14,9 +14,8 @@ type mockStore struct {
 	active  domain.LLMProviderType
 	keys    map[domain.LLMProviderType][]byte
 
-	// embeddingProvider/embeddingModel are stateful (unlike the no-op zero
-	// value every earlier test relied on) so SetControlPlane/ResolvedEmbedding
-	// tests can assert on what SetEmbedding actually stored.
+	// embeddingProvider/embeddingModel are stateful so ResolvedEmbedding tests
+	// can assert on what SetEmbedding actually stored.
 	embeddingProvider domain.LLMProviderType
 	embeddingModel    string
 }

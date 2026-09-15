@@ -15,15 +15,10 @@ type BillingStore interface {
 	UpdatePlan(ctx context.Context, req domain.UpdateBillingPlanRequest) (domain.BillingPlan, error)
 	// SetPeriodStart rolls the billing period to a new start (period renewal).
 	SetPeriodStart(ctx context.Context, start time.Time) error
-	// SyncPlan applies the full plan (including period_start) from a tenant-manager
-	// push, overwriting all fields.
-	SyncPlan(ctx context.Context, plan domain.BillingPlan) error
 
 	ListModelPrices(ctx context.Context) ([]domain.ModelPrice, error)
 	UpsertModelPrice(ctx context.Context, price domain.ModelPrice) (domain.ModelPrice, error)
 	DeleteModelPrice(ctx context.Context, model string) error
-	// ReplaceModelPrices atomically replaces the whole price table (control push).
-	ReplaceModelPrices(ctx context.Context, prices []domain.ModelPrice) error
 
 	// UsdSpentSince sums token usage priced via model_prices since a time.
 	UsdSpentSince(ctx context.Context, since time.Time) (float64, error)

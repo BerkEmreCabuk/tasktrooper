@@ -247,7 +247,7 @@ func (s *CodeToolsSuite) SetupSuite() {
 		},
 	}
 	mapperSvc := mapper.NewService(domain.MappingConfig{Enabled: true, TreeMaxDepth: 4, MaxFiles: 50})
-	s.kit = code.NewToolKit(s.store, &fakeLLM{embedding: []float32{0.1, 0.2}}, mapperSvc, domain.IndexerConfig{TopK: 3}, domain.GraphConfig{MaxExpansionDepth: 2, MaxExpandedChunks: 8}, "embed-model", false)
+	s.kit = code.NewToolKit(s.store, &fakeLLM{embedding: []float32{0.1, 0.2}}, mapperSvc, domain.IndexerConfig{TopK: 3}, domain.GraphConfig{MaxExpansionDepth: 2, MaxExpandedChunks: 8}, "embed-model")
 }
 
 func (s *CodeToolsSuite) TestCodebaseSearch() {

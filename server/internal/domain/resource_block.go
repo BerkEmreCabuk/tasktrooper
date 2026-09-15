@@ -112,29 +112,10 @@ const ResourceWorkOrder = "work_order"
 // the same manual release every other park also accepts.
 const ResourceHumanDecision = "human_decision"
 
-// ResourceRunnerNotAttached is the assignee's Mac, parked on when the work
-// needs it and it is not connected.
-//
-// It is the sixth, and it is a resource in exactly the sense the phone is: a
-// physical thing outside the board that the agent cannot influence and that
-// comes back on its own. What makes it worth its own name rather than a
-// failure is that it is now the NORMAL state of half a working day. agent-server
-// runs in the cloud and the code lives on a laptop; a task assigned to somebody
-// whose lid is shut has nothing wrong with it, and failing its run would spend
-// one of the task's three consecutive-failure lives on that, three times, and
-// then stop the card for a human to look at a machine that was only asleep.
-//
-// Per-MEMBER, not per-task and not a queue: every card assigned to one person
-// is waiting for exactly one laptop, and they all become runnable at the same
-// instant. That is why the sweeper (application/board/runner_sweeper.go) probes
-// once per distinct assignee rather than once per parked card, and releases
-// every card belonging to a member whose Mac came back.
-const ResourceRunnerNotAttached = "runner_not_attached"
-
 // ValidResource guards what may be written to board_tasks.blocked_resource: an
 // unknown value would park a task no sweeper ever looks for.
 func ValidResource(name string) bool {
 	return name == ResourceMobileDevice || name == ResourceClaudeCodeQuota ||
 		name == ResourceDeployWatch || name == ResourceWorkOrder ||
-		name == ResourceHumanDecision || name == ResourceRunnerNotAttached
+		name == ResourceHumanDecision
 }

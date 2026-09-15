@@ -51,20 +51,18 @@ Placement rule: **atoms only in `components/ui/`**; molecules/organisms in the c
 
 | Piece | What it is |
 |---|---|
-| `hooks/useTenantMembers.ts` | Reads `/v1/tenant/members` — the candidate set, by construction exactly who assignment accepts. An unlabelled candidate stays pickable. Returns `PickableMember[]` + `labelFor(uid)` (null when unnamed). |
-| `board/TaskAssigneeFields.tsx` | Organism: both assignments — agent (`Bot`) and person (`User`), each with its own hint. Boxed under "Assignment" only when both show. Unnamed rows read "Workspace member {8-char uid}" — never blank, never a whole uuid. Exports `showMemberAssignee`. |
+| `hooks/useTenantMembers.ts` | Calls `/v1/tenant/members`; the server registers no such route, so the failure reads as no members. Returns `PickableMember[]` + `labelFor(uid)` (null when unnamed). |
+| `board/TaskAssigneeFields.tsx` | Organism: both assignments — agent (`Bot`) and person (`User`), each with its own hint. Boxed under "Assignment" only when both show. Unnamed rows read "Workspace member {8-char uid}". Exports `showMemberAssignee`. |
 | `lib/project-board` | `CACHE_MEMBERS`, `memberLabel(member)` → `""` when nothing names them, `shortMemberLabel`. |
 
-- Used by `CreateTaskDialog` (replacing its lone agent select) and `TaskDetailDrawer`'s
-  sidebar, so `ChatTaskDrawer`/`ReleasedPage` get it too. `BoardPage`'s card gives the
-  person the agent badge's twin — same `Badge`, `User` icon, title naming whose Mac it
-  runs on. No label, no badge (the iOS rule); `created_by` shows only when neither is set.
-- **Single-user workspace: no picker** — `showMemberAssignee` wants 2+ members, or a card
-  that already names somebody so a routed value is never hidden. A 404 reads the same way.
-- Clearing either assignee sends `null`, which the server honours as of 2026-08-30 —
-  before that it was a silent no-op and the drawer's "unassign the agent" did nothing.
-- `isAssigneeRejectedError` switches on `assignee_not_member`; the refusal is re-said in
-  the reader's language and re-reads the roster. Every other failure shows the server's.
+- Used by `CreateTaskDialog` and `TaskDetailDrawer`'s sidebar (so `ChatTaskDrawer`/`ReleasedPage`
+  too). `BoardPage`'s card shows a person badge beside the agent badge — same `Badge`, `User`
+  icon. No label, no badge; `created_by` shows only when neither is set.
+- **No person picker** — `showMemberAssignee` wants 2+ members or an assignee already set;
+  this single-user install has neither.
+- Clearing either assignee sends `null`.
+- `isAssigneeRejectedError` switches on `assignee_not_member` (any non-empty person uid) and
+  re-says the refusal in the reader's language. Every other failure shows the server's.
 
 ## Store console + mobile release panel
 

@@ -2,12 +2,10 @@ package session
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -34,22 +32,6 @@ func (s *Service) runHostExecutedTurn(
 	}
 
 	workDir := strings.TrimSpace(turn.workspaceDir)
-
-	if s.remoteAgentWorkspace != nil && sess.TaskID == nil && sess.ProjectID == nil {
-		member := registry.MemberUIDFromContext(ctx)
-		if member == "" {
-			return domain.AgentResponse{}, fmt.Errorf("this chat names no member, so there is no Mac to prepare a workspace on")
-		}
-		key := "session-" + sess.ID.String()
-		if sess.AgentID != nil {
-			key = "agent-" + sess.AgentID.String()
-		}
-		rel, err := s.remoteAgentWorkspace.Ensure(ctx, member, key)
-		if err != nil {
-			return domain.AgentResponse{}, fmt.Errorf("prepare this chat's workspace on the assignee's Mac: %w", err)
-		}
-		workDir = rel
-	}
 
 	if workDir == "" {
 		return domain.AgentResponse{}, errNoChatWorkspace(turn.lang)

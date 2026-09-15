@@ -95,7 +95,7 @@ func setupOverlayFixture(t *testing.T, stampCommit bool) overlayFixture {
 	}
 
 	mapperSvc := mapper.NewService(domain.MappingConfig{Enabled: true, TreeMaxDepth: 4, MaxFiles: 50})
-	kit := code.NewToolKit(store, &fakeLLM{embedding: []float32{0.1, 0.2}}, mapperSvc, domain.IndexerConfig{TopK: 5}, domain.GraphConfig{MaxExpansionDepth: 2, MaxExpandedChunks: 8}, "embed-model", false)
+	kit := code.NewToolKit(store, &fakeLLM{embedding: []float32{0.1, 0.2}}, mapperSvc, domain.IndexerConfig{TopK: 5}, domain.GraphConfig{MaxExpansionDepth: 2, MaxExpandedChunks: 8}, "embed-model")
 	ctx := registry.ContextWithWorkspaceDir(
 		registry.ContextWithSessionID(context.Background(), sessionID),
 		root,

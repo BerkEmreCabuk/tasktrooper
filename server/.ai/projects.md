@@ -1,6 +1,6 @@
 # Repositories & Initiative Projects
 
-Code repositories bind a filesystem directory to codebase indexing and the kanban board. Repository-scoped chat is removed; agents are triggered by board events instead. Every repo belongs to exactly one tenant (`tenant_id`, migration 114) and the board is global **within** it — there is no second grouping under a tenant, which is what the removed `team_id` used to be. People are a separate axis: see [Teams](#teams-migration-115) for the member roster, per-member agents and card assignees added by migration 115.
+Code repositories bind a filesystem directory to codebase indexing and the kanban board. Repository-scoped chat is removed; agents are triggered by board events instead. Every repo carries a `tenant_id` (migration 114, always `tenant.LocalTenantID` on this product) and the board is global **within** it — there is no second grouping under a tenant, which is what the removed `team_id` used to be. See [Person columns](#person-columns-migration-115) for `assignee_user_id` and the other per-person columns added by migration 115.
 
 ## Data Model
 
@@ -40,7 +40,7 @@ Column slugs are global in `board_columns`. Default template: `backlog`, `todo`,
 
 Board-triggered runs use `repository.root_path` as the effective workspace for shell and code tools.
 
-A tenant's runtime can move between hosts (cloud pod ↔ the user's paired Mac), so a recorded `root_path` may name a folder the current host does not have. The card says so (`domain.GitPresence`), and `POST /v1/repositories/:id/restore` is the way back: it clones from the recorded `remote_url` into **this** runtime's layout (`<workspace>/repos/<name>`, the same helper the GitHub import uses) and re-points `root_path` at where the code actually landed. It is explicit and one repository at a time — a clone is minutes and gigabytes, so it is never started by a read — and it refuses, without touching anything on disk, unless the folder is genuinely missing and a remote is recorded.
+A recorded `root_path` may name a folder that no longer exists on this machine — the data directory moved, or the checkout was deleted by hand. The card says so (`domain.GitPresence`), and `POST /v1/repositories/:id/restore` is the way back: it clones from the recorded `remote_url` into **this** runtime's layout (`<workspace>/repos/<name>`, the same helper the GitHub import uses) and re-points `root_path` at where the code actually landed. It is explicit and one repository at a time — a clone is minutes and gigabytes, so it is never started by a read — and it refuses, without touching anything on disk, unless the folder is genuinely missing and a remote is recorded.
 
 ## Project Profile
 
@@ -82,41 +82,17 @@ Repository resolution: tools read `repository_id` from context; if absent they f
 
 See [Workspace](workspace.md) for the board/dispatch layer.
 
-## Teams (migration 115)
+## Person columns (migration 115)
 
 | Table / column | Purpose |
 |---|---|
-| `tenants` | global registry of tenants this database has served; drives `EachTenant` and the seed gate |
-| `tenant_members` | local MIRROR of the control plane's roster (uid, email, name, role), upserted from the signed headers on every request that has a human on it — never the authority for a role check |
+| `tenants` | one-row registry (`tenant.LocalTenantID`) |
+| `tenant_members` | schema only; nothing reads or writes it |
+| `agents.owner_user_id` | NULL = shared agent |
+| `board_tasks.assignee_user_id` | the person a card belongs to, beside `assignee_agent_id` (the agent working it) |
+| `agent_memories.owner_user_id` | copied from the memory's agent |
 
-`tenantboot.Sight` declines two kinds of caller: one with no actor, and one
-carrying `X-Internal-Scope: control` (`tenant.Identity.ControlPlane`). The
-control plane's own calls — billing sync, OAuth token writeback — name no
-person however their actor header is filled in, and this roster is the set
-`resolveAssignee` validates against, so a write to it needs a human behind it.
-Signing the tenant id as the actor there gave every tenant a blank "member"
-whose uid was the tenant's own uuid, assignable with a 200 (18/18 tenants
-measured). Fixed on both sides: tenant-manager sends no actor, and this side
-refuses the scope regardless.
-| `agents.owner_user_id` | NULL = shared/team agent; a uid = that member's own |
-| `board_tasks.assignee_user_id` | the PERSON a card belongs to, beside `assignee_agent_id` (the agent working it) |
-| `agent_memories.owner_user_id` | copied from the memory's AGENT, so a shared agent's notes stay shared; reads are "unowned OR mine" |
-
-Dispatch: `board.Dispatcher.resolveAgents` picks by column as before, then
-`narrowToAssignee` drops agents owned by anyone but the assignee. Shared
-(unowned) agents are KEPT — a team has one QA agent for everybody, and excluding
-it would make an assigned card unreviewable. A solo tenant has no owners and no
-assignees, so nothing narrows and no lookup is made.
-
-### Assigning a card to a person
-
-| Path | Contract |
-|---|---|
-| `POST /v1/repositories/{id}/tasks` | `assignee_user_id` is a plain string; absent/`""` = unassigned |
-| `PATCH .../tasks/{taskId}` | pointer: omitted = leave alone, `""` = unassign, a uid = reassign |
-| Refusal | a uid absent from `tenant_members` is a `400`, never stored — migration 115 chose a lookup over a foreign key so the message can say the roster fills in as people sign in |
-| No roster wired | self-hosted / desktop / no Postgres: `SetMemberLister` is nil, any uid is taken as given |
-
-`repository.Service` copies the field on BOTH paths and `BoardTaskStore.Update`
-writes the column — neither did, so every card came back unassigned and the
-runner refused every run with "no assignee, so there is no Mac to run it on".
+The install has one person and no login. `repository.Service.resolveAssignee`
+accepts only `""` for `assignee_user_id`; any uid is refused with
+`400 assignee_not_member`. With no assignee, `board.Dispatcher.narrowToAssignee`
+returns every column subscriber unchanged.

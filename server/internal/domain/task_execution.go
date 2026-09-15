@@ -45,24 +45,7 @@ type TaskExecution struct {
 	// WorkDir is the task workspace. Required: an executor must never fall back
 	// to the shared project root, where it would work on another task's branch.
 	//
-	// It is an absolute path for an executor that runs the process here, and
-	// the path RELATIVE to that Mac's workspace root for one that runs it on a
-	// laptop — the only form the runner accepts, and the only form that means
-	// anything on a machine whose home directory this process has never seen.
-	// Whoever prepared the workspace decides which, because only they know
-	// where it landed.
 	WorkDir string
-	// MemberUID is WHOSE Mac this run belongs on: board_tasks.assignee_user_id
-	// (migration 115), the Firebase uid of the person the card is assigned to.
-	//
-	// Empty on every executor that runs in this process — self-hosted, the
-	// desktop bundle, the router's scratch-directory runs — and required by the
-	// one that does not. It is on the request rather than on the context
-	// because it is a property of the TASK, not of the caller: a run is
-	// dispatched by a sweeper or a webhook as often as by the assignee, and
-	// taking it from the acting identity would send Ayşe's task to whoever
-	// happened to trigger it.
-	MemberUID string
 	// SkillsOnDisk says the caller wrote this agent's skills into WorkDir as
 	// files the CLI discovers by itself, so the session must not ALSO be offered
 	// the tool that fetches a skill body over MCP — two mechanisms for one job,
@@ -86,20 +69,14 @@ type TaskExecution struct {
 	// Env is extra environment for the session, resolved by whoever can see the
 	// checkout.
 	//
-	// It is on the request rather than on the context because the two paths
-	// resolve it in two different places and neither may reach into the other's.
-	// An executor that runs the process HERE reads the overlay off the context
-	// (application/toolchain resolved it against a directory on this
-	// filesystem); an executor that runs it on a laptop is handed this, which
-	// the runner's own toolchain.detect produced by reading the pin files where
-	// they actually are. A cloud process cannot do the first — the path names
-	// nothing here — and a laptop's answer has no business overriding a local
-	// run's own resolution.
+	// It is on the request rather than on the context because the context
+	// overlay (application/toolchain) answers a different question: which
+	// INSTALL on this machine a spawned process should find. This is what the
+	// repository DECLARED, in the names a session's own version manager reads,
+	// and only the executor that starts that session can apply it.
 	//
-	// Every name in it is one the far side's allowlist accepts and every value
-	// is in the form the tool takes, so it is passed on UNCHANGED. A mapping
-	// table on this side would be a second source of truth that can only drift
-	// from the parser that produced the value.
+	// Every name in it is one SessionEnvAllowed accepts and every value is in
+	// the form the tool takes, so it is passed on UNCHANGED.
 	//
 	// Empty is a complete answer: the checkout declares nothing, and the session
 	// runs on the machine's own defaults. It must never be filled in with a

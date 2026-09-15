@@ -53,7 +53,7 @@ func (s *GrepCodeCaseSuite) SetupTest() {
 		root,
 	)
 	mapperSvc := mapper.NewService(domain.MappingConfig{Enabled: true, TreeMaxDepth: 4, MaxFiles: 50})
-	s.kit = code.NewToolKit(nil, nil, mapperSvc, domain.IndexerConfig{TopK: 3}, domain.GraphConfig{}, "embed-model", false)
+	s.kit = code.NewToolKit(nil, nil, mapperSvc, domain.IndexerConfig{TopK: 3}, domain.GraphConfig{}, "embed-model")
 
 	for _, executor := range code.NewExecutors(s.kit) {
 		if executor.Name() == "grep_code" {

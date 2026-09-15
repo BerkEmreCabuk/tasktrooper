@@ -47,24 +47,6 @@ func (s *Service) DeleteModelPrice(ctx context.Context, model string) error {
 	return s.store.DeleteModelPrice(ctx, model)
 }
 
-func (s *Service) Sync(ctx context.Context, req domain.BillingSyncRequest) error {
-	prev, err := s.store.GetPlan(ctx)
-	renewalKnown := err == nil
-	if err != nil {
-		log.Warn().Err(err).Msg("billing: current plan unreadable before sync, skipping the renewal check")
-	}
-	if err := s.store.SyncPlan(ctx, req.Plan); err != nil {
-		return err
-	}
-	if err := s.store.ReplaceModelPrices(ctx, req.Prices); err != nil {
-		return err
-	}
-	if renewalKnown && req.Plan.PeriodStart.After(prev.PeriodStart) {
-		s.resumePaused(ctx)
-	}
-	return nil
-}
-
 func (s *Service) MaxConcurrency(ctx context.Context) int {
 	plan, err := s.store.GetPlan(ctx)
 	if err != nil || plan.MaxConcurrentTasks <= 0 {

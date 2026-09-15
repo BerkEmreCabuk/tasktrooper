@@ -380,51 +380,6 @@ func TestClaimRunEnforcesTheTenantCapAcrossReplicas(t *testing.T) {
 	}
 }
 
-// The Claude Code session cap protects one member's subscription on one Mac.
-// RemoteExecutor keyed it by member uid in a per-process map, so N replicas
-// allowed N times the cap on the same laptop. Here the count comes from
-// board_tasks.assignee_user_id, which every replica reads the same.
-func TestClaimRunEnforcesTheMemberCapAcrossReplicas(t *testing.T) {
-	f := newReplicaFixture(t)
-	ctx := f.ctx()
-
-	const member = "firebase-uid-ayse"
-	pairs := make([]claimPair, 0, 3)
-	for i := 0; i < 3; i++ {
-		taskID := f.newTask(t, member)
-		db := f.a
-		if i%2 == 1 {
-			db = f.b
-		}
-		pairs = append(pairs, claimPair{db, port.RunClaim{
-			RunID:         f.newPendingRun(t, taskID),
-			TaskID:        taskID,
-			LiveWithin:    time.Minute,
-			MemberUID:     member,
-			MaxMemberRuns: 1,
-		}})
-	}
-
-	if granted := raceClaims(t, ctx, pairs); granted != 1 {
-		t.Fatalf("%d concurrent sessions on one member's Mac, want 1", granted)
-	}
-
-	// Another member is not throttled by the first one's runs — the cap is per
-	// subscription, and each member has their own.
-	otherTask := f.newTask(t, "firebase-uid-mehmet")
-	res, err := pgstore.NewTaskAgentRunStore(f.b).ClaimRun(ctx, port.RunClaim{
-		RunID:         f.newPendingRun(t, otherTask),
-		TaskID:        otherTask,
-		LiveWithin:    time.Minute,
-		MemberUID:     "firebase-uid-mehmet",
-		MaxMemberRuns: 1,
-	})
-	if err != nil || !res.Claimed {
-		t.Fatalf("a second member must not be capped by the first: claimed=%v reason=%q err=%v",
-			res.Claimed, res.Reason, err)
-	}
-}
-
 // A run whose owner died does not hold the budget forever. The claim counts
 // only rows whose heartbeat is inside LiveWithin, so a 'running' row nobody is
 // touching stops blocking the task within one staleness window.

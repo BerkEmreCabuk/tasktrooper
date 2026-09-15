@@ -64,7 +64,7 @@ Downloads a binary asset (image, font, icon) from a URL and saves it inside the 
 | `url` | string | yes | Direct URL of the asset itself, not a page that shows it |
 | `path` | string | yes | Destination path relative to the workspace root |
 
-Same URL guard as `fetch_url`; path confined to the workspace, `.git` protected. Refuses `text/html` responses (a landing page saved as `.png` is the bug this tool prevents), non-2xx statuses, empty bodies, and anything over 10 MB. Rides with the workspace write tools in `domain.WorkspaceWriteTools`, so verdict columns (review/QA) lose it with the other writers. Registered under `tools.web.enabled` **and only where workspaces are local** — it is a workspace writer, and on a remote-workspace deployment its root is a path on the assignee's Mac that `filepath.Abs` anchors to the pod's own working directory, so the bytes landed on the shared volume while the model was told they were in the repository.
+Same URL guard as `fetch_url`; path confined to the workspace, `.git` protected. Refuses `text/html` responses (a landing page saved as `.png` is the bug this tool prevents), non-2xx statuses, empty bodies, and anything over 10 MB. Rides with the workspace write tools in `domain.WorkspaceWriteTools`, so verdict columns (review/QA) lose it with the other writers. Registered under `tools.web.enabled`.
 
 ### `web_search`
 
@@ -85,7 +85,7 @@ Searches a shared boilerplate repository's `.ai/catalog.yaml` for an existing st
 |---|---|---|---|
 | `query` | string | no | Free-text filter over id/type/language/framework/tags/description. Omit or leave empty to list the full catalog. |
 
-Which repo it searches is the admin-editable `boilerplate_catalog_repo` setting (`GET/PUT /v1/settings`; empty by default), read fresh on every call — no restart needed after changing it. Response JSON: `{repo, branch, query, count, entries: [{id, path, type, language, framework, tags, description, status}], hint}`.
+Which repo it searches is the admin-editable `boilerplate_catalog_repo` setting (`GET/PUT /v1/settings`; defaults to `github.com/makifbaysal/boilerplates`), read fresh on every call — no restart needed after changing it. Response JSON: `{repo, branch, query, count, entries: [{id, path, type, language, framework, tags, description, status}], hint}`.
 
 ## Board Tools
 
@@ -144,7 +144,7 @@ Reads the documents attached to a board task, full content, in position order. T
 
 Response JSON: `{task_id, count, documents: [{id, title, content, position, created_by_type, created_by_id, created_at, updated_at}]}`.
 
-It exists for the reason `list_task_comments` does — a kit that ships only the writer gets a model that "checks the documents" by writing one — and it became load-bearing when an analysis stopped committing its spec to the repository. An analiz task's spec and plan are `task_documents` on that task and nothing else: no `docs/` commit, no file on any branch. An implementation task names its analysis with a `derived_from` relation, `board.Runner` reads that analysis's documents into the run's context automatically, and this tool is how a run re-reads a long plan halfway through or looks at an analysis it was not handed.
+It exists for the reason `list_task_comments` does — a kit that ships only the writer gets a model that "checks the documents" by writing one — and it became load-bearing when an analysis stopped committing its spec to the repository. An analysis task's spec and plan are `task_documents` on that task and nothing else: no `docs/` commit, no file on any branch. An implementation task names its analysis with a `derived_from` relation, `board.Runner` reads that analysis's documents into the run's context automatically, and this tool is how a run re-reads a long plan halfway through or looks at an analysis it was not handed.
 
 ### Task ordering arguments (`create_board_task` / `update_board_task`)
 
@@ -179,7 +179,7 @@ Deletes a board task permanently, with its comments, criteria, documents and rel
 | `reason` | string | no | Why it is being deleted (e.g. `"merged into DE-4"`). Only trace left once the row is gone. |
 | `force` | boolean | no | Delete a task that is no longer in `backlog`/`todo`. |
 
-A task outside `backlog`/`todo` is refused without `force`: the result is `{"deleted": false, "reason", "task", "hint"}`, not an error, and the hint points at `move_board_task`. A successful delete returns `{"deleted": true, id, key, title, column, priority, repository_id, delete_reason}` — the flat `id`/`key`/`title` is what the session action ledger builds the chat's "Task silindi" card from, since the board row no longer exists to read.
+A task outside `backlog`/`todo` is refused without `force`: the result is `{"deleted": false, "reason", "task", "hint"}`, not an error, and the hint points at `move_board_task`. A successful delete returns `{"deleted": true, id, key, title, column, priority, repository_id, delete_reason}` — the flat `id`/`key`/`title` is what the session action ledger builds the chat's "Task deleted" card from, since the board row no longer exists to read.
 
 ### `get_task_pull_request`
 
@@ -442,17 +442,10 @@ To add a new MCP server, add an entry to `tools.mcp_servers` in `resources/confi
 ### Serving OUR tools to a Claude Code session (`/mcp`)
 
 The other direction: `adapter/mcpserver` hands a CLI session the registry's tools as
-`mcp__tasktrooper__<name>`. Same surface wherever the session runs; only the address and the
-credential's reach differ.
-
-| | Local session | Session on a member's Mac |
-| --- | --- | --- |
-| URL given to the session | `http://127.0.0.1:<bound port>/mcp` | `<server.public_base_url>/api/mcp` (https only) |
-| Passed as | `--mcp-config` file written here | `claude.run`'s `mcp` object → file written by the runner |
-| Loopback-only | on in a cloud pod | off — the caller is a laptop |
-| Token expiry | none (dies with the process) | `claude_code.run_timeout + 15m` |
-| Tenant | bound at mint from the run's ctx | same, and **required** — minting is refused without one |
-| `initGuard` | armed | armed only when `mcp` was sent |
+`mcp__tasktrooper__<name>`. The session is always a local `claude` child process, so the URL
+given to it is always `http://127.0.0.1:<bound port>/mcp`, passed as a `--mcp-config` file
+written here, loopback-only, with a token that dies with the process and is bound at mint
+from the run's own tenant context.
 
 A repository's checked-in `.mcp.json` is never loaded (`--strict-mcp-config` on every run) and
 nothing here reads or records one — a profile naming those servers would promise tools the run
@@ -494,47 +487,22 @@ fetch. It must point at an endpoint the application itself serves; there is no
 cluster or cloud-provider log source anywhere in this repository and there must
 never be one.
 
-## Retired in the cloud (`CONTROL_PLANE_URL` set)
+## `mobile_*` — this machine's devices
 
-The repository is on the assignee's Mac; this process's `DATA_DIR` holds nothing. These tools are
-**not registered** there, so naming one gets `application/registry`'s unknown-tool error rather than
-a confident answer about an empty directory.
-
-| Tool | Why not routed to the Mac instead |
-|---|---|
-| `read_file`, `write_file`, `edit_file`, `edit_lines`, `delete_file`, `move_file` | one tunnel round trip per file, across a domestic connection, to give the model a worse copy of the Read/Write/Edit the session already has natively |
-| `run_terminal` | same, and it would run `go build` in an empty directory and report the failure as the repo's |
-| `get_repo_tree` | natively covered by Glob, on the machine that has the tree |
-| `get_symbol_skeleton` | a real loss: not natively covered. Serving it from an empty tree would be worse — its answers would be quietly incomplete rather than absent |
-| `download_file` | it WRITES; see its entry above |
-| `mobile_*` | **now registered** — they drive the ASSIGNEE'S Mac, see below. Bridge/`remote_adb` phones are unaffected |
-
-Kept: `codebase_search`, `expand_symbol_context` — pure index reads whose content is in Postgres.
-They are only index-only because `code.ToolKit.RemoteWorkspaces` (set from the same
-`cfg.Cloud.RemoteWorkspaces()`) turns off the unindexed-edit overlay: `buildOverlay` shells
-`git -C <session workspace> diff` and returns the changed files' bytes as `Snippet`, and both tools
-called it unconditionally. Changing one without the other makes the sentence above untrue again.
-A stale index (migration 116) refuses with `domain.ErrIndexEmbeddingStale` rather than returning
-results a different embedding model produced.
-
-Tool POLICIES are unchanged (`domain.WorkspaceWriteTools`, `role_tools.go`): a policy naming an
-unserved tool is already a no-op everywhere else, and rewriting them would break the self-hosted
-install, which still has all of these.
-
-## `mobile_*` in the cloud — the assignee's own devices
-
-The eleven tools are unchanged. What changed is the `device` behind them: `mobile.Fleet` instead of
-`mobile.Pool`, resolved per run from `registry.MemberUIDFromContext` (the card's assignee, set by
-`board.Runner` — never the acting identity, since sweepers and webhooks dispatch runs too).
+Eleven tools, all driving `mobile.Pool`: a run's first `mobile_*` call walks the registered
+devices and takes the first free one; every later call in that run goes to the same phone. Only
+when every registered device is taken does a call report busy.
 
 | Tool sees | Cause | Result |
 |---|---|---|
-| the device is busy | Appium's own 4xx on a second session | `ResourceBlock{mobile_device}`, released by `MacDeviceSweeper` |
-| the Mac is not attached | control plane 409 `runner_not_attached` | `ResourceBlock{runner_not_attached}`, the existing park and sweeper |
-| the Mac has no Appium / no Android SDK | the catalog's `capabilities.*.detail` | a tool error carrying that sentence — no park; nothing frees itself |
-| the run has no assignee | no member on the context | a tool error naming the missing assignment |
+| the device is busy | Appium's own 4xx on a second session | `ResourceBlock{mobile_device}`, released by `board.DeviceSweeper` |
+| no Appium / no Android SDK | the catalog's `capabilities.*.detail` | a tool error carrying that sentence — no park; nothing frees itself |
 
-Registration is unconditional (there is no tenant at boot to ask, and the answer differs per
-member): an agent on a Mac with no Appium gets one sentence naming the install, not a silent
-absence. `mobile_release_device` deletes the Appium session and deliberately LEAVES the simulator
-running — the next task on that Mac wants the device this one warmed.
+`mobile_release_device` deletes the Appium session and deliberately LEAVES the simulator running —
+the next task wants the device this one warmed.
+
+`codebase_search`, `expand_symbol_context` and `get_symbol_skeleton` read the index (Postgres), then
+layer an **unindexed-edit overlay** on top: `buildOverlay` shells `git -C <session workspace> diff`
+and returns the changed files' bytes as `Snippet`, so uncommitted edits show up without a re-index.
+A stale index (migration 116) refuses with `domain.ErrIndexEmbeddingStale` rather than returning
+results a different embedding model produced.

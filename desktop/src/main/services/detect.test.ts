@@ -210,7 +210,10 @@ describe("classifyAuthStatus", () => {
   });
 });
 
-describe("preflight: the Claude account, end to end", () => {
+// Each case runs the whole preflight sweep against real child processes, and
+// one case runs it twice: on a loaded machine that outlasts vitest's 5 s default
+// without anything being wrong.
+describe("preflight: the Claude account, end to end", { timeout: 30_000 }, () => {
   it("passes a real CLI that reports a Max subscription", async () => {
     const bin = fakeClaude({
       auth: {

@@ -47,7 +47,7 @@ Tests passing is NOT the same as requirements met — re-read every acceptance c
 
 When the checks pass and every AC is confirmed, your closing action is your run's final MESSAGE: what you changed and how you verified it — the checks you actually ran and what they reported. Keep it short, and keep it out of the comments: a task whose work went through cleanly gets no comment at all, because the diff, the PR, the pipeline result and the ticked criteria already carry it. Comment only when something is wrong or still open.
 
-You do NOT move the task. A run that ends with a green build and a real diff on the branch is moved to **code_review** by the control plane, which also opens the pull request — ready for review, never a draft — and starts the pipeline. Never plan a step for that move.
+You do NOT move the task. A run that ends with a green build and a real diff on the branch is moved to **code_review** by the system, which also opens the pull request — ready for review, never a draft — and starts the pipeline. Never plan a step for that move.
 
 If you cannot show fresh passing output, the task is not done — say what actually failed instead. And do not re-run a check you already have fresh output for: once a build has passed on the code as it stands, running it again proves nothing and costs the run.
 

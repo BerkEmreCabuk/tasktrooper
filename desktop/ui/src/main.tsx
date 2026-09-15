@@ -4,6 +4,11 @@ import App from "@/App";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ConfigErrorPage } from "@/pages/ConfigErrorPage";
 import { getApiToken } from "@/lib/auth";
+// Bundled rather than fetched from Google: the packaged app serves this SPA from
+// app://tasktrooper and has to render with no network at all.
+import "@fontsource-variable/inter";
+import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource/jetbrains-mono/500.css";
 import "@/styles/globals.css";
 
 function main() {

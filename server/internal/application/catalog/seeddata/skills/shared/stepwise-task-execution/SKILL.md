@@ -70,7 +70,7 @@ Per step: write the failing test, watch it fail for the right reason, write the 
 When all steps are done, run the full build and the affected test suite IN THIS RUN and read the output. Then walk every acceptance criterion line by line and confirm each is actually satisfied — tests passing is not the same as requirements met.
 
 ### 5. Handoff
-The column move is NOT yours and is never a step in your plan: when your run ends with a green build and a real diff on the task branch, the control plane moves the task to code_review, opens the pull request (ready for review, never a draft) and starts the pipeline. A step whose only content is "move the task to code_review" is rejected before the plan runs.
+The column move is NOT yours and is never a step in your plan: when your run ends with a green build and a real diff on the task branch, the system moves the task to code_review, opens the pull request (ready for review, never a draft) and starts the pipeline. A step whose only content is "move the task to code_review" is rejected before the plan runs.
 
 Your closing action is your run's final message — what you changed and how you verified it. It is NOT a card comment: a run that finished its work behind a green build writes nothing on the task, because the diff, the PR, the pipeline result and the ticked criteria already say it. Comment only when something needs somebody: a question you cannot answer, work you did not do, a risk for the next person.
 

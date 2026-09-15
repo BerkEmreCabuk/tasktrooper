@@ -148,8 +148,8 @@ Deletes file, chunks, and disk storage.
 
 Multipart upload with `file` field (+ optional `repository_id` form value).
 Binary attachments (images/documents) stored as BYTEA in Postgres — a parallel
-concept to `/v1/files`, which feeds the RAG text pipeline and writes to the
-pod's ephemeral disk. Max 10 MB (413 over the cap); content-type allowlist
+concept to `/v1/files`, which feeds the RAG text pipeline and writes to local
+disk under `DATA_DIR/files`. Max 10 MB (413 over the cap); content-type allowlist
 (png/jpeg/webp/gif, pdf, plain/markdown/csv, json, zip, docx, xlsx) validated
 after server-side sniffing (415 otherwise). Returns attachment metadata
 (`{id, filename, content_type, size_bytes, sha256, ...}`, never the bytes).
@@ -199,19 +199,15 @@ LLM token usage aggregates for the cost dashboard: totals, by-model, and
 daily breakdowns (`llm_usage` table, recorded by the `application/usage`
 LLM-client decorator). `days` 1-365, default 30.
 
-## Embedding provider & model — removed from this SPA
+## Embedding provider & model
 
-The embedding provider/model picker (Settings → LLM Connection) has been
-deleted from `web/`: the desktop app is moving to a bundled, self-downloading
-embedding engine that runs invisibly, with no user-facing settings and no
-provider/model choice. `LLMProvidersResponse` no longer carries
-`embedding_provider` / `embedding_model` / `embedding_on_member_mac`, and this
-SPA no longer calls `/v1/llm/embedding-provider`, `/v1/llm/embedding-models`,
-`/v1/llm/embedding-status`, or `/v1/llm/reindex-all`.
-
-Those four endpoints are **dead code on the `agent-server` side** pending
-removal there — that repository is not present here and was not changed by
-this task. Do not add new frontend callers of them.
+Settings has no embedding provider/model picker: embedding runs on a bundled,
+self-downloading engine with no user-facing settings and no provider/model
+choice. `LLMProvidersResponse` carries no `embedding_provider` /
+`embedding_model` / `embedding_on_member_mac`, and this SPA calls none of
+`PUT /v1/llm/embedding-provider`, `GET /v1/llm/embedding-models`,
+`GET /v1/llm/embedding-status`, `POST /v1/llm/reindex-all` — those routes
+still exist server-side (admin API) but nothing here should call them.
 
 ## Board run control
 
@@ -296,7 +292,7 @@ ensure, and `commit_task_changes`). Before this it survived only as the text of 
   human-curated list shown in the initial-setup dialog.
 - `PATCH /v1/repositories/{id}` also accepts `release_engine`
   (`auto|github_actions|local`) — which machine builds/uploads a mobile store
-  release. `auto` (default) is GitHub Actions, falling back to the paired Mac;
+  release. `auto` (default) is GitHub Actions, falling back to this machine;
   see Store operations below for `domain.ErrNoReleaseEngine`.
 - `PATCH /v1/repositories/{id}` also accepts `kind` and now actually applies it
   (the field existed on the request but was never forwarded to the store).
@@ -315,8 +311,8 @@ ensure, and `commit_task_changes`). Before this it survived only as the text of 
   adding a `sub_projects` row when auto-detection found nothing or missed
   one; `path` is invalid (escapes the root, doesn't exist) → 400.
 - `POST /v1/repositories/{id}/restore` — fetch a registered repository's code
-  onto the machine currently running the tenant, from the `remote_url` already
-  on its record. 202 with the repository; the clone runs server-side and is
+  onto this machine, from the `remote_url` already on its record. 202 with
+  the repository; the clone runs server-side and is
   watched through `git_restore` (`{status: running|completed|failed, root_path,
   error}`) by polling `GET /v1/repositories/{id}`. Offer it only when the
   repository read says `git_restorable` — the server refuses (400, message is
@@ -365,32 +361,26 @@ access token; `PUT {team_id}` re-scopes), `GET /v1/settings/vercel/teams`,
 (`{area, provider, external_id, source}`), `DELETE …/hosting/links/{area|root}`.
 409 = Vercel not connected.
 
-## Task assignee — the person (agent-server)
+## Task assignee — the person
 
-A board task carries TWO assignments: `assignee_agent_id` is the agent that works it,
-`assignee_user_id` is the PERSON it belongs to — runs go to that member's Mac and only
-their agents (plus the tenant's shared ones) pick it up. Empty on a solo tenant.
+A board task carries two assignments: `assignee_agent_id` is the agent that works it,
+`assignee_user_id` is the person. The install has one person and no login, so the server
+accepts only `""` for the person. `showMemberAssignee` (2+ members, or an assignee already
+set) keeps the person picker hidden.
 
 | Call | Contract |
 |---|---|
-| `GET /v1/tenant/members` | `{members:[{user_id,email,display_name,role}]}` — the CANDIDATE SET, by construction exactly who assignment accepts. `email`/`display_name` may be `""`; an unlabelled candidate stays pickable. |
+| `GET /v1/tenant/members` | called by `useTenantMembers`; the server registers no such route, and the hook's `.catch` reads the failure as no members |
 | `POST /v1/repositories/{id}/tasks` | `assignee_user_id` optional; absent creates an unassigned card. |
-| `PATCH .../tasks/{taskId}` | BOTH assignees are `domain.Nullable`: omitted leaves it, `null` unassigns, a value assigns (`""` also unassigns the person). They were plain Go pointers until 2026-08-30, where `null` decoded to the same nil as omitted — so "clear the assignee" was a silent no-op on the wire, live in the drawer's agent control. Do not narrow either type to one spelling. |
-| Refusal | `400` `assignee_not_member`, in `error.type` AND a top-level `code`, when the uid is not in the roster. `isAssigneeRejectedError()` in `api.ts` switches on the code — it matched the sentence until the code landed. |
+| `PATCH .../tasks/{taskId}` | both assignees are `domain.Nullable`: omitted leaves it, `null` unassigns, a value assigns (`""` also unassigns the person). Do not narrow either type to one spelling. |
+| Refusal | `400` `assignee_not_member`, in `error.type` and a top-level `code`, for any non-empty `assignee_user_id`. `isAssigneeRejectedError()` in `api.ts` switches on the code. |
 
-## `sync_warning` on the index status (agent-server)
+## `sync_warning` on the index status
 
-One string, TWO causes, and no code to tell them apart — it is `err.Error()` from
-whichever failed:
-
-- a pull from origin that failed, so the index describes older code;
-- a push webhook (or the boot sweep) on a cloud tenant, which names no member and
-  therefore has no Mac to embed on, so the index is marked stale instead of running
-  a pass whose every embed would refuse.
-
-`ProjectSettingsPage` therefore renders the server's `reason` under a lead-in true of
-both ("This index is behind the code it describes: …"). It used to say the clone could
-not be updated from origin, which sent people to check a git remote that was fine.
+Set to `err.Error()` when a reindex pass's git pull from origin fails, so the index
+still runs (indexing slightly old code beats refusing) but the card can say the code
+it describes may be behind. `ProjectSettingsPage` renders it under "This index is
+behind the code it describes: …". Cleared by the next pass that pulls cleanly.
 
 ## Deploy metadata & deploy packages
 

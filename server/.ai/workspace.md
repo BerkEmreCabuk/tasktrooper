@@ -50,10 +50,9 @@ Dispatcher writes `board_events`, creates `task_agent_runs`, and enqueues `board
 
 ## On-disk layout under `storage.sessions.workspace_root`
 
-One process, one PVC, every customer. Row-level security does not reach a
-filesystem path, so the tenant is IN the path — `workspace.TenantRoot` is the
-only way any of these is derived, and it refuses a context with no identity
-rather than falling back to the shared root.
+Every path is still derived through `workspace.TenantRoot`, keyed on
+`tenant.LocalTenantID` — the one fixed local tenant. It refuses a context with
+no identity rather than falling back to a shared root.
 
 | Path | What |
 |---|---|
@@ -65,8 +64,7 @@ rather than falling back to the shared root.
 
 `repos/<name>` is the only non-uuid component, which is why the tenant segment
 above it is load-bearing: migration 114 re-cut `repositories`' unique key to
-`(tenant_id, root_path)`, so two customers with a repository called `api`
-became two rows legally naming one directory.
+`(tenant_id, root_path)`.
 
 **Existing volumes.** `<root>/repos/<name>` written under the flat layout is
 left where it is and keeps working — its row names it, and `UsableHostPath`
@@ -87,42 +85,30 @@ Anything it cannot prove is left untouched, never deleted.
 
 ### Working copy is a cache, not the source of truth
 
-`repositories.remote_url` (064) records the git origin. The clone under `<workspace_root>/tenants/<tenant-id>/repos/<name>` can disappear (fresh pod, wiped disk) and is restored from that URL.
+`repositories.remote_url` (064) records the git origin. The clone under `<workspace_root>/tenants/<tenant-id>/repos/<name>` can disappear (a wiped data directory) and is restored from that URL.
 
 Before any agent starts, `board.Runner.ensureWorkingCopy` requires a real git working copy at the repo root **that is this repository**: intact and its origin matches `remote_url` → use it; intact but a different origin → **fail the run** (adopting a checkout is only safe if it is the right one); missing/empty → clone from `remote_url`; no `remote_url`, or the root exists with non-git contents → **fail the run** with an operator-facing error. It previously called `os.MkdirAll` here, so a stale path silently became an empty directory, `HasGit` went false, the clone/branch gate below was skipped, and the agent ran in an empty tree and asked the human for the repository path.
 
 `remote_url` is written on import/open and backfilled from `git remote get-url origin` while a clone is still present (`repository.Service.syncRemoteURL`) — rows predating the column carry `''`.
 
-### `repositories.root_path` is advisory across hosts
+### `repositories.root_path` is host-absolute
 
-One tenant database can be served by **two hosts running the same binary**: the GKE pod (PVC mounted at `/data`) and the user's own machine behind a reverse tunnel, where `DATA_DIR` is e.g. `<repo>/local-runner/data` and `/data` cannot exist at all (the macOS root filesystem is read-only). `root_path` is an absolute path belonging to whichever host wrote the row, so a board run on the Mac read the pod's path and died in `git clone` with `mkdir /data: read-only file system`.
+`root_path`, `sessions.workspace_dir`, `sessions.project_root` and
+`workspace_indexes.root_path` are absolute paths on this machine. `root_path`
+is written once by `repository.Service.Open` (validated by
+`workspace.ValidateProjectRoot`) and never rewritten; the session/index
+equivalents are written by `ensureSessionWorkspace` and `indexer.Service`
+(`UpdateIndexTree`) from this host's own workspace root.
 
-**Reads translate; writes stay host-absolute.** `postgres.RepositoryStore` re-anchors a foreign path onto the reading host, so `root_path` is a hint about *this* host's filesystem, never a cross-host address:
+Still host-absolute and read by nothing but the API: `task_agent_runs.workspace_path`
+(`board.Runner`), returned on `/runs` for display only.
 
-| Stored path, as seen by the reading host | Result |
-|---|---|
-| Exists here | used unchanged — a self-hosted user may point a repo anywhere |
-| Under this **tenant's own subtree** or an `indexer.allowed_roots` entry (even if not yet cloned) | used unchanged — this host may still create it |
-| Anything else (foreign) | final path segment re-anchored under this **tenant's** subtree, logged once at INFO with both paths |
-| Anything, with no tenant on the context | used unchanged — there is no destination that could be right |
-
-The rule lives in `workspace.HostRootPath` / `workspace.UsableHostPath`; the store applies it in `localizeRootPath`, which every `repositories` scan runs through (`scanRepository`), so the board runner, task chat, webhooks, repo profile, indexer and board tools all get a usable path without knowing the rule exists. `runtime.go` supplies this host's roots via `NewRepositoryStore(pool).SetHostRoots(cfg.Storage.Sessions.WorkspaceRoot, cfg.Indexer.AllowedRoots)`; a store with no host roots (tests) is the old pass-through.
-
-It is **symmetric** — the pod translates a Mac-written path the same way — which is what makes writing a plain host-absolute path harmless. `repository.Service.Open` therefore keeps storing its own `absRoot` (validated by `workspace.ValidateProjectRoot`, so it must exist on the writing host) and never rewrites an existing row's `root_path`.
-
-`GetByRootPath` follows: exact match first, then a match on the directory name alone, restricted to rows whose stored path is foreign to this host **or names this host's pre-tenant layout** (`hostRoots.preTenantLayout`). Without that, re-opening the same repository from the second host inserts a second row for one remote and splits the tasks, indexes and runs hanging off the repository id. Two *local* repositories that merely share a directory name are never folded together.
-
-### The session and index paths follow the same rule
-
-`sessions.workspace_dir`, `sessions.project_root` and `workspace_indexes.root_path` are the same bug class and are now translated the same way, by the same helper. `postgres.SessionStore` and `postgres.IndexStore` each gained `SetHostRoots` and a `localize*` applied to every scan (`scanSession` covers Create/Get/FindByTask/List*; the index store covers its three creates plus `scanIndex` and `GetIndexByProjectBranch`), wired in `runtime.go` from the same `cfg.Storage.Sessions.WorkspaceRoot` + `cfg.Indexer.AllowedRoots` pair. The shared rule and the log-once bookkeeping live in one type, `postgres.hostRoots`, which `RepositoryStore` also uses.
-
-- **`sessions.workspace_dir`** is the directory a turn runs in: a repository root, a task checkout `<tenant-root>/task-<id>`, or the chat's own scratch dir `<tenant-root>/<session-id>`. Resuming a pod-written chat on the Mac used to reach `os.MkdirAll("/data/workspaces/…")` in `session.Service.ensureSessionWorkspace` and fail the turn. Because the re-anchor lands `task-<id>` and `<session-id>` directly under this tenant's subtree — exactly the paths this host derives itself — a resumed task chat now agrees with `board.TaskPRService.TaskWorkspacePath` **without rewriting the column** — the write at `ensureSessionWorkspace` only fires when the paths really differ. (`workspace.AgentDir` is `<tenant-root>/agents/<agent-id>`, so a foreign agent-chat dir re-anchors to `<tenant-root>/repos/<agent-id>` instead; harmless and stable — it is scratch space.)
-- **`sessions.project_root`** is the subtree the index endpoints and code tools are scoped to, and travels with `workspace_dir`.
-- **`workspace_indexes.root_path` is re-anchored, not invalidated.** Everything derived from the tree is stored *relative* to that root — `workspace_symbols.file_path`, `workspace_chunks.file_path` and `workspace_file_hashes.file_path` are all `filepath.Rel` results, and a chunk carries its own text in the row — so the index body is host independent and moving the anchor cannot make a stored chunk describe a file it did not come from. After a read, `root_path` reaches the filesystem in exactly one place: `indexer.Injector` rendering the code skeleton via `mapper.BuildSkeletonRanked`, and only when the run context carries no workspace dir of its own (a live workspace already wins at `inject.go`). That walk reads the *current* tree, so anchoring it here describes this host's checkout; leaving it foreign makes the walk fail and the error is swallowed, so the agent silently loses the skeleton section instead of getting a usable one. Invalidate-and-rebuild was rejected as far more destructive: it would discard every embedding for a repository on a condition that flips each time the tenant changes host, so the two hosts would take turns re-embedding the same tree forever — real provider spend and minutes of latency — to correct a staleness the hash-incremental pass (`workspace_file_hashes` → `DeleteFileData`/`SaveFileHashes`) already fixes file by file on the next pass. The staleness that remains, chunks from the other host's commit, is what a single host already lives with between index passes.
-
-Writes stay host-absolute here too: `ensureSessionWorkspace` and `indexer.Service` (via `UpdateIndexTree`) stamp this host's own path, so a row converges on whoever ran last while the read-time translation keeps the other host safe in the meantime.
-
-Still host-absolute and **not** translated: `task_agent_runs.workspace_path`, which is only ever written (`board.Runner`, from this host's workspace root). Every consumer that needs a task's checkout derives it locally — `board.TaskPRService.TaskWorkspacePath`, `repository.Service.taskWorkspacePath` — and nothing reads the column back for filesystem use. It is still returned on the `/runs` API, so the board can display the path of a run that happened on the other host; that is cosmetic.
+`postgres.RepositoryStore`/`SessionStore`/`IndexStore` still carry a
+`localizeRootPath` / `hostRoots` path-reanchoring step (`SetHostRoots`,
+`GetByRootPath`'s directory-name fallback) from when one tenant database could
+be read by two different hosts sharing the same rows. On this single-machine
+product every stored path already belongs to the one host that wrote it, so
+the reanchoring is a no-op.
 
 ### Per-task git workspace
 
@@ -167,27 +153,16 @@ board:
 
 Migration 038 reverted team-scoped scoring: `agent_performance_scores` is UNIQUE(agent_id); `agent_score_events`, `agent_memories`, `agent_reflections`, `agent_evolution_events`, `agent_kpi_results` are agent-global (no `team_id`). Prometheus: `bridge_agent_score{agent_id}`.
 
-UI: `/agents/:agentId/performance` shows score + trend sparkline, KPI attainment cards + composite, evolution timeline (impact badges, before/after diff), reflections, memories (deletable), score event table, and a "Şimdi analiz et" button.
+UI: `/agents/:agentId/performance` shows score + trend sparkline, KPI attainment cards + composite, evolution timeline (impact badges, before/after diff), reflections, memories (deletable), score event table, and an "Analyze now" button.
 
 API: `GET /v1/agents/:agentId/performance|score-events|evolution-events|reflections|memories`, `POST .../reflect` (202; 409 while in flight), `DELETE .../memories/:memoryId`.
 
 Memory listings (`/v1/agents/:agentId/memories`, `/v1/memories/shared`) take `repository_id` + `repo_scope` and creates take `repository_id` — see [Memory scopes](orchestration-agents.md#memory-scopes-migration-065). Memories are agent-global only in the sense that there is no team layer; the repository dimension is migration 065.
 
-## Where a run's workspace lives (cloud vs self-hosted)
+## Workspace lifecycle
 
-`board.Runner.remoteWorkspaces()` — set when `CONTROL_PLANE_URL` is configured — picks between two
-true lifecycles. Everything above this section describes the local one, unchanged.
-
-| Step | local (self-hosted, desktop) | remote (shared cloud) |
-|---|---|---|
-| working copy | `ensureWorkingCopy` clones `remote_url` into `root_path` here | `workspace.prepare` on the assignee's Mac (`adapter/runner`) |
-| task checkout | `EnsureTaskWorkspace` → `<workspace_root>/task-<id>` | `<repo>/task-<id>` under the Mac's workspace root; only the returned `rel` is ever passed on |
-| task branch | cut here from `origin/<default>` | **not** cut here — the Mac clones and checks out only; the session cuts `tt-<key>` itself, so run 1 gets the default branch and run 2 finds the branch on origin |
-| `run.workspace_path` | this host's absolute path | the **Mac's** absolute path — recorded for a human, read by nothing |
-| grounding / verify / commit / push / PR | cloud-side git steps | all inside the Claude Code session, which is the only process holding the tree |
-| agent catalog (`agentfs`) | materialised into the checkout | skipped — skills go in the prompt (`prompt.SkillsInPrompt`), as for every non-CLI provider |
-| no Mac attached | cannot happen | park on `domain.ResourceRunnerNotAttached`, released by `board.RunnerSweeper` |
-
-The **index mirror is separate and stays in the cloud**: `repository.Service.EnsureIndexMirror`
-restores `root_path` from `remote_url` before a pass, because that clone is a cache on an ephemeral
-pod disk. It is only ever read by the indexer.
+Everything above this section is the whole lifecycle: `ensureWorkingCopy` clones
+`remote_url` into `root_path` on this host, `EnsureTaskWorkspace` checks a task out
+under `<workspace_root>/task-<id>`, and the agent catalog is materialised into that
+checkout. `repository.Service.EnsureIndexMirror` restores `root_path` from
+`remote_url` before an index pass the same way.

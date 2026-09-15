@@ -67,10 +67,39 @@ describe("agentServerEnv", () => {
    * do that" and an empty one as a path to exec.
    */
   it("says nothing about a capability this Mac does not have", () => {
-    const e = env();
-    expect(e.CHROME_BIN).toBeUndefined();
-    expect(e.MOBILE_APPIUM_HUB_URL).toBeUndefined();
-    expect(e.EMBEDDINGS_BASE_URL).toBeUndefined();
+    vi.stubEnv("CHROME_BIN", "/usr/bin/google-chrome");
+    vi.stubEnv("MOBILE_APPIUM_HUB_URL", "http://10.0.0.9:4723");
+    vi.stubEnv("EMBEDDINGS_BASE_URL", "http://10.0.0.9:1234");
+    try {
+      const e = env();
+      expect(e.CHROME_BIN).toBeUndefined();
+      expect(e.MOBILE_APPIUM_HUB_URL).toBeUndefined();
+      expect(e.EMBEDDINGS_BASE_URL).toBeUndefined();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  /**
+   * A shell with DATABASE_URL exported must not steer the backend away from
+   * its embedded database, nor may any other key the backend reads leak in.
+   */
+  it("never inherits a key the backend reads from the parent environment", () => {
+    vi.stubEnv("DATABASE_URL", "postgres://someone:else@db.example:5432/prod");
+    vi.stubEnv("PUBLIC_BASE_URL", "https://example.invalid");
+    vi.stubEnv("CONFIG_PATH", "/etc/elsewhere.yml");
+    vi.stubEnv("CORS_ORIGINS", "*");
+    try {
+      const e = env();
+      expect(e.DATABASE_URL).toBeUndefined();
+      expect(e.PUBLIC_BASE_URL).toBeUndefined();
+      expect(e.CONFIG_PATH).toBeUndefined();
+      expect(e.CORS_ORIGINS).toBeUndefined();
+      expect(e.PORT).toBe("0");
+      expect(e.SERVER_API_KEY).toBe("token-1");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("names the hub and the browser when they were found", () => {

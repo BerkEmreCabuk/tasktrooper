@@ -95,11 +95,7 @@ var adminRoutes = []adminRule{
 // roleMiddleware refuses a mutation of tenant-wide configuration to a member.
 //
 // It reads the role off the request context, which is where tenantMiddleware
-// put the value it verified from X-Internal-Role — never off a body, a query
-// parameter or a local database row. The mirror in tenant_members is a
-// convenience for rendering names; a role that has just been revoked in the
-// control plane must not survive in it, so the header on the request being
-// served is the only thing consulted here.
+// put it — never off a body, a query parameter or a local database row.
 //
 // 403 rather than 404: the member is legitimately in this tenant and knows the
 // route exists. Hiding it would only turn a clear refusal into a bug report.

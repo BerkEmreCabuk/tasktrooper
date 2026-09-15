@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -109,11 +108,7 @@ type Service struct {
 	pipelineJobs port.RepositoryPipelineJobStore
 	githubToken  func(ctx context.Context) (string, error)
 	agentLister  func(ctx context.Context) ([]domain.Agent, error)
-	memberLister func(ctx context.Context) ([]string, error)
 	profiles     ProfileRefresher
-	// embeddingNeedsMac reports whether this tenant's embeddings are produced
-	// on a member's own Mac. See reindexHasNoMac.
-	embeddingNeedsMac func(ctx context.Context) (bool, error)
 
 	// GitHub push-webhook state (see webhook.go). publicBaseURL is where
 	// GitHub must deliver; the maps are the per-repo debounce ledger and the
@@ -505,50 +500,6 @@ func (s *Service) SetAgentLister(fn func(ctx context.Context) ([]domain.Agent, e
 	s.agentLister = fn
 }
 
-// SetEmbeddingNeedsMemberMac wires llmprovider.Service.EmbeddingNeedsMemberMac,
-// the answer to "would a reindex started here have a Mac to embed on".
-//
-// Nil means no — the correct answer for self-hosted, the desktop bundle and
-// every test, where embeddings are produced by an HTTP provider this process
-// can reach on its own and no reindex has ever needed a person.
-func (s *Service) SetEmbeddingNeedsMemberMac(fn func(ctx context.Context) (bool, error)) {
-	s.embeddingNeedsMac = fn
-}
-
-// reindexHasNoMac reports that a reindex started on ctx could not embed a single
-// chunk, because this tenant's embeddings are produced on a member's own Mac
-// and this context names no member.
-//
-// The two halves are both required. A missing member uid on a deployment whose
-// embeddings are an HTTP call is nothing at all; a deployment that embeds on
-// Macs still reindexes fine from a request a person made, which carries their
-// uid (adapter/http.tenantMiddleware) or the assignee's (board.Runner).
-//
-// A failure to ask is answered "no". Refusing a reindex because the provider
-// row could not be read would turn a database blip into a repository that
-// silently stops tracking its own default branch.
-func (s *Service) reindexHasNoMac(ctx context.Context) bool {
-	if s.embeddingNeedsMac == nil || registry.MemberUIDFromContext(ctx) != "" {
-		return false
-	}
-	needs, err := s.embeddingNeedsMac(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("could not resolve the embedding provider; reindex not deferred")
-		return false
-	}
-	return needs
-}
-
-// SetMemberLister wires the tenant roster (tenant_members, migration 115) that
-// an assignee is checked against.
-//
-// Nil leaves assignment unchecked, which is what a deployment with one person
-// in it wants: self-hosted, the desktop bundle and every test have no roster
-// table to ask and nobody to confuse.
-func (s *Service) SetMemberLister(fn func(ctx context.Context) ([]string, error)) {
-	s.memberLister = fn
-}
-
 // nullableString reads a present-but-null field as the empty string, which is
 // what "" already means everywhere a uid is handled: nobody.
 func nullableString(n domain.Nullable[string]) string {
@@ -558,30 +509,18 @@ func nullableString(n domain.Nullable[string]) string {
 	return *n.Value
 }
 
-// resolveAssignee normalises the person a card is being given to and refuses
-// one this tenant does not have.
+// resolveAssignee normalises the person a card is being given to.
 //
-// "" is a legal, meaningful value — an unassigned card is the normal state of a
-// backlog — so it is never looked up; only a named uid is.
-//
-// Migration 115 chose a lookup here over a foreign key precisely so this
-// refusal could say WHY: the roster is a mirror filled in as people sign in, so
-// a teammate invited in the control plane who has never opened the app is
-// genuinely not assignable yet, and a 23503 from the driver would send whoever
-// hit it looking for a corrupt row instead.
-func (s *Service) resolveAssignee(ctx context.Context, userID string) (string, error) {
+// This install has exactly one person in it — the owner of the machine — and
+// no login, so there is no uid to hand a card to and nothing to look up. "" is
+// the only assignable value, and it is also the normal state of a backlog.
+// A named uid is refused rather than stored, because a card assigned to
+// somebody who cannot exist here would never be picked up and nothing would
+// say why.
+func (s *Service) resolveAssignee(userID string) (string, error) {
 	userID = strings.TrimSpace(userID)
-	if userID == "" || s.memberLister == nil {
-		return userID, nil
-	}
-	members, err := s.memberLister(ctx)
-	if err != nil {
-		return "", fmt.Errorf("check assignee against the workspace roster: %w", err)
-	}
-	for _, uid := range members {
-		if uid == userID {
-			return userID, nil
-		}
+	if userID == "" {
+		return "", nil
 	}
 	return "", domain.AssigneeNotMemberError(userID)
 }
@@ -1412,36 +1351,8 @@ func (s *Service) pullProjectRoot(ctx context.Context, repositoryID uuid.UUID, r
 	}
 }
 
-// deferReindexToAHuman marks an index stale instead of starting a pass that
-// could not embed anything, and returns the diagnostic line the caller reports.
-//
-// This is the answer to "a GitHub push has no actor". The push is real and the
-// index is genuinely behind after it, but embedding this tenant's code happens
-// on a member's own Mac and a delivery names no member. The alternatives were
-// both worse than saying so:
-//
-//	PICK A MEMBER — the owner, the last person to push, anybody — and the
-//	  index rebuilds on a laptop whose owner did not ask for the work, may not
-//	  have open, and pays for in battery and fans. Whose machine runs a job is
-//	  not a detail to guess at.
-//	START ANYWAY, which is what happened before this: the pass ran, every
-//	  embed call refused with "no member uid", and the push vanished. Nothing
-//	  was red anywhere — not the delivery, not the index card, not the board.
-//
-// So the index is marked stale through the same ledger a failed pull uses, and
-// the next pass a PERSON triggers picks it up: opening the repository polls
-// IndexStatus, which runs ensureIndexFresh on a context that names them.
-func (s *Service) deferReindexToAHuman(repositoryID uuid.UUID) string {
-	const reason = "a push to the default branch arrived, but this workspace embeds on a member's own Mac and a GitHub " +
-		"delivery names no member, so there is no machine to rebuild on. This index is behind that commit until somebody " +
-		"opens the repository, which re-checks it and rebuilds"
-	s.recordSyncResult(repositoryID, errors.New(reason))
-	return "index marked stale: " + reason
-}
-
 // recordSyncResult stores (or clears) why this repository's index is behind the
-// code it describes — a pull that failed, or a push nobody's machine could
-// embed. Cleared by the next pass that does bring it up to date.
+// code it describes. Cleared by the next pass that does bring it up to date.
 func (s *Service) recordSyncResult(repositoryID uuid.UUID, err error) {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
@@ -1487,14 +1398,6 @@ func (s *Service) ensureIndexFresh(ctx context.Context, repo domain.Repository, 
 		return
 	}
 	if idx.Status != domain.IndexStatusCompleted || s.indexer.IsProjectIndexActive(repo.ID) {
-		return
-	}
-	// The boot sweep reaches here with a tenant and no member (tenant.EachTenant
-	// gives a background pass neither an actor nor an assignee), which is the
-	// same wall a push webhook hits. A poll from the settings page does not: it
-	// carries the person looking at it.
-	if s.reindexHasNoMac(ctx) {
-		s.deferReindexToAHuman(repo.ID)
 		return
 	}
 	if !s.claimFreshnessCheck(repo.ID) {
@@ -1812,7 +1715,7 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 	if createdBy == "" {
 		createdBy = "user"
 	}
-	assigneeUser, err := s.resolveAssignee(ctx, req.AssigneeUserID)
+	assigneeUser, err := s.resolveAssignee(req.AssigneeUserID)
 	if err != nil {
 		return domain.BoardTask{}, err
 	}
@@ -2057,7 +1960,7 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 	// The person, not the agent. An absent uid is resolved through the same
 	// refusal as an assignment, where "" is the one uid that is never looked up.
 	if req.AssigneeUserID.Present {
-		assigneeUser, aerr := s.resolveAssignee(ctx, nullableString(req.AssigneeUserID))
+		assigneeUser, aerr := s.resolveAssignee(nullableString(req.AssigneeUserID))
 		if aerr != nil {
 			return domain.BoardTask{}, aerr
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -23,6 +24,18 @@ func main() {
 	// Before anything logs: the LISTENING line is the only thing on stdout, and
 	// zerolog's default writer is stdout.
 	runtime.ConfigureLogger(cfg.Options.Debug)
+
+	// The workspace root is derived from DATA_DIR and the toolchain detector
+	// refuses relative paths, so the "./data" default becomes absolute once,
+	// here, against the directory the process was started in.
+	if abs, absErr := filepath.Abs(cfg.Options.DataDir); absErr == nil {
+		cfg.Options.DataDir = abs
+	}
+	if cfg.PostgresBinDir != "" {
+		if abs, absErr := filepath.Abs(cfg.PostgresBinDir); absErr == nil {
+			cfg.PostgresBinDir = abs
+		}
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -70,7 +70,7 @@ func (s *BillingCacheSuite) SetupSuite() {
 	s.usage = postgres.NewLLMUsageStore(s.db)
 
 	// Seed this suite's tenant exactly as its first HTTP request would.
-	s.Require().NoError(tenantboot.NewService(s.db, postgres.NewTenantMemberStore(s.db)).
+	s.Require().NoError(tenantboot.NewService(s.db, postgres.NewTenantSeedStore(s.db)).
 		Sight(s.ctx, tenant.Identity{TenantID: tenantIDOf(s.ctx), Role: tenant.RoleOwner}))
 
 	s.seeded, err = s.store.ListModelPrices(s.ctx)

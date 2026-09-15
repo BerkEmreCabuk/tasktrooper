@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/llm"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -58,19 +57,6 @@ type Service struct {
 	// invalidate tells the resolver cache that this tenant's answer changed.
 	// Nil is valid and means nothing caches.
 	invalidate InvalidateFunc
-
-	// runnerBaseURL / runnerSigningKey wire domain.LLMProviderLocalRunner —
-	// see SetControlPlane. Both empty (the zero value) means this deployment
-	// never called it, which is the correct state for self-hosted/desktop
-	// builds: there is no control plane to reach, so "auto" embeddings keep
-	// resolving to the tenant's chat default exactly as they did before this
-	// provider existed.
-	runnerBaseURL    string
-	runnerSigningKey string
-	// embeddingHost asks the acting member's Mac whether it can embed right
-	// now. Nil is valid and is the whole answer on a deployment with no control
-	// plane; see SetEmbeddingHost.
-	embeddingHost port.EmbeddingHostProbe
 }
 
 func NewService(store port.LLMProviderStore, endpoints port.LLMEndpointStore, cipher *secrets.Cipher, timeout time.Duration, invalidate InvalidateFunc) *Service {
@@ -80,210 +66,42 @@ func NewService(store port.LLMProviderStore, endpoints port.LLMEndpointStore, ci
 	return &Service{store: store, endpoints: endpoints, cipher: cipher, timeout: timeout, invalidate: invalidate}
 }
 
-// SetControlPlane wires domain.LLMProviderLocalRunner to the control plane a
-// cloud deployment's Mac tunnel is reached through. It is additive and
-// optional, the same shape as session.Service's SetChatExecutor/SetAttachments
-// — called once at boot, after NewService, so that adding this capability
-// never changes NewService's signature or breaks an existing caller.
-//
-// baseURL is tenant-manager's own origin (cfg.Server.PublicBaseURL's
-// counterpart on the control-plane side); internalAuthKey is the SAME shared
-// HMAC secret already threaded into this process as cfg.Cloud.InternalAuthKey
-// — reused rather than duplicated under a second name, because it is
-// literally the same signature tenant-manager's gateway verifies everywhere
-// else on /internal/*.
-//
-// Calling it triggers a reload so the effect is immediate rather than waiting
-// for the next unrelated Connect/Activate/SetEmbedding call.
-func (s *Service) SetControlPlane(ctx context.Context, baseURL, internalAuthKey string) error {
-	s.SetControlPlaneEndpoint(baseURL, internalAuthKey)
-	return s.reloadAllConfigured(ctx)
-}
-
-// SetControlPlaneEndpoint is SetControlPlane's half that touches no database.
-//
-// It exists because the caller that most needs it is process boot, which has no
-// tenant: SetControlPlane's reload reads llm_provider_configs, so calling it
-// there raised tenant.ErrNoTenant and the control plane was never recorded at
-// all — which is the failure that leaves "auto" embeddings falling through to
-// the chat provider.
-//
-// Splitting them is honest rather than convenient. Where the control plane is
-// is a fact about the DEPLOYMENT — one origin, one signing key, the same for
-// every tenant — while which providers are configured is a fact about a tenant.
-// The synthesised domain.LLMProviderLocalRunner entry these two fields produce
-// carries no tenant either: it is one client that resolves the acting member
-// from the request context on every call (adapter/llm/runner_embed.go), so
-// registering it once for the process is not a shortcut, it is the correct
-// scope.
-func (s *Service) SetControlPlaneEndpoint(baseURL, internalAuthKey string) {
-	s.runnerBaseURL = strings.TrimSpace(baseURL)
-	s.runnerSigningKey = internalAuthKey
-}
-
-// ControlPlaneEmbeddingEntry is the local-runner client the process should hold
-// so that "auto" embeddings resolve to the acting member's Mac, for every
-// tenant, from the first request rather than from whenever some tenant next
-// happens to reload its providers.
-//
-// ok is false when this deployment has no control plane (self-hosted, desktop),
-// where the entry must be absent — its presence is exactly what
-// MultiProviderClient.embedOnce reads to decide that "auto" means the Mac.
-func (s *Service) ControlPlaneEmbeddingEntry() (ProviderReloadEntry, bool) {
-	if s == nil || s.runnerBaseURL == "" {
-		return ProviderReloadEntry{}, false
-	}
-	return ProviderReloadEntry{
-		ProviderType:   domain.LLMProviderLocalRunner,
-		BaseURL:        s.runnerBaseURL,
-		DefaultModel:   domain.PinnedLocalEmbeddingModel,
-		APIKey:         s.runnerSigningKey,
-		TimeoutSeconds: runnerEmbeddingTimeoutSeconds,
-	}, true
-}
-
-// runnerEmbeddingTimeoutSeconds is generous relative to LM Studio's own
-// 2-minute budget (web/desktop/runner/embeddings.go's embeddingsTimeout): this
-// call also crosses the tunnel and the control plane, and a cold model load on
-// the Mac already spends part of the Mac-side budget.
-const runnerEmbeddingTimeoutSeconds = 180
-
-// resolveEmbeddingDisplay turns the raw stored embedding_provider/
-// embedding_model ("" = auto, per SetEmbedding's convention) into what "auto"
-// actually means right now, so a caller — the API response List() builds, or
-// ResolvedEmbedding below — never has to re-derive MultiProviderClient's own
-// resolution order (embeddingTarget/embedOnce in internal/adapter/llm/multi.go)
-// to answer "what model is this tenant's search actually running on".
-//
-// Deliberately conservative: it only fills in the pin when this Service was
-// wired to a control plane (SetControlPlane), matching exactly the condition
-// MultiProviderClient uses to decide whether domain.LLMProviderLocalRunner is
-// registered at all. Anything already explicit (a stored provider or model)
-// is returned unchanged — this never overrides a tenant's deliberate choice.
-func (s *Service) resolveEmbeddingDisplay(provider domain.LLMProviderType, model string) (domain.LLMProviderType, string) {
-	if provider == "" && s.runnerBaseURL != "" {
-		provider = domain.LLMProviderLocalRunner
-	}
-	if model == "" && provider == domain.LLMProviderLocalRunner {
-		model = domain.PinnedLocalEmbeddingModel
-	}
-	return provider, model
-}
-
 // ResolvedEmbedding answers "what model, and what dimension, is this tenant's
-// embedding search actually running on right now" — the same resolution
-// List()'s response uses, exposed as its own call so a caller outside this
-// package (the indexer, comparing against workspace_indexes.embedding_model/
-// embedding_dims — see domain.EmbeddingProvenanceStale) never has to re-derive
-// the "auto" convention itself. dimensions is 0 when the resolved model is not
-// the one pinned model this package knows the size of; a caller with a better
-// source (a vector it just received) should prefer that over guessing here.
+// embedding search actually running on right now", exposed as its own call so
+// a caller outside this package (the indexer, comparing against
+// workspace_indexes.embedding_model/embedding_dims — see
+// domain.EmbeddingProvenanceStale) never has to re-derive it. dimensions is 0
+// when the model is not the one pinned model this package knows the size of; a
+// caller with a better source (a vector it just received) should prefer that
+// over guessing here.
 func (s *Service) ResolvedEmbedding(ctx context.Context) (model string, dimensions int, err error) {
-	provider, err := s.store.GetEmbeddingProvider(ctx)
+	model, err = s.store.GetEmbeddingModel(ctx)
 	if err != nil {
 		return "", 0, err
 	}
-	storedModel, err := s.store.GetEmbeddingModel(ctx)
-	if err != nil {
-		return "", 0, err
-	}
-	_, model = s.resolveEmbeddingDisplay(provider, storedModel)
 	if model == domain.PinnedLocalEmbeddingModel {
 		dimensions = domain.PinnedLocalEmbeddingDimensions
 	}
 	return model, dimensions, nil
 }
 
-// SetEmbeddingHost wires the probe that answers "can this member's Mac produce
-// an embedding right now". Additive and optional, the same shape as
-// SetControlPlane above and called from the same place at boot; nil or a nil
-// probe leaves EmbeddingStatus reporting domain.EmbeddingHostUnknown, which is
-// the correct answer for a deployment with no laptop in its embedding path.
-func (s *Service) SetEmbeddingHost(probe port.EmbeddingHostProbe) {
-	if probe == nil || !probe.Available() {
-		return
-	}
-	s.embeddingHost = probe
-}
-
-// EmbeddingsOnMemberMac reports whether THIS DEPLOYMENT can produce embeddings
-// on a member's own Mac at all — a fact about the process, not about a tenant,
-// so it needs no context and hits nothing.
-//
-// It is what lets a client offer domain.LLMProviderLocalRunner in an embedding
-// picker. It cannot be derived from AllLLMProviderDefinitions(), which that
-// provider is deliberately absent from, and deriving it from the provider
-// catalog was exactly the mistake that told a tenant embedding happily on their
-// own Mac that no provider could produce embeddings.
-func (s *Service) EmbeddingsOnMemberMac() bool {
-	return s != nil && s.runnerBaseURL != ""
-}
-
-// EmbeddingStatus answers "what is producing this tenant's embeddings, and can
-// it do it right now" — the question the settings page has to answer and the
-// provider catalog cannot.
-//
-// The Mac is only asked when the answer depends on it. For an HTTP provider
-// there is no laptop in the path, and a round trip through the tunnel to learn
-// nothing would cost a settings page load several seconds.
+// EmbeddingStatus answers "what is producing this tenant's embeddings" — the
+// question the settings page has to answer and the provider catalog cannot,
+// because a named endpoint is not in the catalog at all.
 func (s *Service) EmbeddingStatus(ctx context.Context) (domain.EmbeddingStatus, error) {
-	stored, err := s.store.GetEmbeddingProvider(ctx)
+	provider, err := s.store.GetEmbeddingProvider(ctx)
 	if err != nil {
 		return domain.EmbeddingStatus{}, err
 	}
-	storedModel, err := s.store.GetEmbeddingModel(ctx)
+	model, err := s.store.GetEmbeddingModel(ctx)
 	if err != nil {
 		return domain.EmbeddingStatus{}, err
 	}
-	provider, model := s.resolveEmbeddingDisplay(stored, storedModel)
-	out := domain.EmbeddingStatus{
-		Provider:    provider,
-		Model:       model,
-		OnMemberMac: provider == domain.LLMProviderLocalRunner,
-		Host:        domain.EmbeddingHostStatus{State: domain.EmbeddingHostUnknown},
-	}
+	out := domain.EmbeddingStatus{Provider: provider, Model: model}
 	if model == domain.PinnedLocalEmbeddingModel {
 		out.Dimensions = domain.PinnedLocalEmbeddingDimensions
 	}
-	if !out.OnMemberMac || s.embeddingHost == nil {
-		return out, nil
-	}
-	// A probe failure is NOT this call's failure. It means the Mac could not be
-	// asked, which is a third thing next to "ready" and "broken", and reporting
-	// it as either would put the wrong instruction in front of the user. The
-	// caller still gets the provider and model, which are true regardless.
-	//
-	// The error's own text is logged, not returned: everything the probe can
-	// fail with is about THIS process (no transport, no member on the request,
-	// a tunnel that broke) and none of it is a sentence a person can act on.
-	// Anything the Mac itself said comes back as a state with a detail instead.
-	status, err := s.embeddingHost.Probe(ctx)
-	if err != nil {
-		log.Debug().Err(err).Msg("embedding host could not be asked whether it is ready")
-		return out, nil
-	}
-	out.Host = status
 	return out, nil
-}
-
-// EmbeddingNeedsMemberMac answers "does producing an embedding for this tenant
-// have to reach one of its members' own machines".
-//
-// It is the same resolution ResolvedEmbedding uses, asked about the PROVIDER
-// rather than the model, and it exists for the one caller that has to decide
-// something before it starts work: a GitHub push carries no actor, so a
-// webhook-triggered reindex has no member uid and no Mac to embed on. A
-// deployment with no control plane answers false — embeddings there are
-// produced by whatever HTTP provider the tenant configured, and a webhook
-// reindex works exactly as it always did — and so does a tenant that has
-// deliberately picked an HTTP embedding provider on a cloud deployment.
-func (s *Service) EmbeddingNeedsMemberMac(ctx context.Context) (bool, error) {
-	stored, err := s.store.GetEmbeddingProvider(ctx)
-	if err != nil {
-		return false, err
-	}
-	provider, _ := s.resolveEmbeddingDisplay(stored, "")
-	return provider == domain.LLMProviderLocalRunner, nil
 }
 
 func (s *Service) List(ctx context.Context) (domain.LLMProvidersResponse, error) {
@@ -324,13 +142,6 @@ func (s *Service) List(ctx context.Context) (domain.LLMProvidersResponse, error)
 	if err != nil {
 		return domain.LLMProvidersResponse{}, err
 	}
-	// Resolved for display: a tenant on "auto" (both blank) is silently on the
-	// Mac's pinned model whenever this deployment is wired to a control plane,
-	// and an empty EmbeddingProvider/EmbeddingModel in the response would tell
-	// the UI nothing is configured when something concrete already is — see
-	// resolveEmbeddingDisplay. An explicit choice always passes through
-	// unchanged.
-	embedding, embeddingModel = s.resolveEmbeddingDisplay(embedding, embeddingModel)
 	endpoints := []domain.LLMEndpoint{}
 	if s.endpoints != nil {
 		eps, err := s.endpoints.List(ctx)
@@ -342,12 +153,11 @@ func (s *Service) List(ctx context.Context) (domain.LLMProvidersResponse, error)
 		}
 	}
 	return domain.LLMProvidersResponse{
-		ActiveProvider:       active,
-		EmbeddingProvider:    embedding,
-		EmbeddingModel:       embeddingModel,
-		EmbeddingOnMemberMac: s.EmbeddingsOnMemberMac(),
-		Providers:            providers,
-		Endpoints:            endpoints,
+		ActiveProvider:    active,
+		EmbeddingProvider: embedding,
+		EmbeddingModel:    embeddingModel,
+		Providers:         providers,
+		Endpoints:         endpoints,
 	}, nil
 }
 
@@ -736,17 +546,6 @@ func (s *Service) Resolve(ctx context.Context) (Resolved, error) {
 			})
 		}
 	}
-	// domain.LLMProviderLocalRunner: synthesised, never stored. There is no
-	// llm_provider_configs row for it — nothing about it is a tenant setting —
-	// so it is added here, generated fresh on every reload from whatever
-	// SetControlPlane last set, rather than round-tripped through the store
-	// like every entry above it. Absent entirely when this deployment was
-	// never wired to a control plane (self-hosted/desktop), which is what
-	// keeps embedOnce's auto-resolution falling back to the old
-	// default-provider behaviour there — see multi.go's embeddingTarget.
-	if entry, ok := s.ControlPlaneEmbeddingEntry(); ok {
-		entries = append(entries, entry)
-	}
 	embedding, err := s.store.GetEmbeddingProvider(ctx)
 	if err != nil {
 		return Resolved{}, err
@@ -808,21 +607,6 @@ func endpointRef(ref domain.LLMProviderType) bool {
 //
 // No error this returns is ever a storage error. See errNoEmbeddingsFromProvider.
 func (s *Service) ListEmbeddingModels(ctx context.Context, providerType domain.LLMProviderType) ([]string, error) {
-	// The Mac, first, because it is neither a catalog provider nor an endpoint
-	// row and every branch below would misread it. Its catalog is one model by
-	// construction: domain.PinnedLocalEmbeddingModel is pinned on BOTH sides —
-	// the runner refuses a request naming anything else
-	// (web/desktop/runner/embeddings.go) — so listing whatever LM Studio
-	// happens to have downloaded would offer choices that cannot be chosen.
-	// Whether that one model is loaded right now is a different question, asked
-	// by EmbeddingStatus, and it must not empty this list: an empty picker next
-	// to a warning is what the user was already looking at.
-	if providerType == domain.LLMProviderLocalRunner {
-		if s.runnerBaseURL == "" {
-			return nil, fmt.Errorf("this deployment has no control plane, so there is no Mac to produce embeddings on")
-		}
-		return []string{domain.PinnedLocalEmbeddingModel}, nil
-	}
 	// Named endpoint (uuid): not in llm_provider_configs. Query its own catalog —
 	// LM Studio's native API tags embedding models; otherwise fall back to the
 	// plain /models list so the user can pick the embedding one.
@@ -961,30 +745,6 @@ func (s *Service) SetEmbedding(ctx context.Context, providerType domain.LLMProvi
 			if domain.RequiresHostExecutor(providerType) {
 				return domain.LLMProvidersResponse{}, fmt.Errorf("%s cannot produce embeddings; pick a different provider for embeddings", providerType)
 			}
-		} else if providerType == domain.LLMProviderLocalRunner {
-			// Accepted, and it has to be: List() RESOLVES a blank stored value
-			// to this provider for display, so the settings page shows
-			// "local_runner" as the current selection and saving what is on
-			// screen was refused with "invalid provider ref" — the one choice a
-			// user could not make was the one already in force.
-			//
-			// It is refused on a deployment with no control plane, where there
-			// is no tunnel to reach a Mac through and storing it would make
-			// every later embedding call fail with no way to see why from here.
-			if s.runnerBaseURL == "" {
-				return domain.LLMProvidersResponse{}, fmt.Errorf(
-					"this deployment has no control plane, so there is no Mac to produce embeddings on")
-			}
-			// The model is a pin on both sides. Storing a different one would
-			// be accepted here and then refused by the Mac on every single
-			// embedding call, so the whole tenant's indexing would stop with
-			// the settings page still showing the choice as saved.
-			if model != "" && model != domain.PinnedLocalEmbeddingModel {
-				return domain.LLMProvidersResponse{}, fmt.Errorf(
-					"embeddings on a Mac are pinned to %s and cannot be substituted — vectors from another model are not "+
-						"comparable to the ones already indexed", domain.PinnedLocalEmbeddingModel)
-			}
-			model = domain.PinnedLocalEmbeddingModel
 		} else if s.endpoints != nil && endpointRef(providerType) {
 			ep, err := s.endpoints.Get(ctx, string(providerType))
 			if err != nil {

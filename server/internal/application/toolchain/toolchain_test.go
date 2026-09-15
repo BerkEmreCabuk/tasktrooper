@@ -49,7 +49,7 @@ func TestDetectEnginesRange(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "package.json", `{"engines":{"node":"^20.9.0"}}`)
 	req := Detect(dir)
-	if req.Node != "20.9.0" || req.NodeSource != "package.json engines.node" {
+	if req.Node != "20.9.0" || req.NodeSource != "package.json" {
 		t.Fatalf("got %+v, want engines 20.9.0", req)
 	}
 }

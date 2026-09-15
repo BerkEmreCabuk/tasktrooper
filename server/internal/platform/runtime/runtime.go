@@ -36,6 +36,7 @@ import (
 	httpadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/http"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/llm"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/localdevice"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/localtoolchain"
 	mcpadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/mcp"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/mcpserver"
 	pgstore "github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
@@ -787,8 +788,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var catalogVersionStore port.CatalogVersionStore
 	var kpiStore port.AgentKPIStore
 	var goldenStore port.GoldenTaskStore
-	var pushDeviceStore port.PushDeviceStore
-	var liveActivityStore port.LiveActivityTokenStore
 	var usageStore port.LLMUsageStore
 	var mcpStore port.MCPStore
 	var settingsStore port.SettingsStore
@@ -796,7 +795,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var vercelCreds port.VercelCredentialStore
 	var llmProviderStore port.LLMProviderStore
 	var llmEndpointStore port.LLMEndpointStore
-	var tenantMembers *pgstore.TenantMemberStore
 
 	if cfg.Storage.Postgres.DSN != "" {
 		pgPool, err := pgstore.NewPool(ctx, cfg.Storage.Postgres.DSN, cfg.Storage.Postgres.MaxConns)
@@ -809,11 +807,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// tenant on the context (internal/adapter/store/postgres/db.go).
 			pgDB := pgstore.NewDB(pgPool)
 			e.pgDB = pgDB
-			// The first request from a tenant is what seeds its board and
-			// mirrors the caller into tenant_members; both need the database,
-			// so the service is built here and handed to the HTTP layer below.
-			tenantMembers = pgstore.NewTenantMemberStore(pgDB)
-			e.tenantOnboarder = tenantboot.NewService(pgDB, tenantMembers)
+			// The first request from a tenant is what seeds its board; it needs
+			// the database, so the service is built here and handed to the HTTP
+			// layer below.
+			e.tenantOnboarder = tenantboot.NewService(pgDB, pgstore.NewTenantSeedStore(pgDB))
 			// SetHostRoots, same reason as the repository store below:
 			// sessions.workspace_dir and sessions.project_root are absolute
 			// paths belonging to whichever host wrote the row. Resuming a
@@ -862,8 +859,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			evolutionStore = pgstore.NewEvolutionStore(pgDB)
 			kpiStore = pgstore.NewKPIStore(pgDB)
 			goldenStore = pgstore.NewGoldenStore(pgDB)
-			pushDeviceStore = pgstore.NewPushDeviceStore(pgDB)
-			liveActivityStore = pgstore.NewLiveActivityTokenStore(pgDB)
 			usageStore = pgstore.NewLLMUsageStore(pgDB)
 			mcpStore = pgstore.NewMCPStore(pgDB)
 			pgSettings := pgstore.NewSettingsStore(
@@ -957,7 +952,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	llmClient = usageapp.NewCachingEmbedder(llmClient, cfg.Embedding.QueryCacheEntries)
 
 	if indexStore != nil {
-		codeKit := code.NewToolKit(indexStore, llmClient, mapperSvc, cfg.Indexer, cfg.Graph, embeddingModel, false)
+		codeKit := code.NewToolKit(indexStore, llmClient, mapperSvc, cfg.Indexer, cfg.Graph, embeddingModel)
 		for _, tool := range code.NewExecutors(codeKit) {
 			e.reg.Register(tool)
 		}
@@ -1197,13 +1192,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	// session with no task resolver keeps its old mirror-clone workspace.
 	var boardTaskChat httpadapter.TaskChatControl
 	var taskChatWorkspaces session.TaskWorkspaceResolver
-	var remoteAgentWorkspace session.RemoteAgentWorkspace
-	// taskWorkspacePreparer is the SAME instance remoteAgentWorkspace and the
-	// board runner's own WorkspacePreparer are — see its assignment below —
-	// so a task-bound chat and that task's board run resolve onto the
-	// identical Mac checkout rather than each preparing (and clashing over)
-	// their own.
-	var taskWorkspacePreparer port.WorkspacePreparer
 
 	// The local agent CLI connect flow. Both stores are required and neither is
 	// optional-with-a-fallback: without the catalog there is nothing to write
@@ -1271,7 +1259,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			MaxWorkers:    maxBoardWorkers,
 			// The Claude Code session cap, handed to the claim so it is a
 			// budget shared by every replica rather than a channel per pod.
-			MaxMemberRuns:       cfg.ClaudeCode.MaxConcurrent,
 			VerificationEnabled: cfg.Board.VerificationEnabled,
 			VerifyFixAttempts:   cfg.Board.VerifyMaxFixAttempts,
 			TaskTypeModels:      cfg.Board.TaskTypeModels,
@@ -1282,6 +1269,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if agentCLISvc != nil {
 			boardRunner.SetAgentCLIConnections(agentCLISvc)
 		}
+		boardRunner.SetToolchainDetector(localtoolchain.New(cfg.Storage.Sessions.WorkspaceRoot))
 		boardDispatcher = boardapp.NewDispatcher(boardConfigStore, boardEventStore, taskAgentRunStore, boardRunner, cfg.Board.DispatchEnabled)
 		if taskSpanStore != nil {
 			boardDispatcher.SetSpans(taskSpanStore)
@@ -1694,7 +1682,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			repos:         repositorySvc,
 			git:           gitClient,
 			workspaceRoot: cfg.Storage.Sessions.WorkspaceRoot,
-			remote:        taskWorkspacePreparer,
 		}
 
 		if settingsStore != nil && cfg.Tools.BoilerplateCatalog.Enabled {
@@ -1801,28 +1788,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			}()
 			if catalogStore != nil {
 				repositorySvc.SetAgentLister(catalogStore.ListAgents)
-			}
-			if tenantMembers != nil {
-				memberUIDs := func(ctx context.Context) ([]string, error) {
-					members, err := tenantMembers.ListMembers(ctx)
-					if err != nil {
-						return nil, err
-					}
-					uids := make([]string, 0, len(members))
-					for _, m := range members {
-						uids = append(uids, m.UserID)
-					}
-					return uids, nil
-				}
-				repositorySvc.SetMemberLister(memberUIDs)
-				if boardRunner != nil {
-					// The same roster, for the opposite question: the service
-					// checks an assignee somebody NAMED, the runner fills one
-					// in for a card that names nobody on a one-member
-					// workspace — where the picker that would have set it is
-					// hidden precisely because there is nothing to choose.
-					boardRunner.SetMemberLister(memberUIDs)
-				}
 			}
 			pipelineRunner.Start(ctx)
 			e.pipelineRunner = pipelineRunner
@@ -2464,15 +2429,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			indexSvc.SetEmbeddingResolver(llmProviderSvc)
 		}
 
-		// Whether a reindex needs somebody's Mac, asked by the two passes that
-		// start with no person behind them: a GitHub push webhook, which
-		// carries no actor by design, and the boot freshness sweep, which is a
-		// background fan-out. Both would otherwise run to completion embedding
-		// nothing. See repository.Service.reindexHasNoMac.
-		if repositorySvc != nil {
-			repositorySvc.SetEmbeddingNeedsMemberMac(llmProviderSvc.EmbeddingNeedsMemberMac)
-		}
-
 	}
 
 	var sessionSvc *session.Service
@@ -2516,13 +2472,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// checkout instead of the shared mirror clone, so what the agent
 			// changes can actually reach the task's pull request.
 			sessionSvc.SetTaskWorkspaces(taskChatWorkspaces)
-		}
-		if remoteAgentWorkspace != nil {
-			// Most chat with a host-executed agent is bound to nothing, and on
-			// the remote (tunnel) path the plain local directory
-			// ensureSessionWorkspace would otherwise hand it is a pod path no
-			// Mac can open.
-			sessionSvc.SetRemoteAgentWorkspace(remoteAgentWorkspace)
 		}
 		if hostChatExecutor != nil {
 			// Chat with an agent on a host-executed provider goes to the local
@@ -2611,8 +2560,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		KPISvc:            kpiSvc,
 		PerfStore:         perfStore,
 		GoldenStore:       goldenStore,
-		PushDevices:       pushDeviceStore,
-		LiveActivities:    liveActivityStore,
 		UsageStore:        usageStore,
 		BillingSvc:        e.billingSvc,
 		UIRoot:            opts.UIRoot,

@@ -25,14 +25,6 @@ func NewProviderClient(providerType domain.LLMProviderType, baseURL, model, apiK
 			return &errorLLMClient{fmt.Errorf("gemini: %w (AI Studio with an API key; for keyless Vertex set GOOGLE_CLOUD_PROJECT + gcloud auth application-default login)", err)}
 		}
 		return c
-	case domain.LLMProviderLocalRunner:
-		// Unreachable in practice: this provider only ever gets an entry when a
-		// control plane is wired, and there is none. A client that fails with a
-		// sentence still beats one that dials an empty base URL and reports a
-		// connection error.
-		return &errorLLMClient{fmt.Errorf(
-			"%s embeddings would need another machine to reach; set EMBEDDINGS_BASE_URL "+
-				"to a local OpenAI-compatible embedder instead", domain.LLMProviderLocalRunner)}
 	default:
 		return NewOpenAICompatClient(baseURL, model, apiKey, timeout)
 	}

@@ -94,6 +94,25 @@ polls `GET /health` until it answers 200. `/health` is public and answers 200
 whenever the database is migrated, even with no LLM provider configured; the
 body says `degraded` in that case.
 
+## Toolchain pins
+
+A board run reads the checkout's own version pins and starts the agent session
+with the matching variable, so a repository is built with the toolchain it
+declares. Only exact versions count; a range such as `>=18` is ignored.
+`.tool-versions` and `mise.toml` are read first and win over the files below.
+
+| variable | read from |
+|---|---|
+| `GOTOOLCHAIN` | `go.mod` (`toolchain`, then `go`), `.go-version` |
+| `NODE_VERSION` | `.nvmrc`, `.node-version`, `package.json` `engines` |
+| `PYTHON_VERSION` | `.python-version`, `pyproject.toml` |
+| `RUBY_VERSION` | `.ruby-version`, `Gemfile` |
+| `JAVA_VERSION` | `.java-version`, `.sdkmanrc` |
+| `RUSTUP_TOOLCHAIN` | `rust-toolchain.toml`, `rust-toolchain` |
+| `FLUTTER_VERSION` | `.fvmrc`, `.flutter-version` |
+
+Parsing: `application/toolchain`. Confinement to `DATA_DIR/workspaces`: `adapter/localtoolchain`.
+
 ## Embedded Postgres
 
 With `DATABASE_URL` empty, `internal/platform/embeddedpg` starts PostgreSQL 17

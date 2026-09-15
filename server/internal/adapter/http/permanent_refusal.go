@@ -26,7 +26,7 @@ import (
 // number from the control plane and a different one from this server is a
 // refusal the web app has to learn twice.
 //
-// Checked on the ERROR rather than per route, for the reason runner_not_attached.go
+// Checked on the ERROR rather than per route, for the reason internalError
 // gives for doing the same: these are raised deep in the provider service and
 // every route that lets one out owes the same answer, so a hand-kept list of
 // paths would go stale the first time somebody added a handler.

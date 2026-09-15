@@ -81,9 +81,8 @@ type Handler struct {
 	legacyAPIKey  string
 	apiKeys       []domain.APIKeyConfig
 	apiKeySvc     *apikey.Service
-	// tenantOnboarder seeds a first-seen tenant's board and mirrors the caller
-	// into tenant_members. Nil on a build with no database, where there is no
-	// roster to mirror into.
+	// tenantOnboarder seeds a first-seen tenant's board. Nil on a build with no
+	// database.
 	tenantOnboarder   TenantOnboarder
 	sessionSvc        *session.Service
 	settingsSvc       *settings.Service
@@ -115,8 +114,6 @@ type Handler struct {
 	kpiSvc            *kpi.Service
 	perfStore         port.AgentPerformanceStore
 	goldenStore       port.GoldenTaskStore
-	pushDevices       port.PushDeviceStore
-	liveActivities    port.LiveActivityTokenStore
 	usageStore        port.LLMUsageStore
 	billingSvc        *billing.Service
 	uiRoot            string
@@ -171,8 +168,6 @@ type Config struct {
 	KPISvc            *kpi.Service
 	PerfStore         port.AgentPerformanceStore
 	GoldenStore       port.GoldenTaskStore
-	PushDevices       port.PushDeviceStore
-	LiveActivities    port.LiveActivityTokenStore
 	UsageStore        port.LLMUsageStore
 	BillingSvc        *billing.Service
 	UIRoot            string
@@ -228,8 +223,6 @@ func NewHandler(cfg Config) *Handler {
 		kpiSvc:            cfg.KPISvc,
 		perfStore:         cfg.PerfStore,
 		goldenStore:       cfg.GoldenStore,
-		pushDevices:       cfg.PushDevices,
-		liveActivities:    cfg.LiveActivities,
 		usageStore:        cfg.UsageStore,
 		billingSvc:        cfg.BillingSvc,
 		uiRoot:            cfg.UIRoot,
@@ -272,7 +265,6 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	app.Get("/v1/billing", h.BillingStatus)
 	app.Get("/admin/billing/plan", h.GetBillingPlan)
 	app.Put("/admin/billing/plan", h.UpdateBillingPlan)
-	app.Put("/admin/billing/sync", h.SyncBilling)
 	app.Get("/admin/billing/model-prices", h.ListModelPrices)
 	app.Put("/admin/billing/model-prices", h.UpsertModelPrice)
 	app.Delete("/admin/billing/model-prices/:model", h.DeleteModelPrice)
@@ -1230,13 +1222,9 @@ func badRequest(c *fiber.Ctx, msg string) error {
 //
 // The difference is not cosmetic. A message this handler composed can only ever
 // be a bad request; an error from a service below it can be a bad request OR
-// one of the states that has its own status — today, "this needed a Mac and
-// there is not one", which a 400 would report as the user's typing being wrong.
-// So a handler that has an error in its hand should reach for this one.
+// one of the states that has its own status. So a handler that has an error in
+// its hand should reach for this one.
 func badRequestErr(c *fiber.Ctx, err error) error {
-	if handled, writeErr := runnerNotAttached(c, err); handled {
-		return writeErr
-	}
 	if handled, writeErr := permanentRefusal(c, err); handled {
 		return writeErr
 	}
@@ -1250,20 +1238,11 @@ func badRequestErr(c *fiber.Ctx, err error) error {
 // makes it the one place that sees every failure this server produces — and
 // therefore the right place to catch the one failure that is not a failure.
 //
-// A request that could not be served because the assignee's Mac is offline is
-// not a 500. It is a state with an instruction attached, the person who can act
-// on it is the one waiting, and the clients have a screen for it. Checked here
-// rather than at ~90 call sites for the reason in runner_not_attached.go: the
-// condition is raised deep and every route that lets it out needs the same
-// answer, so a route that forgot to ask would report somebody's closed laptop
-// as a server fault.
+// A permanent refusal that reached here would tell the client to retry a
+// request that cannot ever succeed. Checked here rather than at ~90 call
+// sites: the condition is raised deep and every route that lets it out needs
+// the same answer. See permanent_refusal.go.
 func internalError(c *fiber.Ctx, err error) error {
-	if handled, writeErr := runnerNotAttached(c, err); handled {
-		return writeErr
-	}
-	// The second family of "not a 500 at all", for the same reason and in the
-	// same place: a permanent refusal that reached here would tell the client
-	// to retry a request that cannot ever succeed. See permanent_refusal.go.
 	if handled, writeErr := permanentRefusal(c, err); handled {
 		return writeErr
 	}

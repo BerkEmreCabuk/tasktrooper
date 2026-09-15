@@ -118,7 +118,14 @@ does not cover it and notarization rejects an unsigned Mach-O.
 ## Updates
 
 `publish: null`, so electron-builder cannot infer a feed from the git remote. A
-build updates itself only if it was packaged with a generic `publish`
-configuration; `services/updater.ts` reads `provider: generic` and refuses
-anything else. A dev run and a plain `npm run package` build report
-`unsupported`, which is the honest state.
+build updates itself only if it was packaged with a `publish` configuration
+passed on the command line — which is what `.github/workflows/release-mac.yml`
+does. `services/updater.ts` reads the bundled `app-update.yml` and accepts two
+shapes: `provider: generic` with a trustworthy URL, and `provider: github` for
+`makifbaysal/tasktrooper-oss` and no other repository. A dev run and a plain
+`npm run package` build report `unsupported`, which is the honest state.
+
+The GitHub provider reads the releases feed unauthenticated, so it answers 404
+for every install while this repository is private. That is expected rather than
+broken: it is logged only under `TASKTROOPER_UPDATE_DEBUG` and never drawn as a
+failed check.

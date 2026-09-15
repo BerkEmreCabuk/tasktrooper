@@ -1,4 +1,4 @@
-## server
+# server
 
 The TaskTrooper backend: HTTP API + agent runtime, one Go binary. **Local is
 the only mode** — one machine, one user, one tenant, no control plane. The
@@ -14,10 +14,9 @@ Detailed docs:
 - [Workspace](.ai/workspace.md)
 - [Repositories & Projects](.ai/projects.md)
 
-Those predate the move to local-only mode: accurate about the domain model, the
-tool surface and the orchestration agents, stale wherever they mention tenants,
-pods, the gateway or a control plane. This file and `README.md` are the current
-word on how the process is configured and started.
+This file and `README.md` are the current word on how the process is
+configured and started; the docs above cover the domain model, the tool
+surface, the API and the orchestration agents.
 
 ## Code comments
 
@@ -63,9 +62,6 @@ implementing it.
 
 RLS (migration 114) stays in the schema as history. The embedded cluster runs
 as a superuser and bypasses it, which is correct with one tenant.
-
-`docs/cloud-leftovers.md` (repo root) lists the cloud-era code that is inert
-rather than deleted, and why.
 
 ## Build
 

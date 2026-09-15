@@ -62,7 +62,7 @@ func (s *PathTraversalSuite) SetupTest() {
 	mapperSvc := mapper.NewService(domain.MappingConfig{Enabled: true, TreeMaxDepth: 4, MaxFiles: 50})
 	// No index store: get_symbol_skeleton then takes the mapper path, which is
 	// the one that reads from disk.
-	s.kit = code.NewToolKit(nil, nil, mapperSvc, domain.IndexerConfig{TopK: 3}, domain.GraphConfig{}, "embed-model", false)
+	s.kit = code.NewToolKit(nil, nil, mapperSvc, domain.IndexerConfig{TopK: 3}, domain.GraphConfig{}, "embed-model")
 }
 
 func (s *PathTraversalSuite) tool(name string) port.ToolExecutor {

@@ -11,12 +11,30 @@ cloud, no login.
 
 ## Install
 
-Download the latest `.dmg` from Releases, drag TaskTrooper to Applications, open
-it. First launch downloads two things into the app's data directory: the
-Postgres binaries (~30 MB) and the embedding model (~140 MB).
+```sh
+curl -fsSL https://raw.githubusercontent.com/makifbaysal/tasktrooper-oss/main/scripts/install.sh | bash
+```
 
-You need `git` and the `claude` CLI signed in to a plan that includes Claude
-Code. The app checks both and shows the exact command if one is missing.
+It downloads the latest release's universal `.dmg`, copies TaskTrooper into
+`/Applications`, and prints the commands for anything else you need. Pass `-y`
+to replace an existing install without being asked.
+
+With Homebrew, once this repository is public:
+
+```sh
+brew tap makifbaysal/tasktrooper && brew install --cask tasktrooper
+```
+
+The app is signed with a Developer ID but is not notarized yet, so a copy you
+install by hand may need right-click → Open the first time; the install script
+and the cask both clear the quarantine flag for you.
+
+First launch downloads two things into the app's data directory: the Postgres
+binaries (~30 MB) and the embedding model (~140 MB). You need `git` and the
+`claude` CLI signed in to a plan that includes Claude Code — the app checks both
+and shows the exact command if one is missing.
+
+Or grab the `.dmg` from [Releases](https://github.com/makifbaysal/tasktrooper-oss/releases) and drag TaskTrooper to Applications.
 
 ## Run from source
 

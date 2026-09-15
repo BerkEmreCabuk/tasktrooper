@@ -35,7 +35,7 @@ npm run check:locales  # en/tr key parity
 npm run preview        # serve the built dist/
 ```
 
-The desktop package builds this itself (`npm --prefix ../web run build`) and
+The desktop package builds this itself (`npm --prefix ui run build`) and
 copies `dist/` into the app bundle.
 
 ## Environment variables

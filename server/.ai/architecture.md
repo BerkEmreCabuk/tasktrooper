@@ -93,7 +93,7 @@ Agents](orchestration-agents.md) → "QA pipeline (migration 040)".
 
 The gate defers the reviewing architect on a move into `code_review` until the pipeline
 reports. Originally only `PipelineRunner.finalize`, **inside the process that started the
-pipeline**, could open it — so a pod replaced mid-poll, a repository out of Actions
+pipeline**, could open it — so a process restart mid-poll, a repository out of Actions
 minutes (402), or a hook registered for `push` only left the card wedged with a spinner
 and no agent, permanently and silently.
 
@@ -138,7 +138,7 @@ the card shows a warning glyph with the reason instead of a spinner.
 The 45-minute window is derived, not chosen: it must exceed `pipelineMaxWait` (30m, the
 in-process poll's budget) so a live pipeline always produces the real verdict first —
 otherwise the sweeper would convert a build about to go red into an opened review gate —
-plus 15 minutes of slack for a replaced pod and Actions queue time. Every other path
+plus 15 minutes of slack for a process restart and Actions queue time. Every other path
 pre-empts it.
 
 ## Where work may start, and who is recorded as starting it
@@ -151,8 +151,8 @@ event). `board.Reconciler` skips the same columns. Work starts when the task is 
 the board.
 
 Every `task.moved` payload carries an explicit `actor` (`agent`/`human`/`system`), and
-system moves also carry a `system_reason` (`domain.MoveReason*`). Control-plane moves used
-to carry no actor and rendered as "by User". The pipeline hand-off changes no column, so
+system moves also carry a `system_reason` (`domain.MoveReason*`), so a system-originated
+move never renders as "by User". The pipeline hand-off changes no column, so
 its history row shows the reason sentence instead of an empty `▭ → ▭`.
 
 ## Column span ledger (migration 057)
@@ -214,33 +214,21 @@ that worked; otherwise the error signature classifies it as config / dependency 
 diagnosis task that must stop at a written proposal, `auto_fix` lets the task carry the fix
 through the board. High and critical incidents also push to the user's devices.
 
-## Run lifetime vs pod lifetime (drain, heartbeat, stale sweep)
+## Run lifetime vs process lifetime (drain, heartbeat, stale sweep)
 
-A board run is minutes of work on a checked-out branch; a tenant pod is replaced far more
-often than that. Four defects turned every overlap into "reconciler: no progress before
-stale timeout" on runs nobody had abandoned:
+A board run is minutes of work on a checked-out branch; the server process can restart
+mid-run (a rebuild, a crash, a machine sleep/wake). Liveness for a run is **never** inferred
+from any in-memory map — it comes from the database:
 
-1. **`ensureDeployment` overwrote the pod template wholesale**, dropping annotations it did
-   not own — including the `kubectl.kubernetes.io/restartedAt` a deploy had just stamped,
-   which changed the pod-template-hash and fired a second rolling restart mid-run. Foreign
-   annotations are merged now.
-2. **SIGTERM cancelled before it drained**, so the run context was dead when the drain began.
-   `server.Shutdown()` runs first; terminal run writes go through `persistCtx`
-   (`context.WithoutCancel` + 15s) so even a cancelled run records its status.
-3. **The runner had no drain.** `Runner.Drain(ctx)` stops taking new jobs and waits for
-   in-flight ones, cancelling only if the pod's grace period expires first. The deployment
-   asks for `terminationGracePeriodSeconds: 600` (GKE Autopilot clamps larger values — a
-   requested 1500 landed as 600) and the bridge drains for `SHUTDOWN_GRACE` (9m) inside it.
-   The tenant-manager sweeps every tenant through `EnsureTenant` at startup and hourly
-   (`startTenantSpecReconciler`), or a spec change would only reach a warm pod on its next
-   wake and the drain would be SIGKILLed halfway.
-4. **`updated_at` froze at run start**, so `ListStale` could not tell "the pod died" from
-   "still working" and failed every run longer than `reconcile_stale_after` (30m). The runner
-   `Touch`es the row every `runHeartbeat` (10s), and the heartbeat is now the ONLY liveness
-   authority — `SetLiveRunChecker` is gone, because it asked one process's map and reported
-   every other replica's live run as abandoned. `reconcile_stale_after` is clamped to
-   `maxRunStale` (18 missed beats), and `FailIfStale` re-asserts the cutoff inside the write,
-   so an owner that heartbeats mid-sweep keeps its run whichever pod it is in.
+- **The server drains on shutdown.** `Runner.Drain(ctx)` stops taking new jobs and waits for
+  in-flight ones. `server.Shutdown()` runs first; terminal run writes go through `persistCtx`
+  (`context.WithoutCancel` + 15s) so even a run whose request context was just cancelled
+  still records its final status instead of leaving the row stuck `running`.
+- **`updated_at` is a heartbeat, not a start timestamp.** The runner `Touch`es the row every
+  `runHeartbeat` (10s), and the heartbeat is the ONLY liveness authority — nothing infers
+  "abandoned" from a process's own in-memory state. `reconcile_stale_after` (30m) is clamped
+  to `maxRunStale` (18 missed beats), and `FailIfStale` re-asserts the cutoff inside the
+  write, so a run that heartbeats mid-sweep is never falsely failed.
 
 The UI had the mirror-image bug: liveness inferred from the step stream alone showed a killed
 run as "Live" forever. `useRunActivity` takes the run's own status, and an unfinished subtask
@@ -279,10 +267,10 @@ step forward only. iOS: TestFlight internal groups → external groups + Beta Ap
 App Store version. Play: `internal` → `alpha`/`beta` → `production`.
 
 `repositories.release_engine` (`auto` | `github_actions` | `local`, migration 126) picks
-where a release runs. `auto` tries Actions, then the paired Mac. Only a definite "Actions
-cannot run" (no workflow, 402, billing, quota) falls through; a plain 5xx propagates. When
-neither can run, `domain.ErrNoReleaseEngine` parks the card on `human_decision` — there is
-no third path.
+where a release runs. `auto` tries Actions, then falls back to running the release script on
+this machine. Only a definite "Actions cannot run" (no workflow, 402, billing, quota) falls
+through; a plain 5xx propagates. When neither can run, `domain.ErrNoReleaseEngine` parks the
+card on `human_decision` — there is no third path.
 
 The script's build targets come from the working copy, not from a convention
 (`repositories.detected_xcode_scheme` / `detected_gradle_module`, migration 127; read by
@@ -674,7 +662,7 @@ degrade quietly** (a load-bearing step fails the run with the message attached; 
 degrades but logs *what* it skipped and *why*, with `permanent: true` separating "this agent
 can never do this" from "the endpoint had a bad minute"). Logged at WARN with the provider,
 model, named call and source location. The same sentence is what `session.runHostExecutedTurn`
-returns when the executor is absent — the ordinary state of every cloud pod.
+returns when no `claude_code` executor is registered — a host with the binary missing from PATH.
 
 ### Which paths run on the CLI, and which need an HTTP provider
 
@@ -729,7 +717,7 @@ the device park, with one difference that shapes the rest:
 | carried as | `AgentResponse.ResourceBlock` (a tool said "not now") | `error` — `*domain.QuotaBlock` (the run produced nothing to carry it on) |
 | released by | probing the hub: is a phone free | the clock: has the recorded reset passed |
 | state lives in | `board_tasks.blocked_resource` | that, **plus** `task_agent_runs.quota_resume_at` / `cli_session_id` |
-| sweeps on boot | no — an idle hub may be another pod's lease | yes — a recorded reset time survives a restart |
+| sweeps on boot | no — an idle hub's lease is re-probed on the next sweep, not assumed free | yes — a recorded reset time survives a restart |
 
 Migration 101 adds those two columns (partial index on `quota_resume_at`). They are on the row
 rather than in memory because that is what makes the park survive a restart: `QuotaSweeper`
@@ -779,18 +767,14 @@ platform/runtime ── RunTokenRegistry ── adapter/mcpserver ◄───�
 
 **Per-run tokens.** `RunTokenRegistry` (in-memory mutex map) mints 32 bytes of `crypto/rand`
 per run and stores the runner's `runCtx`, the run's **tenant** and its policy. The token is
-written into a 0600 file — by this process for a local session, by the runner for a remote one
-— never onto a command line, which is world-readable in `ps` — and revoked on every exit path:
-a finished session, a failure, the quota park, a dropped tunnel. In memory is enough precisely
-because of that: a resumed park is a new run row with a fresh token, and a restart is the
-strongest revocation there is. An unknown, revoked or expired token gets `401` with a JSON-RPC
-error body.
+written into a 0600 file, never onto a command line, which is world-readable in `ps` — and
+revoked on every exit path: a finished session, a failure, or the quota park. In memory is
+enough precisely because of that: a resumed park is a new run row with a fresh token, and a
+restart is the strongest revocation there is. An unknown, revoked or expired token gets `401`
+with a JSON-RPC error body.
 
-`Run.ExpiresAt` is an absolute ceiling, set **only** for a token that leaves this machine
-(remote), at `run_timeout + 15m` — past the session's own deadline, because a 401 mid-session
-makes the CLI report `requires re-authorization` and abandon the server for the rest of the
-run. A cancelled `Run.Ctx` deliberately does **not** invalidate the token, for that same
-reason: the call must fail as a cancelled call, not as an auth failure.
+A cancelled `Run.Ctx` deliberately does **not** invalidate the token: the call must fail as a
+cancelled call, not as an auth failure.
 
 Storing the run's *context* is what makes a CLI session's tool call indistinguishable from a
 loop run's downstream: audit rows, the session action ledger, the tool-usage counters the
@@ -815,13 +799,8 @@ server's credentials, and it authenticates with the per-run bearer token alone.
 `tenantMiddleware` therefore never runs for it and **there is no signed header here to read**
 — the tenant is bound into the token at mint time (`Run.Tenant`, from the board runner's
 `runCtx`) and re-applied per call by `Run.Scoped()`. No valid token ⇒ `401`; never a default
-tenant. `SetLoopbackOnly` follows where the session runs, not whether this is cloud:
-
-| Executor | Loopback-only | Why |
-|---|---|---|
-| local, cloud pod | **on** | pod binds `0.0.0.0`; the only client is a `claude` child at 127.0.0.1 |
-| remote (Mac) | **off** | every legitimate call arrives from the gateway; the token is the whole check |
-| desktop / self-hosted | either | the listener binds 127.0.0.1 already |
+tenant. `SetLoopbackOnly(true)` on this product: the listener already binds `127.0.0.1`, and
+the only legitimate caller is a `claude` child process on this same machine.
 
 `c.IP()` is the peer's real address (the fiber app is built with no `ProxyHeader`).
 
@@ -868,12 +847,11 @@ to their text.
 
 ## Local simulators and emulators (migration 102)
 
-The `mobile_*` tools were written against a physical Android phone reached through the
-cluster's adb bridge (`adapter/deviceagent`, `MOBILE_BRIDGE_URL`) and driven by an Appium hub
-in the cluster; iOS was refused by name, because XCUITest needs a macOS host with Xcode. The
-same binary now also runs on an operator's Mac, where two more devices exist that are not
-reachable that way — so a registration gained a **kind**, and the kind is the only thing that
-changes:
+The `mobile_*` tools were written against a physical Android phone reached through a bridge
+sidecar (`adapter/deviceagent`, `MOBILE_BRIDGE_URL`) driving a remote Appium hub; iOS was
+refused by name, because XCUITest needs a macOS host with Xcode. The same binary also runs
+directly on this machine, where two more devices exist that the bridge cannot reach — so a
+registration gained a **kind**, and the kind is the only thing that changes:
 
 | | `remote_adb` (default) | `ios_simulator` | `android_emulator` |
 |---|---|---|---|
@@ -922,47 +900,27 @@ before. A blank kind normalises through `domain.MobileDevice.DeviceKind()`. Tool
 is still driven by the *effective* devices: `MOBILE_BRIDGE_URL` being unset (the normal case
 on a Mac) disables nothing, because the bridge only ever served one of the three kinds.
 
-## Mobile work reaches the assignee's Mac (`mobile.*`)
+Mobile device access (`mobile.*`) runs entirely through `adapter/localdevice` on this
+machine — see "Local simulators and emulators" above for the full `remote_adb` /
+`ios_simulator` / `android_emulator` breakdown. There is no second, remote path: `mobile.Pool`
+talks to one Appium hub on this host, and a park (`ResourceBlock{mobile_device}`) is released
+by `DeviceSweeper` probing that same hub.
 
-A Linux pod cannot run an iOS simulator. `adapter/localdevice` execs `xcrun`/`adb` on THIS host,
-so in the cloud it is replaced — not disabled — by the same four questions asked over the tunnel.
+## One tenant (migrations 114, 115)
 
-| Question | Local | Cloud |
-| --- | --- | --- |
-| what is there | `localdevice.Host` | `runner.MobileHost` → `GET mobile.devices` (per member, never cached) |
-| attach / detach | `simctl` / `emulator` | `POST mobile.boot` / `mobile.shutdown`, both idempotent |
-| drive it | `mobile.Pool` → cluster Appium | `mobile.Fleet` → `ANY mobile.appium/…`, proxied verbatim |
-| release a park | `DeviceSweeper` (one hub) | `MacDeviceSweeper` (one probe per MEMBER, one resume per pass) |
-
-- **`boot`'s `udid` is not its `id`.** The id is a simctl UDID or an **AVD name**; the udid is the
-  serial the emulator was allocated at boot. Only the udid may reach `appium:udid`.
-- **No `hub_token`.** `Authorization` is stripped by `appiumTransport`: the hub is a loopback
-  process with no credential, and the control plane does not forward the header.
-- **The lease stays Appium's.** `Fleet` holds no mutex, queue or registry — it tries devices until
-  one ACCEPTS a session, so a busy one comes back as the hub's own 4xx → `errDeviceBusy` →
-  `ResourceBlock{mobile_device}`. Already-up devices first; **at most one cold boot per acquire**.
-- **Three absences, three outcomes.** No Mac → `ResourceRunnerNotAttached` (the existing park and
-  sweeper). No Appium / no Android SDK → the Mac's own capability `detail`, a tool error, no park.
-  No assignee → a refusal naming the missing assignment. `interceptForwardRefusal` is what keeps a
-  hop's 409 from reaching `classifyError` as a busy device.
-- `Fleet` is keyed by (tenant, member, run), so nothing is process-wide; `Pool` stays unwired in
-  the cloud for the reason it always was.
-
-## One server, every tenant (migrations 114, 115)
-
-A tenant WAS a database (`team_<uid>`) behind a pod of its own. It is now a
-`tenant_id` column and a row-level-security policy in one shared database, read
-by one shared Deployment.
+Multi-tenancy is a `tenant_id` column and a row-level-security policy, still present because
+this schema is shared with a hosted version of the product; this product always runs with
+exactly one tenant, `tenant.LocalTenantID`.
 
 | Piece | Where | Rule |
 |---|---|---|
-| identity in | `adapter/http/middleware_tenant.go` | signed `X-Internal-Tenant` / `X-Internal-Role` / `X-Internal-Actor`; **no header ⇒ 401**, never a default tenant |
+| identity in | `adapter/http/middleware_tenant.go` | every request is stamped `tenant.LocalTenantID` + `RoleOwner` after the bearer `SERVER_API_KEY` check — no per-request identity header exists |
 | identity through | `platform/tenant` | `tenant.Identity` on the context; 469 store methods take no tenant argument |
 | identity down | `adapter/store/postgres/db.go` | every statement in its own tx opening `SET LOCAL app.tenant_id`; no un-scoped path exists |
 | isolation | migration 114 | 85 tables carry `tenant_id NOT NULL DEFAULT current_setting('app.tenant_id')::uuid`, `ENABLE`+`FORCE` RLS, one `tenant_isolation` policy each |
 | global | `schema_migrations`, `tenants` | one schema, and the registry OF tenants — neither is a tenant's data |
 | uniqueness | migration 114 | every UNIQUE key re-cut to lead with `tenant_id`; single-row tables (`board_settings`, `billing_plan`, `agent_cli_connection`) became single-row-per-tenant |
-| per-tenant seed | `application/tenantboot` | migrations no longer seed; the first request seeds the board and mirrors the caller into `tenant_members` — unless the request carries `X-Internal-Scope: control`, which names no human (see `.ai/projects.md`) |
+| per-tenant seed | `application/tenantboot` | migrations no longer seed; the first request seeds the board (see `.ai/projects.md` for `tenant_members`, which stays empty on this product) |
 | background sweeps | `tenant.EachTenant` / `tenant.Sweep` | one tick per tenant; with no lister (self-hosted) one tick, unchanged |
 | board runs | `board.RunJob.Tenant` | the queue severs request and worker, so the tenant rides the job |
 | CI pipelines | `board.pipelineJob.Tenant` | same queue, same fix; without it every run logged `get task pipeline: tenant: no tenant in context` and failed the pipeline |
@@ -972,266 +930,60 @@ The application role must be **neither SUPERUSER nor BYPASSRLS**: both ignore
 policies unconditionally, `FORCE` included. `TenantIsolationSuite` connects as an
 unprivileged role for exactly that reason.
 
-The `TENANT_UID` pin is gone (there is no second pod to impersonate) and the
-GitHub webhook URL now carries `?t=<tenant uuid>` read off the registering
-request rather than off a pod-wide env var.
-
 ### RLS does not reach the disk: the tenant is in the path
 
-One `ReadWriteOnce` PVC serves every customer, so a directory listing on the
-shared workspace root saw every tenant's directories while the query that said
-what to keep saw one tenant's rows. The difference was deleted, or adopted. All
-of it is now derived from `workspace.TenantRoot` — `<root>/tenants/<tenant-id>/…`,
-see `.ai/workspace.md` for the table — which refuses a context with no identity
-instead of falling back to the shared root.
-
-| Was | Consequence | Now |
-|---|---|---|
-| `WorkspaceReaper` listed `<root>` per tenant | deleted every OTHER tenant's checkouts older than 48h, hourly | listing rooted at the tenant subtree; a foreign directory never reaches a delete branch |
-| `repos/<name>` had no tenant, and 114 re-cut `root_path` UNIQUE to `(tenant_id, root_path)` | two customers' rows legally named one clone: cross-tenant read into the index, profile and chats, plus `git revert`+push on the victim's default branch (`deploywatch/rollback.go`) | `workspace.TenantRepoDir`; **and** all four adoption paths (import, restore, `EnsureIndexMirror`, `Runner.ensureWorkingCopy`) compare the checkout's origin with `remote_url` before acting — `repository.assertSameRepo` |
-| `HostRootPath` re-anchored a foreign path onto `<root>/<name>` | the same collision, from the other direction and with no user action | re-anchors into the calling tenant's subtree; no tenant ⇒ no re-anchor |
-| `allowed_roots: []` meant "any absolute path" | `POST /v1/repositories/open` indexed any readable directory on the pod | empty means the tenant's own subtree only; `allowed_roots` can only widen |
-
-`HasLiveRunForTask` is the detail worth keeping: it is tenant-scoped, so a
-foreign task's LIVE run reads as `(false, nil)` — a confident wrong answer, not
-an error. The reaper's "every uncertain answer is keep" rule therefore never
-fired for it. No guard can be built on a query RLS has already narrowed;
-ownership has to come from the path. Pinned by
-`TenantIsolationSuite.TestHasLiveRunForTaskLiesAboutAnotherTenantsRun`.
-
-## N replicas of one server (migration 117)
-
-`replicas: 1`+`Recreate` was a deploy outage for every tenant. Eight facts lived in Go maps; each moved into the row it describes, using the blocked-resource sweepers' claim pattern.
-
-| Was (per process) | Now | Where |
-|---|---|---|
-| `Runner.activeTasks` | claim: no other live `running` row for the task | `port.RunClaim` → `claimRunSQL` |
-| pool size = plan concurrency | claim: tenant's live runs < plan cap, read per run | `BillingGate.MaxConcurrency` |
-| `RemoteExecutor.slots` per member | claim: live runs on that assignee < `ClaudeCode.MaxConcurrent` | `board_tasks.assignee_user_id` |
-| `Reconciler.IsActive` | heartbeat, re-asserted inside the write | `FailIfStale`, `maxRunStale` |
-| `Runner.cancels`, `session.runs` | the row, observed by the heartbeat | `startHeartbeat`, `watchRemoteCancel` |
-| `PipelineRunner.inflight` gating effects | guarded terminal transition | `PipelineStore.ClaimTerminal` |
-| webhook delivery map; `Runner.IsTaskActive` | `INSERT … ON CONFLICT DO NOTHING`; `HasLiveRunForTask` | `github_webhook_deliveries`, `WorkspaceReaper` |
-
-The claim takes a **per-tenant `pg_advisory_xact_lock` before counting**: `FOR UPDATE SKIP LOCKED` locks the claimed row only, so under READ COMMITTED four concurrent claims each counted zero live runs and all four passed a cap of two. Found by `adapter/store/postgres/multireplica_test.go` — two pools over embedded Postgres as a `NOSUPERUSER NOBYPASSRLS` role, raced.
-**Dissolved:** the restore ledger guards a directory on *this* host; `root_path` is re-anchored per host (`localizeRootPath`). **Removed:** `FailStaleRunning(0)` at pipeline boot — one pod restarting failed every pipeline its siblings were polling.
+A filesystem path is outside anything Postgres RLS can narrow, so every on-disk path is
+derived from `workspace.TenantRoot` — `<root>/tenants/<tenant-id>/…`, always
+`tenant.LocalTenantID` on this product — rather than trusted from a caller. See
+`.ai/workspace.md` for the full path table. `HasLiveRunForTask` follows the same rule: it is
+tenant-scoped, so `WorkspaceReaper` never derives a delete decision from an unscoped query.
 
 ## Boot-time work has no tenant
 
-A shared process has no tenant at boot and, on a cold pod, no tenant LIST. ~12 boot paths ran unscoped, raised `tenant.ErrNoTenant`, logged one Warn and did nothing — measured live as four tenants with **zero** `agents` rows.
+A process has no tenant identity at boot — nothing tenant-scoped runs until the first request
+names one. `tenantboot.AddStep` then seeds mcp servers, role agents, llm providers and mobile
+devices once per process; `tenant.Sweep` runs fleet-wide sweeps (billing period, webhook
+reconcile, index freshness) the same way regardless of tenant count.
 
-| Kind | Answer | Examples |
-|---|---|---|
-| per-tenant seed | `tenantboot.AddStep` — once per tenant per process, on first request | mcp servers, role agents, llm providers¹, mobile devices¹ |
-| fleet sweep | `tenant.Sweep` | billing period, webhook reconcile, index freshness |
-| per-tenant read gating a singleton | removed; resolve per call | deployops token → `NewActionsAPIFor` |
-| genuinely process-wide | says so | pgvector bootstrap (`DB.schemaPool`), `SetControlPlaneEndpoint` |
-| must not run here at all | refused, with the reason | llm bootstrap from env/yaml, mobile pool — both cloud |
+**A goroutine started from a request loses the tenant with the cancellation.**
+`tenant.Detach(ctx)` (`context.WithoutCancel`) replaces `context.Background()`: keep the
+identity, drop the deadline — a background continuation (a repository import's profile pass,
+a push webhook registration) needs the identity to still resolve after its parent request has
+returned.
 
-¹ self-hosted only: per-pod credentials and one Appium pool cannot be scoped to a tenant.
-**A goroutine started from a request loses the tenant with the cancellation.** `tenant.Detach(ctx)` (`context.WithoutCancel`) replaces `context.Background()`: keep the identity, drop the deadline. Every repository import on every tenant was silently getting no project profile and no push webhook this way.
+## Embeddings
 
-## Cloud mode refuses to boot misconfigured
-
-`validateCloudRequirements` fails boot when `INTERNAL_AUTH_KEY`, `CONTROL_PLANE_URL` or `PUBLIC_BASE_URL` is missing or is not an absolute http(s) URL. The bar is **"its absence changes what the process IS"**, not "a feature is off": `CONTROL_PLANE_URL` unset made `RemoteWorkspaces()` false, so the pod registered filesystem tools for an empty `/data`, tried to run a `claude` binary the image does not ship, and sent embeddings to a chat provider — writing incomparable vectors into one `workspace_chunks`. One Info line, a healthy pod, every board run failing. A non-https `PUBLIC_BASE_URL` stays a **warning**: it disables the MCP callback only, and a localhost dev stack cannot have https.
-
-## Process-wide state a request writes (the credential leak)
-
-`llm.MultiProviderClient` held `clients[provider]` — built from a tenant's decrypted API keys — plus their default and embedding pins, as FIELDS. `llmprovider.Service` rewrote all four on every settings save, from a request path. The last tenant to save decided which key every other tenant's next call spent. A mutex would only have made it deterministic.
-
-| Was | Now |
-|---|---|
-| `SetProvider`/`SetDefault`/`SetEmbedding*`/`Prune` on a shared client | **removed**; no location a request writes and another tenant reads. `llm.ProviderResolver` resolves `ResolveProviders(ctx)` per call instead |
-| `ReloadFunc` pushing one tenant's entries process-wide | `InvalidateFunc` — a save says only "this tenant changed" |
-| — | `runtime.tenantProviders` — cache keyed **by tenant**, `providerCacheTTL` 15s, invalidated at once on the replica that served the write |
-| embedding cache key `(provider, model, text)` | `(tenant, …)` — "auto" resolves per tenant, so `""` collided two tenants' models |
-| one chromium profile for the process | `Session.run` tears the browser down when the tenant changes (`handoverLocked`) — cookies, localStorage, the open page |
-| MCP reload registering a tenant's servers into the process tool registry | refused inside `engine.reloadMCP` — on the resource, not on one caller |
-| `POST /admin/reload` (per-**tenant** admin role) rebuilding `e.cfg`, the MCP manager and the shared browser | refused in cloud; config.yml ships in the image and cannot have changed |
-
-The TTL is cost, not correctness: it bounds how long a tenant's OWN rotated key takes to reach a replica that did not serve the rotation, and a stale entry can only serve a tenant their own previous credential. Verified in `platform/runtime/llm_tenant_test.go` — two tenants, a tenant-scoped store, a real cipher, real HTTP servers, asserting the `Authorization` header that left the process; under a deliberately shared cache key it reports `A=6 B=0`.
-
-## Embeddings reach the tenant's Mac, not a base URL
-
-`domain.LLMProviderLocalRunner` (`internal/adapter/llm/runner_embed.go`) is embeddings-only and
-absent from `AllLLMProviderDefinitions()` on purpose — there is no base URL a tenant could type
-in, only whichever Mac the acting member has attached. `Embed` reads
-`tenant.Identity.{TenantID,UserID}` off its context and calls
-`POST {control-plane}/internal/runner/forward/embeddings.create` with `X-Runner-Tenant`,
-`X-Runner-Member` and `X-Internal-Auth` (signed with `cfg.Cloud.InternalAuthKey`, threaded in
-via `llmprovider.Service.SetControlPlane` — additive, called once at boot). A `409
-runner_not_attached` becomes `domain.ErrEmbeddingRunnerNotAttached`, never a generic upstream
-error. `MultiProviderClient.embedOnce` resolves "auto" (no `embedding_llm_provider` row) to this
-client FIRST, ahead of the chat default, and does **not** fall through to another provider on
-failure — a fallback there would silently mix a different model's vectors into one index.
+`llm.MultiProviderClient` resolves the embedding provider per call (`llm.ProviderResolver.ResolveProviders(ctx)`),
+not from a cached field, so a settings change is picked up by the next call rather than requiring
+a restart. On this product the resolved provider is the bundled embedder the desktop shell
+spawns (`EMBEDDINGS_BASE_URL`, OpenAI-compatible, `nomic-embed-text-v1.5`) — see
+`docs/architecture.md`. `GET /v1/llm/embedding-status` reports readiness.
 
 `workspace_indexes.embedding_model` / `embedding_dims` (migration 116) record what an index was
-built with; `domain.EmbeddingProvenanceStale(indexModel, indexDims, configuredModel,
-configuredDims)` is the read-time comparison against `llmprovider.Service.ResolvedEmbedding`.
-Not a stored boolean — staleness tracks the tenant's *current* setting, which moves
-independently of any index row.
+built with; `domain.EmbeddingProvenanceStale` is the read-time comparison against the currently
+resolved embedding config, so a changed provider re-embeds an index whole rather than mixing
+two coordinate systems into one `workspace_chunks` table. `SearchChunksByIndex` refuses a stale
+index with `domain.ErrIndexEmbeddingStale` rather than returning a plausible-looking wrong
+ranking.
 
-**Absent from the catalog ≠ absent from the UI.** The settings page derived both the
-embedding picker's options and "no connected provider can produce embeddings" from
-`AllLLMProviderDefinitions()`, so a tenant embedding happily on their own Mac was shown an
-empty dropdown, a `SQLSTATE 22P02` (the ref fell through to an `llm_endpoints` uuid lookup)
-and an instruction to connect an endpoint they do not need. Three things replace that
-derivation, none of which puts `local_runner` back in the catalog:
+## `POST /v1/agent-cli/claude/connect`
 
-| | |
-|---|---|
-| `LLMProvidersResponse.embedding_on_member_mac` | the picker's option exists — a fact about the deployment |
-| `ListEmbeddingModels(local_runner)` | the pin, one model, no round trip |
-| `GET /v1/llm/embedding-status` | readiness, from the Mac's own `preflight.report` |
-
-`SetEmbedding` accepts `local_runner` (List resolves `""` to it for display, so saving what
-is on screen was refused) and pins the model. `adapter/runner.EmbeddingPreflight` reads the
-`lm-studio` and `embedding-model` items — two items on the Mac, two states here, because a
-switched-off server is a toggle and a missing model is a download.
-
-Both ends are wired. A pass stamps the columns from `passProvenance` — model from
-`ResolvedEmbedding`, dimension **observed from a real vector** rather than guessed — and a stale
-index is re-embedded whole rather than incrementally, so one index never holds two coordinate
-systems. `SearchChunksByIndex` refuses a stale index with `domain.ErrIndexEmbeddingStale` (never an
-empty result: a wrong ranking is indistinguishable from a right one). `embedmap` **labels** rather
-than refuses — PCA would silently drop the odd-length rows and re-derive its axes from the
-survivors, and a person reading a map can act on a warning. Every pre-116 index is stale until its
-next pass.
-
-## How a board run reaches a Mac
-
-The cloud orchestrates; the assignee's Mac executes. `board_tasks.assignee_user_id` names the
-machine, and every hop is `POST {CONTROL_PLANE_URL}/internal/runner/forward/<method>` with
-`X-Runner-Tenant`, `X-Runner-Member` and an `X-Internal-Auth` signing that same tenant.
-
-**`X-Runner-Member` has exactly one source: `registry.MemberUIDFromContext`.**
-
-| Producer | Records |
-|---|---|
-| `board.Runner` (remote workspaces) | the task's assignee — the run is async, nobody is acting |
-| `tenantMiddleware` | the signed `X-Internal-Actor`, i.e. the person asking about their own Mac |
-| anything else (`tenant.Sweep`, hand-built contexts) | nothing; every reader refuses |
-
-`tenant.Identity.UserID` is the ACTING HUMAN and is not a second source. Readers
-(`llm.runnerEmbedClient`, `runner.MobileHost`, `mobile.Fleet`) consult the member uid alone: while
-the embed path read the identity instead, every board run died before `claude.run` with
-`embed query: … no member identity …`.
-
-| Step | Where |
-|---|---|
-| transport | `adapter/runner.Client` — per-method paths, JSON in; NDJSON out for `claude.run`, JSON for the rest |
-| streaming | `claude.run` events are fed line by line into the existing `parseStream`, so the activity feed fills in during the run |
-| call id | chosen by the client and sent in the body, so a stop pressed before the first line still has something to name |
-| cancellation | `POST .../cancel` naming the id, **then** closing the body after `DefaultCancelGrace`; a `cancelled` terminal frame while our ctx is done reports as the caller's cancellation, not a failure |
-| workspace | `runner.Workspaces` → `workspace.prepare`; wired to `board.Runner.SetWorkspacePreparer` |
-| execution | `claudecode.RemoteExecutor` — same stream, same gates, concurrency capped **per member** |
-| no Mac (board run) | `*domain.RunnerBlock` → park on `domain.ResourceRunnerNotAttached`; `board.RunnerSweeper` probes `preflight.report` once per member every 5 min |
-| no Mac (user request) | `409` + `code: runner_not_attached`, **no `Retry-After`** — `adapter/http/runner_not_attached.go`, reached from `internalError` and `badRequestErr`. Body carries `self` (the caller's own Mac vs a colleague's) and `member_uid` |
-| tunnel drops mid-run | stream ends without `done` → `runner.ErrIncomplete`, a plain **failure**, never a park — a park would re-dispatch into the same fault forever |
-
-Codes map to statuses (`bad_request` 400, `unsupported_method` 404, `not_ready` 409, `cancelled`
-499, `upstream` 502, `internal` 500) but callers branch on the **code**: `not_ready` and
-`runner_not_attached` share 409 and mean different things to the board.
-
-### `POST /v1/agent-cli/claude/connect` — the probe follows the sessions
-
-`agentcli.ProbeFunc` is chosen by `runnerClient.Configured()`, the same predicate as the executor:
-locally `claudecode.Probe` runs the binary here; in the cloud `claudecode.Preflight` reads the
-report the member's Mac pushed (`preflight.report`, member from `registry.MemberUIDFromContext`).
-Running the local probe in the cloud asked a Linux pod for the user's CLI and blocked every new
-tenant at setup step 2.
+`agentcli.ProbeFunc` runs `claudecode.Probe`, which checks the `claude` binary and its signed-in
+account on this host directly.
 
 | Report | Result | HTTP |
 |---|---|---|
-| `claude` **and** `claude-account` `ok` | `Probe{BinaryPath, Version}` from the report | 200 |
-| `claude` `missing`/`unusable` | `ErrAgentCLIBinaryMissing` + **the Mac's own remediation and command**, verbatim | 400 `agent_cli_binary_missing` |
-| `claude-account` `missing`/`unusable` | `ErrAgentCLIUnauthenticated` + the same, so signed-out ≠ no-plan | 400 `agent_cli_unauthenticated` |
-| either item absent | plain error naming desktop-app version skew — never a sentinel | 500 |
-| no Mac / `not_ready` | `*domain.RunnerBlock`, untouched | 409 `runner_not_attached` (via `internalError`) |
+| `claude` **and** `claude-account` `ok` | `Probe{BinaryPath, Version}` | 200 |
+| `claude` `missing`/`unusable` | `ErrAgentCLIBinaryMissing` + remediation and the command to run | 400 `agent_cli_binary_missing` |
+| `claude-account` `missing`/`unusable` | `ErrAgentCLIUnauthenticated`, so signed-out ≠ no-plan | 400 `agent_cli_unauthenticated` |
+| either item absent | plain error naming a version-skew problem — never a sentinel | 500 |
 
-The **catalog snapshot is not written** on a remote deployment and `catalog_path` comes back empty:
-nobody can open a pod's disk, and the CLI that would read it is on a laptop. The path used to carry
-no tenant either, so `pruneAgentDirs` deleted every other tenant's directories on the shared PVC on
-each connect; `snapshotRoot` is now `<tenant-root>/agent-cli/<flavor>` (`workspace.TenantRoot`), so
-that is a property of the path rather than of the `s.remote` flag alone. The counts stay real; they
-are read from the database. Disconnect touches no disk on a remote deployment.
+The catalog snapshot for each agent-CLI flavor is written under `<tenant-root>/agent-cli/<flavor>`
+(`workspace.TenantRoot`) and read straight off this host's disk.
 
-### A remote session's TaskTrooper tools
+## `toolchain.detect` — the repository's own pins, read where the files are
 
-`claude.run` carries an optional `mcp` object; the runner turns it into `--mcp-config` +
-`--strict-mcp-config` and deletes the file however the run ends. Absent = native tools only.
-
-| Field | Value | Note |
-|---|---|---|
-| `url` | `server.public_base_url` + `/api/mcp` (`mcpserver.PublicURL`) | absolute **https** only — the runner refuses `http`, so a non-https base is dropped at boot with a warning |
-| `token` | per-run bearer, 32 bytes `crypto/rand` | tenant-bound at mint, expiry `claude_code.run_timeout + 15m`, revoked by the executor's defer |
-| `server_name` | `tasktrooper` | required; it is the `mcp__<name>__` prefix the model calls |
-
-- The gateway must forward `/api/mcp` **without Firebase auth**, keep `Authorization`, and mint
-  **no** identity header — the token is the identity (`mcpserver.Run.Tenant`).
-- `SetLoopbackOnly(false)` on this path: the client is a laptop, so the token is the whole check.
-- `initGuard` is armed when and only when `mcp` was sent; its fault outranks the cancelled call it
-  causes. No public base URL ⇒ no `mcp`, guard off, one boot warning — never a failed run.
-
-### The rest of the local invocation, remotely
-
-Three more optional `claude.run` parameters; absent ⇒ the runner passes no flag, i.e. today's
-behaviour.
-
-| Local flag | Param | Sent | Status |
-| --- | --- | --- | --- |
-| `--tools` | `tools` | `domain.NativeToolsForPolicy(req.Policy)`; nil for an unrestricted policy | **closed** — without it a policy was enforced on MCP tools and decorative on Bash |
-| `--effort` | `effort` | `TaskExecution.Effort` | **closed** |
-| child env | `env` | `toolchain.detect`'s answer from the Mac, verbatim | **closed** — see below |
-| `--setting-sources` | *(none)* | — | **closed by the runner**, unconditionally `project,local`; a rule that depended on this side asking would not be one |
-
-### `toolchain.detect` — the repository's own pins, read where the files are
-
-`portableTaskEnv` is **gone**, and so is the local overlay on this path. Both were one bug:
-`toolchain.Detect` resolves against a directory, `WorkDir` on a remote run is relative to the Mac,
-so nothing was read and only `Resolver`'s unconditional PATH rewrite survived — this pod's Linux
-`PATH`. The allowlist existed to stop that reaching macOS.
-
-| | local run | remote run |
-| --- | --- | --- |
-| resolved by | `toolchain.Default.Overlay(workDir)` | `POST toolchain.detect {workspace}` on the assignee's Mac |
-| carried on | the context (`registry.ContextWithTaskEnv`) — tools spawn processes here | the request (`TaskExecution.Env`) — the process is there |
-| translated | n/a | **never**; every name is already one `checkEnv` accepts, `GOTOOLCHAIN` is already `go1.24.3` |
-| empty answer | no overlay | no `env` key — never a "system"/"latest" default |
-| call fails | n/a | logged; the session runs on the Mac's defaults (the status quo), the run does not fail |
-
-`pins` (with `exact:false` constraints) and `read` are not forwarded: `read` separates "no pin file"
-from "the files say nothing recognised" and is logged for that, and resolving a constraint here
-would be this side deciding what a repository meant.
-
-## Server-side filesystem tools in the cloud
-
-`cfg.Cloud.RemoteWorkspaces()` gates them. The repository is on a laptop; a tool acting on this
-pod's empty `DATA_DIR` does not error, it reports a missing file or a failing build — which reads as
-a bug in the customer's project.
-
-| Tool | In the cloud |
-|---|---|
-| `read/write/edit/edit_lines/delete/move_file`, `run_terminal` | **not registered** — the session's own Read/Write/Edit/Bash run on the machine with the code |
-| `get_repo_tree`, `get_symbol_skeleton` | **not registered** (`indexOnlyCodeTool`) — they walk a tree that is not here |
-| `codebase_search`, `expand_symbol_context` | kept — pure index reads, content is in Postgres, **because `ToolKit.RemoteWorkspaces` turns off the unindexed-edit overlay** |
-| `download_file` | **not registered** — it is a workspace WRITER; see below |
-| `adapter/localdevice` (simulators) | **not wired** — replaced by `runner.MobileHost`, the same interface asked over the tunnel (see "Mobile work reaches the assignee's Mac") |
-| mobile bridge / `remote_adb` | unaffected — those phones were never local |
-
-An agent naming a retired tool gets `application/registry`'s unknown-tool error. The tool POLICIES
-(`domain.WorkspaceWriteTools`, `role_tools.go`) are deliberately untouched: a policy naming an
-unserved tool is already a no-op, and rewriting them would break the self-hosted install.
-
-Two of these rows were wrong until the tenancy pass and are worth stating as corrections:
-
-- **The two kept tools were not index-only.** Both called `code.buildOverlay`, which shells
-  `git -C <session workspace> diff`/`ls-files` and returns the changed files' bytes as `Snippet`.
-  `code.NewToolKit(..., cfg.Cloud.RemoteWorkspaces())` now switches it off, so the claim in
-  `indexOnlyCodeTool` is true rather than aspirational. Change one without the other and the name
-  becomes a lie again.
-- **`download_file` was registered on `cfg.Tools.Web.Enabled` alone**, outside the workspace gate,
-  and was the one tool in a cloud deployment that wrote into the workspace directory. On a board
-  run its root resolved to a path on the assignee's Mac, which `filepath.Abs` anchored to the
-  process's own working directory: the bytes landed on the shared PVC, unquota'd and never cleaned
-  up, while the tool told the model the file was in the repository.
+`toolchain.Default.Overlay(workDir)` resolves a repository's pinned toolchain versions against
+the working copy and carries them on the context (`registry.ContextWithTaskEnv`), so every tool
+that spawns a build/test process picks up the repository's own pin rather than whatever this
+machine's PATH happens to resolve.

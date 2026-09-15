@@ -14,7 +14,6 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -286,70 +285,6 @@ func TestDeliveryDedupeFallsBackWhenTheLedgerIsDown(t *testing.T) {
 	}
 	if !s.seenDelivery(context.Background(), "d9", now.Add(time.Minute)) {
 		t.Fatal("and this process's own memory must still dedupe its own retries")
-	}
-}
-
-// A GitHub push carries no actor. On a workspace whose embeddings are produced
-// on a member's own Mac that leaves the reindex with no machine to run on, and
-// the honest answer is to say the index is behind rather than to pick somebody's
-// laptop or to start a pass whose every embed call refuses.
-func TestPushWithNoMacMarksTheIndexStaleInsteadOfReindexing(t *testing.T) {
-	var started atomic.Int32
-	s := &Service{}
-	s.pushRunFn = func(uuid.UUID) { started.Add(1) }
-	s.embeddingNeedsMac = func(context.Context) (bool, error) { return true, nil }
-	repoID := uuid.New()
-
-	accepted, reason := s.HandleGitHubPush(context.Background(), repoID, "d1", "refs/heads/main", "main", "abc123")
-	if accepted {
-		t.Fatalf("a push with no Mac to embed on must not be accepted for reindexing: %q", reason)
-	}
-	if !strings.Contains(reason, "index marked stale") {
-		t.Fatalf("the delivery log must say what happened instead, got %q", reason)
-	}
-	if got := s.syncWarning(repoID); got == "" {
-		t.Fatal("the index must be marked stale so the settings page stops showing a healthy one")
-	}
-	if got := started.Load(); got != 0 {
-		t.Fatalf("no pass may start: %d", got)
-	}
-}
-
-// The same push on a deployment that embeds over HTTP — self-hosted, the
-// desktop bundle, or a cloud tenant that picked an HTTP embedding provider —
-// reindexes exactly as it always did. Nobody's Mac is involved, so nothing is
-// missing.
-func TestPushStillReindexesWhenEmbeddingNeedsNoMac(t *testing.T) {
-	var started atomic.Int32
-	s := &Service{}
-	s.pushRunFn = func(uuid.UUID) { started.Add(1) }
-	s.embeddingNeedsMac = func(context.Context) (bool, error) { return false, nil }
-
-	accepted, reason := s.HandleGitHubPush(context.Background(), uuid.New(), "d1", "refs/heads/main", "main", "abc123")
-	if !accepted || reason != "reindex started" {
-		t.Fatalf("accepted=%v reason=%q", accepted, reason)
-	}
-	waitFor(t, &started)
-}
-
-// A pass a PERSON triggered carries their uid, so it has a Mac and is not
-// deferred — this is the path the marked-stale index is picked up on.
-func TestReindexIsNotDeferredWhenTheContextNamesAMember(t *testing.T) {
-	s := &Service{embeddingNeedsMac: func(context.Context) (bool, error) { return true, nil }}
-	ctx := registry.ContextWithMemberUID(context.Background(), "firebase-uid-1")
-	if s.reindexHasNoMac(ctx) {
-		t.Fatal("a request made by a member has that member's Mac to embed on")
-	}
-}
-
-// A provider lookup that fails must not stop a repository tracking its default
-// branch: an unreadable row is a blip, not a decision.
-func TestReindexIsNotDeferredWhenTheProviderCannotBeRead(t *testing.T) {
-	s := &Service{embeddingNeedsMac: func(context.Context) (bool, error) {
-		return false, errors.New("database is down")
-	}}
-	if s.reindexHasNoMac(context.Background()) {
-		t.Fatal("a failed lookup must not defer the reindex")
 	}
 }
 

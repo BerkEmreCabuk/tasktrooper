@@ -235,11 +235,7 @@ type Runner struct {
 	// heartbeatEvery is runHeartbeat, overridable so a test can drive the
 	// cross-replica stop without waiting ten seconds for a tick. Production
 	// never sets it.
-	heartbeatEvery time.Duration
-	// maxMemberRuns is cfg.ClaudeCode.MaxConcurrent, carried here so the claim
-	// can enforce it across replicas instead of per process. See
-	// memberConcurrency.
-	maxMemberRuns     int
+	heartbeatEvery    time.Duration
 	taskUpdater       TaskUpdater
 	verifyEnabled     bool
 	verifyFixAttempts int
@@ -247,18 +243,10 @@ type Runner struct {
 	pipelines         port.TaskPipelineStore
 	billing           BillingGate
 	blocker           TaskBlocker
-	// workspaces prepares a checkout on the ASSIGNEE'S MAC instead of in this
-	// process's DATA_DIR. Nil, or Available() false, keeps the local git path
-	// exactly as it was — which is what a self-hosted install and the desktop
-	// bundle still want, because there the code really is on this machine.
-	workspaces port.WorkspacePreparer
-	// toolchains asks the Mac what the checkout it just prepared declares.
-	// Nil, or Available() false, leaves the local resolver in charge — which
-	// is correct wherever the checkout really is on this filesystem.
+	// toolchains reads the version pins the task's checkout declares for
+	// itself. Nil, or Available() false, leaves the session on this machine's
+	// own defaults.
 	toolchains port.ToolchainDetector
-	// memberLister is the workspace roster, consulted only to answer "whose
-	// Mac" for a card that names nobody. See SetMemberLister.
-	memberLister func(ctx context.Context) ([]string, error)
 	// parks writes the board event and the column span a park would otherwise
 	// leave behind — see ParkJournal for why it is not the dispatcher's job.
 	// Nil-safe: without it a park is exactly as (in)visible as it was before.
@@ -353,7 +341,6 @@ type RunnerDeps struct {
 	// runner outlives the setting, so DefaultLang is only the startup fallback.
 	Settings            port.SettingsStore
 	MaxWorkers          int
-	MaxMemberRuns       int
 	VerificationEnabled bool
 	VerifyFixAttempts   int
 	TaskTypeModels      map[string]string
@@ -393,7 +380,6 @@ func NewRunner(deps RunnerDeps) *Runner {
 		defaultLang:       lang,
 		settings:          deps.Settings,
 		maxWorkers:        maxWorkers,
-		maxMemberRuns:     deps.MaxMemberRuns,
 		verifyEnabled:     deps.VerificationEnabled,
 		verifyFixAttempts: deps.VerifyFixAttempts,
 		taskTypeModels:    deps.TaskTypeModels,
@@ -459,104 +445,47 @@ func (r *Runner) SetTaskBlocker(b TaskBlocker) {
 	r.blocker = b
 }
 
-// SetWorkspacePreparer moves workspace preparation onto the assignee's Mac.
+// SetToolchainDetector wires the reader of a checkout's own version pins.
 //
-// Set in the cloud, where this process holds no repository and the `claude`
-// session that edits one runs on a laptop. Unset on a self-hosted install and
-// in the desktop bundle, where the working copy really is here and the local
-// git path below is correct — so this is a switch between two true things, not
-// a feature flag.
-func (r *Runner) SetWorkspacePreparer(w port.WorkspacePreparer) {
-	r.workspaces = w
-}
-
-// SetMemberLister wires the tenant roster this runner falls back to when a
-// card names no person.
-//
-// It exists because of a real dead end: a remote run needs to know WHOSE Mac
-// to use (Task.AssigneeUserID), the web UI deliberately hides the person
-// picker while a workspace has only one member — there is nothing to choose
-// between — and nothing filled the field in for that case, so a
-// single-person workspace could assign an agent, see the card move, and get
-// "T-1 has no assignee, so there is no Mac to run it on" every time, with no
-// control anywhere that would have set it.
-//
-// The fallback is deliberately narrow: EXACTLY one member. With two the
-// refusal is right — picking one of two laptops on the run's behalf is a
-// guess that silently sends somebody else's machine the work.
-func (r *Runner) SetMemberLister(fn func(ctx context.Context) ([]string, error)) {
-	r.memberLister = fn
-}
-
-// soleMember returns the workspace's only member, or "" when the roster is
-// unavailable, empty, or holds more than one person.
-func (r *Runner) soleMember(ctx context.Context) string {
-	if r.memberLister == nil {
-		return ""
-	}
-	members, err := r.memberLister(ctx)
-	if err != nil {
-		log.Warn().Err(err).Msg("could not read the workspace roster to resolve an unassigned task's member")
-		return ""
-	}
-	if len(members) != 1 {
-		return ""
-	}
-	return strings.TrimSpace(members[0])
-}
-
-// SetToolchainDetector moves toolchain resolution onto the machine that holds
-// the checkout.
-//
-// Set alongside the workspace preparer and for the same reason: application/
-// toolchain resolves against a DIRECTORY, and once the directory is a path
-// relative to somebody's Mac, resolving it here reads no go.mod, no .nvmrc and
-// no .tool-versions. A repository that pins its own Node was honoured locally
-// and silently ignored remotely, and no allowlist on this side could have
-// fixed that — only the machine that can open the files can answer.
+// Late-set like the stores above, and nil-safe: without it a session runs on
+// whatever versions this machine resolves by itself, which is where every run
+// was before the detector existed.
 func (r *Runner) SetToolchainDetector(d port.ToolchainDetector) {
 	r.toolchains = d
 }
 
-// remoteToolchains reports whether this run's toolchain is resolved on a Mac.
-func (r *Runner) remoteToolchains() bool {
-	return r.toolchains != nil && r.toolchains.Available()
-}
-
-// detectRemoteToolchain asks the assignee's Mac what the prepared checkout
-// declares, and never fails the run for the answer.
+// detectToolchain reads what the checkout declares, and never fails the run
+// for the answer.
 //
-// A detection that could not be made leaves the session on the Mac's own
-// defaults, which is exactly where every remote run was before this call
-// existed — so the worst case of the tunnel hiccuping here is the status quo,
-// while failing the run would turn a repository that pins nothing into a task
-// that never starts. The Mac being ABSENT is not treated specially either: the
-// workspace was already prepared on it moments ago, so this can only be a
-// tunnel that dropped in between, and the executor's own call parks on it a
-// second later with the same block and the same sweeper.
+// A detection that could not be made leaves the session on the machine's own
+// defaults; failing the run instead would turn a repository that pins nothing
+// into a task that never starts.
 //
 // Absence stays absence. An empty answer is returned as nil, which omits the
 // parameter entirely; nothing here fills it with a "system" or "latest"
 // default, because none of those is something the checkout said.
-func (r *Runner) detectRemoteToolchain(ctx context.Context, job RunJob, workDir string) map[string]string {
-	env, err := r.toolchains.Detect(ctx, job.Task.AssigneeUserID, workDir)
+func (r *Runner) detectToolchain(ctx context.Context, job RunJob, workDir string) map[string]string {
+	if r.toolchains == nil || !r.toolchains.Available() {
+		return nil
+	}
+	tc, err := r.toolchains.Detect(ctx, workDir)
 	if err != nil {
 		log.Warn().Err(err).
 			Str("task_id", job.Task.ID.String()).Str("workspace", workDir).
-			Msg("toolchain: the Mac could not say what this checkout pins; the session runs on that machine's defaults")
+			Msg("toolchain: this checkout could not be read for version pins; the session runs on the host defaults")
 		return nil
 	}
-	if len(env) == 0 {
+	if len(tc.Env) == 0 {
 		return nil
 	}
-	names := make([]string, 0, len(env))
-	for name := range env {
-		names = append(names, name)
+	sources := make([]string, 0, len(tc.Pins))
+	for _, pin := range tc.Pins {
+		sources = append(sources, pin.Language+" "+pin.Version+" ("+pin.Source+")")
 	}
-	sort.Strings(names)
-	log.Info().Str("task_id", job.Task.ID.String()).Strs("pins", names).
-		Msg("toolchain: resolved on the assignee's Mac from the repository's own pin files")
-	return env
+	sort.Strings(sources)
+	log.Info().Str("task_id", job.Task.ID.String()).Strs("pins", sources).
+		Msg("toolchain: resolved from the repository's own pin files")
+	return tc.Env
 }
 
 // tenantConcurrency is the plan's concurrent-task cap, or 0 when there is no
@@ -568,28 +497,6 @@ func (r *Runner) tenantConcurrency(ctx context.Context) int {
 		return 0
 	}
 	return r.billing.MaxConcurrency(ctx)
-}
-
-// memberConcurrency is the Claude Code session cap, and it applies only where
-// the sessions run on somebody's Mac.
-//
-// On a self-hosted install or the desktop bundle the CLI runs in this process
-// against this host's own subscription, and claudecode.Executor's own slot
-// channel is the whole population of sessions — one process, one host, one
-// correct answer. In the cloud it is not: the sessions run on the assignee's
-// machine, several replicas dispatch to it, and each held its own channel of
-// slots for that member. 0 disables the check, which is what every non-remote
-// deployment gets.
-func (r *Runner) memberConcurrency() int {
-	if !r.remoteWorkspaces() {
-		return 0
-	}
-	return r.maxMemberRuns
-}
-
-// remoteWorkspaces reports whether this run's checkout lives on a Mac.
-func (r *Runner) remoteWorkspaces() bool {
-	return r.workspaces != nil && r.workspaces.Available()
 }
 
 // SetParkJournal wires the writer that makes a park visible on the board. Late-
@@ -947,21 +854,6 @@ func (r *Runner) alreadyStopped(ctx context.Context, runID uuid.UUID) bool {
 func (r *Runner) execute(parent context.Context, job RunJob) error {
 	run := job.Run
 
-	// Whose Mac, for a card that names nobody. job is a value, so filling it
-	// in here is what every later reader of job.Task.AssigneeUserID sees —
-	// the workspace prepare, the toolchain detect, the executor's MemberUID
-	// and the run context's member — rather than each one having to know
-	// about the fallback. See SetMemberLister for why exactly-one-member is
-	// the only case this fires on.
-	if strings.TrimSpace(job.Task.AssigneeUserID) == "" && r.remoteWorkspaces() {
-		if member := r.soleMember(parent); member != "" {
-			log.Info().
-				Str("task_key", job.Task.Key).
-				Str("member", member).
-				Msg("task names no assignee; this workspace has exactly one member, running on their Mac")
-			job.Task.AssigneeUserID = member
-		}
-	}
 	// Everything this run touches hangs off ctx — the agent loop, the tools it
 	// spawns, the git work around them — so cancelling it is what makes the run
 	// stoppable at all. Registered before the row says 'running': a stop that
@@ -989,8 +881,6 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 			TaskID:        job.Task.ID,
 			LiveWithin:    runLiveWithin,
 			MaxTenantRuns: r.tenantConcurrency(ctx),
-			MemberUID:     job.Task.AssigneeUserID,
-			MaxMemberRuns: r.memberConcurrency(),
 		})
 		if err != nil {
 			return err
@@ -1081,94 +971,48 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 		return fail(fmt.Errorf("repository %q has no root path configured", repoRec.Name))
 	}
 
-	// Where the working copy is decides everything below it.
-	//
-	// remote: this process is a shared cloud deployment holding no repository,
-	// and the checkout lives on the assignee's Mac. Nothing here may open it —
-	// `workDir` is a path in somebody's home directory that this filesystem has
-	// never had — so taskWorkspace deliberately stays empty and every
-	// cloud-side git step downstream (the diff, the verify gate, the commit,
-	// the push, the PR) is skipped. Those are not lost: they moved INSIDE the
-	// Claude Code session, which is where the tree is. See runInstruction.
-	//
-	// local: unchanged. The self-hosted install and the desktop bundle really
-	// do hold the code, and their lifecycle is the one .ai/workspace.md
-	// describes.
 	workDir := rootPath
 	taskWorkspace := ""
 	taskBranch := ""
-	if r.remoteWorkspaces() {
-		prepared, prepErr := r.prepareRemoteWorkspace(ctx, job, repoRec)
-		if prepErr != nil {
-			// A missing Mac is a park, not a failure: nothing is wrong with the
-			// task and nothing about it is retriable now. Everything else — a
-			// repository with no remote, git refusing the clone — fails the run
-			// the way a bad local clone always has.
-			if block, ok := domain.RunnerBlockOf(prepErr); ok {
-				// nil history: this is before the run's own lookup, so the
-				// helper fetches it. See parkOrGiveUpOnRunner for why the cap
-				// has to apply here too and not only at the executor.
-				return r.parkOrGiveUpOnRunner(ctx, job, run, agentRec, block, nil, fail)
-			}
-			return fail(fmt.Errorf("the task workspace could not be prepared on the assignee's Mac, so the agent was not started: %w", prepErr))
-		}
-		workDir = prepared.Rel
-		taskBranch = domain.TaskBranchName(job.Task)
-		// The absolute path is recorded so a person can find the checkout on
-		// their own machine, and read back by nothing: task_agent_runs
-		// .workspace_path was already host-absolute and already never used for
-		// filesystem access (.ai/workspace.md).
-		run.WorkspacePath = prepared.Path
-		_, _ = r.runs.Update(ctx, run)
-	} else {
-		if r.git != nil {
-			// The working copy is a cache, not the source of truth. If it is gone
-			// (fresh pod, wiped disk) or was never a repo, restore it from the
-			// recorded origin instead of handing the agent an empty directory —
-			// that is what made an agent ask the human for the repository path.
-			if err := r.ensureWorkingCopy(ctx, repoRec, rootPath); err != nil {
-				return fail(err)
-			}
-		} else if err := workspace.EnsureDir(rootPath); err != nil {
+	if r.git != nil {
+		// The working copy is a cache, not the source of truth. If it is gone
+		// (wiped disk) or was never a repo, restore it from the recorded origin
+		// instead of handing the agent an empty directory — that is what made
+		// an agent ask the human for the repository path.
+		if err := r.ensureWorkingCopy(ctx, repoRec, rootPath); err != nil {
 			return fail(err)
 		}
-		if r.git != nil && r.workspaceRoot != "" && r.git.HasGit(rootPath) {
-			// Deterministic pre-LLM setup: clone the repo into an isolated task
-			// workspace and check out the task branch BEFORE any agent runs. This is
-			// a hard gate — if clone/branch fails we must NOT fall back to running
-			// the LLM on the shared project root (it would work on the wrong tree,
-			// on someone else's branch, and could push to the default branch). Fail
-			// the run instead so nothing runs until the workspace is ready.
-			wsPath, wsPathErr := workspace.TenantTaskDir(ctx, r.workspaceRoot, job.Task.ID)
-			if wsPathErr != nil {
-				return fail(fmt.Errorf("task workspace path could not be resolved, agent was not started: %w", wsPathErr))
-			}
-			branch := domain.TaskBranchName(job.Task)
-			if wsErr := r.git.EnsureTaskWorkspace(ctx, rootPath, wsPath, branch); wsErr != nil {
-				return fail(fmt.Errorf("task workspace could not be prepared (repo clone/branch creation failed), agent was not started: %w", wsErr))
-			}
-			workDir = wsPath
-			taskWorkspace = wsPath
-			taskBranch = branch
-			run.WorkspacePath = wsPath
-			_, _ = r.runs.Update(ctx, run)
+	} else if err := workspace.EnsureDir(rootPath); err != nil {
+		return fail(err)
+	}
+	if r.git != nil && r.workspaceRoot != "" && r.git.HasGit(rootPath) {
+		// Deterministic pre-LLM setup: clone the repo into an isolated task
+		// workspace and check out the task branch BEFORE any agent runs. This is
+		// a hard gate — if clone/branch fails we must NOT fall back to running
+		// the LLM on the shared project root (it would work on the wrong tree,
+		// on someone else's branch, and could push to the default branch). Fail
+		// the run instead so nothing runs until the workspace is ready.
+		wsPath, wsPathErr := workspace.TenantTaskDir(ctx, r.workspaceRoot, job.Task.ID)
+		if wsPathErr != nil {
+			return fail(fmt.Errorf("task workspace path could not be resolved, agent was not started: %w", wsPathErr))
 		}
+		branch := domain.TaskBranchName(job.Task)
+		if wsErr := r.git.EnsureTaskWorkspace(ctx, rootPath, wsPath, branch); wsErr != nil {
+			return fail(fmt.Errorf("task workspace could not be prepared (repo clone/branch creation failed), agent was not started: %w", wsErr))
+		}
+		workDir = wsPath
+		taskWorkspace = wsPath
+		taskBranch = branch
+		run.WorkspacePath = wsPath
+		_, _ = r.runs.Update(ctx, run)
 	}
 
 	// A CLI provider reads its catalog off the workspace instead of out of the
 	// prompt: agentfs writes the role, its rules and its skills in the shape
 	// the binary discovers on its own. It happens here because this is the only
 	// moment when the workspace exists and the session has not started.
-	//
-	// Not on a remote run. agentfs writes FILES, and the workspace is on
-	// somebody else's machine — the Mac exposes no way to put a file in it, and
-	// writing here would create the catalog in a directory of the same relative
-	// name under this pod's DATA_DIR, which no session will ever open. The
-	// fallback is the one that already exists and already works: the skills go
-	// in the prompt (prompt.SkillsInPrompt), which is what every non-CLI
-	// provider has always had.
 	skillDelivery := prompt.SkillsInPrompt
-	if flavor, isCLI := cliFlavor(agentRec.ProviderType); isCLI && !r.remoteWorkspaces() {
+	if flavor, isCLI := cliFlavor(agentRec.ProviderType); isCLI {
 		// Both failures end the run rather than being logged and stepped over.
 		// A session whose skills silently did not arrive still LOOKS like a
 		// working run — it does plausible work on its native tools and returns a
@@ -1233,32 +1077,18 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	if taskBranch != "" {
 		runCtx = registry.ContextWithBranch(runCtx, taskBranch)
 	}
-	// Whose Mac this run belongs on, for everything BELOW the executor. The
-	// executor gets it on the request (TaskExecution.MemberUID); this is for
-	// the tools, which arrive minutes later over MCP on this very context and
-	// have to reach the same laptop — a mobile_tap must drive a simulator on
-	// the ASSIGNEE'S machine, not on whoever's request triggered the run.
-	// Empty, and therefore absent, wherever the work runs in this process.
-	if r.remoteWorkspaces() {
-		runCtx = registry.ContextWithMemberUID(runCtx, job.Task.AssigneeUserID)
-	}
-	// The toolchain the repository declares for itself, resolved once per run.
+	// The toolchain the repository declares for itself, resolved once per run,
+	// in two complementary forms.
 	//
-	// WHERE it is resolved follows where the checkout is, and the two are
-	// mutually exclusive rather than layered. Locally the overlay is computed
-	// here and carried on the context to every process the agent spawns — two
-	// concurrent tasks pinning different Go/Node versions must not share the
-	// host default. Remotely there is nothing here to read: workDir is a path
-	// on somebody's laptop, so the resolver would append this container's
-	// /opt/homebrew/bin to this container's PATH and call it a repository's
-	// toolchain. So the Mac is asked instead, and its answer travels on the
-	// REQUEST rather than on the context — the context overlay feeds tools that
-	// spawn processes in this process, and a laptop's PATH has no business
-	// reaching those.
-	var remoteEnv map[string]string
-	if r.remoteToolchains() {
-		remoteEnv = r.detectRemoteToolchain(runCtx, job, workDir)
-	} else if overlay := toolchain.Default.Overlay(workDir); len(overlay.Env) > 0 || len(overlay.Warnings) > 0 {
+	// The overlay picks an INSTALL on this machine and rides the context, so
+	// every process the agent spawns here gets the same PATH — two concurrent
+	// tasks pinning different Go/Node versions must not share the host default.
+	// The detector reads the same pin files for the VERSION NAMES a session's
+	// own version manager takes (GOTOOLCHAIN, NODE_VERSION, …) and rides the
+	// request, because an executor that starts a CLI is the only thing that can
+	// apply them.
+	sessionEnv := r.detectToolchain(runCtx, job, workDir)
+	if overlay := toolchain.Default.Overlay(workDir); len(overlay.Env) > 0 || len(overlay.Warnings) > 0 {
 		runCtx = registry.ContextWithTaskEnv(runCtx, overlay.Env)
 		for _, w := range overlay.Warnings {
 			log.Warn().Str("task_id", job.Task.ID.String()).Str("workspace", workDir).Msg("toolchain: " + w)
@@ -1580,14 +1410,10 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 			// (ContextWithWorkspaceDir above), so a CLI session and a loop run
 			// work in exactly the same tree.
 			WorkDir: workDir,
-			// Whose Mac, when the executor is the remote one. Empty on every
-			// local executor, which ignores it — the process is here, and there
-			// is nobody to address.
-			MemberUID: job.Task.AssigneeUserID,
-			// What the assignee's Mac read off the checkout it prepared. Nil on
-			// every local executor, which resolves its own overlay against a
-			// directory it can actually open.
-			Env: remoteEnv,
+			// The version pins the checkout declares for itself, read off the
+			// same directory the session is started in. Nil when it declares
+			// nothing, which leaves the session on the host defaults.
+			Env: sessionEnv,
 			// A previous run on this task that was parked mid-work left its CLI
 			// session behind; continuing it is what makes the resume cheaper
 			// than a restart.
@@ -1627,24 +1453,6 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 		return nil
 	}
 	if err != nil {
-		// The assignee's Mac went away between the workspace prepare and the
-		// end of the session — a lid closing, a home network dropping. Nothing
-		// is wrong with the work and there is nothing to retry now, so it parks
-		// exactly as a spent quota does, and for the same reason: failing here
-		// would spend one of the task's three consecutive-failure lives on
-		// somebody's laptop being shut.
-		//
-		// Checked BEFORE the quota, because the two can arrive together: a Mac
-		// that dropped mid-session produces a truncated stream whose tail may
-		// contain anything, including the CLI's own words about a usage limit.
-		if runnerErr, ok := domain.RunnerBlockOf(err); ok {
-			// …unless this task has done nothing but wait. See
-			// maxConsecutiveRunnerParks: this is the one park with no clock, so
-			// a repeating false positive has nothing at all to stop it. The
-			// history is already in hand here, so it is passed rather than
-			// re-read.
-			return r.parkOrGiveUpOnRunner(ctx, job, run, agentRec, runnerErr, prevRuns, fail)
-		}
 		// The subscription behind the local CLI is spent until a known time.
 		// Nothing is wrong with the work and there is nothing to retry now, so
 		// this is a park, not a failure — the same treatment a held test device

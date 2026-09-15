@@ -46,22 +46,6 @@ func (h *Handler) UpdateBillingPlan(c *fiber.Ctx) error {
 	return c.JSON(plan)
 }
 
-// SyncBilling — PUT /admin/billing/sync — tenant-manager push of the full plan +
-// price table. Internal-auth only (reached via the gateway, not the browser).
-func (h *Handler) SyncBilling(c *fiber.Ctx) error {
-	if h.billingSvc == nil {
-		return badRequest(c, "billing disabled")
-	}
-	var req domain.BillingSyncRequest
-	if err := c.BodyParser(&req); err != nil {
-		return badRequest(c, "invalid request body")
-	}
-	if err := h.billingSvc.Sync(h.enrichContext(c), req); err != nil {
-		return internalError(c, err)
-	}
-	return c.SendStatus(fiber.StatusNoContent)
-}
-
 // ListModelPrices — GET /admin/billing/model-prices.
 func (h *Handler) ListModelPrices(c *fiber.Ctx) error {
 	if h.billingSvc == nil {

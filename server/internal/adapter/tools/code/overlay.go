@@ -49,7 +49,7 @@ type workspaceOverlay struct {
 // index reads" — the stated reason those two survive the cloud tool gate —
 // false. With the overlay off, that claim is true.
 func buildOverlay(ctx context.Context, kit *ToolKit, idx domain.WorkspaceIndex) *workspaceOverlay {
-	if kit == nil || kit.RemoteWorkspaces {
+	if kit == nil {
 		return nil
 	}
 	reg := kit.Chunkers

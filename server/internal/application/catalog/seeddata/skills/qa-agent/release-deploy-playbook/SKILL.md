@@ -128,10 +128,10 @@ followed by the tail. Two sources:
 
 Post what actually failed, with the relevant lines. Not the whole log.
 
-> If you are running on a **local runner**, your own shell may also have tooling
-> the host happens to provide. That capability comes from the machine you are
-> running on, not from this system, and nothing here depends on it: the
-> playbook above works on a cloud pod with no such tooling at all.
+> Your own shell may also have tooling the host machine happens to provide.
+> That capability comes from the machine you are running on, not from this
+> system, and nothing here depends on it: the playbook above works with no
+> such tooling at all.
 
 ## 5. Roll back — `rollback_task_release`
 

@@ -818,8 +818,7 @@ func (s *TenantIsolationSuite) TestWritesCannotCrossTenants() {
 // pass on a half-applied seed, and a board missing `code_review` is a board
 // whose agents silently never get work.
 func (s *TenantIsolationSuite) TestTenantBootSeedsAWorkingBoard() {
-	members := postgres.NewTenantMemberStore(s.db)
-	boot := tenantboot.NewService(s.db, members)
+	boot := tenantboot.NewService(s.db, postgres.NewTenantSeedStore(s.db))
 
 	fresh := uuid.New()
 	ctx := tenant.With(s.ctx, tenant.Identity{
@@ -834,7 +833,6 @@ func (s *TenantIsolationSuite) TestTenantBootSeedsAWorkingBoard() {
 	s.Positive(s.countFor(fresh, "app_settings"), "the settings a tenant needs before configuring anything")
 	s.Positive(s.countFor(fresh, "llm_provider_configs"), "the provider catalog")
 	s.Positive(s.countFor(fresh, "model_prices"), "the default price sheet")
-	s.Equal(1, s.countFor(fresh, "tenant_members"), "the caller mirrored into the roster")
 
 	// The slugs are the part that must not drift: board_tasks.board_column is
 	// validated against them and agent subscriptions name them.
@@ -851,13 +849,13 @@ func (s *TenantIsolationSuite) TestTenantBootSeedsAWorkingBoard() {
 // and the `tenants.bootstrapped_at` gate is what stops the re-seed). The second
 // is the one that matters, because a pod restart is not a rare event.
 func (s *TenantIsolationSuite) TestTenantBootIsIdempotent() {
-	members := postgres.NewTenantMemberStore(s.db)
+	seeds := postgres.NewTenantSeedStore(s.db)
 	fresh := uuid.New()
 	ctx := tenant.With(s.ctx, tenant.Identity{
 		TenantID: fresh, Role: tenant.RoleOwner, UserID: "repeat-uid",
 	})
 
-	first := tenantboot.NewService(s.db, members)
+	first := tenantboot.NewService(s.db, seeds)
 	s.Require().NoError(first.Sight(ctx, mustIdentity(ctx)))
 	before := s.countFor(fresh, "board_columns")
 
@@ -865,12 +863,11 @@ func (s *TenantIsolationSuite) TestTenantBootIsIdempotent() {
 	s.Require().NoError(first.Sight(ctx, mustIdentity(ctx)))
 	// A restarted process: a brand-new Service with an empty `seeded` map, so
 	// the gate has to come from the database.
-	cold := tenantboot.NewService(s.db, members)
+	cold := tenantboot.NewService(s.db, seeds)
 	s.Require().NoError(cold.Sight(ctx, mustIdentity(ctx)), "re-seeding a known tenant must not fail")
 
 	s.Equal(before, s.countFor(fresh, "board_columns"), "re-running the seed duplicated the board")
 	s.Equal(1, s.countFor(fresh, "board_settings"), "re-running the seed duplicated a singleton")
-	s.Equal(1, s.countFor(fresh, "tenant_members"), "re-running the seed duplicated the roster")
 }
 
 // TestSecondTenantGetsItsOwnBoard is the tenant-two case in the form it would
@@ -881,8 +878,7 @@ func (s *TenantIsolationSuite) TestTenantBootIsIdempotent() {
 // 'local', model 'claude-opus-5', id = 1. Under the pre-114 constraints this is
 // thirteen-plus 23505s and a tenant that never gets a board.
 func (s *TenantIsolationSuite) TestSecondTenantGetsItsOwnBoard() {
-	members := postgres.NewTenantMemberStore(s.db)
-	boot := tenantboot.NewService(s.db, members)
+	boot := tenantboot.NewService(s.db, postgres.NewTenantSeedStore(s.db))
 
 	first, second := uuid.New(), uuid.New()
 	for _, id := range []uuid.UUID{first, second} {
@@ -896,7 +892,6 @@ func (s *TenantIsolationSuite) TestSecondTenantGetsItsOwnBoard() {
 	for _, id := range []uuid.UUID{first, second} {
 		s.Equal(13, s.countFor(id, "board_columns"), "tenant %s has its own columns", id)
 		s.Equal(1, s.countFor(id, "board_settings"), "tenant %s has its own settings row", id)
-		s.Equal(1, s.countFor(id, "tenant_members"), "tenant %s has its own roster", id)
 	}
 
 	// And the two boards are genuinely separate rows, not one board seen twice.

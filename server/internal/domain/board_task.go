@@ -25,16 +25,11 @@ var ErrTaskAlreadyClaimed = errors.New("task is already assigned to another agen
 // task not found: <id>", which told the agent nothing and had it retry.
 var ErrTaskOutsideRepository = errors.New("board task belongs to a different repository than this run")
 
-// ErrAssigneeNotMember is the roster's refusal of a person a card was being
-// given to.
+// ErrAssigneeNotMember is the refusal of a person a card was being given to.
 //
 // It is a sentinel because clients need to branch on it and were branching on
 // the PROSE instead — the web app matched a substring of the sentence, which
-// means rewording the explanation changed client behaviour. The sentence is
-// worth keeping exactly as it is (it names the real cause: the roster fills in
-// as people sign in, so an invited teammate who has never opened the app cannot
-// be assigned yet), and that is precisely why it must not also be the API
-// contract.
+// means rewording the explanation changed client behaviour.
 var ErrAssigneeNotMember = errors.New("assignee is not a member of this workspace")
 
 // AssigneeNotMemberError builds that refusal. It carries the explanation as its
@@ -47,8 +42,8 @@ func AssigneeNotMemberError(userID string) error {
 type assigneeNotMemberError struct{ userID string }
 
 func (e assigneeNotMemberError) Error() string {
-	return fmt.Sprintf("assignee %q is not a member of this workspace; the roster is filled in as members sign in, "+
-		"so somebody invited but who has never opened the app cannot be assigned yet", e.userID)
+	return fmt.Sprintf("assignee %q is not a member of this workspace; this install has one person in it and no "+
+		"sign-in, so a card is given to an agent rather than to a named person", e.userID)
 }
 
 func (e assigneeNotMemberError) Is(target error) bool { return target == ErrAssigneeNotMember }

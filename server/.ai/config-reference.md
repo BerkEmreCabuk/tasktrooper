@@ -2,7 +2,7 @@
 
 Config path defaults to `resources/config.yml`; override with `-config`. `${VAR}` is
 substituted in the YAML and again after unmarshaling for nested fields. Secrets:
-see `.env.example`.
+see `.env.local.example`.
 
 ## `llm`
 
@@ -18,9 +18,9 @@ see `.env.example`.
 **Provider catalog** (`domain.AllLLMProviderDefinitions`, not YAML-configured): every declared
 provider is `Available:true` today, including the four host-executed CLIs (`claude_code`,
 `cursor_agent`, `antigravity`, `opencode` — see their own sections below). `local_runner` is a
-different case: a real, working embeddings-only client that reaches a tenant's Mac through the
-control-plane tunnel, deliberately absent from this catalog because there is nothing to connect —
-see `.ai/architecture.md`'s "Embeddings reach the tenant's Mac" for the wire path.
+leftover provider type for the old hosted product's remote-Mac embeddings path; it is absent from
+this catalog and plays no part here. This product's own local embedder is the separate `local`
+provider type, bootstrapped from `EMBEDDINGS_BASE_URL` — see the `embedding` section below.
 
 ## `server`
 
@@ -28,7 +28,8 @@ see `.ai/architecture.md`'s "Embeddings reach the tenant's Mac" for the wire pat
 |---|---|---|---|
 | `port` | int | `8080` | Listen port |
 | `api_key` | string | `""` | Legacy single API key (`${SERVER_API_KEY}`) |
-| `api_keys[]` | array | `[]` | Legacy config-file client keys; new keys are created in the UI and stored hashed. Desktop and cloud modes clear both fields |
+| `api_keys[]` | array | `[]` | Legacy config-file client keys; new keys are created in the UI and stored hashed. The desktop app clears both fields and sets `SERVER_API_KEY` itself |
+| `public_base_url` | string | `""` | Origin a Claude Code session calls back on for the MCP endpoint (`${PUBLIC_BASE_URL}`); empty defaults to `http://<listen-addr>` |
 
 ## `storage`
 
@@ -110,8 +111,9 @@ vetted IP (so a DNS rebind cannot slip past) and re-checks every redirect hop. I
 transport sets `Proxy: nil`, because a proxy hides the real destination —
 self-hosted users behind an HTTP proxy lose these tools.
 
-`ALLOW_LOOPBACK_TOOL_URLS` is a **process env var, not a config key**, so a hosted
-tenant cannot reach it. It opens loopback only; metadata, RFC1918 and CGNAT stay shut.
+`ALLOW_LOOPBACK_TOOL_URLS` is a **process env var, not a config key**, so nothing with
+only server config or API access can flip it — only whoever launches the process can.
+It opens loopback only; metadata, RFC1918 and CGNAT stay shut.
 
 | Surface | Unset | Effect |
 |---|---|---|
@@ -119,59 +121,57 @@ tenant cannot reach it. It opens loopback only; metadata, RFC1918 and CGNAT stay
 | browser tools | loopback **allowed** | set false to block |
 
 The browser default is inverted because the QA agent boots the app it just built on
-`127.0.0.1:PORT` and already holds `run_terminal` in that pod.
+`127.0.0.1:PORT` and already holds `run_terminal` on this machine.
 
 ## `tools.mobile`
 
-Gerçek cihazı Appium üzerinden `mobile_*` tool setine bağlar (`mobile_launch_app`,
+Connects a real device to the `mobile_*` tool set through Appium (`mobile_launch_app`,
 `mobile_tap`, `mobile_type_text`, `mobile_swipe`, `mobile_screenshot`,
 `mobile_read_ui`, `mobile_wait_for`, `mobile_press_button`, `mobile_rotate`,
 `mobile_unlock_device`, `mobile_release_device`).
 
-| Anahtar | Env | Açıklama |
+| Key | Env | Description |
 |---|---|---|
-| `hub_url` | `MOBILE_APPIUM_HUB_URL` | Appium sunucusu (cluster'da servis adresi, yerelde `http://127.0.0.1:4723`) |
-| `device_udid` | `MOBILE_DEVICE_UDID` | Hangi cihaz; kablosuz adb'de `100.x.y.z:5555` |
-| `platform_version` | `MOBILE_PLATFORM_VERSION` | Opsiyonel capability. Simülatörlerde kullanılmaz — sürüm simctl runtime'ından türetilir (`iOS 17.4` → `17.4`) |
-| `device_pin` | `MOBILE_DEVICE_PIN` | Ekran kilidi PIN'i; yalnızca Android |
-| `auth_token` | `MOBILE_APPIUM_TOKEN` | Hub'a bearer token |
-| `bridge_url` | `MOBILE_BRIDGE_URL` | adb sidecar'ı (`cmd/device-agent`); yalnızca `remote_adb` cihazları için |
-| `bridge_token` | `MOBILE_BRIDGE_TOKEN` | Sidecar'a bearer token |
+| `hub_url` | `MOBILE_APPIUM_HUB_URL` | Appium server (service address in a cluster, `http://127.0.0.1:4723` locally) |
+| `device_udid` | `MOBILE_DEVICE_UDID` | Which device; `100.x.y.z:5555` for wireless adb |
+| `platform_version` | `MOBILE_PLATFORM_VERSION` | Optional capability. Not used for simulators — the version is derived from the simctl runtime (`iOS 17.4` → `17.4`) |
+| `device_pin` | `MOBILE_DEVICE_PIN` | Screen-lock PIN; Android only |
+| `auth_token` | `MOBILE_APPIUM_TOKEN` | Bearer token for the hub |
+| `bridge_url` | `MOBILE_BRIDGE_URL` | The adb sidecar (`cmd/device-agent`); `remote_adb` devices only |
+| `bridge_token` | `MOBILE_BRIDGE_TOKEN` | Bearer token for the sidecar |
 
-### Cihaz türleri (`kind`, migration 102)
+### Device kinds (`kind`, migration 102)
 
-Ayarlar API'sinde `kind` opsiyoneldir; boş gelmesi `remote_adb` demektir.
+`kind` is optional in the settings API; empty means `remote_adb`.
 
-| `kind` | Nedir | `device_addr` | `device_udid` | Nerede çalışır |
+| `kind` | What | `device_addr` | `device_udid` | Runs where |
 |---|---|---|---|---|
-| `remote_adb` (varsayılan) | adb bridge üzerinden fiziksel telefon | Tailnet `host:port` | Bridge'in ayırdığı loopback adresi | Her yerde |
-| `ios_simulator` | Bu makinedeki `xcrun simctl` simülatörü | Simülatör UDID | Aynı UDID | Yalnızca Xcode'lu macOS |
-| `android_emulator` | Bu makinedeki AVD | AVD adı | Açılıştaki adb serial (`emulator-5554`) | adb'si olan her host |
+| `remote_adb` (default) | A physical phone over the adb bridge | Tailnet `host:port` | The loopback address the bridge assigns | Anywhere |
+| `ios_simulator` | An `xcrun simctl` simulator on this machine | Simulator UDID | Same UDID | macOS with Xcode only |
+| `android_emulator` | An AVD on this machine | AVD name | The adb serial at boot (`emulator-5554`) | Any host with adb |
 
-- Yerel türler yeni env istemez: `xcrun`, `adb`, `emulator` PATH'te, sonra
-  `ANDROID_HOME`/`ANDROID_SDK_ROOT` ve Android Studio dizininde aranır. Hiçbiri
-  olmayan host (yani her Linux node'u) hiçbir yerel cihaz bildirmez.
-- iOS reddi host başına koşullu: `remote_adb` için hâlâ reddedilir (XCUITest
-  Xcode'lu macOS ister), `ios_simulator` host'un gerçekten simülatörü var mı diye
-  bakar.
-- `GET /v1/settings/mobile-devices/local-catalog` host'un sürebileceklerini döner:
-  `{"ios":[{"udid","name","runtime"}],"android":["Pixel_7_API_34"]}`. Kayıt bu
-  kataloğa karşı doğrulanır — yerel cihaz elle yazılamaz. Hiçbiri yoksa cevap iki
-  boş dizi ile `200`, `404` değil.
-- `enabled` anahtarı yok: `hub_url` ya da `device_udid` boşsa tool'lar hiç
-  kaydedilmez.
-- **Cihaz paylaşılır.** Kirayı Appium yapar; dolu cihaz `blocked` sayılır, task park
-  edilir, `DeviceSweeperInterval` (10 dk) boşalınca kaldığı kolondan devam ettirir.
-  Kira 5 dk işlemsizlikte düşer, `mobile_release_device` hemen bırakır. Telefon,
-  simülatör ve emülatör aynı havuzda ayrı kiralardır.
-- **Tool seti türe göre değişmez**; tek fark `capabilitiesFor`'daki capability seti
-  (`ios_simulator` → XCUITest + `appium:bundleId`; Android → `appPackage`,
-  `autoGrantPermissions`, PIN ile kilit açma).
-- `mobile_launch_app` yalnızca deploy target'ta kayıtlı paketi açar
-  (`repository_deploy_targets.app_package`, artefakt için `app_url`); bu alanları
-  insan yazar — ajanın yazabildiği guard, guard değildir.
-
-Kurulum: [deploy/k8s/appium-android.yaml](../deploy/k8s/appium-android.yaml).
+- Local kinds need no new env: `xcrun`, `adb`, `emulator` are looked up on PATH, then
+  under `ANDROID_HOME`/`ANDROID_SDK_ROOT` and the Android Studio directory. A host with
+  none of them (i.e. every Linux node) reports no local devices.
+- The iOS refusal is per host: still refused for `remote_adb` (XCUITest needs macOS
+  with Xcode); for `ios_simulator` the host is checked for an actual simulator.
+- `GET /v1/settings/mobile-devices/local-catalog` returns what the host can drive:
+  `{"ios":[{"udid","name","runtime"}],"android":["Pixel_7_API_34"]}`. Registration is
+  validated against this catalog — a local device cannot be typed in by hand. With
+  none, the answer is `200` with two empty arrays, not `404`.
+- There is no `enabled` key: with `hub_url` or `device_udid` empty the tools are not
+  registered at all.
+- **Devices are shared.** Appium does the leasing; a busy device counts as `blocked`,
+  the task parks, and `DeviceSweeperInterval` (10 min) resumes it from the column it
+  left once the device frees up. A lease drops after 5 min of inactivity;
+  `mobile_release_device` releases immediately. Phones, simulators and emulators are
+  separate leases in one pool.
+- **The tool set does not vary by kind**; the only difference is the capability set in
+  `capabilitiesFor` (`ios_simulator` → XCUITest + `appium:bundleId`; Android →
+  `appPackage`, `autoGrantPermissions`, PIN unlock).
+- `mobile_launch_app` opens only the package registered on the deploy target
+  (`repository_deploy_targets.app_package`, `app_url` for the artifact); a human
+  writes those fields — a guard the agent can write is not a guard.
 
 ## `tools.boilerplate_catalog`
 
@@ -180,7 +180,7 @@ Kurulum: [deploy/k8s/appium-android.yaml](../deploy/k8s/appium-android.yaml).
 | `enabled` | bool | `false` | Enable `search_boilerplate_catalog` |
 
 Which repo it searches is the admin setting `boilerplate_catalog_repo`
-(`GET/PUT /v1/settings`), not config. Empty by default; accepts `owner/repo`, `github.com/owner/repo`
+(`GET/PUT /v1/settings`), not config. Defaults to `github.com/makifbaysal/boilerplates`; accepts `owner/repo`, `github.com/owner/repo`
 or a full URL. Reads `<repo>/.ai/catalog.yaml` off `main` (falls back to `master`) on
 every call — no restart needed.
 
@@ -205,8 +205,6 @@ every call — no restart needed.
 
 ## `context`
 
-See [context-management.md](context-management.md).
-
 | Key | Type | Default | Description |
 |---|---|---|---|
 | `max_tokens` | int | `32000` | Context budget |
@@ -216,10 +214,6 @@ See [context-management.md](context-management.md).
 
 ## `mapping` / `indexer` / `graph`
 
-See [repository-mapping.md](repository-mapping.md),
-[codebase-indexing.md](codebase-indexing.md),
-[dependency-graph.md](dependency-graph.md).
-
 | Key | Default | Description |
 |---|---|---|
 | `indexer.query_rewrite` | `false` | Rewrites the task text into 2 extra code-search queries (multi-query retrieval) |
@@ -227,8 +221,8 @@ See [repository-mapping.md](repository-mapping.md),
 
 `allowed_roots` only ever WIDENS the set. Empty means nothing extra — not
 "anywhere", which is what it used to mean and what let `POST /v1/repositories/open`
-index any readable directory on the pod for whoever asked. Set it only on a
-self-hosted install that keeps its checkouts outside the managed workspace.
+index any readable directory on this host. Set it only when this install keeps
+its checkouts outside the managed workspace.
 
 pgvector: migration 036 tries `vector` + `pg_trgm` (image `pgvector/pgvector:pg16`).
 With them, workspace chunk search uses an HNSW index and text search a trigram+RRF
@@ -262,11 +256,13 @@ tuned for Mistral — `requests_per_minute: 55`, `max_retries: 8`, `request_time
 requests, not tokens (55 req/min with `chunk_max_lines: 150` stays under the 500k
 tokens/minute limit).
 
-**Cloud mode's local model.** `domain.PinnedLocalEmbeddingModel` = `nomic-embed-text-v1.5`
-(`domain.PinnedLocalEmbeddingDimensions` = `768`) is what `local_runner` always asks LM Studio
-for over the Mac tunnel; not YAML-configured, not per-tenant. `embedding_llm_provider`/
-`embedding_llm_model` empty ("auto") resolves to it whenever
-`llmprovider.Service.SetControlPlane` is wired — see `.ai/architecture.md`.
+**Local embedder model.** `domain.PinnedLocalEmbeddingModel` = `nomic-embed-text-v1.5`
+(`domain.PinnedLocalEmbeddingDimensions` = `768`) is the model `Service.BootstrapEmbeddings`
+pins the `local` provider to on a fresh install, from `EMBEDDINGS_BASE_URL` — the desktop app's
+bundled embedder (any local OpenAI-compatible embeddings host serving the same model works too,
+in dev). Pinned because a vector from another model is not comparable to what is already
+indexed; not YAML-configured. `embedding_llm_provider`/`embedding_llm_model` empty ("auto")
+resolves to it once `EMBEDDINGS_BASE_URL` bootstraps the `local` provider.
 
 ## `tools.mcp_servers[]`
 
@@ -281,14 +277,6 @@ for over the Mac tunnel; not YAML-configured, not per-tenant. `embedding_llm_pro
 | `url` | string | http | MCP HTTP endpoint |
 | `headers` | map | no | HTTP headers |
 | `allowed_tools` | []string | no | Tool whitelist; empty = all |
-
-## Podman PostgreSQL
-
-```bash
-export POSTGRES_PASSWORD=local_llm_secret
-podman compose -f podman-compose.yml up -d postgres
-export POSTGRES_DSN=postgres://local_llm:local_llm_secret@localhost:5432/local_llm?sslmode=disable
-```
 
 ## Evolution (`evolution`)
 
@@ -310,49 +298,49 @@ Periodic reflections, KPI evaluation, impact tracking.
 | `max_memory_changes` | `5` | Per-reflection memory change cap |
 | `memory_max_count` | `200` | Per-agent memory cap; oldest evicted |
 | `evidence_max_chars` | `24000` | Reflection evidence truncation |
-| `model` / `provider_type` | _(boş)_ | Reflection + golden eval override (ucuz model önerilir) |
-| `judge_model` / `judge_provider_type` | _(boş)_ | Golden gate kararını veren bağımsız model; boşsa reflection modeli |
+| `model` / `provider_type` | _(empty)_ | Reflection + golden eval override (a cheap model is recommended) |
+| `judge_model` / `judge_provider_type` | _(empty)_ | Independent model that makes the golden-gate decision; the reflection model when empty |
 
 ## Board quality gates (`board`)
 
 | Key | Default | Description |
 |---|---|---|
-| `verification_enabled` | `false` | Run sonrası build/vet doğrulaması + otomatik düzeltme döngüsü |
-| `verify_max_fix_attempts` | `2` | Düzeltme denemesi; hâlâ kırıksa task `in_progress`'e döner + system comment |
-| `require_criteria_complete` | `false` | AC gate: kriterleri açık task `ready_for_qa`/`done`/`released`'e taşınamaz |
-| `task_type_models` | `{}` | Task tipine göre model override, ör. `{analiz: küçük-model}` |
-| `pipeline_gate_timeout` | `45m` | `code_review`'da build/test sonucu beklenen üst sınır; sonra reviewer yine atanır (`gate_reason=timeout`). **`pipelineMaxWait`'ten (30m) büyük olmalı** — aksi halde cevap vermek üzere olan canlı pipeline'dan vazgeçilir. Kalan 15m pod değişimi ve Actions kuyruğu payıdır |
-| `pipeline_gate_interval` | `2m` | `PipelineGateSweeper`'ın GitHub'a yeniden sorma sıklığı; her bitmemiş pipeline bir round-trip. Boot'ta hemen bir kez süpürür — poller kaybetmenin en yaygın yolu restart'tır |
+| `verification_enabled` | `false` | Post-run build/vet verification + automatic fix loop |
+| `verify_max_fix_attempts` | `2` | Fix attempts; still broken → the task returns to `in_progress` + a system comment |
+| `require_criteria_complete` | `false` | AC gate: a task with open criteria cannot move to `ready_for_qa`/`done`/`released` |
+| `task_type_models` | `{}` | Model override by task type, e.g. `{analiz: small-model}` |
+| `pipeline_gate_timeout` | `45m` | Upper bound on waiting for the build/test result in `code_review`; after it the reviewer is assigned anyway (`gate_reason=timeout`). **Must exceed `pipelineMaxWait` (30m)** — otherwise a live pipeline about to answer is abandoned. The remaining 15m is the allowance for host restarts and the Actions queue |
+| `pipeline_gate_interval` | `2m` | How often `PipelineGateSweeper` re-asks GitHub; every unfinished pipeline is one round-trip. It sweeps once immediately at boot — a restart is the most common way to lose the poller |
 
-### QA pipeline (admin settings / repo alanları, `config.yml` dışı)
+### QA pipeline (admin settings / repository fields, outside `config.yml`)
 
-| Key | Kapsam | Default | Description |
+| Key | Scope | Default | Description |
 |---|---|---|---|
-| `pipeline_container_runtime` | Admin settings | `""` (`auto`) | `podman`/`docker`/`auto`. İkisi de yoksa container build stage'i atlanır. Değişiklik restart ister — `PipelineRunner` bunu bir kez çözer |
-| `verify_command` | Repository | `""` | Inline verify gate komutu; boşsa auto-detect |
-| `build_command` | Repository | `""` | QA pipeline build override; boşsa auto-detect ya da (Dockerfile varsa) container build |
-| `test_command` | Repository | `""` | QA pipeline test override; boşsa auto-detect |
+| `pipeline_container_runtime` | Admin settings | `""` (`auto`) | `podman`/`docker`/`auto`. With neither, the container build stage is skipped. A change needs a restart — `PipelineRunner` resolves it once |
+| `verify_command` | Repository | `""` | Inline verify-gate command; auto-detect when empty |
+| `build_command` | Repository | `""` | QA pipeline build override; when empty, auto-detect or (with a Dockerfile) a container build |
+| `test_command` | Repository | `""` | QA pipeline test override; auto-detect when empty |
 
 ## Prod ops (`prod_ops`)
 
-| Anahtar | Varsayılan | Açıklama |
+| Key | Default | Description |
 |---|---|---|
-| `monitor_enabled` | `true` | Deploy target'ların `health_url` yoklaması |
-| `probe_interval` | `1m` | Üst üste 2 başarısız yoklama incident açar, ilk başarılı yoklama kapatır |
+| `monitor_enabled` | `true` | Probes deploy targets' `health_url` |
+| `probe_interval` | `1m` | Two consecutive failed probes open an incident; the first successful probe closes it |
 
 ## Deploy ops (`deploy_ops`)
 
-| Anahtar | Varsayılan | Açıklama |
+| Key | Default | Description |
 |---|---|---|
-| `monitor_enabled` | `true` | Actions deploy koşularını `deployment_runs`'a aynalar, konsol dispatch'lerini eşler, başarısız deploy'u incident'a çevirir. Kapalıyken rollback dönecek commit'i bulamaz ve release atfı yapılamaz |
-| `poll_interval` | `2m` | Sweep başına en fazla bir GitHub çağrısı, her (repository × environment) için |
-| `health_window` | `15m` | Başarılı deploy sonrası incident'in release eden task'a atfedildiği süre; `auto_rollback` bu pencerede tetiklenir. Kasten kısa — belirli bir kartın release'ini geri almaya yetki verir. `prodops/remedy.go`'daki 45 dk'lık genel korelasyon bundan bağımsızdır ve yalnızca tavsiye yazar |
+| `monitor_enabled` | `true` | Mirrors Actions deploy runs into `deployment_runs`, matches console dispatches, turns a failed deploy into an incident. When off, rollback cannot find the commit to return to and release attribution is impossible |
+| `poll_interval` | `2m` | At most one GitHub call per sweep, per (repository × environment) |
+| `health_window` | `15m` | How long after a successful deploy an incident is attributed to the releasing task; `auto_rollback` fires inside this window. Deliberately short — it authorizes rolling back a specific card's release. The 45-minute general correlation in `prodops/remedy.go` is independent of it and only writes advice |
 
 ## Store ops (`storeops`)
 
-| Anahtar | Varsayılan | Açıklama |
+| Key | Default | Description |
 |---|---|---|
-| `poll_interval` | `5m` | Store app satırlarını süpürür: onboarding checklist, review durumu, imzalama varlıklarının yenilenmesi. Cipher (`MCP_SECRETS_KEY`/`SERVER_API_KEY`) yoksa monitör başlamaz, sunucu yine kalkar |
+| `poll_interval` | `5m` | Sweeps store app rows: onboarding checklist, review status, signing-asset renewal. Without a cipher (`MCP_SECRETS_KEY`/`SERVER_API_KEY`) the monitor does not start; the server still boots |
 
 ## Claude Code executor (`claude_code`)
 
@@ -389,8 +377,8 @@ grounding, verify gate, commit/PR, column advance).
 - **The MCP endpoint has no configuration of its own**: mounted whenever the executor
   is registered, on the server's own port, with one bearer token per run (or per chat
   turn), minted at the start and revoked at the end.
-- **Child environment** is `internal/platform/childenv` (no `DATABASE_URL`,
-  `INTERNAL_AUTH_KEY` or `MCP_SECRETS_KEY`) plus an explicit passthrough of
+- **Child environment** is `internal/platform/childenv`, an allowlist (so no
+  `DATABASE_URL`, `SERVER_API_KEY` or `MCP_SECRETS_KEY`) plus an explicit passthrough of
   `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN` and the proxy variables.
   `ANTHROPIC_API_KEY` is deliberately **not** forwarded: it would hand a child a
   secret it was never given and move the session onto metered billing.
@@ -443,28 +431,3 @@ written to the workspace at all.
 
 A known upstream bug can end a run without its final `step_finish` event; a clean exit with
 real output is treated as success rather than a hard failure.
-
-## Cloud (`cloud`) — reaching the user's Mac
-
-| Env | koanf | Meaning |
-|---|---|---|
-| `INTERNAL_AUTH_KEY` | `cloud.internal_auth_key` | shared HMAC secret; signs `X-Internal-Auth` outbound and verifies `X-Internal-Tenant`/`Role`/`Actor` inbound |
-| `CONTROL_PLANE_URL` | `cloud.control_plane_url` | tenant-manager's origin, e.g. `https://tasktrooper.ai`. **The one route to a member's Mac** — the tunnel is reverse, so this process asks the control plane to carry a call rather than dialling a laptop |
-
-`cloud.RemoteWorkspaces()` is `control_plane_url != ""`, and it — not `cloud.enabled` — is what
-decides where a board run executes, whether workspaces are prepared on a Mac, and whether the
-filesystem tools are registered. **Unset is a complete configuration for a NON-cloud process**:
-self-hosted and the desktop bundle hold the working copy and the `claude` binary on this same host.
-
-**In cloud mode all three of these are refused at boot** (`validateCloudRequirements`), not logged:
-
-| Env | Missing ⇒ the process becomes |
-|---|---|
-| `INTERNAL_AUTH_KEY` | an unauthenticated server in front of every tenant's data |
-| `CONTROL_PLANE_URL` | a self-hosted single-machine server: filesystem tools over an empty `/data`, a `claude` binary the image does not ship, embeddings falling through to a chat provider and writing incomparable vectors into one index |
-| `PUBLIC_BASE_URL` | unreachable from outside: no MCP callback address for a Mac, no webhook target for GitHub |
-
-A non-https `PUBLIC_BASE_URL` is a **warning**, not a refusal: it disables the MCP callback
-only (the runner refuses a bearer token over http) while webhooks still work, and a localhost
-dev stack cannot have https. `TENANT_UID` is gone (migration 114: there is no per-tenant pod
-to pin to).

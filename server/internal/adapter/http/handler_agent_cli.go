@@ -83,15 +83,6 @@ func agentCLIDisabled(c *fiber.Ctx) error {
 // permanentRefusal so that naming a not-yet-built provider gets the same 409 on
 // every route of this server and of the control plane, rather than a status per
 // endpoint.
-//
-// A THIRD refusal reaches a user here and is not listed below: on a cloud
-// deployment the probe asks the member's Mac, so "no Mac is attached" and "one
-// is attached and has not reported yet" now arrive on this path as
-// *domain.RunnerBlock. They are answered as 409 `runner_not_attached` — with
-// `self` and `member_uid` — by the check internalError already makes, which is
-// why the default branch is the right home for them rather than a fourth case
-// here: a missing laptop is not a fact about the CLI, and every route that can
-// raise it must answer it the same way.
 func agentCLIError(c *fiber.Ctx, err error) error {
 	if handled, writeErr := permanentRefusal(c, err); handled {
 		return writeErr

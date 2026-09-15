@@ -181,15 +181,10 @@ func (m *MultiProviderClient) SetEmbeddingLimits(cfg domain.EmbeddingConfig) {
 }
 
 // embeddingTarget is the provider whose account serves embeddings: the pinned
-// one when set; otherwise the tenant's own Mac when one is wired
-// (domain.LLMProviderLocalRunner — see embedOnce's doc for why "auto" prefers
-// it over the chat default); otherwise the default.
+// one when set, otherwise the default.
 func embeddingTarget(set ProviderSet) domain.LLMProviderType {
 	if set.EmbeddingProvider != "" {
 		return set.EmbeddingProvider
-	}
-	if _, ok := set.Clients[domain.LLMProviderLocalRunner]; ok {
-		return domain.LLMProviderLocalRunner
 	}
 	return set.Default
 }
@@ -495,27 +490,6 @@ func (m *MultiProviderClient) Embed(ctx context.Context, input string, model str
 
 func (m *MultiProviderClient) embedOnce(ctx context.Context, set ProviderSet, input string, model string) ([]float32, error) {
 	pinned := set.EmbeddingProvider
-	// "Auto" (pinned == "") resolves to the tenant's own Mac when one is
-	// wired, and resolves to it the SAME WAY an explicit pin does: through the
-	// single early return below, never through the speculative fallback loop
-	// further down. That distinction matters here specifically. The fallback
-	// loop exists to try another already-configured provider when the first
-	// one errors, which is fine when every candidate produces vectors from the
-	// SAME model — but domain.LLMProviderLocalRunner is pinned to
-	// domain.PinnedLocalEmbeddingModel, a different model with a different
-	// dimension count than whatever the tenant's default chat provider serves.
-	// Falling through on failure would silently write a chunk of an index with
-	// a different model's vector — exactly the corruption
-	// domain.EmbeddingProvenanceStale exists to catch after the fact. Better to
-	// fail loudly once, with domain.ErrEmbeddingRunnerNotAttached naming what to
-	// do, than to poison an index quietly.
-	autoResolvedLocal := false
-	if pinned == "" {
-		if _, ok := set.Clients[domain.LLMProviderLocalRunner]; ok {
-			pinned = domain.LLMProviderLocalRunner
-			autoResolvedLocal = true
-		}
-	}
 	clients := set.Clients
 	order := make([]domain.LLMProviderType, 0, len(clients)+2)
 	order = append(order, set.Default)
@@ -538,14 +512,6 @@ func (m *MultiProviderClient) embedOnce(ctx context.Context, set ProviderSet, in
 		}
 		c, ok := clients[pinned]
 		if !ok {
-			if autoResolvedLocal {
-				// The registration check above (set.Clients[LocalRunner]) and this
-				// one read the same map without holding the lock across both —
-				// a concurrent Prune could in principle drop it between the two.
-				// domain.ErrEmbeddingRunnerNotAttached is still the right answer:
-				// either way there is currently no way to reach this tenant's Mac.
-				return nil, domain.ErrEmbeddingRunnerNotAttached()
-			}
 			return nil, fmt.Errorf("embedding provider %q is not configured; connect it and choose its model in LLM settings", pinned)
 		}
 		return c.Embed(ctx, input, model)

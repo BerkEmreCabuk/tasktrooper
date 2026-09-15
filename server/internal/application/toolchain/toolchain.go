@@ -1,13 +1,11 @@
 // Package toolchain resolves the tool versions a repository declares in its
-// own files (go.mod, .nvmrc, .node-version, .tool-versions, package.json
-// engines, .python-version) into an environment overlay for commands executed
+// own files (see ReadPins) into an environment overlay for commands executed
 // in that repository's workspace. Two concurrent tasks whose repos pin
 // different versions of the same tool each get their own resolution instead of
 // silently sharing whatever binary the host PATH finds first.
 package toolchain
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -28,8 +26,8 @@ type Requirements struct {
 	NodeSource   string
 	Python       string
 	PythonSource string
-	// Flutter is what a mobile repository declares, either in .tool-versions or
-	// as the SDK constraint in pubspec.yaml. It is resolved the same way node
+	// Flutter is what a mobile repository declares, in .tool-versions or
+	// .flutter-version. It is resolved the same way node
 	// and python are — an install root on disk, not a download — because the
 	// verify gate has to judge a diff with the analyzer the repo expects, and
 	// two Flutter minors disagree about what is a lint and what is an error.
@@ -45,71 +43,51 @@ type Overlay struct {
 	Warnings []string
 }
 
+// requirementSources is the per-language precedence the PATH resolver reads.
+// It is narrower than ReadPins on purpose: a constraint such as pyproject's
+// ">=3.11" would make hostMismatch warn about a host that satisfies it.
+var requirementSources = map[string][]string{
+	"go":      {"go.mod", ".tool-versions"},
+	"node":    {".nvmrc", ".node-version", ".tool-versions", "package.json"},
+	"python":  {".python-version", ".tool-versions"},
+	"flutter": {".tool-versions", ".flutter-version"},
+}
+
 // Detect reads the repository's own version declarations. It never guesses:
 // no declaration, no requirement.
 func Detect(dir string) Requirements {
+	pins := ReadPins(dir)
 	var req Requirements
-	tools := parseToolVersions(filepath.Join(dir, ".tool-versions"))
-
-	if data, err := os.ReadFile(filepath.Join(dir, "go.mod")); err == nil {
-		goDirective, toolchainDirective := parseGoMod(string(data))
-		switch {
-		case toolchainDirective != "":
-			req.Go, req.GoExact = toolchainDirective, true
-		case goDirective != "":
-			req.Go = goDirective
-		}
+	if p, ok := firstPin(pins, requirementSources["go"], "go"); ok {
+		req.Go = normalizeVersion(p.Version)
+		req.GoExact = p.Source != "go.mod" || strings.HasPrefix(p.Version, "go")
 	}
-	if req.Go == "" {
-		if v := tools["golang"]; v != "" {
-			req.Go, req.GoExact = v, true
-		}
+	if p, ok := firstPin(pins, requirementSources["node"], "node"); ok {
+		req.Node, req.NodeSource = normalizeVersion(p.Version), p.Source
 	}
-
-	nodeSources := []struct {
-		source string
-		value  string
-	}{
-		{".nvmrc", readVersionFile(filepath.Join(dir, ".nvmrc"))},
-		{".node-version", readVersionFile(filepath.Join(dir, ".node-version"))},
-		{".tool-versions", firstNonEmpty(tools["nodejs"], tools["node"])},
-		{"package.json engines.node", enginesNode(dir)},
+	if p, ok := firstPin(pins, requirementSources["python"], "python"); ok {
+		req.Python, req.PythonSource = normalizeVersion(p.Version), p.Source
 	}
-	for _, s := range nodeSources {
-		if s.value != "" {
-			req.Node, req.NodeSource = s.value, s.source
-			break
-		}
-	}
-
-	pySources := []struct {
-		source string
-		value  string
-	}{
-		{".python-version", readVersionFile(filepath.Join(dir, ".python-version"))},
-		{".tool-versions", tools["python"]},
-	}
-	for _, s := range pySources {
-		if s.value != "" {
-			req.Python, req.PythonSource = s.value, s.source
-			break
-		}
-	}
-
-	flutterSources := []struct {
-		source string
-		value  string
-	}{
-		{".tool-versions", firstNonEmpty(tools["flutter"], tools["dart"])},
-		{".flutter-version", readVersionFile(filepath.Join(dir, ".flutter-version"))},
-	}
-	for _, s := range flutterSources {
-		if s.value != "" {
-			req.Flutter, req.FlutterSource = s.value, s.source
-			break
-		}
+	if p, ok := firstPin(pins, requirementSources["flutter"], "flutter", "dart"); ok {
+		req.Flutter, req.FlutterSource = normalizeVersion(p.Version), p.Source
 	}
 	return req
+}
+
+// firstPin returns the first pin, by source precedence, for any of languages
+// whose version still holds a comparable number once normalised — an alias
+// such as "lts/iron" does not.
+func firstPin(pins []Pin, sources []string, languages ...string) (Pin, bool) {
+	for _, source := range sources {
+		for _, language := range languages {
+			for _, p := range pins {
+				if p.Source == source && p.Language == language && normalizeVersion(p.Version) != "" {
+					return p, true
+				}
+			}
+		}
+	}
+	return Pin{}, false
 }
 
 // Resolver turns Requirements into an Overlay using the version-manager
@@ -318,76 +296,7 @@ func verOfName(name, prefix string) string {
 	return normalizeVersion(strings.TrimPrefix(name, prefix))
 }
 
-// --- parsing helpers ---
-
-func parseGoMod(content string) (goDirective, toolchainDirective string) {
-	for _, line := range strings.Split(content, "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) < 2 {
-			continue
-		}
-		switch fields[0] {
-		case "go":
-			goDirective = fields[1]
-		case "toolchain":
-			toolchainDirective = strings.TrimPrefix(fields[1], "go")
-		}
-	}
-	return goDirective, toolchainDirective
-}
-
-func parseToolVersions(path string) map[string]string {
-	out := map[string]string{}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return out
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			out[fields[0]] = normalizeVersion(fields[1])
-		}
-	}
-	return out
-}
-
-// readVersionFile reads single-line version files like .nvmrc. Alias values
-// ("lts/iron", "system") carry no comparable version and are ignored.
-func readVersionFile(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	v := normalizeVersion(strings.TrimSpace(strings.SplitN(string(data), "\n", 2)[0]))
-	if v == "" || !isDigit(v[0]) {
-		return ""
-	}
-	return v
-}
-
 var versionRe = regexp.MustCompile(`[0-9]+(\.[0-9]+)*`)
-
-func enginesNode(dir string) string {
-	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
-	if err != nil {
-		return ""
-	}
-	var pkg struct {
-		Engines struct {
-			Node string `json:"node"`
-		} `json:"engines"`
-	}
-	if json.Unmarshal(data, &pkg) != nil || pkg.Engines.Node == "" {
-		return ""
-	}
-	// Ranges like ">=18.17 <19" or "^20.x": the leading concrete version is
-	// the intent; exact range semantics are not needed to pick a runtime.
-	return versionRe.FindString(pkg.Engines.Node)
-}
 
 // --- version helpers ---
 
@@ -480,5 +389,3 @@ func firstNonEmpty(vals ...string) string {
 	}
 	return ""
 }
-
-func isDigit(b byte) bool { return b >= '0' && b <= '9' }

@@ -22,13 +22,6 @@ type ToolKit struct {
 	EmbeddingModel string
 	TopK           int
 	GraphCfg       domain.GraphConfig
-
-	// RemoteWorkspaces says the repository is on the assignee's Mac and this
-	// process's disk holds nothing an agent's workspace path refers to. It
-	// turns off the unindexed-edit overlay, which is the only filesystem read
-	// left in the two tools such a deployment still registers — see
-	// buildOverlay.
-	RemoteWorkspaces bool
 }
 
 func NewToolKit(
@@ -38,7 +31,6 @@ func NewToolKit(
 	indexerCfg domain.IndexerConfig,
 	graphCfg domain.GraphConfig,
 	embeddingModel string,
-	remoteWorkspaces bool,
 ) *ToolKit {
 	topK := indexerCfg.TopK
 	if topK <= 0 {
@@ -52,8 +44,6 @@ func NewToolKit(
 		EmbeddingModel: embeddingModel,
 		TopK:           topK,
 		GraphCfg:       graphCfg,
-
-		RemoteWorkspaces: remoteWorkspaces,
 	}
 }
 

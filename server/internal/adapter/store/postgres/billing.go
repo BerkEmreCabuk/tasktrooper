@@ -50,43 +50,6 @@ func (s *BillingStore) UpdatePlan(ctx context.Context, req domain.UpdateBillingP
 	return p, nil
 }
 
-// SyncPlan overwrites the entire plan row (including period_start) from a
-// tenant-manager push.
-func (s *BillingStore) SyncPlan(ctx context.Context, plan domain.BillingPlan) error {
-	_, err := s.pool.Exec(ctx, `
-		UPDATE billing_plan SET
-			name = $1, usd_budget = $2, max_concurrent_tasks = $3,
-			period_days = $4, period_start = $5, display_token_rate = $6, updated_at = now()
-		WHERE id = 1
-	`, plan.Name, plan.UsdBudget, plan.MaxConcurrentTasks, plan.PeriodDays, plan.PeriodStart, plan.DisplayTokenRate)
-	if err != nil {
-		return fmt.Errorf("sync billing plan: %w", err)
-	}
-	return nil
-}
-
-func (s *BillingStore) ReplaceModelPrices(ctx context.Context, prices []domain.ModelPrice) error {
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `DELETE FROM model_prices`); err != nil {
-		return err
-	}
-	for _, p := range prices {
-		if _, err := tx.Exec(ctx, `
-			INSERT INTO model_prices (model, usd_per_1m_prompt, usd_per_1m_completion,
-				usd_per_1m_cache_read, usd_per_1m_cache_write, updated_at)
-			VALUES ($1, $2, $3, $4, $5, now())
-		`, p.Model, p.UsdPer1MPrompt, p.UsdPer1MCompletion,
-			p.UsdPer1MCacheRead, p.UsdPer1MCacheWrite); err != nil {
-			return fmt.Errorf("insert model price: %w", err)
-		}
-	}
-	return tx.Commit(ctx)
-}
-
 func (s *BillingStore) SetPeriodStart(ctx context.Context, start time.Time) error {
 	_, err := s.pool.Exec(ctx, `UPDATE billing_plan SET period_start = $1, updated_at = now() WHERE id = 1`, start)
 	if err != nil {

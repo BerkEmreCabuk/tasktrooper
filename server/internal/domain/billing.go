@@ -76,9 +76,6 @@ type BillingStatus struct {
 	PeriodStart        time.Time `json:"period_start"`
 	ResetAt            time.Time `json:"reset_at"`
 	MaxConcurrentTasks int       `json:"max_concurrent_tasks"`
-	// Managed marks a plan the tenant-manager owns: the tenant may read it but
-	// not edit it, so the UI hides its plan-editing controls.
-	Managed bool `json:"managed"`
 }
 
 // QuotaPausedTask records a task halted because the budget was exhausted, so the
@@ -87,14 +84,6 @@ type QuotaPausedTask struct {
 	TaskID       uuid.UUID `json:"task_id"`
 	RepositoryID uuid.UUID `json:"repository_id"`
 	PausedAt     time.Time `json:"paused_at"`
-}
-
-// BillingSyncRequest is the tenant-manager → tenant push: the full effective plan
-// (including period_start, which the control plane owns) plus the global model
-// price table. Applied wholesale by the tenant.
-type BillingSyncRequest struct {
-	Plan   BillingPlan  `json:"plan"`
-	Prices []ModelPrice `json:"prices"`
 }
 
 type UpdateBillingPlanRequest struct {

@@ -11,20 +11,14 @@
 //     once per TENANT, and the only event that reliably happens once per tenant
 //     is its first request.
 //
-//  2. **Mirror the caller into tenant_members.** The control plane owns the
-//     roster; this is the local copy the board renders names from and validates
-//     an assignee against. Refreshed from the signed headers on the request
-//     being served, so it is always at least as fresh as the caller.
-//
-//  3. **Run the seeds that used to be boot-time work.** See Step. A process
+//  2. **Run the seeds that used to be boot-time work.** See Step. A process
 //     that serves every tenant has no tenant at boot, so about a dozen
 //     "ensure the defaults exist" calls in buildHandler were running unscoped
 //     and doing nothing at all. They are registered here instead and run once
 //     per tenant per process, which is the same cost they always had.
 //
-// All three are idempotent and all three are cheap after the first time: one
-// UPDATE for the member, a gate read that the tenants row answers, and a map
-// lookup for the steps.
+// Both are idempotent and both are cheap after the first time: a gate read that
+// the tenants row answers, and a map lookup for the steps.
 package tenantboot
 
 import (
@@ -59,19 +53,9 @@ type Registry interface {
 	MarkBootstrapped(ctx context.Context, id uuid.UUID) error
 }
 
-// MemberStore mirrors the caller into tenant_members.
-type MemberStore interface {
-	UpsertMember(ctx context.Context, m Member) error
-	ListMembers(ctx context.Context) ([]Member, error)
+// SeedStore runs the per-tenant board seed.
+type SeedStore interface {
 	Seed(ctx context.Context, sql string) error
-}
-
-// Member is one row of the local roster mirror.
-type Member struct {
-	UserID      string
-	Email       string
-	DisplayName string
-	Role        tenant.Role
 }
 
 // Step is per-tenant setup that used to happen once, at process boot, back when
@@ -99,7 +83,7 @@ type Step struct {
 
 type Service struct {
 	registry Registry
-	members  MemberStore
+	seeds    SeedStore
 
 	// steps run once per tenant per PROCESS, not once per tenant ever.
 	//
@@ -124,8 +108,8 @@ type Service struct {
 	booted sync.Map
 }
 
-func NewService(registry Registry, members MemberStore) *Service {
-	return &Service{registry: registry, members: members}
+func NewService(registry Registry, seeds SeedStore) *Service {
+	return &Service{registry: registry, seeds: seeds}
 }
 
 // AddStep registers per-tenant setup. Called during wiring, before the listener
@@ -142,8 +126,8 @@ func (s *Service) AddStep(name string, run func(context.Context) error) {
 }
 
 // Sight is called by the HTTP tenant middleware for every authenticated
-// request. It is deliberately the whole per-request cost of multi-tenancy at
-// the edge: a map lookup, and one member upsert.
+// request. It is deliberately the whole per-request cost at the edge: a map
+// lookup.
 func (s *Service) Sight(ctx context.Context, id tenant.Identity) error {
 	if s == nil || s.registry == nil {
 		return nil
@@ -152,22 +136,7 @@ func (s *Service) Sight(ctx context.Context, id tenant.Identity) error {
 		return err
 	}
 	s.runSteps(ctx, id)
-	if id.UserID == "" || id.ControlPlane {
-		// Nobody to mirror. Either the call names no human — a machine call, or
-		// a self-hosted run with no gateway — or it is the control plane acting
-		// on its own behalf, whose actor is not a person however the far side
-		// filled it in. Not an error: the board simply records no actor, as it
-		// did before teams.
-		//
-		// The scope is checked here rather than trusted to be absent, because
-		// this roster is the set assignment validates against: a control-scope
-		// call that signed the tenant id as its actor gave every tenant a
-		// nameless "member" that a card could be handed to and whose Mac can
-		// never attach. Anything that can write this table owes a check at the
-		// point of writing.
-		return nil
-	}
-	return s.members.UpsertMember(ctx, Member{UserID: id.UserID, Role: id.Role})
+	return nil
 }
 
 // stepTimeout bounds one tenant's whole step run. It is generous because the
@@ -236,8 +205,8 @@ func (s *Service) ensureSeeded(ctx context.Context, id uuid.UUID) error {
 		s.seeded.Store(id, struct{}{})
 		return nil
 	}
-	if s.members != nil {
-		if err := s.members.Seed(ctx, seedSQL); err != nil {
+	if s.seeds != nil {
+		if err := s.seeds.Seed(ctx, seedSQL); err != nil {
 			return fmt.Errorf("seed tenant board: %w", err)
 		}
 	}
@@ -247,35 +216,4 @@ func (s *Service) ensureSeeded(ctx context.Context, id uuid.UUID) error {
 	s.seeded.Store(id, struct{}{})
 	log.Info().Str("tenant_id", id.String()).Msg("tenant board seeded")
 	return nil
-}
-
-// Members returns the local roster for the tenant on ctx. The board uses it to
-// render names and to check that an assignee is really in this tenant.
-func (s *Service) Members(ctx context.Context) ([]Member, error) {
-	if s == nil || s.members == nil {
-		return nil, nil
-	}
-	return s.members.ListMembers(ctx)
-}
-
-// IsMember answers "may this card be assigned to this person".
-//
-// It is a check against the MIRROR, so it can only be wrong in one direction:
-// a teammate invited in the control plane who has never opened the app is not
-// in it yet and cannot be assigned. That is the safe direction — the other one
-// would let a card be assigned to a uid from another tenant.
-func (s *Service) IsMember(ctx context.Context, userID string) (bool, error) {
-	if userID == "" {
-		return true, nil // unassigning is always allowed
-	}
-	members, err := s.Members(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, m := range members {
-		if m.UserID == userID {
-			return true, nil
-		}
-	}
-	return false, nil
 }

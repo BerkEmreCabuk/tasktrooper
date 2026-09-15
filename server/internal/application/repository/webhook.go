@@ -299,9 +299,6 @@ func (s *Service) HandleGitHubPush(ctx context.Context, repositoryID uuid.UUID, 
 			return false, "index already at pushed commit"
 		}
 	}
-	if s.reindexHasNoMac(ctx) {
-		return false, s.deferReindexToAHuman(repositoryID)
-	}
 	return true, s.schedulePushReindex(ctx, repositoryID)
 }
 

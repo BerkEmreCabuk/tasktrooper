@@ -83,17 +83,6 @@ func TestEveryProviderExceptDeclaredButUnbuiltIsAvailable(t *testing.T) {
 	require.True(t, domain.ProviderAvailable(domain.LLMProviderAnthropic))
 }
 
-// domain.LLMProviderLocalRunner is a different kind of thing from the two
-// above: it works today, but it is not a provider a tenant connects, tests or
-// activates, so — unlike a declared-but-unbuilt CLI — it must never appear in
-// the catalog a Connect/Activate/SetEmbedding request or the settings UI reads
-// from. It is reached only through the "auto" empty-string convention.
-func TestLocalRunnerIsNeverInTheConnectableCatalog(t *testing.T) {
-	_, ok := domain.LLMProviderDefinitionFor(domain.LLMProviderLocalRunner)
-	require.False(t, ok, "local_runner must not be selectable via Connect/Test/Activate/SetEmbedding")
-	require.False(t, domain.ValidLLMProviderType("local_runner"))
-}
-
 // An unknown type is not available either. Same answer ValidLLMProviderType
 // gives it, so a typo cannot be mistaken for a ready provider.
 func TestAnUnknownProviderIsNotAvailable(t *testing.T) {

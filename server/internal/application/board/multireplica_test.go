@@ -13,16 +13,14 @@ import (
 )
 
 type sharedRunStore struct {
-	mu       sync.Mutex
-	rows     map[uuid.UUID]domain.TaskAgentRun
-	assignee map[uuid.UUID]string
-	claims   int
+	mu     sync.Mutex
+	rows   map[uuid.UUID]domain.TaskAgentRun
+	claims int
 }
 
 func newSharedRunStore() *sharedRunStore {
 	return &sharedRunStore{
-		rows:     map[uuid.UUID]domain.TaskAgentRun{},
-		assignee: map[uuid.UUID]string{},
+		rows: map[uuid.UUID]domain.TaskAgentRun{},
 	}
 }
 
@@ -62,7 +60,6 @@ func (s *sharedRunStore) ClaimRun(_ context.Context, c port.RunClaim) (port.RunC
 		return port.RunClaimResult{Reason: "not_pending"}, nil
 	}
 	live := 0
-	member := 0
 	taskBusy := false
 	for _, row := range s.rows {
 		if row.Status != domain.TaskAgentRunStatusRunning {
@@ -75,17 +72,12 @@ func (s *sharedRunStore) ClaimRun(_ context.Context, c port.RunClaim) (port.RunC
 		if row.TaskID == me.TaskID {
 			taskBusy = true
 		}
-		if c.MemberUID != "" && s.assignee[row.TaskID] == c.MemberUID {
-			member++
-		}
 	}
 	switch {
 	case taskBusy:
 		return port.RunClaimResult{Reason: "task_busy"}, nil
 	case c.MaxTenantRuns > 0 && live >= c.MaxTenantRuns:
 		return port.RunClaimResult{Reason: "tenant_at_capacity"}, nil
-	case c.MemberUID != "" && c.MaxMemberRuns > 0 && member >= c.MaxMemberRuns:
-		return port.RunClaimResult{Reason: "member_at_capacity"}, nil
 	}
 	me.Status = domain.TaskAgentRunStatusRunning
 	me.UpdatedAt = time.Now()
@@ -313,45 +305,6 @@ func TestTenantConcurrencyIsSharedAcrossReplicas(t *testing.T) {
 	}
 }
 
-func TestMemberSessionCapIsSharedAcrossReplicas(t *testing.T) {
-	store := newSharedRunStore()
-	catalog := newCountingCatalog()
-	defer close(catalog.release)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	const member = "firebase-uid-ayse"
-	runners := make([]*Runner, 2)
-	for i := range runners {
-		r := NewRunner(RunnerDeps{Runs: store, Catalog: catalog, MaxWorkers: 2, MaxMemberRuns: 1})
-
-		r.SetWorkspacePreparer(remoteWorkspaces{})
-		r.Start(ctx)
-		defer r.Stop()
-		runners[i] = r
-	}
-
-	for i := 0; i < 4; i++ {
-		taskID := uuid.New()
-		store.assignee[taskID] = member
-		run := store.put(domain.TaskAgentRun{TaskID: taskID})
-		runners[i%2].Enqueue(RunJob{
-			Run:  run,
-			Task: domain.BoardTask{ID: taskID, AssigneeUserID: member},
-		})
-	}
-
-	if !waitUntil(func() bool { return store.claimCount() >= 1 }) {
-		t.Fatal("no session started at all")
-	}
-	time.Sleep(150 * time.Millisecond)
-
-	if got := store.claimCount(); got != 1 {
-		t.Fatalf("%d concurrent sessions on one member's Mac, want 1", got)
-	}
-}
-
 func TestStopOnAnotherReplicaStopsTheRun(t *testing.T) {
 	store := newSharedRunStore()
 	catalog := newCountingCatalog()
@@ -402,13 +355,6 @@ type fixedPlan struct{ max int }
 func (p *fixedPlan) Allow(context.Context) (bool, string)            { return true, "" }
 func (p *fixedPlan) PauseTask(context.Context, uuid.UUID, uuid.UUID) {}
 func (p *fixedPlan) MaxConcurrency(context.Context) int              { return p.max }
-
-type remoteWorkspaces struct{}
-
-func (remoteWorkspaces) Available() bool { return true }
-func (remoteWorkspaces) Prepare(context.Context, string, string, string, string) (port.PreparedWorkspace, error) {
-	return port.PreparedWorkspace{}, context.Canceled
-}
 
 type countingQA struct {
 	mu    sync.Mutex

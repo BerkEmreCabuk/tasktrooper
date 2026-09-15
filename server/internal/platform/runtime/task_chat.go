@@ -2,14 +2,10 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/google/uuid"
 
-	boardapp "github.com/makifbaysal/tasktrooper/server/internal/application/board"
-	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/session"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -30,26 +26,12 @@ import (
 // request. A task-bound chat gets the task's own checkout on the task's own
 // branch instead — the SAME checkout the board runner and the pipeline use for
 // that task, so a chat and a run are working the same tree.
-//
-// # Local vs remote, and why the directory naming must match exactly
-//
-// "The same checkout" is not a figure of speech: on the remote (tunnel) path
-// this and the board runner's own prepareRemoteWorkspace both resolve the SAME
-// dir on the assignee's Mac (boardapp.RemoteTaskDir — <repo-name>/task-<id>), so
-// a chat turn and a board run genuinely share one working copy rather than each
-// getting its own clone that silently diverges from the other's edits. Get the
-// naming wrong here and a chat "about" a task edits a checkout nobody's task
-// pipeline will ever read from.
-//
-// remote is nil on a self-hosted or desktop install, where this process and the
-// CLI share a filesystem and the local git path below is already correct.
 type taskChatWorkspace struct {
 	tasks         port.BoardTaskStore
 	criteria      port.AcceptanceCriterionStore
 	repos         session.RepositoryResolver
 	git           port.GitClient
 	workspaceRoot string
-	remote        port.WorkspacePreparer
 }
 
 func (w taskChatWorkspace) ResolveTaskWorkspace(ctx context.Context, repositoryID, taskID uuid.UUID) (session.TaskBinding, error) {
@@ -65,31 +47,6 @@ func (w taskChatWorkspace) ResolveTaskWorkspace(ctx context.Context, repositoryI
 		if items, listErr := w.criteria.ListByTask(ctx, taskID); listErr == nil {
 			binding.Criteria = items
 		}
-	}
-
-	if w.remote != nil && w.remote.Available() {
-		member := registry.MemberUIDFromContext(ctx)
-		if member == "" {
-			return session.TaskBinding{}, errors.New("this chat names no member, so there is no Mac to prepare a workspace on")
-		}
-		repo, err := w.repos.ResolveRepository(ctx, repositoryID)
-		if err != nil {
-			return session.TaskBinding{}, err
-		}
-		if strings.TrimSpace(repo.RemoteURL) == "" {
-			return session.TaskBinding{}, fmt.Errorf(
-				"repository %q has no remote_url on record, and a Mac can only be given a URL to clone — "+
-					"re-import it from GitHub (or set its remote) before this chat can run on it", repo.Name)
-		}
-		dir := boardapp.RemoteTaskDir(repo, task)
-		branch := domain.TaskBranchName(task)
-		prepared, err := w.remote.Prepare(ctx, member, repo.RemoteURL, dir, branch)
-		if err != nil {
-			return session.TaskBinding{}, fmt.Errorf("prepare this task's workspace on the assignee's Mac: %w", err)
-		}
-		binding.WorkspaceDir = prepared.Rel
-		binding.Branch = prepared.Branch
-		return binding, nil
 	}
 
 	root, err := w.repos.ResolveRootPath(ctx, repositoryID)

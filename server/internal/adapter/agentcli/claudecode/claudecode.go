@@ -350,6 +350,12 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 	// them, and so a resumed session (empty prompt) is left alone.
 	systemPrompt = withToolManifest(systemPrompt, mcpCfg.Tools)
 
+	sessionEnv, refusedEnv := domain.SessionEnv(req.Env)
+	if len(refusedEnv) > 0 {
+		log.Warn().Strs("names", refusedEnv).Str("task", req.TaskKey).
+			Msg("claude code: dropped session environment outside the allowlist")
+	}
+
 	s, err := e.spawn(ctx, invocation{
 		workDir:         req.WorkDir,
 		systemPrompt:    systemPrompt,
@@ -361,6 +367,7 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 		tools:           domain.NativeToolsForPolicy(req.Policy),
 		label:           req.TaskKey,
 		mcpPath:         mcpPath,
+		env:             sessionEnv,
 	})
 	if err != nil {
 		return domain.AgentResponse{}, err
@@ -378,7 +385,11 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 // spawns TWICE on the resume-refused path, which is only affordable when a
 // spawn is a value away.
 type invocation struct {
-	workDir         string
+	workDir string
+	// env is the checkout's own version pins, already allowlisted. It goes
+	// after childEnv because exec keeps the last value for a repeated name,
+	// so the repository's pin beats the host's value for the same name.
+	env             []string
 	systemPrompt    string
 	prompt          string
 	model           string
@@ -431,7 +442,7 @@ func (e *Executor) spawn(ctx context.Context, inv invocation) (session, error) {
 	args := e.buildArgs(inv)
 	cmd := exec.CommandContext(runCtx, e.bin, args...)
 	cmd.Dir = inv.workDir
-	cmd.Env = childEnv(ctx)
+	cmd.Env = append(childEnv(ctx), inv.env...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

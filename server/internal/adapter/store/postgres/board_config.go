@@ -660,7 +660,7 @@ func (s *TaskAgentRunStore) Touch(ctx context.Context, id uuid.UUID) (string, er
 //     tenant's own transaction — so "count of live runs" IS the
 //     tenant's concurrency without a tenant_id in the text. The
 //     heartbeat window is what excludes runs whose pod was killed.
-//   - gate     the three budgets, evaluated together so the caller learns WHICH
+//   - gate     the two budgets, evaluated together so the caller learns WHICH
 //     one refused without a second query.
 //   - claimed  the transition. 'pending' -> 'running' is the claim; there is no
 //     owner column and no lease to expire, because the heartbeat on
@@ -673,31 +673,27 @@ WITH me AS (
     WHERE r.id = $1 AND r.status = 'pending'
     FOR UPDATE SKIP LOCKED
 ), live AS (
-    SELECT r.id, r.task_id, COALESCE(t.assignee_user_id, '') AS member
+    SELECT r.id, r.task_id
     FROM task_agent_runs r
-    JOIN board_tasks t ON t.id = r.task_id
     WHERE r.status = 'running' AND r.updated_at > now() - $2::interval
 ), gate AS (
     SELECT me.id,
         EXISTS (SELECT 1 FROM live WHERE live.task_id = me.task_id) AS task_busy,
-        ($3 > 0 AND (SELECT count(*) FROM live) >= $3) AS tenant_full,
-        ($4 <> '' AND $5 > 0
-            AND (SELECT count(*) FROM live WHERE live.member = $4) >= $5) AS member_full
+        ($3 > 0 AND (SELECT count(*) FROM live) >= $3) AS tenant_full
     FROM me
 ), claimed AS (
     UPDATE task_agent_runs r
     SET status = 'running', updated_at = now()
     FROM gate
     WHERE r.id = gate.id
-      AND NOT gate.task_busy AND NOT gate.tenant_full AND NOT gate.member_full
+      AND NOT gate.task_busy AND NOT gate.tenant_full
     RETURNING r.id
 )
 SELECT
     EXISTS (SELECT 1 FROM claimed) AS claimed,
     EXISTS (SELECT 1 FROM me) AS pending,
     COALESCE((SELECT task_busy FROM gate), false),
-    COALESCE((SELECT tenant_full FROM gate), false),
-    COALESCE((SELECT member_full FROM gate), false)
+    COALESCE((SELECT tenant_full FROM gate), false)
 `
 
 // claimLockClass namespaces this store's advisory locks so they cannot collide
@@ -732,7 +728,7 @@ func (s *TaskAgentRunStore) ClaimRun(ctx context.Context, claim port.RunClaim) (
 	if live <= 0 {
 		live = time.Minute
 	}
-	var claimed, pending, taskBusy, tenantFull, memberFull bool
+	var claimed, pending, taskBusy, tenantFull bool
 	err := s.pool.InTx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, claimTenantLockSQL, claimLockClass); err != nil {
 			return fmt.Errorf("lock tenant for claim: %w", err)
@@ -741,9 +737,7 @@ func (s *TaskAgentRunStore) ClaimRun(ctx context.Context, claim port.RunClaim) (
 			claim.RunID,
 			live.String(),
 			claim.MaxTenantRuns,
-			claim.MemberUID,
-			claim.MaxMemberRuns,
-		).Scan(&claimed, &pending, &taskBusy, &tenantFull, &memberFull)
+		).Scan(&claimed, &pending, &taskBusy, &tenantFull)
 	})
 	if err != nil {
 		return port.RunClaimResult{}, fmt.Errorf("claim task agent run: %w", err)
@@ -757,8 +751,6 @@ func (s *TaskAgentRunStore) ClaimRun(ctx context.Context, claim port.RunClaim) (
 		return port.RunClaimResult{Reason: "task_busy"}, nil
 	case tenantFull:
 		return port.RunClaimResult{Reason: "tenant_at_capacity"}, nil
-	case memberFull:
-		return port.RunClaimResult{Reason: "member_at_capacity"}, nil
 	default:
 		// The gate passed and the UPDATE still wrote nothing. Not reachable
 		// through the statement above, but a reason the caller can log beats a

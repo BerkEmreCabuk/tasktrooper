@@ -49,38 +49,12 @@ const (
 	// invocation, so the role and rules are folded into the run's prompt
 	// instead — see opencode.flattenHistory.
 	LLMProviderOpencode LLMProviderType = "opencode"
-	// LLMProviderLocalRunner is different in kind from every provider above: it
-	// is real and working today, but it is not something a tenant connects,
-	// tests or activates, so it is deliberately absent from
-	// AllLLMProviderDefinitions() and from every UI that renders that list.
-	//
-	// It is the embeddings client that reaches LM Studio on a tenant's own Mac
-	// through the control plane's reverse tunnel — see
-	// internal/adapter/llm.NewRunnerEmbedClient and
-	// web/desktop/runner/CLAUDE.md's "embeddings.create". There is no base URL
-	// to type in and no key to paste: the Mac a call reaches is whichever one
-	// the ACTING MEMBER (internal/platform/tenant.Identity.UserID) has attached
-	// through the desktop app, resolved per request rather than configured once
-	// per tenant. A Connect/Test/Activate flow built for "one endpoint, one
-	// key" has no field for that, and pretending otherwise would let a tenant
-	// "activate" a Mac that is not theirs to activate — the tunnel's own
-	// per-member attach already decides that.
-	//
-	// It IS the default embedding target, through the existing empty-string
-	// "auto" convention rather than a config a tenant has to discover: see
-	// MultiProviderClient.embeddingTarget/embedOnce. A tenant that explicitly
-	// picks a different embedding provider via SetEmbedding keeps that choice;
-	// this is only ever what "auto" resolves to.
-	LLMProviderLocalRunner LLMProviderType = "local_runner"
 )
 
-// PinnedLocalEmbeddingModel is the one model LM Studio serves on a tenant's
-// Mac, and the model every LLMProviderLocalRunner client asks for. It is a pin
-// in the same sense web/desktop/runner/embeddings.go pins it on the Mac side —
-// a request naming a different model is refused, not silently substituted,
-// because a vector from another model is not comparable to the ones already
-// indexed. Kept here, not read from config: nothing about it is
-// tenant-configurable, so there is nothing to load.
+// PinnedLocalEmbeddingModel is the model EMBEDDINGS_BASE_URL bootstraps a local
+// embedder with. It is a pin because a vector from another model is not
+// comparable to the ones already indexed. Kept here, not read from config:
+// nothing about it is configurable, so there is nothing to load.
 const PinnedLocalEmbeddingModel = "nomic-embed-text-v1.5"
 
 // PinnedLocalEmbeddingDimensions is nomic-embed-text-v1.5's vector length. It
@@ -148,21 +122,11 @@ type LLMProviderView struct {
 }
 
 type LLMProvidersResponse struct {
-	ActiveProvider    LLMProviderType `json:"active_provider"`
-	EmbeddingProvider LLMProviderType `json:"embedding_provider,omitempty"`
-	EmbeddingModel    string          `json:"embedding_model,omitempty"`
-	// EmbeddingOnMemberMac reports that LLMProviderLocalRunner is a choice on
-	// this deployment: embeddings can be produced by LM Studio on the acting
-	// member's own Mac.
-	//
-	// It is a field rather than something a client derives, because a client
-	// CANNOT derive it. That provider is deliberately absent from Providers
-	// below (see LLMProviderLocalRunner), so a UI building its embedding picker
-	// from the catalog concluded no provider could embed — while one was
-	// embedding — and offered no way to select the provider already in force.
-	EmbeddingOnMemberMac bool              `json:"embedding_on_member_mac"`
-	Providers            []LLMProviderView `json:"providers"`
-	Endpoints            []LLMEndpoint     `json:"endpoints"`
+	ActiveProvider    LLMProviderType   `json:"active_provider"`
+	EmbeddingProvider LLMProviderType   `json:"embedding_provider,omitempty"`
+	EmbeddingModel    string            `json:"embedding_model,omitempty"`
+	Providers         []LLMProviderView `json:"providers"`
+	Endpoints         []LLMEndpoint     `json:"endpoints"`
 }
 
 // ConnectLLMProviderRequest — model alanı yoktur: sağlayıcı bağlanırken model
@@ -422,29 +386,6 @@ func ErrHostExecutedProvider(t LLMProviderType) error {
 // failing with — for the tenant it was written for, a dead `gemini-2.0-flash`
 // and, before it, an unpaid Mistral.
 var ErrHostExecutedUnservable = errors.New("host-executed provider cannot serve this call")
-
-// ErrRunnerNotAttached marks an embedding call that reached the control plane
-// fine and found no Mac attached for the acting member — the domain-level
-// counterpart of the control plane's 409 runner_not_attached (see
-// tenant-manager's internal/control/gateway, and
-// internal/adapter/llm.NewRunnerEmbedClient on this side of the call).
-//
-// It is a sentinel for the same reason ErrProviderUnavailable is one: this sits
-// inside the indexer's retry and dedup paths, and both need to answer "will
-// this become true if I wait" before they answer anything else. Nothing here
-// becomes true on the next attempt by itself — the fix is a person opening the
-// desktop app — so the answer is "stop and say so", not "back off and retry".
-var ErrRunnerNotAttached = errors.New("no Mac is attached for this member")
-
-// ErrEmbeddingRunnerNotAttached is what an embedding caller gets for this
-// state. Indexing that fails silently and produces an empty or half-built
-// index is worse than indexing that names the one thing to do about it, which
-// is the whole reason this is its own sentinel rather than a bare upstream
-// error a caller would report as "embedding failed" with no next step.
-func ErrEmbeddingRunnerNotAttached() error {
-	return fmt.Errorf("no Mac is attached for this member; open the TaskTrooper desktop app and connect one, "+
-		"then try indexing or searching again: %w", ErrRunnerNotAttached)
-}
 
 // EmbeddingProvenanceStale reports whether an index built with (indexModel,
 // indexDimensions) can still be trusted for similarity search against a tenant

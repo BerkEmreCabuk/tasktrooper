@@ -43,28 +43,18 @@ fallback model and no sign that the value it sent had been dropped.
 
 ### GET /v1/llm/embedding-models | /v1/llm/embedding-status
 
-`?provider=` on the first takes a catalog type, an `llm_endpoints` uuid, **or**
-`local_runner`. `local_runner` is answered from the pin — one model,
-`nomic-embed-text-v1.5` — with no round trip: the runner refuses any other model,
-so LM Studio's real catalog would offer choices that cannot be chosen, and the
-listing must not empty when the Mac is unreachable.
+`?provider=` on the first takes a catalog type or an `llm_endpoints` uuid. Anything
+else is refused as "this provider cannot produce embeddings" (`endpointRef` checks the
+ref parses as a uuid before it reaches Postgres). The same guard
+covers `PUT`/`DELETE /v1/llm/endpoints/{id}`.
 
-No error from either names storage. A ref that is not a uuid is refused before the
-query (`endpointRef`); `llm_endpoints.id` is a uuid column, so `provider=local_runner`
-used to reach the user as `invalid input syntax for type uuid … (SQLSTATE 22P02)`.
-The same guard now covers `PUT`/`DELETE /v1/llm/endpoints/{id}`.
-
-`/embedding-status` answers "what is embedding, and can it right now":
-
-| field | |
-|---|---|
-| `provider` / `model` / `dimensions` | resolved, never the raw stored `""` |
-| `on_member_mac` | `provider == local_runner`; the Mac is asked only then |
-| `host.state` | `ready`, `no_mac`, `mac_not_ready`, `lm_studio_down`, `model_missing`, `unknown` |
-| `host.detail` | the Mac's own remediation, unrewritten |
-
-Split from `GET /v1/llm/providers` because it crosses the tunnel; a probe failure is
-`unknown`, never an error — the provider and model are true regardless.
+`/embedding-status` returns `{provider, model, dimensions}` (`domain.EmbeddingStatus`):
+the resolved values, never the raw stored `""`. `dimensions` is set only when `model`
+is the pinned local embedder's `nomic-embed-text-v1.5` (768) — the embedder child
+process the desktop app spawns (see `docs/architecture.md`); otherwise it is 0 and the
+client does not know the vector length until an index reports it. A separate call from
+`GET /v1/llm/providers` because it's a cheap, independent read, not because of any
+network round trip.
 
 ### GET /v1/models
 
@@ -126,7 +116,7 @@ is persisted as the assistant message, and the SSE stream ends with a normal
 
 | Endpoint | Notes |
 |---|---|
-| `POST /v1/files` | Multipart `file`; chunked and embedded for RAG (pod's ephemeral disk) |
+| `POST /v1/files` | Multipart `file`; chunked and embedded for RAG, stored under `DATA_DIR/files` |
 | `GET /v1/files` · `DELETE /v1/files/{id}` | Delete removes chunks and disk storage |
 | `POST /v1/attachments` | Multipart `file` + optional `repository_id`; binary attachments stored as BYTEA |
 | `GET /v1/attachments/{id}` | Raw bytes, stored `Content-Type`, `Content-Disposition: inline`, `Cache-Control: private, max-age=31536000, immutable` |
@@ -151,49 +141,6 @@ alongside `documents`.
 | `POST /admin/reload` | Reloads config, reconnects MCP servers; no HTTP restart |
 | `GET /health` | No auth; bridge + LM Studio status |
 | `GET /v1/usage?days=30` | Token usage aggregates (totals, by-model, daily) from `llm_usage`. `days` 1-365 |
-
-## Push notifications
-
-`POST /v1/push/devices` · `DELETE /v1/push/devices/{token}` register APNs tokens. Board
-`task.moved` events into `analiz_review`, `human_uat`, `need_revision` or `done` fan out
-to registered devices (`application/notify` + `adapter/apns`, enabled when `push.apns_*`
-config / `APNS_*` env is set).
-
-A `task.moved` produced by a park sweeper (device, Claude Code quota, deploy watch, work
-order) fans out as a **resume** instead — never as well, so one released card is one
-notification. That push carries application data beside the `aps` dictionary
-(`apns.SendData`), which is what the iOS client routes the tap on:
-
-```json
-{ "aps": { "alert": { "title": "T-42 devam ediyor",
-                      "body": "Claude kullanım limiti sıfırlandı, görev kaldığı yerden sürüyor." },
-           "sound": "default" },
-  "type": "task.resumed", "task_id": "<uuid>", "repository_id": "<uuid>",
-  "task_key": "T-42", "blocked_resource": "claude_code_quota" }
-```
-
-`type`, `task_id` and `repository_id` are required (the client fetches tasks per
-repository, so a tap cannot route without it); `task_key` and `blocked_resource` are
-informational. `type` is matched exactly — an unrecognised value is displayed and opens
-nothing — so it is a contract with the client, not a label. Copy lives in
-`application/notify/copy.go`. The question-answer resume, the billing-period resume and
-a release rollback look similar in the payload and deliberately do NOT send it
-(`board.parkResume`).
-
-`POST /v1/push/live-activities/start-token` saves a device's push-to-start token (the
-backend then launches a `TaskRunAttributes` lock-screen card when a task moves to
-`in_progress`); `POST /v1/push/live-activities` binds a running activity's update token
-to a `task_id`. Later column moves push `update`, `done`/`released` push `end`, over the
-`<bundle>.push-type.liveactivity` topic (`live_activity_tokens`, migration 045).
-
-## Waker service (Cloud Run, separate binary `cmd/waker`)
-
-Wake/sleep controller for the scale-to-zero cloud deploy: `POST /wake` and `GET /status`
-(Firebase auth) start Cloud SQL + the tenant-manager and report the phase
-(`sleeping`/`db_starting`/`service_starting`/`awake`); Cloud Scheduler calls `POST /reap`
-(OIDC) every 15 min and sleeps the system when the gateway's `/internal/idle-status`
-(internal-auth HMAC) proves it idle. Web (`SystemWakeGate`) and iOS
-(`SystemWakeGate`/`WakerClient`) poll `/wake` behind a loading screen.
 
 ## Board run control
 
@@ -452,8 +399,8 @@ repository's own `local_run` doc (`scripts/dev.sh`).
   `code_review` waits for the build/test pipeline before the reviewing architect is
   dispatched; off, dispatch is immediate and the board event carries `pipeline_gate:
   gate_disabled` so a card that skipped the gate is never mistaken for one that passed
-  it. Turn it off for a repository whose CI cannot answer (no Actions minutes, checks the
-  control plane cannot read). Even on, the wait is bounded
+  it. Turn it off for a repository whose CI cannot answer (no Actions minutes, checks this
+  server cannot read). Even on, the wait is bounded
   (`board.pipeline_gate_timeout`).
 
   Arming the other two changes what a later move accepts, not this call.
@@ -581,63 +528,17 @@ then block power iteration with Gram-Schmidt deflation against the covariance ac
 the last bit, including the parallel decomposition, so a client may cache a projection
 and diff it against a later one.
 
-## 409 `runner_not_attached` — the request needs a Mac
+## Assignee roster
 
-Any user-initiated request that cannot be served without the assignee's Mac answers `409` with
-**no `Retry-After`**. Nothing about it becomes true by waiting, so a client that backed off would
-show a spinner where the "connect your Mac" screen belongs.
-
-```json
-{ "error": {"message": "…", "type": "runner_not_attached"},
-  "code": "runner_not_attached", "member_uid": "…", "self": true }
-```
-
-| Field | Meaning |
-|---|---|
-| `code` / `error.type` | the same string in both places — the control plane's own refusal writes only the outer one |
-| `self` | the missing Mac is the CALLER's. `false` = a colleague's, so "open your laptop" is the wrong sentence |
-| `member_uid` | whose Mac, when known. Empty on the embedding path, where the call is always made as the acting member |
-
-Written by `adapter/http.runnerNotAttached`, reached from `internalError` (≈90 handlers, so any
-route that propagates the error gets it) and from `badRequestErr` (code search, whose 400 would
-otherwise read as "bad query"). Recognises `*domain.RunnerBlock` and `domain.ErrRunnerNotAttached`,
-including wrapped. `not_ready` answers the same 409 — to a person waiting, "connected but starting"
-and "not connected" are one instruction.
-
-**A dispatched board run is the opposite** and does NOT produce this: nobody is waiting on a socket,
-so it parks on `domain.ResourceRunnerNotAttached` and resumes by itself. Self-hosted and desktop
-never produce it at all.
-
-`POST /v1/agent-cli/{flavor}/connect` is one of these routes in the cloud: its probe reads the
-member's Mac (`preflight.report`), so no Mac answers 409 here rather than
-`agent_cli_binary_missing`. Those two are different problems — a shut laptop and a missing CLI —
-and only the 409 opens the "connect your Mac" screen.
-
-## GET /v1/tenant/members — the workspace roster
-
-Who a task may be assigned to. Readable by **every** role: a picker only an admin can
-populate would make assigning work to a teammate an admin feature by accident.
-
-```json
-{"members": [{"user_id": "…", "email": "…", "display_name": "…", "role": "owner|admin|member"}]}
-```
-
-| Fact | Value |
-|---|---|
-| Source | `tenant_members` (migration 115), the LOCAL mirror — **not** tenant-manager's `GET /api/tenant/members` |
-| Order | `display_name, user_id`; stable between calls |
-| Empty workspace | `{"members": []}`, never `null` |
-| No database | route not mounted (404), rather than an empty list a desktop build would have to explain |
-
-It reads the mirror because that is the exact set `resolveAssignee` validates against. The
-control plane's roster is a **larger** set — it holds invited teammates who have never
-opened the app — so a picker fed from there offers people whose selection is refused.
-
-**`email` and `display_name` are `""` today.** The mirror is filled from the signed identity
-headers, and `internalauth` signs only tenant, role and uid — tenant-manager has the email
-(`GET /api/tenant/members`) and no display name anywhere. Filling them is a coordinated
-multi-repo change (a signed email header); until then a client that wants labels joins this
-list with the control plane's on `user_id`, keeping THIS list as the set of candidates.
+This install has one person and no login: `assignee_user_id` on a task is either `""`
+(unassigned — the normal state of a backlog) or refused. `resolveAssignee`
+(`application/repository/service.go`) has no uid to look up and no roster to check
+against, so any non-empty value is refused as `assignee_not_member` rather than stored —
+a card assigned to somebody who cannot exist here would never be picked up. `tenant_members`
+(migration 115) still exists in the schema — the table this product shares with the hosted
+one — but nothing ever writes to it: this product's own auth is a single bearer token with
+no per-human identity header, so there is no caller identity to mirror into it and the
+roster stays empty. See [projects.md](projects.md#assignee-roster-migration-115).
 
 ## Assignee fields: omitted vs `null` vs a value
 
@@ -648,45 +549,27 @@ list with the control plane's on `user_id`, keeping THIS list as the set of cand
 |---|---|
 | key omitted | leave whoever is on the card alone |
 | `null` | unassign |
-| a value (`""` for the person) | assign that agent / that person |
+| a value | assign that agent; for the person, only `""` is accepted (see Assignee roster above) — any other value is refused |
 
 `null` used to decode to the same nil pointer as an omitted key, so it was a clear that
 silently did nothing — including the board's own "unassign this agent" control.
 
 ## Machine-readable refusals
 
-Every code below appears in **both** `error.type` and a top-level `code`, matching
-tenant-manager's `writeJSONCode`, so a client reads one place whichever server refused it.
+Every code below appears in **both** `error.type` and a top-level `code`, so a client reads
+one place for the refusal reason.
 
 | Code | Status | Meaning |
 |---|---|---|
-| `runner_not_attached` | 409 | see above |
-| `provider_unavailable` | 409 | a declared-but-not-built provider was named (`cursor_agent`, `antigravity`). Same code and status tenant-manager's onboarding route answers |
-| `host_executed_provider` | 409 | `claude_code` was asked to behave like an endpoint — connect/test/activate. It is a process on a machine (in cloud, the assigned member's Mac), so there is nothing to dial |
-| `assignee_not_member` | 400 | the person a task was given to is not in `tenant_members`. The body is wrong, so 400; the sentence explains that the roster fills in as people sign in |
+| `provider_unavailable` | 409 | a declared-but-not-built provider was named (`cursor_agent`, `antigravity`) |
+| `host_executed_provider` | 409 | `claude_code` was asked to behave like an endpoint — connect/test/activate. It's a CLI process this server execs directly, not a network endpoint, so there is nothing to dial |
+| `assignee_not_member` | 400 | a task was given a non-empty `assignee_user_id`; see Assignee roster above |
 | `invalid_catalog_input` | 400 | agent-catalog validation (`POST\|PUT /admin/agents`, `.../skills`, `.../rules`): `name is required`, `content is required`, `effort must be one of …`, `max_turns cannot be negative`. The sentence is the whole explanation and is rendered verbatim |
 | `unknown_agent_cli_flavor` | 400 | `POST /v1/agent-cli/{flavor}/connect` or `DELETE /v1/agent-cli/{flavor}` named no CLI at all. A flavor that IS known but not built answers 409 `provider_unavailable` instead |
 
-The first four were previously either `500` (the first three) or an untyped `400` (the
-fourth), i.e. a permanent refusal that told every client and every monitor to retry, or one a
-client could only recognise by matching the prose. The last two already answered 400 and were
-the stragglers: right status, no code. Written by `adapter/http.permanentRefusal` /
-`typedBadRequest` / `codedBadRequest`, the first two reached from `internalError` and
-`badRequestErr`, so any route that propagates the error gets the same answer.
-
-## Push webhook with no member: the index is marked stale
-
-A GitHub delivery carries no actor by design. On a workspace whose embeddings are produced on
-a member's own Mac (`local_runner`), a push therefore has no machine to reindex on, and the
-answer is neither "pick somebody's laptop" nor "start a pass that embeds nothing":
-
-- `202 {"accepted": false, "reason": "index marked stale: …"}`
-- the index's `sync_warning` says the push arrived and the index is behind that commit
-- the next pass a **person** triggers picks it up: opening the repository polls
-  `GET /v1/repositories/{id}/index/status`, which runs the freshness check on a context that
-  names them
-
-The boot freshness sweep is deferred the same way and for the same reason — a background
-fan-out has neither an actor nor an assignee. A deployment that embeds over HTTP (self-hosted,
-desktop, or a tenant that chose an HTTP embedding provider) is unaffected and reindexes on
-push exactly as before.
+The first two were previously `500` and the third an untyped `400` — a permanent refusal
+that told every client and every monitor to retry, or one a client could only recognise by
+matching the prose. The last two already answered 400 and were the stragglers: right status,
+no code. Written by `adapter/http.permanentRefusal` / `typedBadRequest` / `codedBadRequest`,
+the first two reached from `internalError` and `badRequestErr`, so any route that propagates
+the error gets the same answer.

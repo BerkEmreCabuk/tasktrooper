@@ -32,18 +32,13 @@ func (f *fakeBillingStore) SetPeriodStart(_ context.Context, start time.Time) er
 	f.plan.PeriodStart = start
 	return nil
 }
-func (f *fakeBillingStore) SyncPlan(_ context.Context, plan domain.BillingPlan) error {
-	f.plan = plan
-	return nil
-}
 func (f *fakeBillingStore) ListModelPrices(context.Context) ([]domain.ModelPrice, error) {
 	return nil, nil
 }
 func (f *fakeBillingStore) UpsertModelPrice(_ context.Context, p domain.ModelPrice) (domain.ModelPrice, error) {
 	return p, nil
 }
-func (f *fakeBillingStore) DeleteModelPrice(context.Context, string) error                { return nil }
-func (f *fakeBillingStore) ReplaceModelPrices(context.Context, []domain.ModelPrice) error { return nil }
+func (f *fakeBillingStore) DeleteModelPrice(context.Context, string) error { return nil }
 func (f *fakeBillingStore) UsdSpentSince(context.Context, time.Time) (float64, error) {
 	return f.usd, nil
 }

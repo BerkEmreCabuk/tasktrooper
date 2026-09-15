@@ -81,16 +81,6 @@ type Identity struct {
 	// behind them (background sweeps, self-hosted runs with no gateway). The
 	// board records it as actor_user_id and the memory scopes key off it.
 	UserID string
-	// ControlPlane says the control plane made this call on its OWN behalf — a
-	// billing push, an OAuth token writeback — rather than proxying a person's
-	// request. Read from internalauth.ScopeHeader, which the gateway strips
-	// from client-supplied requests and sets only on the calls it originates.
-	//
-	// Whatever UserID such a call carries is not an acting human, so nothing
-	// may record one from it. It only ever WITHDRAWS a claim, which is why the
-	// unsigned header is enough: forging it costs the forger the mirror write
-	// it would otherwise get.
-	ControlPlane bool
 }
 
 type ctxKey struct{}

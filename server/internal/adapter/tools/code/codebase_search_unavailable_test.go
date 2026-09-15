@@ -43,7 +43,6 @@ func searchToolAgainst(t *testing.T, client port.LLMClient) (port.ToolExecutor, 
 		domain.IndexerConfig{TopK: 3},
 		domain.GraphConfig{MaxExpansionDepth: 2, MaxExpandedChunks: 8},
 		"embed-model",
-		false,
 	)
 
 	ctx := registry.ContextWithWorkspaceDir(
@@ -160,7 +159,6 @@ func TestCodebaseSearchStillReportsAMissingIndex(t *testing.T) {
 		domain.IndexerConfig{TopK: 3},
 		domain.GraphConfig{},
 		"embed-model",
-		false,
 	)
 	ctx := registry.ContextWithSessionID(context.Background(), uuid.New())
 

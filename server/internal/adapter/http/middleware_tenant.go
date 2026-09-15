@@ -6,7 +6,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog/log"
 
-	"github.com/makifbaysal/tasktrooper/server/internal/application/tenantboot"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
@@ -59,12 +58,6 @@ func (h *Handler) tenantMiddleware(c *fiber.Ctx) error {
 // TenantOnboarder is the half of tenantboot.Service this layer needs. Declared
 // here rather than imported as a concrete type so the handler stays testable
 // without a database, and so a build with no Postgres can leave it nil.
-//
-// Sight WRITES the mirror and Members READS it. They are one interface because
-// they are one fact — who is in this tenant — and splitting them would let a
-// build wire the reader without the writer, i.e. serve a roster that nothing
-// ever fills in.
 type TenantOnboarder interface {
 	Sight(ctx context.Context, id tenant.Identity) error
-	Members(ctx context.Context) ([]tenantboot.Member, error)
 }

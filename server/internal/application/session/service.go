@@ -25,35 +25,34 @@ import (
 )
 
 type Service struct {
-	store                port.SessionStore
-	activityStore        port.ActivityStore
-	cancelPoll           time.Duration
-	agentLoop            *agent.Loop
-	orchestrator         *orchestrator.Service
-	settings             *appSettings.Service
-	repositories         RepositoryResolver
-	board                port.BoardConfigStore
-	catalog              port.CatalogStore
-	ttl                  time.Duration
-	rag                  RAGInjector
-	indexInjector        IndexInjector
-	budget               appcontext.Budget
-	summarizer           appcontext.Summarizer
-	contextCfg           domain.ContextConfig
-	indexerCfg           domain.IndexerConfig
-	mappingCfg           domain.MappingConfig
-	memories             port.AgentMemoryStore
-	kpis                 port.AgentKPIStore
-	actions              port.SessionActionStore
-	answerResumer        AnswerResumer
-	workspace            WorkspaceLister
-	attachments          AttachmentLinker
-	taskWorkspaces       TaskWorkspaceResolver
-	chatExecutor         port.ChatExecutor
-	remoteAgentWorkspace RemoteAgentWorkspace
-	runsMu               sync.Mutex
-	runs                 map[uuid.UUID]*runHandle
-	sessionRuns          map[uuid.UUID]map[uuid.UUID]struct{}
+	store          port.SessionStore
+	activityStore  port.ActivityStore
+	cancelPoll     time.Duration
+	agentLoop      *agent.Loop
+	orchestrator   *orchestrator.Service
+	settings       *appSettings.Service
+	repositories   RepositoryResolver
+	board          port.BoardConfigStore
+	catalog        port.CatalogStore
+	ttl            time.Duration
+	rag            RAGInjector
+	indexInjector  IndexInjector
+	budget         appcontext.Budget
+	summarizer     appcontext.Summarizer
+	contextCfg     domain.ContextConfig
+	indexerCfg     domain.IndexerConfig
+	mappingCfg     domain.MappingConfig
+	memories       port.AgentMemoryStore
+	kpis           port.AgentKPIStore
+	actions        port.SessionActionStore
+	answerResumer  AnswerResumer
+	workspace      WorkspaceLister
+	attachments    AttachmentLinker
+	taskWorkspaces TaskWorkspaceResolver
+	chatExecutor   port.ChatExecutor
+	runsMu         sync.Mutex
+	runs           map[uuid.UUID]*runHandle
+	sessionRuns    map[uuid.UUID]map[uuid.UUID]struct{}
 }
 
 type AttachmentLinker interface {
@@ -83,14 +82,6 @@ func (s *Service) SetTaskWorkspaces(r TaskWorkspaceResolver) {
 
 func (s *Service) SetChatExecutor(e port.ChatExecutor) {
 	s.chatExecutor = e
-}
-
-type RemoteAgentWorkspace interface {
-	Ensure(ctx context.Context, memberUID, dir string) (string, error)
-}
-
-func (s *Service) SetRemoteAgentWorkspace(w RemoteAgentWorkspace) {
-	s.remoteAgentWorkspace = w
 }
 
 type AnswerResumer interface {

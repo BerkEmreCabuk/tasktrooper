@@ -31,22 +31,12 @@ func (r *fakeRegistry) MarkBootstrapped(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
-type fakeMembers struct {
-	mu      sync.Mutex
-	seeded  int
-	members []Member
+type fakeSeeds struct {
+	mu     sync.Mutex
+	seeded int
 }
 
-func (m *fakeMembers) UpsertMember(_ context.Context, member Member) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.members = append(m.members, member)
-	return nil
-}
-
-func (m *fakeMembers) ListMembers(context.Context) ([]Member, error) { return nil, nil }
-
-func (m *fakeMembers) Seed(context.Context, string) error {
+func (m *fakeSeeds) Seed(context.Context, string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.seeded++
@@ -95,10 +85,10 @@ func (r *stepRecorder) waitFor(t *testing.T, n int) {
 	}
 }
 
-func newService() (*Service, *fakeRegistry, *fakeMembers) {
+func newService() (*Service, *fakeRegistry, *fakeSeeds) {
 	reg := &fakeRegistry{needs: map[uuid.UUID]bool{}}
-	members := &fakeMembers{}
-	return NewService(reg, members), reg, members
+	seeds := &fakeSeeds{}
+	return NewService(reg, seeds), reg, seeds
 }
 
 // A step runs for the tenant on the request, and it runs once per tenant per
@@ -166,57 +156,11 @@ func TestAFailingStepDoesNotFailTheRequest(t *testing.T) {
 	good.waitFor(t, 1)
 }
 
-// The mirror is the set task assignment validates against, so it takes a
-// caller only when there is a person behind it. A control-scope call is the
-// control plane acting on its own behalf and names none, whatever it puts in
-// the actor header — it used to put the tenant's own uuid there, and every
-// tenant ended up with a nameless "member" that a card could be assigned to.
-func TestSightDoesNotMirrorAControlPlaneCall(t *testing.T) {
-	svc, _, members := newService()
-
-	id := uuid.New()
-	if err := svc.Sight(context.Background(), tenant.Identity{
-		TenantID:     id,
-		Role:         tenant.RoleOwner,
-		UserID:       id.String(),
-		ControlPlane: true,
-	}); err != nil {
-		t.Fatalf("Sight: %v", err)
-	}
-
-	members.mu.Lock()
-	defer members.mu.Unlock()
-	if len(members.members) != 0 {
-		t.Fatalf("a control-scope call was mirrored into the roster: %+v", members.members)
-	}
-}
-
-// And the ordinary case still works, which is what makes the test above mean
-// something: a proxied request is how a teammate becomes assignable at all.
-func TestSightMirrorsAProxiedCaller(t *testing.T) {
-	svc, _, members := newService()
-
-	if err := svc.Sight(context.Background(), tenant.Identity{
-		TenantID: uuid.New(), Role: tenant.RoleAdmin, UserID: "firebase-uid-7",
-	}); err != nil {
-		t.Fatalf("Sight: %v", err)
-	}
-
-	members.mu.Lock()
-	defer members.mu.Unlock()
-	if len(members.members) != 1 {
-		t.Fatalf("roster writes = %d, want 1", len(members.members))
-	}
-	if got := members.members[0]; got.UserID != "firebase-uid-7" || got.Role != tenant.RoleAdmin {
-		t.Fatalf("mirrored %+v, want the caller's uid and role", got)
-	}
-}
-
 // The board seed is the durable, once-ever half; the steps are the
 // once-per-process half. A tenant seeded by an earlier build still gets the
 // steps, which is how new seed data reaches tenants that already exist.
 func TestStepsRunForAnAlreadySeededTenant(t *testing.T) {
-	svc, reg, members := newService()
+	svc, reg, seeds := newService()
 	rec := newStepRecorder()
 	svc.AddStep("probe", rec.run)
 
@@ -228,9 +172,9 @@ func TestStepsRunForAnAlreadySeededTenant(t *testing.T) {
 	}
 	rec.waitFor(t, 1)
 
-	members.mu.Lock()
-	seeded := members.seeded
-	members.mu.Unlock()
+	seeds.mu.Lock()
+	seeded := seeds.seeded
+	seeds.mu.Unlock()
 	if seeded != 0 {
 		t.Fatalf("the board was re-seeded %d times for a tenant that already had one", seeded)
 	}

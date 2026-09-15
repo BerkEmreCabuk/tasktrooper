@@ -38,9 +38,9 @@ func NewSettingsStore(pool *DB, defaultRoot, defaultLang string, lockWorkspaceRo
 	}
 }
 
-// Empty until the user points it at a repository of their own: the
-// search_boilerplate_catalog tool reads whatever is set here on every call.
-const defaultBoilerplateCatalogRepo = ""
+// The public catalog, until the user points it at a repository of their own:
+// the search_boilerplate_catalog tool reads whatever is set here on every call.
+const defaultBoilerplateCatalogRepo = "github.com/makifbaysal/boilerplates"
 
 func (s *SettingsStore) Get(ctx context.Context) (domain.AppSettings, error) {
 	rows, err := s.pool.Query(ctx, `SELECT key, value FROM app_settings`)

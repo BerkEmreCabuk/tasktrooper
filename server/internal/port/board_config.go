@@ -134,12 +134,6 @@ type RunClaim struct {
 	// counted over the tenant's live runs — which row-level security scopes for
 	// free, since the count runs inside the tenant's own transaction.
 	MaxTenantRuns int
-	// MemberUID and MaxMemberRuns are the Claude Code session cap, applied
-	// where the sessions actually run: one member, one Mac, one subscription.
-	// Empty uid or 0 cap skips it — a deployment that executes runs in its own
-	// process has no member to cap.
-	MemberUID     string
-	MaxMemberRuns int
 }
 
 // RunClaimResult says whether this process won, and if not, which budget said
@@ -150,7 +144,7 @@ type RunClaimResult struct {
 	Claimed bool
 	// Reason is "" when Claimed. Otherwise one of: "not_pending" (somebody else
 	// claimed it, or it was cancelled while it queued), "task_busy",
-	// "tenant_at_capacity", "member_at_capacity".
+	// "tenant_at_capacity".
 	Reason string
 }
 

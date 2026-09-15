@@ -66,6 +66,14 @@ export const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 const BUNDLED_CONFIG_FILE = "app-update.yml";
 
+/**
+ * The one repository this app accepts a GitHub feed for: the releases the
+ * `release-mac` workflow publishes. Anything else in a bundled config was
+ * inferred from somebody's git remote rather than chosen — see `resolveFeed`.
+ */
+const GITHUB_OWNER = "makifbaysal";
+const GITHUB_REPO = "tasktrooper-oss";
+
 // --- the feed ---------------------------------------------------------------
 
 export interface FeedPaths {
@@ -82,7 +90,7 @@ export interface FeedPaths {
  * ad-hoc build it always was. Both say so plainly rather than checking a URL
  * that was never configured and reporting a network error.
  */
-export type Feed = { kind: "bundled"; url?: string } | { kind: "none"; reason: string };
+export type Feed = { kind: "bundled"; provider: "generic" | "github"; url: string } | { kind: "none"; reason: string };
 
 /**
  * https, or http on the loopback interface and nowhere else.
@@ -117,10 +125,11 @@ function field(file: string, name: string): string | undefined {
 /**
  * Decide where this launch fetches update metadata from.
  *
- * One source: a generic `app-update.yml` that a packaging run deliberately put
- * in the bundle. No environment override, and nothing this repository points at
- * by default — a build with no feed is honestly unsupported rather than quietly
- * checking a URL nobody configured.
+ * One source: the `app-update.yml` a packaging run deliberately put in the
+ * bundle, and only the two shapes this project publishes — a `generic` URL, or
+ * the `github` releases of this repository. No environment override, and
+ * nothing this repository points at by default — a build with no feed is
+ * honestly unsupported rather than quietly checking a URL nobody configured.
  */
 export function resolveFeed(paths: FeedPaths): Feed {
   if (!paths.packaged) {
@@ -133,8 +142,8 @@ export function resolveFeed(paths: FeedPaths): Feed {
   const bundled = path.join(paths.resourcesPath, BUNDLED_CONFIG_FILE);
   if (existsSync(bundled)) {
     /**
-     * Only `generic`, and this check is load-bearing rather than defensive
-     * tidiness.
+     * Two providers, and reading this file at all is load-bearing rather than
+     * defensive tidiness.
      *
      * electron-builder does not leave `app-update.yml` out when no publish
      * configuration is set — it **guesses one from the git remote** and writes
@@ -142,17 +151,33 @@ export function resolveFeed(paths: FeedPaths): Feed {
      * would check a repository it was never meant to check, forever.
      *
      * `publish: null` in electron-builder.yml stops the guess at the source.
-     * This refuses it at the other end, for any config nobody meant to be
-     * there.
+     * This refuses it at the other end: a generic feed must carry a URL that
+     * could be trusted, and a GitHub feed must name this repository, which the
+     * release workflow states explicitly and a guess cannot.
      */
     const provider = field(bundled, "provider");
+
+    if (provider === "github") {
+      // The release workflow passes owner and repo on the command line, so a
+      // config naming anything else is one electron-builder guessed. The guess
+      // is what this check exists for; the identity is the whole of it.
+      const owner = field(bundled, "owner");
+      const repo = field(bundled, "repo");
+      if (owner !== GITHUB_OWNER || repo !== GITHUB_REPO) {
+        return {
+          kind: "none",
+          reason:
+            "This build carries a GitHub update feed for a repository this app does not publish from, " +
+            "so it was inferred from a git remote rather than chosen, and it is ignored.",
+        };
+      }
+      return { kind: "bundled", provider: "github", url: `https://github.com/${owner}/${repo}/releases` };
+    }
+
     if (provider !== "generic") {
       return {
         kind: "none",
-        reason:
-          provider === "github"
-            ? "This build carries a GitHub update feed that was inferred from the git remote, not chosen, so it is ignored."
-            : `This build's update feed uses the '${provider ?? "unknown"}' provider, which this app does not read.`,
+        reason: `This build's update feed uses the '${provider ?? "unknown"}' provider, which this app does not read.`,
       };
     }
 
@@ -163,13 +188,13 @@ export function resolveFeed(paths: FeedPaths): Feed {
         reason: "This build's update feed is not a usable URL, so it will not be fetched.",
       };
     }
-    return { kind: "bundled", url };
+    return { kind: "bundled", provider: "generic", url };
   }
 
   return {
     kind: "none",
     reason:
-      "This build carries no update feed, so it cannot update itself. Packaging with a generic " +
+      "This build carries no update feed, so it cannot update itself. Packaging with a " +
       "`publish` configuration is what adds one.",
   };
 }
@@ -228,6 +253,22 @@ function reason(err: unknown): string {
   const first = raw.split("\n", 1)[0]?.trim() ?? "";
   if (!first) return "The update check failed.";
   return first.length > 200 ? `${first.slice(0, 197)}…` : first;
+}
+
+/**
+ * A GitHub feed answering "not found" is the expected state while this
+ * repository is private, not a fault a user can do anything about.
+ *
+ * electron-updater's GitHub provider reads the public releases feed with no
+ * credentials, which is what makes it work for everyone once the repository is
+ * public — and what makes it 404 for everyone until then. Drawing a warning
+ * triangle over that would tell every early user their app is broken, so it is
+ * logged at debug level and the status stays quiet.
+ */
+export function feedNotFound(feed: Feed, err: unknown): boolean {
+  if (feed.kind !== "bundled" || feed.provider !== "github") return false;
+  const message = err instanceof Error ? err.message : String(err);
+  return /\b404\b/.test(message) || /not found/i.test(message) || /ensure a production release exists/i.test(message);
 }
 
 export class UpdateService {
@@ -317,7 +358,7 @@ export class UpdateService {
       });
     });
     backend.on("error", (err) => {
-      this.#set({ phase: "error", checkedAt: this.#now(), detail: reason(err) });
+      this.#failed(err);
     });
 
     this.#firstCheck = setTimeout(() => void this.check(), FIRST_CHECK_DELAY_MS);
@@ -347,7 +388,7 @@ export class UpdateService {
     try {
       await this.#backend.checkForUpdates();
     } catch (err) {
-      this.#set({ phase: "error", checkedAt: this.#now(), detail: reason(err) });
+      this.#failed(err);
     }
     return this.#status;
   }
@@ -368,6 +409,16 @@ export class UpdateService {
     return true;
   }
 
+  /** Every failure lands here, so the one that must stay silent stays silent. */
+  #failed(err: unknown): void {
+    if (feedNotFound(this.#feed, err)) {
+      this.#logDebug(`feed has no releases yet: ${reason(err)}`);
+      this.#set({ phase: "current", checkedAt: this.#now(), version: undefined, percent: undefined, detail: undefined });
+      return;
+    }
+    this.#set({ phase: "error", checkedAt: this.#now(), detail: reason(err) });
+  }
+
   #set(patch: Partial<UpdateStatus>): void {
     this.#status = { ...this.#status, ...patch };
     this.#onStatus(this.#status);
@@ -379,17 +430,16 @@ export class UpdateService {
    * either, so info and debug are dropped unless they were asked for.
    */
   #logger(): UpdaterLogger {
-    const debug = this.#debug;
     return {
-      info: (message) => {
-        if (debug) console.warn(`[updater] ${message}`);
-      },
-      debug: (message) => {
-        if (debug) console.warn(`[updater] ${message}`);
-      },
+      info: (message) => this.#logDebug(message),
+      debug: (message) => this.#logDebug(message),
       warn: (message) => console.warn(`[updater] ${message}`),
       error: (message) => console.error(`[updater] ${message}`),
     };
+  }
+
+  #logDebug(message: string): void {
+    if (this.#debug) console.warn(`[updater] ${message}`);
   }
 }
 

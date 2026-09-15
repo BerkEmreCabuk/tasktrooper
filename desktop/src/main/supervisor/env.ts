@@ -61,6 +61,22 @@ export function childEnv(preflight: PreflightReport): NodeJS.ProcessEnv {
   return env;
 }
 
+export const SERVER_CONTRACT_KEYS = [
+  "DATABASE_URL",
+  "PORT",
+  "DATA_DIR",
+  "CONFIG_PATH",
+  "SERVER_API_KEY",
+  "MCP_SECRETS_KEY",
+  "PUBLIC_BASE_URL",
+  "CORS_ORIGINS",
+  "CLAUDE_CODE_BIN",
+  "EMBEDDINGS_BASE_URL",
+  "EMBEDDED_POSTGRES_CACHE_DIR",
+  "CHROME_BIN",
+  "MOBILE_APPIUM_HUB_URL",
+] as const;
+
 export interface AgentServerEnvInputs {
   preflight: PreflightReport;
   /** Where the backend keeps its database, its RAG files and its workspaces. */
@@ -93,8 +109,15 @@ export function agentServerEnv(inputs: AgentServerEnvInputs): NodeJS.ProcessEnv 
   const chrome = itemById(preflight, "chrome");
   const appium = itemById(preflight, "appium");
 
+  // Launched from a terminal, the app inherits that shell's environment. An
+  // exported DATABASE_URL would silently point the backend at someone else's
+  // database instead of its embedded one, so every key the backend reads is
+  // this function's to set or to leave absent — never the parent shell's.
+  const inherited = childEnv(preflight);
+  for (const key of SERVER_CONTRACT_KEYS) delete inherited[key];
+
   return {
-    ...childEnv(preflight),
+    ...inherited,
     PORT: "0",
     DATA_DIR: inputs.dataDir,
     EMBEDDED_POSTGRES_CACHE_DIR: inputs.postgresCacheDir,
