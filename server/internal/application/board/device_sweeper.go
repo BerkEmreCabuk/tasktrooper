@@ -7,7 +7,6 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 const DeviceSweeperInterval = 10 * time.Minute
@@ -45,7 +44,7 @@ func (s *DeviceSweeper) Start(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				tenant.Sweep(ctx, "mobile_device", s.sweep)
+				s.sweep(ctx)
 			}
 		}
 	}()

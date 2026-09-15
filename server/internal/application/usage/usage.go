@@ -13,7 +13,6 @@ import (
 
 	appcontext "github.com/makifbaysal/tasktrooper/server/internal/application/context"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -79,7 +78,7 @@ func (r *RecordingClient) Embed(ctx context.Context, input, model string) ([]flo
 // record writes the call's tokens to llm_usage in the background.
 //
 // ctx is taken for the tenant on it and nothing else — the write must outlive
-// the request whose tokens it is recording (tenant.Detach). It ran on a bare
+// the request whose tokens it is recording (context.WithoutCancel). It ran on a bare
 // context.Background(), so on a shared server EVERY chat and embedding call's
 // usage was dropped with one Warn line: no spend, no budget gate, no billing.
 func (r *RecordingClient) record(ctx context.Context, model string, u domain.Usage) {
@@ -90,7 +89,7 @@ func (r *RecordingClient) record(ctx context.Context, model string, u domain.Usa
 		model = "(default)"
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(tenant.Detach(ctx), recordTimeout)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), recordTimeout)
 		defer cancel()
 		if err := r.store.Record(ctx, domain.LLMUsageRecord{
 			Model:            model,

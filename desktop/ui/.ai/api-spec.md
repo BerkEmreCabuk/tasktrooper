@@ -361,19 +361,13 @@ access token; `PUT {team_id}` re-scopes), `GET /v1/settings/vercel/teams`,
 (`{area, provider, external_id, source}`), `DELETE …/hosting/links/{area|root}`.
 409 = Vercel not connected.
 
-## Task assignee — the person
+## Task assignee
 
-A board task carries two assignments: `assignee_agent_id` is the agent that works it,
-`assignee_user_id` is the person. The install has one person and no login, so the server
-accepts only `""` for the person. `showMemberAssignee` (2+ members, or an assignee already
-set) keeps the person picker hidden.
+A board task is assigned to an agent only (`assignee_agent_id`); there is no person assignee.
 
 | Call | Contract |
 |---|---|
-| `GET /v1/tenant/members` | called by `useTenantMembers`; the server registers no such route, and the hook's `.catch` reads the failure as no members |
-| `POST /v1/repositories/{id}/tasks` | `assignee_user_id` optional; absent creates an unassigned card. |
-| `PATCH .../tasks/{taskId}` | both assignees are `domain.Nullable`: omitted leaves it, `null` unassigns, a value assigns (`""` also unassigns the person). Do not narrow either type to one spelling. |
-| Refusal | `400` `assignee_not_member`, in `error.type` and a top-level `code`, for any non-empty `assignee_user_id`. `isAssigneeRejectedError()` in `api.ts` switches on the code. |
+| `PATCH .../tasks/{taskId}` | `assignee_agent_id` is `domain.Nullable`: omitted leaves it, `null` unassigns, a value assigns. Do not narrow the type to one spelling. |
 
 ## `sync_warning` on the index status
 

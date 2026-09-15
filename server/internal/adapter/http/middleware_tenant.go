@@ -4,7 +4,6 @@ import (
 	"context"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
@@ -61,5 +60,5 @@ func (h *Handler) tenantMiddleware(c *fiber.Ctx) error {
 // without a database, and so a build with no Postgres can leave it nil.
 type TenantOnboarder interface {
 	Sight(ctx context.Context, id tenant.Identity) error
-	Booting(tenantID uuid.UUID) bool
+	Booting() bool
 }

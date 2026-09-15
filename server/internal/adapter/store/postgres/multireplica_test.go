@@ -145,7 +145,7 @@ func (f *replicaFixture) seed(t *testing.T) {
 	}
 	// One event is enough for every run in these tests: board_event_id is
 	// provenance, and nothing the claim does reads it.
-	taskID := f.newTask(t, "")
+	taskID := f.newTask(t)
 	if err := f.a.QueryRow(ctx, `
 		INSERT INTO board_events (repository_id, task_id, event_type)
 		VALUES ($1, $2, 'task.moved') RETURNING id
@@ -154,19 +154,15 @@ func (f *replicaFixture) seed(t *testing.T) {
 	}
 }
 
-func (f *replicaFixture) newTask(t *testing.T, assignee string) uuid.UUID {
+func (f *replicaFixture) newTask(t *testing.T) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
-	var user any
-	if assignee != "" {
-		user = assignee
-	}
 	number := f.nextTask
 	f.nextTask++
 	if err := f.a.QueryRow(f.ctx(), `
-		INSERT INTO board_tasks (repository_id, title, task_number, assignee_user_id)
-		VALUES ($1, 'probe task', $2, $3) RETURNING id
-	`, f.repoID, number, user).Scan(&id); err != nil {
+		INSERT INTO board_tasks (repository_id, title, task_number)
+		VALUES ($1, 'probe task', $2) RETURNING id
+	`, f.repoID, number).Scan(&id); err != nil {
 		t.Fatalf("seed task: %v", err)
 	}
 	return id
@@ -307,7 +303,7 @@ func TestClaimRunGivesOneReplicaTheTask(t *testing.T) {
 	f := newReplicaFixture(t)
 	ctx := f.ctx()
 
-	taskID := f.newTask(t, "")
+	taskID := f.newTask(t)
 	runA := f.newPendingRunFor(t, taskID, f.agentID)
 	runB := f.newPendingRunFor(t, taskID, f.agentID2)
 
@@ -341,7 +337,7 @@ func TestClaimRunOnTheSameRowHasOneWinner(t *testing.T) {
 	f := newReplicaFixture(t)
 	ctx := f.ctx()
 
-	taskID := f.newTask(t, "")
+	taskID := f.newTask(t)
 	runID := f.newPendingRun(t, taskID)
 
 	granted := raceClaims(t, ctx, []claimPair{
@@ -360,7 +356,7 @@ func TestClaimRunIgnoresRunsWithNoHeartbeat(t *testing.T) {
 	f := newReplicaFixture(t)
 	ctx := f.ctx()
 
-	taskID := f.newTask(t, "")
+	taskID := f.newTask(t)
 	abandoned := f.newPendingRun(t, taskID)
 	if _, err := f.a.Exec(ctx, `
 		UPDATE task_agent_runs SET status = 'running', updated_at = now() - interval '1 hour' WHERE id = $1
@@ -388,7 +384,7 @@ func TestFailIfStaleLosesToAHeartbeat(t *testing.T) {
 	f := newReplicaFixture(t)
 	ctx := f.ctx()
 
-	taskID := f.newTask(t, "")
+	taskID := f.newTask(t)
 	runID := f.newPendingRun(t, taskID)
 	if _, err := f.a.Exec(ctx, `
 		UPDATE task_agent_runs SET status = 'running', updated_at = now() - interval '1 hour' WHERE id = $1
@@ -425,7 +421,7 @@ func TestTouchReportsACancelWrittenByAnotherReplica(t *testing.T) {
 	f := newReplicaFixture(t)
 	ctx := f.ctx()
 
-	taskID := f.newTask(t, "")
+	taskID := f.newTask(t)
 	runID := f.newPendingRun(t, taskID)
 	if _, err := pgstore.NewTaskAgentRunStore(f.a).ClaimRun(ctx, port.RunClaim{
 		RunID: runID, TaskID: taskID, LiveWithin: time.Minute,

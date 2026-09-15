@@ -8,7 +8,6 @@ import (
 	"sync"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -79,7 +78,7 @@ func (c *CachingEmbedder) Embed(ctx context.Context, input, model string) ([]flo
 	if c.capacity <= 0 {
 		return c.inner.Embed(ctx, input, model)
 	}
-	key := embedCacheKey(ctx, c.embeddingProvider(ctx), model, input)
+	key := embedCacheKey(c.embeddingProvider(ctx), model, input)
 	if vec, ok := c.get(key); ok {
 		return vec, nil
 	}
@@ -91,15 +90,15 @@ func (c *CachingEmbedder) Embed(ctx context.Context, input, model string) ([]flo
 	return vec, nil
 }
 
-// embeddingProvider resolves the provider the wrapped client is pinned to FOR
-// THE TENANT ON CTX, when one is reachable, by walking the same Unwrap() chain
+// embeddingProvider resolves the provider the wrapped client is pinned to, when
+// one is reachable, by walking the same Unwrap() chain
 // resolveMultiClient uses in adapter/http/handler.go (duck-typed against the
 // method, not the concrete *llm.MultiProviderClient type, so this package
 // does not need to import the adapter layer). "" is a valid outcome — auto
 // mode, or no reachable reporter.
 //
-// It takes a context because the pin is a tenant setting, and the whole point
-// of the key below is that two tenants must not share a partition.
+// It takes a context because the pin is a stored setting, read through the
+// store like any other.
 func (c *CachingEmbedder) embeddingProvider(ctx context.Context) string {
 	var cur port.LLMClient = c.inner
 	for i := 0; i < 8 && cur != nil; i++ {
@@ -117,26 +116,11 @@ func (c *CachingEmbedder) embeddingProvider(ctx context.Context) string {
 	return ""
 }
 
-// embedCacheKey partitions the cache by TENANT first.
-//
-// Without the tenant this cache had the same shape as the bug it sits next to:
-// one process-wide structure, written by whichever request came last, read by
-// whoever came next. The dangerous case is precisely the one that used to be
-// dismissed as harmless — provider "" (auto). Auto now resolves per tenant, so
-// tenant A on OpenAI and tenant B on their own Mac's nomic-embed-text-v1.5 both
-// key under "", and B would be served a 1536-dimension vector from A's model
-// for the same text. Cosine similarity across two models does not error; it
-// ranks wrongly, confidently, and writes that into workspace_chunks.
-//
-// The vectors themselves are not secret and two tenants on the same model would
-// legitimately compute the same value — this is not a data leak. It is the
-// incomparable-vector corruption, arriving cross-tenant.
-func embedCacheKey(ctx context.Context, provider, model, input string) string {
+// embedCacheKey keys an entry by provider, model and text, each separated so
+// "ab"+"c" and "a"+"bc" cannot collide. The provider is part of it because two
+// models return vectors that are not comparable, even for the same text.
+func embedCacheKey(provider, model, input string) string {
 	h := sha256.New()
-	if id, ok := tenant.ID(ctx); ok {
-		h.Write(id[:])
-	}
-	h.Write([]byte{0})
 	h.Write([]byte(provider))
 	h.Write([]byte{0})
 	h.Write([]byte(model))

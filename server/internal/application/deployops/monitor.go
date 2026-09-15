@@ -10,7 +10,6 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -130,7 +129,7 @@ func (m *Monitor) Start(ctx context.Context, interval time.Duration) {
 		defer m.wg.Done()
 		// Sweep immediately — waiting a full interval before the first pass
 		// leaves a fresh dispatch or a failed deploy unwatched for no reason.
-		tenant.Sweep(ctx, "deploy_runs", m.Sweep)
+		m.Sweep(ctx)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -138,7 +137,7 @@ func (m *Monitor) Start(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				tenant.Sweep(ctx, "deploy_runs", m.Sweep)
+				m.Sweep(ctx)
 			}
 		}
 	}()

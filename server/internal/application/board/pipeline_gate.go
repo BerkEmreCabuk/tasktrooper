@@ -12,7 +12,6 @@ import (
 
 	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -134,7 +133,7 @@ func (s *PipelineGateSweeper) Start(ctx context.Context, interval time.Duration)
 		interval = PipelineGateSweeperInterval
 	}
 	go func() {
-		tenant.Sweep(ctx, "pipeline_gate", s.sweep)
+		s.sweep(ctx)
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
@@ -142,7 +141,7 @@ func (s *PipelineGateSweeper) Start(ctx context.Context, interval time.Duration)
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				tenant.Sweep(ctx, "pipeline_gate", s.sweep)
+				s.sweep(ctx)
 			}
 		}
 	}()

@@ -8,11 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -73,15 +71,6 @@ func StaticResolver(set ProviderSet) ProviderResolver {
 	return ResolverFunc(func(context.Context) (ProviderSet, error) { return set, nil })
 }
 
-// limiterKey is one provider ACCOUNT. It carries the tenant because, since
-// every tenant supplies their own key, an account is a (tenant, provider) pair
-// — sharing a limiter across tenants would let one tenant's 429 pace another
-// tenant's unrelated subscription.
-type limiterKey struct {
-	tenant   uuid.UUID
-	provider domain.LLMProviderType
-}
-
 type MultiProviderClient struct {
 	mu sync.RWMutex
 	// resolver supplies the acting tenant's ProviderSet. Nil until wired, which
@@ -93,9 +82,9 @@ type MultiProviderClient struct {
 	// in the file, which on a shared deployment is nothing — so it stays a
 	// field while the per-tenant clients do not.
 	fallback port.LLMClient
-	// limits holds one limiter per provider account. Chat and embedding calls
-	// to the same account share theirs, because they share its quota.
-	limits   map[limiterKey]*accountLimiter
+	// limits holds one limiter per provider. Chat and embedding calls to the
+	// same provider share theirs, because they share its quota.
+	limits   map[domain.LLMProviderType]*accountLimiter
 	embedCfg domain.EmbeddingConfig
 }
 
@@ -107,7 +96,7 @@ func embeddingCapable(pt domain.LLMProviderType) bool {
 
 func NewMultiProviderClient(fallback port.LLMClient, resolver ProviderResolver) *MultiProviderClient {
 	return &MultiProviderClient{
-		limits:   make(map[limiterKey]*accountLimiter),
+		limits:   make(map[domain.LLMProviderType]*accountLimiter),
 		fallback: fallback,
 		resolver: resolver,
 	}
@@ -197,23 +186,15 @@ func embeddingTarget(set ProviderSet) domain.LLMProviderType {
 // provider gets a limiter with no spacing — it still exists, because it is what
 // remembers a 429 and holds the next calls back by the Retry-After the provider
 // asked for.
-func (m *MultiProviderClient) limiterFor(ctx context.Context, set ProviderSet, pt domain.LLMProviderType) *accountLimiter {
-	key := limiterKey{provider: pt}
-	// The account is the tenant's, so the limiter is too. tenant.ID is absent
-	// on a single-tenant or test context, which collapses every key onto the
-	// zero uuid — the one shared limiter those deployments used to have, and
-	// the right answer when there is only one account.
-	if id, ok := tenant.ID(ctx); ok {
-		key.tenant = id
-	}
+func (m *MultiProviderClient) limiterFor(set ProviderSet, pt domain.LLMProviderType) *accountLimiter {
 	m.mu.Lock()
 	if m.limits == nil {
-		m.limits = make(map[limiterKey]*accountLimiter)
+		m.limits = make(map[domain.LLMProviderType]*accountLimiter)
 	}
-	lim, ok := m.limits[key]
+	lim, ok := m.limits[pt]
 	if !ok {
 		lim = &accountLimiter{}
-		m.limits[key] = lim
+		m.limits[pt] = lim
 	}
 	cfg := m.embedCfg
 	m.mu.Unlock()
@@ -439,7 +420,7 @@ func (m *MultiProviderClient) Chat(ctx context.Context, req domain.AgentRequest)
 		return domain.AgentResponse{}, fmt.Errorf("no llm client available for provider %q", req.ProviderType)
 	}
 	var resp domain.AgentResponse
-	err := m.limiterFor(ctx, set, key).guard(ctx, key, req.Model, func(ctx context.Context) error {
+	err := m.limiterFor(set, key).guard(ctx, key, req.Model, func(ctx context.Context) error {
 		var err error
 		resp, err = client.Chat(ctx, req)
 		return err
@@ -457,7 +438,7 @@ func (m *MultiProviderClient) ChatStream(ctx context.Context, req domain.AgentRe
 		return domain.AgentResponse{}, fmt.Errorf("no llm client available for provider %q", req.ProviderType)
 	}
 	var resp domain.AgentResponse
-	err := m.limiterFor(ctx, set, key).guard(ctx, key, req.Model, func(ctx context.Context) error {
+	err := m.limiterFor(set, key).guard(ctx, key, req.Model, func(ctx context.Context) error {
 		var err error
 		resp, err = client.ChatStream(ctx, req, onToken)
 		return err
@@ -483,7 +464,7 @@ func (m *MultiProviderClient) ModelsFor(ctx context.Context, providerType domain
 
 func (m *MultiProviderClient) Embed(ctx context.Context, input string, model string) ([]float32, error) {
 	set := m.providers(ctx)
-	return m.limiterFor(ctx, set, embeddingTarget(set)).do(ctx, func(ctx context.Context) ([]float32, error) {
+	return m.limiterFor(set, embeddingTarget(set)).do(ctx, func(ctx context.Context) ([]float32, error) {
 		return m.embedOnce(ctx, set, input, model)
 	})
 }

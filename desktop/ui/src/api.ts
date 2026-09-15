@@ -883,14 +883,6 @@ export interface BoardTask {
   priority: TaskPriority;
   created_by: string;
   assignee_agent_id?: string;
-  /**
-   * The PERSON the card belongs to, as opposed to `assignee_agent_id`, which
-   * is the agent working it. Runs are routed to this member's Mac and only
-   * their agents (plus the tenant's shared ones) may pick the card up, which
-   * is why "why is this not moving?" is so often answered by the name here.
-   * Empty on a solo tenant and on any unassigned card.
-   */
-  assignee_user_id?: string;
   created_at: string;
   updated_at: string;
   acceptance_criteria?: AcceptanceCriterion[];
@@ -959,8 +951,6 @@ export interface CreateBoardTaskInput {
   priority?: TaskPriority;
   created_by?: string;
   assignee_agent_id?: string;
-  /** Whose Mac this runs on. Omitted (or "") creates an unassigned card. */
-  assignee_user_id?: string;
   acceptance_criteria?: AcceptanceCriterionInput[];
   relations?: TaskRelationInput[];
   documents?: CreateTaskDocumentInput[];
@@ -979,21 +969,18 @@ export interface UpdateBoardTaskInput {
   position?: number;
   priority?: TaskPriority;
   /**
-   * The two assignees read the same three spellings, because a client holding
-   * one is holding the other (`domain.Nullable` on the server):
+   * The assignee reads three spellings (`domain.Nullable` on the server):
    *
    *   omitted   leave whoever is on the card alone
    *   null      unassign
-   *   a value   assign that agent / that person (`""` also unassigns)
+   *   a value   assign that agent (`""` also unassigns)
    *
-   * This was NOT always true. Both fields were plain Go pointers, where an
+   * This was NOT always true. The field was a plain Go pointer, where an
    * explicit `null` decodes to the same nil as an omitted key — so "clear the
-   * assignee" was a silent no-op on the wire, live in the drawer's agent
-   * control long before the person field existed. Do not narrow either type
-   * back to a shape that can only spell one of the three.
+   * assignee" was a silent no-op on the wire. Do not narrow the type back to a
+   * shape that can only spell one of the three.
    */
   assignee_agent_id?: string | null;
-  assignee_user_id?: string | null;
   before_deploy?: string;
   after_deploy?: string;
   rollback_plan?: string;
@@ -2157,23 +2144,6 @@ export class ApiError extends Error {
   }
 }
 
-/**
- * Did the workspace roster refuse the person a task was being given to?
- *
- * `assignee_not_member` is agent-server's own code (`permanent_refusal.go`'s
- * `typedBadRequests`), carried in both `error.type` and a top-level `code`. It
- * is not one of the `ControlPlaneErrorCode`s above and deliberately not folded
- * into that union: they are two servers' vocabularies, and merging them would
- * suggest either program answers either code.
- *
- * Matched on the code and nothing else. This used to test a substring of the
- * server's sentence, which made rewording the explanation a client-visible
- * change — the coupling a code exists to remove.
- */
-export function isAssigneeRejectedError(e: unknown): e is ApiError {
-  return e instanceof ApiError && e.type === "assignee_not_member";
-}
-
 // Every non-2xx carries a JSON error body: {"error": {"message": "...", "type": "..."}}.
 // The type is the machine-readable half — callers switch on it rather than on
 // prose, so a reworded message is not a client-visible change.
@@ -2296,23 +2266,6 @@ export function attachmentUrl(id: string): string {
   return apiUrl(`/v1/attachments/${id}`);
 }
 
-export type TenantRole = "owner" | "admin" | "member";
-
-/**
- * One row of `GET /v1/tenant/members` — the server's own roster, and the ONLY
- * list a task assignee may be picked from. It is the candidate set by
- * construction: exactly who `resolveAssignee` accepts.
- *
- * `email` and `display_name` may be `""`; a row nothing can name stays
- * pickable, and each caller decides what to render for it.
- */
-export interface AssignableMember {
-  user_id: string;
-  email: string;
-  display_name: string;
-  role: TenantRole;
-}
-
 export const api = {
   health: () => request<HealthResponse>("/health"),
   usageSummary: (days = 30) => request<UsageSummary>(`/v1/usage?days=${days}`),
@@ -2405,8 +2358,6 @@ export const api = {
       { method: "DELETE" },
     ),
 
-  /** Who a board task may be assigned to — agent-server's own roster. */
-  listAssignableMembers: () => request<{ members: AssignableMember[] }>("/v1/tenant/members"),
   githubStatus: () =>
     request<GitHubConnectionStatus>("/v1/settings/github"),
 

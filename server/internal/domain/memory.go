@@ -59,15 +59,6 @@ type MemoryQuery struct {
 	RepositoryID *uuid.UUID
 	Repo         MemoryRepoScope
 	Limit        int
-	// OwnerUserID is the caller's Firebase uid, and it narrows the four buckets
-	// above by a fifth dimension the team layer added (migration 115): a
-	// memory belonging to a member's own agent is private to that member.
-	//
-	// It is a filter, not a bucket selector - "unowned, or mine" - so a solo
-	// tenant, where every agent is unowned, reads exactly what it read before
-	// teams existed. Empty means the caller has no uid (a machine call, a
-	// self-hosted run) and sees only the unowned ones.
-	OwnerUserID string
 }
 
 type AgentMemory struct {
@@ -78,14 +69,9 @@ type AgentMemory struct {
 	Category     string     `json:"category"`
 	Embedding    []float32  `json:"embedding,omitempty"`
 	Source       string     `json:"source"`
-	// OwnerUserID is set from the memory's AGENT, not from whoever happened to
-	// save it: ownership is a property of the agent (agents.owner_user_id), so
-	// a shared agent's memories stay shared no matter which member's run wrote
-	// them, and a member's agent keeps its notes to itself.
-	OwnerUserID string    `json:"owner_user_id,omitempty"`
-	Scope       string    `json:"scope"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	Scope        string     `json:"scope"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // MemoryScopeOf names the bucket a memory belongs to.

@@ -269,11 +269,6 @@ watch keys off rather than the default branch.
 
 ## Deploy metadata, ordering relations, packages
 
-**`assignee_user_id`** — the PERSON a card belongs to, and the thing that decides whose Mac runs
-it. Plain string on `POST`, optional pointer on `PATCH` (omitted leaves it, `""` unassigns). A uid
-that is not in `tenant_members` is a `400` naming the uid, never stored; with no roster wired
-(self-hosted, desktop) it is taken as given. See [Teams](projects.md#teams-migration-115).
-
 **Task fields** `before_deploy`, `after_deploy`, `rollback_plan` (nullable markdown) ride
 on `domain.BoardTask` and are accepted by `POST /v1/repositories/{id}/tasks` and
 `PATCH /v1/repositories/{id}/tasks/{taskId}` (the usual optional-pointer contract: omitted leaves the value, `""`
@@ -528,28 +523,15 @@ then block power iteration with Gram-Schmidt deflation against the covariance ac
 the last bit, including the parallel decomposition, so a client may cache a projection
 and diff it against a later one.
 
-## Assignee roster
+## Assignee field: omitted vs `null` vs a value
 
-This install has one person and no login: `assignee_user_id` on a task is either `""`
-(unassigned — the normal state of a backlog) or refused. `resolveAssignee`
-(`application/repository/service.go`) has no uid to look up and no roster to check
-against, so any non-empty value is refused as `assignee_not_member` rather than stored —
-a card assigned to somebody who cannot exist here would never be picked up. `tenant_members`
-(migration 115) still exists in the schema — the table this product shares with the hosted
-one — but nothing ever writes to it: this product's own auth is a single bearer token with
-no per-human identity header, so there is no caller identity to mirror into it and the
-roster stays empty. See [projects.md](projects.md#assignee-roster-migration-115).
-
-## Assignee fields: omitted vs `null` vs a value
-
-`PATCH /v1/repositories/{id}/tasks/{taskId}` reads both assignees the same way
-(`domain.Nullable`), because a client holding one reference is holding the other:
+`PATCH /v1/repositories/{id}/tasks/{taskId}` reads `assignee_agent_id` as `domain.Nullable`:
 
 | Spelling | Effect |
 |---|---|
 | key omitted | leave whoever is on the card alone |
 | `null` | unassign |
-| a value | assign that agent; for the person, only `""` is accepted (see Assignee roster above) — any other value is refused |
+| a value | assign that agent |
 
 `null` used to decode to the same nil pointer as an omitted key, so it was a clear that
 silently did nothing — including the board's own "unassign this agent" control.
@@ -563,13 +545,11 @@ one place for the refusal reason.
 |---|---|---|
 | `provider_unavailable` | 409 | a declared-but-not-built provider was named (`cursor_agent`, `antigravity`) |
 | `host_executed_provider` | 409 | `claude_code` was asked to behave like an endpoint — connect/test/activate. It's a CLI process this server execs directly, not a network endpoint, so there is nothing to dial |
-| `assignee_not_member` | 400 | a task was given a non-empty `assignee_user_id`; see Assignee roster above |
 | `invalid_catalog_input` | 400 | agent-catalog validation (`POST\|PUT /admin/agents`, `.../skills`, `.../rules`): `name is required`, `content is required`, `effort must be one of …`, `max_turns cannot be negative`. The sentence is the whole explanation and is rendered verbatim |
 | `unknown_agent_cli_flavor` | 400 | `POST /v1/agent-cli/{flavor}/connect` or `DELETE /v1/agent-cli/{flavor}` named no CLI at all. A flavor that IS known but not built answers 409 `provider_unavailable` instead |
 
-The first two were previously `500` and the third an untyped `400` — a permanent refusal
-that told every client and every monitor to retry, or one a client could only recognise by
-matching the prose. The last two already answered 400 and were the stragglers: right status,
+The first two were previously `500` — a permanent refusal that told every client and every
+monitor to retry. The last two already answered 400 and were the stragglers: right status,
 no code. Written by `adapter/http.permanentRefusal` / `typedBadRequest` / `codedBadRequest`,
 the first two reached from `internalError` and `badRequestErr`, so any route that propagates
 the error gets the same answer.

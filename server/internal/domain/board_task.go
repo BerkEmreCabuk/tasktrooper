@@ -25,29 +25,6 @@ var ErrTaskAlreadyClaimed = errors.New("task is already assigned to another agen
 // task not found: <id>", which told the agent nothing and had it retry.
 var ErrTaskOutsideRepository = errors.New("board task belongs to a different repository than this run")
 
-// ErrAssigneeNotMember is the refusal of a person a card was being given to.
-//
-// It is a sentinel because clients need to branch on it and were branching on
-// the PROSE instead — the web app matched a substring of the sentence, which
-// means rewording the explanation changed client behaviour.
-var ErrAssigneeNotMember = errors.New("assignee is not a member of this workspace")
-
-// AssigneeNotMemberError builds that refusal. It carries the explanation as its
-// WHOLE message — no sentinel text appended — because this sentence is rendered
-// verbatim to the person who picked the wrong teammate.
-func AssigneeNotMemberError(userID string) error {
-	return assigneeNotMemberError{userID: userID}
-}
-
-type assigneeNotMemberError struct{ userID string }
-
-func (e assigneeNotMemberError) Error() string {
-	return fmt.Sprintf("assignee %q is not a member of this workspace; this install has one person in it and no "+
-		"sign-in, so a card is given to an agent rather than to a named person", e.userID)
-}
-
-func (e assigneeNotMemberError) Is(target error) bool { return target == ErrAssigneeNotMember }
-
 type TaskType string
 
 const (
@@ -320,28 +297,23 @@ type UpdateTaskDocumentRequest struct {
 }
 
 type BoardTask struct {
-	ID                   uuid.UUID    `json:"id"`
-	RepositoryID         uuid.UUID    `json:"repository_id"`
-	Key                  string       `json:"key"`
-	TaskNumber           int          `json:"task_number"`
-	Title                string       `json:"title"`
-	TaskType             TaskType     `json:"task_type"`
-	Description          string       `json:"description"`
-	TechnicalDescription string       `json:"technical_description"`
-	InitiativeProjectID  *uuid.UUID   `json:"initiative_project_id,omitempty"`
-	Column               TaskColumn   `json:"column"`
-	Position             int          `json:"position"`
-	Priority             TaskPriority `json:"priority"`
-	CreatedBy            string       `json:"created_by"`
-	AssigneeAgentID      *uuid.UUID   `json:"assignee_agent_id,omitempty"`
-	// AssigneeUserID is the PERSON the card belongs to, as distinct from
-	// AssigneeAgentID, which is the agent working it. Empty on a solo tenant
-	// and on any unassigned card; when it is set, the dispatcher will only wake
-	// that member's own agents (plus the tenant's shared ones).
-	AssigneeUserID     string                `json:"assignee_user_id,omitempty"`
-	CreatedAt          time.Time             `json:"created_at"`
-	UpdatedAt          time.Time             `json:"updated_at"`
-	AcceptanceCriteria []AcceptanceCriterion `json:"acceptance_criteria,omitempty"`
+	ID                   uuid.UUID             `json:"id"`
+	RepositoryID         uuid.UUID             `json:"repository_id"`
+	Key                  string                `json:"key"`
+	TaskNumber           int                   `json:"task_number"`
+	Title                string                `json:"title"`
+	TaskType             TaskType              `json:"task_type"`
+	Description          string                `json:"description"`
+	TechnicalDescription string                `json:"technical_description"`
+	InitiativeProjectID  *uuid.UUID            `json:"initiative_project_id,omitempty"`
+	Column               TaskColumn            `json:"column"`
+	Position             int                   `json:"position"`
+	Priority             TaskPriority          `json:"priority"`
+	CreatedBy            string                `json:"created_by"`
+	AssigneeAgentID      *uuid.UUID            `json:"assignee_agent_id,omitempty"`
+	CreatedAt            time.Time             `json:"created_at"`
+	UpdatedAt            time.Time             `json:"updated_at"`
+	AcceptanceCriteria   []AcceptanceCriterion `json:"acceptance_criteria,omitempty"`
 	// TestCases is the round the task was actually given: every case derived
 	// from the request with its verdict, including the ones rejected as not
 	// valid. Filled on the single-task read, like criteria; the board's list
@@ -470,7 +442,6 @@ type CreateBoardTaskRequest struct {
 	Priority             TaskPriority               `json:"priority,omitempty"`
 	CreatedBy            string                     `json:"created_by,omitempty"`
 	AssigneeAgentID      *uuid.UUID                 `json:"assignee_agent_id,omitempty"`
-	AssigneeUserID       string                     `json:"assignee_user_id,omitempty"`
 	AcceptanceCriteria   []AcceptanceCriterionInput `json:"acceptance_criteria,omitempty"`
 	// Relations are written with the NEW task as their source: deploy_depends_on
 	// (this ships after those) and derived_from (this came out of that analysis).
@@ -497,20 +468,16 @@ type UpdateBoardTaskRequest struct {
 	Column               *TaskColumn   `json:"column,omitempty"`
 	Position             *int          `json:"position,omitempty"`
 	Priority             *TaskPriority `json:"priority,omitempty"`
-	// The two assignees — the AGENT working the card and the PERSON it belongs
-	// to — read the same three spellings, because a client holding one of them
-	// is holding the other and any difference between them is a trap rather
-	// than a decision:
+	// The assignee reads three spellings:
 	//
 	//	omitted   leave whoever is on the card alone
 	//	null      unassign
-	//	a value   assign that agent / that person ("" also unassigns)
+	//	a value   assign that agent ("" also unassigns)
 	//
-	// They are domain.Nullable rather than plain pointers for exactly that
+	// It is domain.Nullable rather than a plain pointer for exactly that
 	// reason — see its doc for what an omitted key and an explicit null used to
 	// have in common, and which control it silently broke.
 	AssigneeAgentID Nullable[uuid.UUID] `json:"assignee_agent_id,omitempty"`
-	AssigneeUserID  Nullable[string]    `json:"assignee_user_id,omitempty"`
 	// Deploy runbook. Same optional-pointer contract as the other text fields:
 	// nil leaves the stored value alone, a pointer to "" clears it.
 	BeforeDeploy *string `json:"before_deploy,omitempty"`

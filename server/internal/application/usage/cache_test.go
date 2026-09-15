@@ -8,9 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -228,42 +226,5 @@ func TestCachingEmbedder_ChatAndModelsPassThrough(t *testing.T) {
 	}
 	if c.Unwrap() != port.LLMClient(inner) {
 		t.Fatalf("Unwrap() did not return the wrapped client")
-	}
-}
-
-// The cache key's FIRST component is the tenant, and this is the reason it
-// exists: two tenants asking for the same text under the same model must not
-// share an entry.
-//
-// It reads as harmless — the same model returns the same vector — right up to
-// the case that actually happens. "Auto" resolves per tenant now, so tenant A
-// on OpenAI and tenant B on their own Mac's pinned model both report provider
-// "", and B would be handed A's vector: a different model, a different
-// dimension count, written into B's index. That is the corruption
-// domain.EmbeddingProvenanceStale exists to catch after the fact.
-func TestCachingEmbedder_TenantsDoNotShareCacheEntries(t *testing.T) {
-	inner := &fakeEmbedClient{}
-	c := NewCachingEmbedder(inner, 8)
-
-	a := tenant.With(context.Background(), tenant.Identity{TenantID: uuid.New(), Role: tenant.RoleOwner})
-	b := tenant.With(context.Background(), tenant.Identity{TenantID: uuid.New(), Role: tenant.RoleOwner})
-
-	if _, err := c.Embed(a, "hello", "m1"); err != nil {
-		t.Fatalf("embed for tenant A: %v", err)
-	}
-	if _, err := c.Embed(b, "hello", "m1"); err != nil {
-		t.Fatalf("embed for tenant B: %v", err)
-	}
-	if got := inner.callCount(); got != 2 {
-		t.Fatalf("call count = %d, want 2 — tenant B must not be served tenant A's cached vector", got)
-	}
-
-	// And a tenant still gets its own cache: the partition must not defeat the
-	// point of caching at all.
-	if _, err := c.Embed(a, "hello", "m1"); err != nil {
-		t.Fatalf("embed for tenant A again: %v", err)
-	}
-	if got := inner.callCount(); got != 2 {
-		t.Fatalf("call count = %d, want still 2 — a tenant's own repeat must hit", got)
 	}
 }

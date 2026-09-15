@@ -7,7 +7,6 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 // QuotaSweeperInterval is how often a task parked on the Claude Code usage
@@ -81,7 +80,7 @@ func (s *QuotaSweeper) Start(ctx context.Context, interval time.Duration) {
 		interval = QuotaSweeperInterval
 	}
 	go func() {
-		tenant.Sweep(ctx, "quota", s.sweep)
+		s.sweep(ctx)
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
@@ -89,7 +88,7 @@ func (s *QuotaSweeper) Start(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				tenant.Sweep(ctx, "quota", s.sweep)
+				s.sweep(ctx)
 			}
 		}
 	}()

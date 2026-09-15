@@ -1,6 +1,5 @@
 import { AlertTriangle, CheckCircle2, Loader2, MinusCircle, XCircle, type LucideIcon } from "lucide-react";
 import type {
-  AssignableMember,
   BoardTask,
   PipelineGateReason,
   TaskPipeline,
@@ -17,26 +16,6 @@ export const CACHE_REPOS = "board.repositories";
 export const CACHE_PROJECTS = "board.initiativeProjects";
 export const CACHE_CONFIG = "board.config";
 export const CACHE_AGENTS = "board.agents";
-export const CACHE_MEMBERS = "board.members";
-
-/**
- * What to call a member on screen: the display name, then the email.
- *
- * Returns `""` when nothing can name them. Never the uid: a card that looks
- * owned by an identity number is worse than one that names nobody, and the
- * callers each decide what to show instead.
- */
-export function memberLabel(member: AssignableMember, fallbackEmail = ""): string {
-  return member.display_name.trim() || member.email.trim() || fallbackEmail.trim();
-}
-
-/**
- * The same label, narrowed for a board card: the local part of an email, since
- * a full address in a 6rem badge is an ellipsis with no information in it.
- */
-export function shortMemberLabel(label: string): string {
-  return label.split("@")[0] || label;
-}
 
 
 

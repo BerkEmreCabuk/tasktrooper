@@ -79,7 +79,6 @@ export const boardArea: BoardAreaDict = {
     taskDeleted: "Görev silindi",
     deleteFailed: "Görev silinemedi",
     agentRunning: "Ajan çalışıyor",
-    assignedPersonTitle: "{name} adlı üyenin Mac'inde çalışır",
     pipelineTitle: "Pipeline: {status}",
     title: "Board",
     description: "Aktif iş akışı — backlog'daki görevler Backlog ekranında",
@@ -92,16 +91,9 @@ export const boardArea: BoardAreaDict = {
   },
   components: {
     memberAssignee: {
-      groupLabel: "Atama",
-      label: "Atanan kişi",
-      hint: "Görevin hangi üyenin Mac'inde çalışacağı ve hangi üyenin ajanlarının alabileceği.",
       agentLabel: "Atanan ajan",
-      agentHint: "Kartta işi yapan ajan.",
       unassigned: "Atanmamış",
-      unknown: "Bilinmeyen üye",
-      unnamed: "Çalışma alanı üyesi {id}",
-      rejected:
-        "{name} bu çalışma alanında değil. Liste üyeler giriş yaptıkça dolar; davet edilmiş ama uygulamayı hiç açmamış birine görev atanamaz.",
+      unknown: "Bilinmeyen ajan",
     },
     createTask: {
       defaultTitle: "Yeni Görev",

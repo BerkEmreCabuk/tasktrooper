@@ -239,31 +239,3 @@ func TestChatAndEmbedUsageRecordAgainstTheCallingTenant(t *testing.T) {
 		t.Fatalf("recorded %+v, want one chat and one embedding record", got)
 	}
 }
-
-// And each tenant is billed for its own calls only.
-func TestUsageIsNotAttributedToAnotherTenant(t *testing.T) {
-	store := newTenantUsageStore()
-	client := NewRecordingClient(usageInner{}, store)
-
-	a, b := uuid.New(), uuid.New()
-	ctxA := tenant.With(context.Background(), tenant.Identity{TenantID: a, Role: tenant.RoleOwner})
-	ctxB := tenant.With(context.Background(), tenant.Identity{TenantID: b, Role: tenant.RoleOwner})
-
-	for i := 0; i < 3; i++ {
-		if _, err := client.Chat(ctxA, domain.AgentRequest{Model: "gpt-4o"}); err != nil {
-			t.Fatalf("chat A: %v", err)
-		}
-	}
-	if _, err := client.Chat(ctxB, domain.AgentRequest{Model: "gpt-4o"}); err != nil {
-		t.Fatalf("chat B: %v", err)
-	}
-
-	waitForRecords(t, store, a, 3)
-	waitForRecords(t, store, b, 1)
-	if got := len(store.recorded(a)); got != 3 {
-		t.Fatalf("tenant A accrued %d records, want 3", got)
-	}
-	if got := len(store.recorded(b)); got != 1 {
-		t.Fatalf("tenant B accrued %d records, want 1 — B must not be billed for A's calls", got)
-	}
-}

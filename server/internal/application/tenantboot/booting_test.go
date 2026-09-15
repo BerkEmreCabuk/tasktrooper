@@ -26,13 +26,13 @@ func TestBootingIsTrueOnlyWhileStepsRun(t *testing.T) {
 	})
 
 	id := uuid.New()
-	if svc.Booting(id) {
+	if svc.Booting() {
 		t.Fatal("booting before the tenant was sighted")
 	}
 	if err := svc.Sight(context.Background(), tenant.Identity{TenantID: id, Role: tenant.RoleOwner}); err != nil {
 		t.Fatalf("Sight: %v", err)
 	}
-	if !svc.Booting(id) {
+	if !svc.Booting() {
 		t.Fatal("not booting while a step is still running")
 	}
 
@@ -43,7 +43,7 @@ func TestBootingIsTrueOnlyWhileStepsRun(t *testing.T) {
 		t.Fatal("steps never finished")
 	}
 	deadline := time.Now().Add(3 * time.Second)
-	for svc.Booting(id) {
+	for svc.Booting() {
 		if time.Now().After(deadline) {
 			t.Fatal("still booting after every step finished")
 		}
@@ -51,7 +51,7 @@ func TestBootingIsTrueOnlyWhileStepsRun(t *testing.T) {
 	}
 
 	var none *Service
-	if none.Booting(id) {
+	if none.Booting() {
 		t.Fatal("a nil service reports booting")
 	}
 }

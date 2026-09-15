@@ -763,11 +763,11 @@ func hasRealSuccessJob(jobs []domain.TaskPipelineJob) bool {
 // finalize persists the terminal pipeline state and fires side effects unless a
 // newer pipeline superseded this one.
 func (p *PipelineRunner) finalize(ctx context.Context, job pipelineJob, pipeline domain.TaskPipeline, status domain.PipelineStatus, jobs []domain.TaskPipelineJob) error {
-	// tenant.Detach, not context.Background(): this has to outlive a cancelled
+	// context.WithoutCancel, not context.Background(): this has to outlive a cancelled
 	// run context (a pipeline that settles during shutdown still owes its row a
 	// terminal status) but it must not lose the tenant with it — every write
 	// below is policy-protected. finishNoWorkspace already had this right.
-	finCtx, cancel := context.WithTimeout(tenant.Detach(ctx), 30*time.Second)
+	finCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 
 	finishedAt := time.Now()
@@ -1022,7 +1022,7 @@ func (p *PipelineRunner) moveTask(ctx context.Context, job pipelineJob, col doma
 // provider of "Did not run" — a contradiction that made the QA gate look
 // satisfied when nothing had executed.
 func (p *PipelineRunner) finishNoChecks(ctx context.Context, job pipelineJob, pipeline domain.TaskPipeline, note string) error {
-	finCtx, cancel := context.WithTimeout(tenant.Detach(ctx), 30*time.Second)
+	finCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	pipeline.Provider = domain.PipelineProviderNone
 	noop := domain.TaskPipelineJob{PipelineID: pipeline.ID, Name: note, Status: domain.PipelineJobStatusSkipped, Position: 0}
@@ -1055,7 +1055,7 @@ func (p *PipelineRunner) finishNoWorkspace(ctx context.Context, job pipelineJob,
 }
 
 func (p *PipelineRunner) persistNoWorkspace(ctx context.Context, pipeline domain.TaskPipeline, note string) error {
-	finCtx, cancel := context.WithTimeout(tenant.Detach(ctx), 30*time.Second)
+	finCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	finishedAt := time.Now()
 	pipeline.Status = domain.PipelineStatusFailed
@@ -1073,7 +1073,7 @@ func (p *PipelineRunner) persistNoWorkspace(ctx context.Context, pipeline domain
 // finishInterrupted persists the pipeline as interrupted with no side effects
 // (a plain app shutdown must not spawn spurious revision runs).
 func (p *PipelineRunner) finishInterrupted(ctx context.Context, pipeline domain.TaskPipeline, jobs []domain.TaskPipelineJob) error {
-	finCtx, cancel := context.WithTimeout(tenant.Detach(ctx), 30*time.Second)
+	finCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	finishedAt := time.Now()
 	pipeline.Status = domain.PipelineStatusFailed

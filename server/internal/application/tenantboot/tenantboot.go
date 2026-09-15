@@ -26,6 +26,7 @@ import (
 	_ "embed"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -106,9 +107,9 @@ type Service struct {
 	// booted is "has THIS process run its ensure-steps for this tenant" (local,
 	// and correctly re-done by the next pod).
 	booted sync.Map
-	// running holds the tenants whose steps are in flight in this process, so a
-	// caller can tell an empty roster from one that is still being written.
-	running sync.Map
+	// running counts the step runs in flight in this process, so a caller can
+	// tell an empty roster from one that is still being written.
+	running atomic.Int32
 }
 
 func NewService(registry Registry, seeds SeedStore) *Service {
@@ -142,14 +143,12 @@ func (s *Service) Sight(ctx context.Context, id tenant.Identity) error {
 	return nil
 }
 
-// Booting reports whether this process is still running the registered steps
-// for the tenant.
-func (s *Service) Booting(id uuid.UUID) bool {
+// Booting reports whether this process is still running the registered steps.
+func (s *Service) Booting() bool {
 	if s == nil {
 		return false
 	}
-	_, ok := s.running.Load(id)
-	return ok
+	return s.running.Load() > 0
 }
 
 // stepTimeout bounds one tenant's whole step run. It is generous because the
@@ -178,11 +177,10 @@ func (s *Service) runSteps(ctx context.Context, id tenant.Identity) {
 	if _, done := s.booted.LoadOrStore(id.TenantID, struct{}{}); done {
 		return
 	}
-	s.running.Store(id.TenantID, struct{}{})
-	// Least privilege, matching tenant.EachTenant: a seed has no human behind
-	// it and makes no role decisions, so if one ever grows a role check it gets
-	// the answer a stranger would rather than the answer this caller happens to
-	// have.
+	s.running.Add(1)
+	// Least privilege: a seed has no human behind it and makes no role
+	// decisions, so if one ever grows a role check it gets the answer a stranger
+	// would rather than the answer this caller happens to have.
 	stepCtx := tenant.With(context.WithoutCancel(ctx), tenant.Identity{
 		TenantID: id.TenantID,
 		Role:     tenant.RoleMember,
@@ -190,7 +188,7 @@ func (s *Service) runSteps(ctx context.Context, id tenant.Identity) {
 	go func() {
 		stepCtx, cancel := context.WithTimeout(stepCtx, stepTimeout)
 		defer cancel()
-		defer s.running.Delete(id.TenantID)
+		defer s.running.Add(-1)
 		for _, step := range s.steps {
 			if err := step.Run(stepCtx); err != nil {
 				// Logged and continued, never fatal and never retried: one

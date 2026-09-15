@@ -39,13 +39,6 @@ const (
 	codeHostExecutedProvider = "host_executed_provider"
 )
 
-// codeAssigneeNotMember: a task was given to somebody the workspace roster does
-// not have. A 400 rather than a 409 — the assignee in the body is wrong, and
-// the fix is a different body — but a MACHINE-READABLE one, which it was not:
-// the web app was matching a substring of the sentence to recognise it, so
-// rewording the explanation changed client behaviour. See typedBadRequests.
-const codeAssigneeNotMember = "assignee_not_member"
-
 // codeInvalidCatalogInput: agent-catalog validation — a missing name, a skill
 // with no content, an effort level that is not one of the five. See
 // catalog.ErrInvalidInput, which already carries the sentence.
@@ -76,7 +69,6 @@ var typedBadRequests = []struct {
 	sentinel error
 	code     string
 }{
-	{domain.ErrAssigneeNotMember, codeAssigneeNotMember},
 	{catalog.ErrInvalidInput, codeInvalidCatalogInput},
 }
 

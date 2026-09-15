@@ -37,7 +37,6 @@ type Dispatcher struct {
 	notifier     TaskNotifier
 	spans        port.TaskColumnSpanStore
 	workOrder    *WorkOrder
-	agentOwners  AgentOwnerLookup
 	gatePolicy   PipelineGatePolicy
 	reviewLoop   *ReviewLoopGuard
 }
@@ -332,38 +331,7 @@ func isHandoffGateColumn(col domain.TaskColumn) bool {
 	}
 }
 
-type AgentOwnerLookup interface {
-	AgentOwners(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error)
-}
-
-func (d *Dispatcher) SetAgentOwners(l AgentOwnerLookup) { d.agentOwners = l }
-
 func (d *Dispatcher) resolveAgents(ctx context.Context, input DispatchInput) ([]uuid.UUID, error) {
-	ids, err := d.resolveAgentsByColumn(ctx, input)
-	if err != nil {
-		return nil, err
-	}
-	return d.narrowToAssignee(ctx, input.Task, ids)
-}
-
-func (d *Dispatcher) narrowToAssignee(ctx context.Context, task domain.BoardTask, ids []uuid.UUID) ([]uuid.UUID, error) {
-	if d.agentOwners == nil || task.AssigneeUserID == "" || len(ids) == 0 {
-		return ids, nil
-	}
-	owners, err := d.agentOwners.AgentOwners(ctx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("resolve agent owners: %w", err)
-	}
-	kept := make([]uuid.UUID, 0, len(ids))
-	for _, id := range ids {
-		if owner := owners[id]; owner == "" || owner == task.AssigneeUserID {
-			kept = append(kept, id)
-		}
-	}
-	return kept, nil
-}
-
-func (d *Dispatcher) resolveAgentsByColumn(ctx context.Context, input DispatchInput) ([]uuid.UUID, error) {
 	task := input.Task
 	taskType := string(task.TaskType)
 

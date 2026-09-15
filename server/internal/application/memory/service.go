@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
 )
@@ -78,7 +77,6 @@ func (s *Service) SaveShared(ctx context.Context, repositoryID *uuid.UUID, conte
 // Search returns semantically ranked memories from the buckets the query
 // selects; an empty query or embedding failure falls back to recency.
 func (s *Service) Search(ctx context.Context, q domain.MemoryQuery, query string, topK int) ([]domain.AgentMemory, error) {
-	q = scopeToCaller(ctx, q)
 	if topK <= 0 {
 		topK = 5
 	}
@@ -105,20 +103,7 @@ func (s *Service) List(ctx context.Context, q domain.MemoryQuery) ([]domain.Agen
 	if q.Limit <= 0 {
 		q.Limit = 50
 	}
-	return s.store.List(ctx, scopeToCaller(ctx, q))
-}
-
-// scopeToCaller stamps the reading member onto a query.
-//
-// It is applied at every read path in this package rather than left to the
-// caller, because "which memories may I see" is not a question a handler or a
-// tool should be able to answer differently. The uid comes off the context the
-// tenant middleware verified - never from a request body - and an empty one
-// (machine call, self-hosted run) narrows to the unowned memories, which on a
-// solo tenant is all of them.
-func scopeToCaller(ctx context.Context, q domain.MemoryQuery) domain.MemoryQuery {
-	q.OwnerUserID = tenant.UserID(ctx)
-	return q
+	return s.store.List(ctx, q)
 }
 
 // Recall reads what an agent should carry into a run: the repository's project
@@ -139,19 +124,19 @@ func Recall(ctx context.Context, store port.AgentMemoryStore, agentID uuid.UUID,
 	}
 	var out []domain.AgentMemory
 	if repositoryID != nil {
-		project, err := store.List(ctx, scopeToCaller(ctx, domain.MemoryQuery{
+		project, err := store.List(ctx, domain.MemoryQuery{
 			AgentID: agentID, RepositoryID: repositoryID,
 			Repo: domain.MemoryRepoScopeProject, Limit: perScope,
-		}))
+		})
 		if err != nil {
 			log.Warn().Err(err).Msg("project memory recall failed")
 		} else {
 			out = append(out, project...)
 		}
 	}
-	global, err := store.List(ctx, scopeToCaller(ctx, domain.MemoryQuery{
+	global, err := store.List(ctx, domain.MemoryQuery{
 		AgentID: agentID, Repo: domain.MemoryRepoScopeGlobal, Limit: perScope,
-	}))
+	})
 	if err != nil {
 		log.Warn().Err(err).Msg("global memory recall failed")
 		return out

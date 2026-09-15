@@ -186,7 +186,7 @@ func generateWebhookSecret() (string, error) {
 // setupWebhookAsync is the best-effort install at repo registration time. A
 // failure only costs the automation: the UI shows a warning with a retry
 // button as long as the repo has no webhook.
-// It takes the caller's context for its IDENTITY only — see tenant.Detach. The
+// It takes the caller's context for its IDENTITY only (context.WithoutCancel). The
 // install reads the repository row, resolves the tenant's GitHub token and
 // stores the webhook secret, all policy-protected, and it stamps the delivery
 // URL with ?t=<tenant> (webhookTargetURL). On a bare context.Background() every
@@ -198,7 +198,7 @@ func (s *Service) setupWebhookAsync(ctx context.Context, repositoryID uuid.UUID)
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(tenant.Detach(ctx), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if _, err := s.SetupWebhook(ctx, repositoryID); err != nil {
 			log.Warn().Err(err).Str("repository_id", repositoryID.String()).

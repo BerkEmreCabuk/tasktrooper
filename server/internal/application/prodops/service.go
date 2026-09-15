@@ -36,8 +36,8 @@ type DeployHistory interface {
 }
 
 // Notifier pushes an alert to the user's devices.
-// ctx is for the tenant on it: the send is backgrounded and the device list it
-// reads is per-tenant. See tenant.Detach.
+// ctx is carried for its values: the send is backgrounded and still reads the
+// device list through the store.
 type Notifier interface {
 	Alert(ctx context.Context, title, body string)
 }

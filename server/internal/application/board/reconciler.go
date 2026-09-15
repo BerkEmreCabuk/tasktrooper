@@ -6,7 +6,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
 )
@@ -89,7 +88,7 @@ func (r *Reconciler) Start(ctx context.Context, interval time.Duration) {
 	// (maxRunStale). The first tick recovers a genuinely dead run within
 	// minutes and cannot touch a live one, on any replica, at any time.
 	go func() {
-		tenant.Sweep(ctx, "reconciler_boot", r.Run)
+		r.Run(ctx)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
@@ -97,7 +96,7 @@ func (r *Reconciler) Start(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				tenant.Sweep(ctx, "reconciler", r.Run)
+				r.Run(ctx)
 			}
 		}
 	}()

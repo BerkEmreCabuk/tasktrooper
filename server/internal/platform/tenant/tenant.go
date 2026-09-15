@@ -18,7 +18,6 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
-	"github.com/rs/zerolog/log"
 )
 
 // Role is the caller's role in this tenant, as signed by the control plane.
@@ -85,9 +84,8 @@ type Identity struct {
 
 type ctxKey struct{}
 
-// With attaches an identity. It is called in exactly two places: the HTTP
-// middleware that verified the headers, and the background fan-out in
-// postgres.DB.EachTenant. Anywhere else is a bug.
+// With attaches an identity. The HTTP middleware and the runtime's root context
+// are where it belongs; anywhere else is a bug.
 func With(ctx context.Context, id Identity) context.Context {
 	return context.WithValue(ctx, ctxKey{}, id)
 }
@@ -116,101 +114,4 @@ func RoleOf(ctx context.Context) Role {
 		return id.Role
 	}
 	return RoleMember
-}
-
-// UserID returns the acting human's uid, or "" when there is none.
-func UserID(ctx context.Context) string {
-	id, _ := From(ctx)
-	return id.UserID
-}
-
-// Detach is how work that OUTLIVES a request keeps the request's tenant.
-//
-// It is one line, and it exists because the obvious line was wrong in a way
-// nothing reported. A handler that starts a goroutine cannot hand it the
-// request's context — that context is cancelled the moment the response is
-// written — so the idiom throughout this codebase was
-//
-//	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-//
-// which drops the cancellation and the identity together. The work then ran
-// with no tenant, every store call answered ErrNoTenant, and the only trace was
-// one Warn line in a goroutine nobody was watching. Measured on a live stack:
-// every repository import on every tenant silently got no project profile and
-// no GitHub push webhook.
-//
-// context.WithoutCancel keeps the values and drops the deadline and the
-// cancellation, which is exactly and only what this case wants. It is named
-// here rather than called inline so that the name says which of the two the
-// caller means to keep — and so grepping for it finds every place that made
-// this decision on purpose.
-//
-// Wrap it in a WithTimeout at the call site: detached must not mean unbounded.
-func Detach(ctx context.Context) context.Context {
-	return context.WithoutCancel(ctx)
-}
-
-// --- fleet-wide background work -------------------------------------------
-
-// Lister answers "which tenants does this database serve". It is satisfied by
-// postgres.DB, which reads the `tenants` registry (migration 115).
-type Lister interface {
-	Tenants(ctx context.Context) ([]uuid.UUID, error)
-}
-
-type listerKey struct{}
-
-// WithLister installs the fan-out source. Called once, in platform/runtime,
-// on the context every background loop is started with.
-func WithLister(ctx context.Context, l Lister) context.Context {
-	return context.WithValue(ctx, listerKey{}, l)
-}
-
-// EachTenant runs fn once per tenant, on a context scoped to that tenant.
-//
-// It exists because the background loops — the reconciler, the quota, deploy,
-// device and work-order sweepers, the pipeline gate, the health and store
-// monitors — were written when "all rows" and "this tenant's rows" were the
-// same set. Under row-level security they are not, and a sweep that runs
-// un-scoped now raises ErrNoTenant instead of quietly doing nothing, so each
-// one calls this in place of its bare tick.
-//
-// With no lister on ctx (self-hosted, desktop, and every existing test) fn runs
-// exactly once on ctx unchanged. That is deliberate: those deployments have one
-// tenant, already on the context, and the fan-out must not become a second code
-// path they never exercise.
-//
-// A failure to list is not silently a no-op — it is reported to the caller,
-// which logs it. fn's own errors belong to fn; one tenant's bad sweep must not
-// stop the next tenant's.
-func EachTenant(ctx context.Context, fn func(context.Context)) error {
-	lister, ok := ctx.Value(listerKey{}).(Lister)
-	if !ok || lister == nil {
-		fn(ctx)
-		return nil
-	}
-	ids, err := lister.Tenants(ctx)
-	if err != nil {
-		return err
-	}
-	for _, id := range ids {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		// Least privilege: a background sweep has no human behind it and makes
-		// no role decisions, so if one ever grows a role check it gets the
-		// answer a stranger would.
-		fn(With(ctx, Identity{TenantID: id, Role: RoleMember}))
-	}
-	return nil
-}
-
-// Sweep is EachTenant for a background loop: it runs one tick per tenant and
-// says so when the fan-out itself failed, which is otherwise indistinguishable
-// from a pass that found nothing to do.
-func Sweep(ctx context.Context, name string, tick func(context.Context)) {
-	if err := EachTenant(ctx, tick); err != nil {
-		log.Warn().Err(err).Str("sweeper", name).
-			Msg("tenant fan-out failed, sweep skipped this pass")
-	}
 }

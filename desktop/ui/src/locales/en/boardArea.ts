@@ -81,7 +81,6 @@ export const boardArea = {
     taskDeleted: "Task deleted",
     deleteFailed: "Failed to delete task",
     agentRunning: "Agent running",
-    assignedPersonTitle: "Runs on {name}'s Mac",
     pipelineTitle: "Pipeline: {status}",
     title: "Board",
     description: "Active workflow — backlog tasks are on the Backlog screen",
@@ -96,16 +95,9 @@ export const boardArea = {
     // The person half of a task's assignment. Shared by the create dialog and
     // the detail drawer so both say the same thing about what it means.
     memberAssignee: {
-      groupLabel: "Assignment",
-      label: "Assigned person",
-      hint: "Whose Mac this task runs on, and whose agents may pick it up.",
       agentLabel: "Assigned agent",
-      agentHint: "The agent that does the work on the card.",
       unassigned: "Unassigned",
-      unknown: "Unknown member",
-      unnamed: "Workspace member {id}",
-      rejected:
-        "{name} is not in this workspace. The roster fills in as people sign in, so a teammate who was invited but has never opened the app cannot be assigned yet.",
+      unknown: "Unknown agent",
     },
     createTask: {
       defaultTitle: "New Task",

@@ -20,7 +20,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/taskkey"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -41,7 +40,7 @@ type RevisionNotifier interface {
 type ProfileRefresher interface {
 	// RefreshAsync starts a rebuild; false = one is already running. ctx is
 	// taken for the tenant on it, not for its lifetime — the rebuild outlives
-	// the request. See tenant.Detach.
+	// the request.
 	RefreshAsync(ctx context.Context, repositoryID uuid.UUID, reason string) bool
 	// RefreshIfStale rebuilds only when the profile is missing or stale.
 	RefreshIfStale(ctx context.Context, repositoryID uuid.UUID, reason string)
@@ -500,31 +499,6 @@ func (s *Service) SetAgentLister(fn func(ctx context.Context) ([]domain.Agent, e
 	s.agentLister = fn
 }
 
-// nullableString reads a present-but-null field as the empty string, which is
-// what "" already means everywhere a uid is handled: nobody.
-func nullableString(n domain.Nullable[string]) string {
-	if n.Value == nil {
-		return ""
-	}
-	return *n.Value
-}
-
-// resolveAssignee normalises the person a card is being given to.
-//
-// This install has exactly one person in it — the owner of the machine — and
-// no login, so there is no uid to hand a card to and nothing to look up. "" is
-// the only assignable value, and it is also the normal state of a backlog.
-// A named uid is refused rather than stored, because a card assigned to
-// somebody who cannot exist here would never be picked up and nothing would
-// say why.
-func (s *Service) resolveAssignee(userID string) (string, error) {
-	userID = strings.TrimSpace(userID)
-	if userID == "" {
-		return "", nil
-	}
-	return "", domain.AssigneeNotMemberError(userID)
-}
-
 // CreateWorkflowSetupTask opens a board task (assigned by repo kind) to author
 // the repo's GitHub Actions CI/CD workflows, for repos that have none yet.
 func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid.UUID) (domain.BoardTask, error) {
@@ -851,7 +825,7 @@ func (s *Service) Open(ctx context.Context, req domain.OpenRepositoryRequest) (d
 	s.startIndex(ctx, repo.ID, absRoot)
 	// ctx is handed to all three for its identity, not its lifetime: each
 	// starts a goroutine that outlives this request and each writes
-	// policy-protected rows. See tenant.Detach.
+	// policy-protected rows, so each detaches it with context.WithoutCancel.
 	s.setupWebhookAsync(ctx, repo.ID)
 	// First registration of this working copy: build the project profile in
 	// the background so the first agent run already knows the basics.
@@ -930,7 +904,7 @@ func (s *Service) ensureGitSync(ctx context.Context, rootPath, name, owner strin
 	return s.git.EnsureRepoWithRemote(gctx, rootPath, name, owner)
 }
 
-// ctx for its identity only (tenant.Detach): EnsureRepoWithRemote resolves the
+// ctx for its identity only (context.WithoutCancel): EnsureRepoWithRemote resolves the
 // tenant's GitHub token through the client's token source, which is a read on a
 // policy-protected settings row.
 func (s *Service) ensureGitAsync(ctx context.Context, repositoryID uuid.UUID, rootPath, name string) {
@@ -938,7 +912,7 @@ func (s *Service) ensureGitAsync(ctx context.Context, repositoryID uuid.UUID, ro
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(tenant.Detach(ctx), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer cancel()
 		if err := s.git.EnsureRepoWithRemote(ctx, rootPath, name, ""); err != nil {
 			log.Warn().Err(err).Str("repository_id", repositoryID.String()).Msg("git/github setup failed")
@@ -1708,10 +1682,6 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 	if createdBy == "" {
 		createdBy = "user"
 	}
-	assigneeUser, err := s.resolveAssignee(req.AssigneeUserID)
-	if err != nil {
-		return domain.BoardTask{}, err
-	}
 	existing, err := s.tasks.ListByRepository(ctx, repositoryID)
 	if err != nil {
 		return domain.BoardTask{}, err
@@ -1739,7 +1709,6 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 		Priority:             priority,
 		CreatedBy:            createdBy,
 		AssigneeAgentID:      req.AssigneeAgentID,
-		AssigneeUserID:       assigneeUser,
 		BeforeDeploy:         req.BeforeDeploy,
 		AfterDeploy:          req.AfterDeploy,
 		RollbackPlan:         req.RollbackPlan,
@@ -1824,9 +1793,6 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 	}
 	if task.AssigneeAgentID != nil {
 		createdPayload["assignee_agent_id"] = task.AssigneeAgentID.String()
-	}
-	if task.AssigneeUserID != "" {
-		createdPayload["assignee_user_id"] = task.AssigneeUserID
 	}
 	_ = s.emit(ctx, repo, task, domain.BoardEventTaskCreated, createdPayload)
 	return task, nil
@@ -1949,15 +1915,6 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 	}
 	if req.AssigneeAgentID.Present {
 		task.AssigneeAgentID = req.AssigneeAgentID.Value
-	}
-	// The person, not the agent. An absent uid is resolved through the same
-	// refusal as an assignment, where "" is the one uid that is never looked up.
-	if req.AssigneeUserID.Present {
-		assigneeUser, aerr := s.resolveAssignee(nullableString(req.AssigneeUserID))
-		if aerr != nil {
-			return domain.BoardTask{}, aerr
-		}
-		task.AssigneeUserID = assigneeUser
 	}
 	// Review hand-back: with require_human_review on, a reviewing agent's
 	// approval is recorded as a verdict and the task waits where it is. The
@@ -2140,7 +2097,7 @@ func (s *Service) ReplaceDeployDependencies(ctx context.Context, taskID uuid.UUI
 // request path. It was createDraftPRAsync and opened a draft; task PRs are
 // opened ready for review now — see git.EnsurePullRequest for why a draft made
 // every task PR unmergeable.
-// ctx for its identity only (tenant.Detach): it resolves the tenant's GitHub
+// ctx for its identity only (context.WithoutCancel): it resolves the tenant's GitHub
 // token, writes the PR back onto the task row and comments on the card.
 func (s *Service) ensurePullRequestAsync(ctx context.Context, task domain.BoardTask) {
 	if s.git == nil || s.workspaceRoot == "" || s.comments == nil {
@@ -2151,7 +2108,7 @@ func (s *Service) ensurePullRequestAsync(ctx context.Context, task domain.BoardT
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(tenant.Detach(ctx), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer cancel()
 		url, err := s.git.EnsurePullRequest(ctx, workspacePath)
 		if err != nil {

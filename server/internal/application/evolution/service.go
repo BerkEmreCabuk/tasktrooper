@@ -11,7 +11,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/kpi"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/memory"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
 )
@@ -103,7 +102,7 @@ func (s *Service) Start(ctx context.Context) {
 			case <-runCtx.Done():
 				return
 			case <-ticker.C:
-				tenant.Sweep(runCtx, "evolution", s.tick)
+				s.tick(runCtx)
 			}
 		}
 	}()
@@ -189,14 +188,14 @@ func (s *Service) reflectionDue(ctx context.Context, agentRec domain.Agent, now 
 //
 // ctx is taken for the tenant on it, not for its lifetime: the reflection
 // outlives the board move that triggered it, and every row it reads and writes
-// is policy-protected. See tenant.Detach.
+// is policy-protected (context.WithoutCancel).
 func (s *Service) NotifyRevision(ctx context.Context, task domain.BoardTask) {
 	if !s.cfg.Enabled || task.AssigneeAgentID == nil {
 		return
 	}
 	agentID := *task.AssigneeAgentID
 	go func() {
-		ctx, cancel := context.WithTimeout(tenant.Detach(ctx), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		last, err := s.store.LatestReflectionByTrigger(ctx, agentID, domain.ReflectionTriggerRevision)
 		if err == nil && last != nil && time.Since(last.CreatedAt) < s.cfg.RevisionDebounce {
@@ -249,7 +248,7 @@ func (s *Service) StartReflection(ctx context.Context, agentID uuid.UUID, trigge
 	go func() {
 		defer s.wg.Done()
 		defer release()
-		procCtx, cancel := context.WithTimeout(tenant.Detach(ctx), 10*time.Minute)
+		procCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
 		defer cancel()
 		s.processReflection(procCtx, reflection)
 	}()

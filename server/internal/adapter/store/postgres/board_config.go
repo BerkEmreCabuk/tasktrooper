@@ -805,36 +805,3 @@ func scanTaskAgentRuns(rows pgx.Rows) ([]domain.TaskAgentRun, error) {
 	}
 	return runs, rows.Err()
 }
-
-// AgentOwners maps agent ids to their owning member's uid, "" for a shared
-// (unowned) agent. Every id asked about gets an entry, so a caller cannot
-// mistake "this agent is gone" for "this agent is shared".
-//
-// One statement rather than a lookup per agent: the dispatcher calls this on
-// every dispatch of an assigned card, and a column can be subscribed by half
-// the catalog.
-func (s *BoardConfigStore) AgentOwners(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]string, error) {
-	out := make(map[uuid.UUID]string, len(ids))
-	if len(ids) == 0 {
-		return out, nil
-	}
-	for _, id := range ids {
-		out[id] = ""
-	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT id, COALESCE(owner_user_id, '') FROM agents WHERE id = ANY($1)
-	`, ids)
-	if err != nil {
-		return nil, fmt.Errorf("list agent owners: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id uuid.UUID
-		var owner string
-		if err := rows.Scan(&id, &owner); err != nil {
-			return nil, err
-		}
-		out[id] = owner
-	}
-	return out, rows.Err()
-}

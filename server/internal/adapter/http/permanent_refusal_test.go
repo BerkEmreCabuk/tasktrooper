@@ -13,7 +13,6 @@ import (
 	agentcliapp "github.com/makifbaysal/tasktrooper/server/internal/application/agentcli"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/catalog"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/llmprovider"
-	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
 // The number is the point. Each of these answered 500 with a correct, permanent
@@ -198,43 +197,5 @@ func TestUnknownAgentCLIFlavorIsACoded400(t *testing.T) {
 				t.Fatal("the refusal must still say why")
 			}
 		})
-	}
-}
-
-// The roster refusal answers a 400 — the body is wrong and a different body
-// fixes it — but a CODED one. Without the code the only signal a client had was
-// a substring of the sentence, so improving the wording moved client behaviour.
-func TestAssigneeNotMemberIsACoded400(t *testing.T) {
-	app := fiber.New()
-	app.Post("/t", func(c *fiber.Ctx) error {
-		return badRequestErr(c, domain.AssigneeNotMemberError("uid-stranger"))
-	})
-
-	resp, err := app.Test(httptest.NewRequest("POST", "/t", nil))
-	if err != nil {
-		t.Fatalf("request failed: %v", err)
-	}
-	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != nethttp.StatusBadRequest {
-		t.Fatalf("status = %d, want 400: %s", resp.StatusCode, string(body))
-	}
-	var out struct {
-		Error struct {
-			Message string `json:"message"`
-			Type    string `json:"type"`
-		} `json:"error"`
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(body, &out); err != nil {
-		t.Fatalf("decode: %v (%s)", err, string(body))
-	}
-	if out.Error.Type != codeAssigneeNotMember || out.Code != codeAssigneeNotMember {
-		t.Fatalf("type = %q / code = %q, want %q", out.Error.Type, out.Code, codeAssigneeNotMember)
-	}
-	// The sentence a person reads is unchanged, and the substring the web app
-	// matches on today still holds while it moves over to the code.
-	if !strings.Contains(out.Error.Message, "is not a member of this workspace") {
-		t.Fatalf("message = %q", out.Error.Message)
 	}
 }

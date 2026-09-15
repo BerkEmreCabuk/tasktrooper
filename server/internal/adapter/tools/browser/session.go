@@ -18,10 +18,8 @@ import (
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/cdproto/target"
 	"github.com/chromedp/chromedp"
-	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 )
 
@@ -70,20 +68,6 @@ type Session struct {
 
 	// extraFlags are additional chromium command-line flags. Tests only.
 	extraFlags []chromedp.ExecAllocatorOption
-
-	// tenant is who the live browser belongs to right now.
-	//
-	// One chromium, one profile, one tab, shared by every caller in the
-	// process — which was correct while a process served one tenant and is a
-	// cross-tenant session leak now. A QA agent that logs into its tenant's
-	// staging app leaves that login in the shared profile: its cookies, its
-	// localStorage, its open page. The next tenant's agent to call
-	// browser_navigate on the same host arrives authenticated as somebody else,
-	// and browser_read_dom hands what it finds to a model.
-	//
-	// So the browser is not shared ACROSS tenants: run tears it down when the
-	// tenant changes. See handoverLocked.
-	tenant uuid.UUID
 }
 
 // Option customises a Session at construction.
@@ -143,9 +127,6 @@ func resolveExecPath() (string, error) {
 func (s *Session) run(ctx context.Context, timeout time.Duration, actions ...chromedp.Action) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Before anything else: if the last caller was a different tenant, none of
-	// what is in this browser may be visible to this one.
-	s.handoverLocked(ctx)
 	if err := s.ensureLocked(); err != nil {
 		return err
 	}
@@ -168,41 +149,6 @@ func (s *Session) run(ctx context.Context, timeout time.Duration, actions ...chr
 		return err
 	}
 	return runErr
-}
-
-// handoverLocked hands the browser from one tenant to the next by destroying
-// it. mu is held, so no call can be in flight.
-//
-// Destroying rather than clearing, and the difference is the whole point. A
-// fresh chromium has no cookies, no localStorage, no sessionStorage, no cache,
-// no service workers, no open page and no history; "clear the things that carry
-// a session" is a list, and a list is something you can be wrong about — a new
-// storage API, an HttpOnly cookie on a partition nobody thought of, an
-// authenticated service worker. The next call starts a browser lazily
-// (ensureLocked), so the cost is one process start, paid only when the tenant
-// actually changes.
-//
-// That cost is affordable because of who calls: browser_* is a QA and PM agent
-// tool, used a handful of times in a run, and every call already serialises on
-// this mutex. It would not be affordable if this were a per-request path.
-//
-// A context with no tenant is the single-tenant case (self-hosted, desktop, a
-// test) and hands over to the zero uuid, which is stable — so those deployments
-// keep exactly one browser for the life of the process, as they always did.
-func (s *Session) handoverLocked(ctx context.Context) {
-	var next uuid.UUID
-	if id, ok := tenant.ID(ctx); ok {
-		next = id
-	}
-	if s.tenant == next {
-		return
-	}
-	if s.tabCtx != nil {
-		log.Info().Str("from_tenant", s.tenant.String()).Str("to_tenant", next.String()).
-			Msg("browser: tearing the shared browser down before another tenant uses it")
-		s.closeLocked()
-	}
-	s.tenant = next
 }
 
 // runLocked is the unguarded run. It must only be called with mu held and only

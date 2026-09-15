@@ -20,7 +20,7 @@ func NewMemoryStore(pool *DB) *MemoryStore {
 	return &MemoryStore{pool: pool}
 }
 
-const memoryColumns = "id, agent_id, repository_id, content, category, embedding, source, owner_user_id, created_at, updated_at"
+const memoryColumns = "id, agent_id, repository_id, content, category, embedding, source, created_at, updated_at"
 
 func (s *MemoryStore) Create(ctx context.Context, m domain.AgentMemory) (domain.AgentMemory, error) {
 	var embJSON []byte
@@ -36,12 +36,8 @@ func (s *MemoryStore) Create(ctx context.Context, m domain.AgentMemory) (domain.
 		agentID = &m.AgentID
 	}
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO agent_memories (agent_id, repository_id, content, category, embedding, source, owner_user_id)
-		-- Ownership is read off the agent rather than taken from the caller.
-		-- Whoever saved this memory is not the question: whose agent produced
-		-- it is. A NULL agent_id (the team bucket) makes the subquery NULL,
-		-- which is exactly right - a team memory is never owned.
-		VALUES ($1, $2, $3, $4, $5, $6, (SELECT owner_user_id FROM agents WHERE id = $1))
+		INSERT INTO agent_memories (agent_id, repository_id, content, category, embedding, source)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING `+memoryColumns,
 		agentID, m.RepositoryID, m.Content, m.Category, embJSON, m.Source)
 	out, err := scanMemory(row)
@@ -103,18 +99,6 @@ func buildMemoryListQuery(q domain.MemoryQuery) (string, []any) {
 		clause = append(clause, "repository_id = "+next(*q.RepositoryID))
 	default:
 		clause = append(clause, "(repository_id IS NULL OR repository_id = "+next(*q.RepositoryID)+")")
-	}
-
-	// The owner filter is unconditional, and it is here rather than only in the
-	// application service on purpose: this is the last place before the SQL, so
-	// a future caller that builds a MemoryQuery by hand and forgets still
-	// cannot read another member's notes. "Unowned OR mine" collapses to
-	// "unowned" for a caller with no uid, and on a solo tenant every row is
-	// unowned - so neither a machine call nor a solo install sees any change.
-	if q.OwnerUserID != "" {
-		clause = append(clause, "(owner_user_id IS NULL OR owner_user_id = "+next(q.OwnerUserID)+")")
-	} else {
-		clause = append(clause, "owner_user_id IS NULL")
 	}
 
 	limit := q.Limit
@@ -192,12 +176,8 @@ func scanMemory(row pgx.Row) (domain.AgentMemory, error) {
 	var m domain.AgentMemory
 	var embJSON []byte
 	var agentID *uuid.UUID
-	var owner *string
-	if err := row.Scan(&m.ID, &agentID, &m.RepositoryID, &m.Content, &m.Category, &embJSON, &m.Source, &owner, &m.CreatedAt, &m.UpdatedAt); err != nil {
+	if err := row.Scan(&m.ID, &agentID, &m.RepositoryID, &m.Content, &m.Category, &embJSON, &m.Source, &m.CreatedAt, &m.UpdatedAt); err != nil {
 		return domain.AgentMemory{}, err
-	}
-	if owner != nil {
-		m.OwnerUserID = *owner
 	}
 	if agentID != nil {
 		m.AgentID = *agentID

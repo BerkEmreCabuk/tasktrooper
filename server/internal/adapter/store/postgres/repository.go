@@ -733,7 +733,7 @@ const taskKeySQL = `CASE bt.task_type WHEN 'bug' THEN 'B' WHEN 'analiz' THEN 'A'
 
 const boardTaskColumns = `id, repository_id, task_number, title, task_type,
 		description, technical_description, initiative_project_id, board_column,
-		position, priority, created_by, assignee_agent_id, assignee_user_id, created_at, updated_at,
+		position, priority, created_by, assignee_agent_id, created_at, updated_at,
 		blocked_question, blocked_session_id, blocked_at, blocked_origin_column,
 		blocked_resource,
 		clarification_session_id,
@@ -753,7 +753,7 @@ const boardTaskColumns = `id, repository_id, task_number, title, task_type,
 const boardTaskSelect = `
 	SELECT bt.id, bt.repository_id, bt.task_number, bt.title, bt.task_type,
 		bt.description, bt.technical_description, bt.initiative_project_id, bt.board_column,
-		bt.position, bt.priority, bt.created_by, bt.assignee_agent_id, bt.assignee_user_id,
+		bt.position, bt.priority, bt.created_by, bt.assignee_agent_id,
 		bt.created_at, bt.updated_at,
 		bt.blocked_question, bt.blocked_session_id, bt.blocked_at, bt.blocked_origin_column,
 		bt.blocked_resource,
@@ -782,12 +782,11 @@ func scanBoardTask(scanner interface {
 	var task domain.BoardTask
 	var col, taskType, priority string
 	var blockedQuestion, blockedOrigin, blockedResource, prURL, mergeCommitSHA *string
-	var assigneeUser *string
 	var prNumber *int
 	err := scanner.Scan(
 		&task.ID, &task.RepositoryID, &task.TaskNumber, &task.Title, &taskType,
 		&task.Description, &task.TechnicalDescription, &task.InitiativeProjectID, &col,
-		&task.Position, &priority, &task.CreatedBy, &task.AssigneeAgentID, &assigneeUser,
+		&task.Position, &priority, &task.CreatedBy, &task.AssigneeAgentID,
 		&task.CreatedAt, &task.UpdatedAt,
 		&blockedQuestion, &task.BlockedSessionID, &task.BlockedAt, &blockedOrigin,
 		&blockedResource,
@@ -803,9 +802,6 @@ func scanBoardTask(scanner interface {
 	// The PR columns are nullable but the domain fields are plain values: NULL
 	// and "" both mean "no PR known", so the scan targets are pointers only
 	// because pgx needs them to be.
-	if assigneeUser != nil {
-		task.AssigneeUserID = *assigneeUser
-	}
 	if prURL != nil {
 		task.PRURL = *prURL
 	}
@@ -841,14 +837,12 @@ func (s *BoardTaskStore) Create(ctx context.Context, task domain.BoardTask) (dom
 		INSERT INTO board_tasks (
 			repository_id, task_number, title, task_type, description, technical_description,
 			initiative_project_id, board_column, position, priority, created_by, assignee_agent_id,
-			assignee_user_id,
 			before_deploy, after_deploy, rollback_plan
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
 		RETURNING `+boardTaskColumns+`
 	`, task.RepositoryID, task.TaskNumber, task.Title, string(task.TaskType),
 		task.Description, task.TechnicalDescription, task.InitiativeProjectID, string(task.Column),
 		task.Position, string(task.Priority), task.CreatedBy, task.AssigneeAgentID,
-		nullableText(task.AssigneeUserID),
 		task.BeforeDeploy, task.AfterDeploy, task.RollbackPlan)
 	created, err := scanBoardTask(row)
 	if err != nil {
@@ -1024,10 +1018,6 @@ func (s *BoardTaskStore) Update(ctx context.Context, task domain.BoardTask) (dom
 			position = $9,
 			priority = $10,
 			assignee_agent_id = $11,
-			-- NULL rather than '' for "nobody", so the partial index on
-			-- assignee_user_id (migration 115) stays the size of the assigned
-			-- cards rather than the size of the board.
-			assignee_user_id = $17,
 			blocked_question = CASE WHEN blocked_session_id IS NULL AND $8 <> $12::text
 				THEN NULL ELSE blocked_question END,
 			blocked_at = CASE WHEN blocked_session_id IS NULL AND $8 <> $12::text
@@ -1060,8 +1050,7 @@ func (s *BoardTaskStore) Update(ctx context.Context, task domain.BoardTask) (dom
 		task.TechnicalDescription, task.InitiativeProjectID, string(task.Column),
 		task.Position, string(task.Priority), task.AssigneeAgentID,
 		string(domain.TaskColumnBlocked), task.VerifiedSHA,
-		task.BeforeDeploy, task.AfterDeploy, task.RollbackPlan,
-		nullableText(task.AssigneeUserID))
+		task.BeforeDeploy, task.AfterDeploy, task.RollbackPlan)
 	updated, err := scanBoardTask(row)
 	if err != nil {
 		return domain.BoardTask{}, fmt.Errorf("update board task: %w", err)
@@ -2160,15 +2149,4 @@ func (s *InitiativeProjectStore) Delete(ctx context.Context, id uuid.UUID) error
 		return fmt.Errorf("initiative project not found")
 	}
 	return nil
-}
-
-// nullableText maps "" onto SQL NULL. The identity columns added by migration
-// 115 (assignee_user_id, owner_user_id) are nullable because "nobody" is a real
-// state, and storing an empty string instead would make the partial indexes -
-// which exist precisely to skip the unassigned rows - index everything.
-func nullableText(v string) *string {
-	if v == "" {
-		return nil
-	}
-	return &v
 }

@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   api,
-  isAssigneeRejectedError,
   type Agent,
   type AttachmentMeta,
   type BoardTask,
@@ -15,7 +14,7 @@ import {
   type BoardColumn,
 } from "@/api";
 import { MultiSelectPicker } from "@/components/admin/MultiSelectPicker";
-import { shortUid, TaskAssigneeFields } from "@/components/board/TaskAssigneeFields";
+import { TaskAssigneeFields } from "@/components/board/TaskAssigneeFields";
 import { AttachmentDropzone } from "@/components/attachments/AttachmentDropzone";
 import { AttachmentList } from "@/components/attachments/AttachmentList";
 import { MarkdownField } from "@/components/markdown/MarkdownField";
@@ -37,7 +36,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useI18n } from "@/hooks/useI18n";
-import { useTenantMembers } from "@/hooks/useTenantMembers";
 import { TASK_PRIORITY_OPTIONS, TASK_TYPE_OPTIONS } from "@/lib/project-board";
 
 interface CriterionDraft {
@@ -87,7 +85,6 @@ export function CreateTaskDialog({
   onCreated,
 }: CreateTaskDialogProps) {
   const { t } = useI18n();
-  const { members, labelFor, refresh: refreshMembers } = useTenantMembers(open);
   const [repositoryId, setRepositoryId] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [taskType, setTaskType] = useState<TaskType>("task");
@@ -97,9 +94,6 @@ export function CreateTaskDialog({
   const [initiativeProjectId, setInitiativeProjectId] = useState<string>("none");
   const [column, setColumn] = useState<TaskColumn>(defaultColumn);
   const [assigneeId, setAssigneeId] = useState<string>("none");
-  // "" is unassigned, which on create simply omits the field — see
-  // CreateBoardTaskInput.
-  const [assigneeUserId, setAssigneeUserId] = useState<string>("");
   const [criteria, setCriteria] = useState<CriterionDraft[]>([]);
   const [documents, setDocuments] = useState<DocumentDraft[]>([]);
   const [attachments, setAttachments] = useState<AttachmentMeta[]>([]);
@@ -129,7 +123,6 @@ export function CreateTaskDialog({
     setInitiativeProjectId("none");
     setColumn(defaultColumn);
     setAssigneeId("none");
-    setAssigneeUserId("");
     setCriteria([]);
     setDocuments([]);
     setAttachments([]);
@@ -187,7 +180,6 @@ export function CreateTaskDialog({
         column,
         priority,
         assignee_agent_id: assigneeId !== "none" ? assigneeId : undefined,
-        assignee_user_id: assigneeUserId || undefined,
         acceptance_criteria: criteria
           .filter((c) => c.text.trim())
           .map((c, i) => ({ text: c.text.trim(), position: i })),
@@ -221,22 +213,7 @@ export function CreateTaskDialog({
       onOpenChange(false);
       onCreated();
     } catch (e) {
-      // The roster refusing the person is the one failure here whose fix the
-      // user can act on, and the server answers it in English only — so it is
-      // said in their language, naming whoever they picked. Refreshed too: the
-      // only way to reach this from the picker is a list that went stale.
-      if (assigneeUserId && isAssigneeRejectedError(e)) {
-        refreshMembers();
-        toast.error(
-          t("boardArea.components.memberAssignee.rejected", {
-            name:
-              labelFor(assigneeUserId) ??
-              t("boardArea.components.memberAssignee.unnamed", { id: shortUid(assigneeUserId) }),
-          }),
-        );
-      } else {
-        toast.error(e instanceof Error ? e.message : t("boardArea.components.createTask.createFailed"));
-      }
+      toast.error(e instanceof Error ? e.message : t("boardArea.components.createTask.createFailed"));
     } finally {
       setCreating(false);
     }
@@ -343,16 +320,10 @@ export function CreateTaskDialog({
             )}
           </div>
 
-          {/* Both assignments together, and never as two matching dropdowns
-              lost among the other fields: which agent works the card and whose
-              Mac it runs on are different questions. */}
           <TaskAssigneeFields
             agents={memberAgents}
             agentValue={assigneeId === "none" ? "" : assigneeId}
             onAgentChange={(id) => setAssigneeId(id || "none")}
-            members={members}
-            personValue={assigneeUserId}
-            onPersonChange={setAssigneeUserId}
             disabled={creating}
           />
 

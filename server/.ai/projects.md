@@ -1,6 +1,6 @@
 # Repositories & Initiative Projects
 
-Code repositories bind a filesystem directory to codebase indexing and the kanban board. Repository-scoped chat is removed; agents are triggered by board events instead. Every repo carries a `tenant_id` (migration 114, always `tenant.LocalTenantID` on this product) and the board is global **within** it — there is no second grouping under a tenant, which is what the removed `team_id` used to be. See [Person columns](#person-columns-migration-115) for `assignee_user_id` and the other per-person columns added by migration 115.
+Code repositories bind a filesystem directory to codebase indexing and the kanban board. Repository-scoped chat is removed; agents are triggered by board events instead. Every repo carries a `tenant_id` (migration 114, always `tenant.LocalTenantID` on this product) and the board is global **within** it — there is no second grouping under a tenant, which is what the removed `team_id` used to be. See [Person columns](#person-columns-migration-115) for the per-person columns migration 115 added, which no code uses.
 
 ## Data Model
 
@@ -88,11 +88,8 @@ See [Workspace](workspace.md) for the board/dispatch layer.
 |---|---|
 | `tenants` | one-row registry (`tenant.LocalTenantID`) |
 | `tenant_members` | schema only; nothing reads or writes it |
-| `agents.owner_user_id` | NULL = shared agent |
-| `board_tasks.assignee_user_id` | the person a card belongs to, beside `assignee_agent_id` (the agent working it) |
-| `agent_memories.owner_user_id` | copied from the memory's agent |
+| `agents.owner_user_id`, `board_tasks.assignee_user_id`, `agent_memories.owner_user_id` | schema only; no code reads or writes them |
 
-The install has one person and no login. `repository.Service.resolveAssignee`
-accepts only `""` for `assignee_user_id`; any uid is refused with
-`400 assignee_not_member`. With no assignee, `board.Dispatcher.narrowToAssignee`
-returns every column subscriber unchanged.
+The install has one person and no login: a task is assigned to an agent only
+(`assignee_agent_id`), the dispatcher wakes every column subscriber, and memory reads have
+no owner filter.

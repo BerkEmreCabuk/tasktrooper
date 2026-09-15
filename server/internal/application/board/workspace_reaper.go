@@ -12,7 +12,6 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 // WorkspaceReaperInterval is how often finished tasks' checkouts are collected.
@@ -117,7 +116,7 @@ func (r *WorkspaceReaper) Start(ctx context.Context, interval time.Duration) {
 		interval = WorkspaceReaperInterval
 	}
 	go func() {
-		tenant.Sweep(ctx, "workspace_reaper", r.Sweep)
+		r.Sweep(ctx)
 		t := time.NewTicker(interval)
 		defer t.Stop()
 		for {
@@ -125,7 +124,7 @@ func (r *WorkspaceReaper) Start(ctx context.Context, interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				tenant.Sweep(ctx, "workspace_reaper", r.Sweep)
+				r.Sweep(ctx)
 			}
 		}
 	}()
@@ -136,8 +135,8 @@ func (r *WorkspaceReaper) Start(ctx context.Context, interval time.Duration) {
 // property it has to hold (another tenant's directories are untouched) is only
 // testable against a real database, from another package.
 func (r *WorkspaceReaper) Sweep(ctx context.Context) {
-	// Whose directories this pass may even look at. tenant.Sweep gives every
-	// tick an identity, so failing here means a caller built a context by hand
+	// Whose directories this pass may even look at. Start's context carries the
+	// local identity, so failing here means a caller built a context by hand
 	// — and the answer to "I cannot tell whose these are" is to touch nothing,
 	// not to fall back to the shared root.
 	root, err := workspace.TenantRoot(ctx, r.root)

@@ -38,7 +38,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/repofacts"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -310,7 +309,7 @@ func (s *Service) RefreshAsync(ctx context.Context, repositoryID uuid.UUID, reas
 }
 
 // refreshAsyncScoped takes the CALLER's context, and uses it for nothing except
-// the identity on it. See tenant.Detach: the rebuild outlives the request that
+// the identity on it (context.WithoutCancel): the rebuild outlives the request that
 // asked for it, so it cannot hold the request's cancellation, but it is still
 // that tenant's rebuild and every store it touches is policy-protected. It ran
 // on a bare context.Background(), so on a live stack every repository import on
@@ -330,7 +329,7 @@ func (s *Service) refreshAsyncScoped(ctx context.Context, repositoryID uuid.UUID
 				log.Error().Any("panic", r).Str("repository_id", repositoryID.String()).Msg("profile refresh panicked")
 			}
 		}()
-		ctx, cancel := context.WithTimeout(tenant.Detach(ctx), refreshTimeout)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), refreshTimeout)
 		defer cancel()
 		if err := s.run(ctx, repositoryID, reason, only, st); err != nil {
 			log.Warn().Err(err).Str("repository_id", repositoryID.String()).Str("reason", reason).Msg("profile refresh failed")

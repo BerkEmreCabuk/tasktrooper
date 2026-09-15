@@ -366,12 +366,6 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 
 	runCtx, cancel := context.WithCancel(ctx)
 
-	// The fan-out source for every background sweep. It is installed here, on
-	// the context the loops are started with, and resolves lazily through the
-	// engine because the database is not built until buildHandler runs -
-	// several hundred lines below - while runCtx has to exist before it.
-	runCtx = tenant.WithLister(runCtx, engineTenants{e: e})
-
 	// The tenant every background context inherits.
 	//
 	// Boot steps, sweepers, monitors and the job worker all descend from runCtx
@@ -750,19 +744,6 @@ func (e *engine) bootstrapLLMFromYAML(baseURL, model, apiKey string, timeout tim
 // later HTTP request — after scrubProcessSecrets has already wiped
 // MCP_SECRETS_KEY from the process environment. See pgSettings.SetCipher and
 // mobileStore.SetCipher below for the same fix on their stores.
-// engineTenants answers "which tenants does this database serve" for
-// tenant.EachTenant. A nil pgDB (no Postgres configured) reports none, and
-// EachTenant's own no-lister path is what keeps a single-tenant deployment
-// working - see tenant.EachTenant.
-type engineTenants struct{ e *engine }
-
-func (t engineTenants) Tenants(ctx context.Context) ([]uuid.UUID, error) {
-	if t.e == nil || t.e.pgDB == nil {
-		return nil, nil
-	}
-	return t.e.pgDB.Tenants(ctx)
-}
-
 func wireRepositoryStore(pgDB *pgstore.DB, cfg *domain.Config, cipher *secrets.Cipher, cipherErr error) *pgstore.RepositoryStore {
 	store := pgstore.NewRepositoryStore(pgDB).
 		SetHostRoots(cfg.Storage.Sessions.WorkspaceRoot, cfg.Indexer.AllowedRoots)
@@ -1302,12 +1283,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if taskSpanStore != nil {
 			boardDispatcher.SetSpans(taskSpanStore)
 		}
-		// Assignee narrowing: a card with a person on it only wakes that
-		// person's agents and the tenant's shared ones. The concrete store is
-		// the board config store, which is where the catalog already lives.
-		if owners, ok := boardConfigStore.(boardapp.AgentOwnerLookup); ok {
-			boardDispatcher.SetAgentOwners(owners)
-		}
 		// A park is a move the dispatcher never sees (see board.ParkJournal), so
 		// the runner writes its event and its span itself. Same two stores the
 		// dispatcher was just given, deliberately: the row a park leaves behind
@@ -1492,12 +1467,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// budget period rolled over has tasks parked on a budget that is no
 			// longer spent, and nothing else will wake them.
 			//
-			// tenant.Sweep, like the other twelve loops: Tick reads
-			// billing_plan and lists that tenant's paused tasks, so on the bare
-			// loop context it raised tenant.ErrNoTenant on the boot pass and on
-			// every pass after it, and no tenant's budget ever renewed.
+			// Tick reads billing_plan and the paused tasks, so it runs on ctx,
+			// which carries the local identity (see Run).
 			activateBoard = append(activateBoard, func() {
-				tenant.Sweep(ctx, "billing_period", billingSvc.Tick)
+				billingSvc.Tick(ctx)
 				go func() {
 					t := time.NewTicker(15 * time.Minute)
 					defer t.Stop()
@@ -1506,7 +1479,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 						case <-ctx.Done():
 							return
 						case <-t.C:
-							tenant.Sweep(ctx, "billing_period", billingSvc.Tick)
+							billingSvc.Tick(ctx)
 						}
 					}
 				}()
@@ -1796,16 +1769,14 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			//     commit until a human opens the repository settings page.
 			//
 			// Backgrounded together, on one goroutine: both are GitHub round
-			// trips per repository per tenant, neither is on any request path,
-			// and doing them in sequence keeps a fleet-wide boot from opening a
-			// connection per tenant at once. The budget is the pass's, not each
-			// tenant's — a fleet that cannot converge in fifteen minutes has a
-			// GitHub problem, and the next pod tries again.
+			// trips per repository and neither is on any request path. The
+			// budget is the whole pass's; one that cannot converge in fifteen
+			// minutes has a GitHub problem, and the next start tries again.
 			go func() {
 				bootCtx, cancel := context.WithTimeout(ctx, bootConvergeTimeout)
 				defer cancel()
-				tenant.Sweep(bootCtx, "webhook_reconcile", repositorySvc.ReconcileWebhooks)
-				tenant.Sweep(bootCtx, "index_freshness", repositorySvc.SweepIndexFreshness)
+				repositorySvc.ReconcileWebhooks(bootCtx)
+				repositorySvc.SweepIndexFreshness(bootCtx)
 			}()
 			// GitHub will not deliver webhooks to a loopback or private address,
 			// and a desktop install listens on 127.0.0.1. Poll instead: the
@@ -1821,7 +1792,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 						case <-ctx.Done():
 							return
 						case <-t.C:
-							tenant.Sweep(ctx, "index_freshness", repositorySvc.SweepIndexFreshness)
+							repositorySvc.SweepIndexFreshness(ctx)
 						}
 					}
 				}()
@@ -2429,8 +2400,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		// call. Constructed before the service so the service can be given its
 		// invalidation hook, and installed on the client immediately after —
 		// from that moment the client stops using the config.yml fallback and
-		// starts answering per tenant.
-		providers := newTenantProviders(func(rctx context.Context) (llmprovider.Resolved, error) {
+		// starts answering from the stored settings.
+		providers := newProviderCache(func(rctx context.Context) (llmprovider.Resolved, error) {
 			return llmProviderSvc.Resolve(rctx)
 		}, llmTimeout)
 		llmProviderSvc = llmprovider.NewService(llmProviderStore, llmEndpointStore, e.secretsCipher, llmTimeout, providers.Invalidate)

@@ -16,7 +16,6 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -30,14 +29,14 @@ var ErrMigrationNotStaged = errors.New("this task changes the database schema an
 // whether the task carries a schema change. It runs off the request path
 // (git is slow) and comments on the task the first time it finds one, so the
 // developer and the QA agent both learn that the stage gate is now armed.
-// ctx for its identity only (tenant.Detach): the stamp and the comment it
+// ctx for its identity only (context.WithoutCancel): the stamp and the comment it
 // writes are both policy-protected rows.
 func (s *Service) DetectTaskMigration(ctx context.Context, task domain.BoardTask) {
 	if s.git == nil || s.workspaceRoot == "" || s.tasks == nil {
 		return
 	}
 	go func() {
-		ctx, cancel := context.WithTimeout(tenant.Detach(ctx), 2*time.Minute)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer cancel()
 
 		workspacePath := s.taskWorkspacePath(ctx, task.ID)

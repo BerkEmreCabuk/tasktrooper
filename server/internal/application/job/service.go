@@ -13,7 +13,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
@@ -137,7 +136,7 @@ func (s *Service) worker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			tenant.Sweep(ctx, "jobs", s.processOne)
+			s.processOne(ctx)
 		}
 	}
 }
@@ -189,8 +188,7 @@ func (s *Service) processOne(ctx context.Context) {
 // ctx is carried for its VALUES, not its lifetime: the callback outlives the
 // job whose result it reports. Nothing here reads a tenant row today, and that
 // is exactly why it is worth carrying — the next thing added to this path would
-// otherwise inherit a context with no identity and fail silently, which is the
-// shape of every bug tenant.Detach exists to end.
+// otherwise inherit a context with no identity and fail silently.
 func (s *Service) fireCallback(ctx context.Context, url string, jobID uuid.UUID, status domain.JobStatus, result []byte, errMsg string) {
 	if url == "" {
 		return
@@ -207,7 +205,7 @@ func (s *Service) fireCallback(ctx context.Context, url string, jobID uuid.UUID,
 	}
 	body, _ := json.Marshal(payload)
 	go func() {
-		ctx, cancel := context.WithTimeout(tenant.Detach(ctx), callbackTimeout)
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), callbackTimeout)
 		defer cancel()
 
 		// Resolved and checked here, not just at Create: the row was written

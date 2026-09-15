@@ -4,7 +4,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   api,
-  isAssigneeRejectedError,
   type AcceptanceCriterion,
   type Agent,
   type AttachmentMeta,
@@ -31,7 +30,7 @@ import { AttachmentDropzone } from "@/components/attachments/AttachmentDropzone"
 import { AttachmentList } from "@/components/attachments/AttachmentList";
 import { PlanView } from "@/components/chat/PlanView";
 import { PipelineSection } from "@/components/board/PipelineSection";
-import { shortUid, TaskAssigneeFields } from "@/components/board/TaskAssigneeFields";
+import { TaskAssigneeFields } from "@/components/board/TaskAssigneeFields";
 import { TaskDocumentList } from "@/components/board/TaskDocumentList";
 import { TaskHistory } from "@/components/board/TaskHistory";
 import { MarkdownContent } from "@/components/markdown/MarkdownContent";
@@ -60,7 +59,6 @@ import { Separator } from "@/components/ui/separator";
 import { useI18n } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
 import { useRunActivity } from "@/hooks/useRunActivity";
-import { useTenantMembers } from "@/hooks/useTenantMembers";
 import { subtaskActivityByKey } from "@/lib/sessionGraph";
 import {
   blockedResourceLabel,
@@ -136,10 +134,6 @@ export function TaskDetailDrawer({
 }: TaskDetailDrawerProps) {
   const { t } = useI18n();
   const navigate = useNavigate();
-  // `members` above is the board roster (which AGENTS work this board);
-  // these are the people the card may belong to. Two different rosters, so the
-  // name here says which one it is.
-  const { members: tenantMembers, labelFor, refresh: refreshMembers } = useTenantMembers(open);
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [runs, setRuns] = useState<TaskAgentRun[]>([]);
   const [documents, setDocuments] = useState<TaskDocument[]>([]);
@@ -350,40 +344,18 @@ export function TaskDetailDrawer({
       onUpdated();
       toast.success(t("boardArea.components.taskDetail.updated"));
     } catch (e) {
-      // The roster refusing the person is the only refusal here the reader can
-      // do something about, and the server writes it in English only — so it
-      // is said in their language, naming whoever they picked. The roster is
-      // re-read as well: reaching this from the picker means it was stale.
-      const person = data.assignee_user_id;
-      if (person && isAssigneeRejectedError(e)) {
-        refreshMembers();
-        toast.error(
-          t("boardArea.components.memberAssignee.rejected", {
-            name:
-              labelFor(person) ??
-              t("boardArea.components.memberAssignee.unnamed", { id: shortUid(person) }),
-          }),
-        );
-      } else {
-        toast.error(e instanceof Error ? e.message : t("boardArea.components.taskDetail.updateFailed"));
-      }
+      toast.error(e instanceof Error ? e.message : t("boardArea.components.taskDetail.updateFailed"));
     } finally {
       setSaving(false);
     }
   };
 
-  // Unassigning sends `null`, which the server honours only since it moved both
-  // assignees onto domain.Nullable — before that this control was a silent
+  // Unassigning sends `null`, which the server honours only since it moved the
+  // assignee onto domain.Nullable — before that this control was a silent
   // no-op, the request going out and nothing being cleared. See
   // UpdateBoardTaskInput for the three spellings.
   const handleAssignee = (agentId: string) => {
     patchTask({ assignee_agent_id: agentId || null });
-  };
-
-  // "" rather than null only because that is what the picker hands back for
-  // "nobody"; the server unassigns on either.
-  const handlePersonAssignee = (userId: string) => {
-    patchTask({ assignee_user_id: userId });
   };
 
   const handleColumn = (column: TaskColumn) => {
@@ -1255,9 +1227,6 @@ export function TaskDetailDrawer({
                         agentValue={task.assignee_agent_id}
                         onAgentChange={handleAssignee}
                         agentFallbackName={assigneeName}
-                        members={tenantMembers}
-                        personValue={task.assignee_user_id}
-                        onPersonChange={handlePersonAssignee}
                         disabled={saving}
                       />
                     </div>

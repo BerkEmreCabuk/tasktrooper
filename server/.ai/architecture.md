@@ -921,7 +921,7 @@ exactly one tenant, `tenant.LocalTenantID`.
 | global | `schema_migrations`, `tenants` | one schema, and the registry OF tenants — neither is a tenant's data |
 | uniqueness | migration 114 | every UNIQUE key re-cut to lead with `tenant_id`; single-row tables (`board_settings`, `billing_plan`, `agent_cli_connection`) became single-row-per-tenant |
 | per-tenant seed | `application/tenantboot` | migrations no longer seed; the first request seeds the board (see `.ai/projects.md` for `tenant_members`, which stays empty on this product) |
-| background sweeps | `tenant.EachTenant` / `tenant.Sweep` | one tick per tenant; with no lister (self-hosted) one tick, unchanged |
+| background loops | `platform/runtime` `Run` | the root context carries `tenant.LocalTenantID` + `RoleOwner`; every loop calls its tick directly on it |
 | board runs | `board.RunJob.Tenant` | the queue severs request and worker, so the tenant rides the job |
 | CI pipelines | `board.pipelineJob.Tenant` | same queue, same fix; without it every run logged `get task pipeline: tenant: no tenant in context` and failed the pipeline |
 | roles | `adapter/http/middleware_role.go` | mutations of `/admin`, `/v1/settings`, `/v1/board/`, `/v1/llm/`, `/v1/projects`, `/v1/store/credentials`, repository config and agent subscriptions need admin/owner; reads and board work are open to member |
@@ -942,11 +942,11 @@ tenant-scoped, so `WorkspaceReaper` never derives a delete decision from an unsc
 
 A process has no tenant identity at boot — nothing tenant-scoped runs until the first request
 names one. `tenantboot.AddStep` then seeds mcp servers, role agents, llm providers and mobile
-devices once per process; `tenant.Sweep` runs fleet-wide sweeps (billing period, webhook
-reconcile, index freshness) the same way regardless of tenant count.
+devices once per process; the background loops (billing period, webhook reconcile, index freshness,
+the board sweepers) run on the runtime's root context, which carries the local identity.
 
 **A goroutine started from a request loses the tenant with the cancellation.**
-`tenant.Detach(ctx)` (`context.WithoutCancel`) replaces `context.Background()`: keep the
+`context.WithoutCancel(ctx)` replaces `context.Background()`: keep the
 identity, drop the deadline — a background continuation (a repository import's profile pass,
 a push webhook registration) needs the identity to still resolve after its parent request has
 returned.

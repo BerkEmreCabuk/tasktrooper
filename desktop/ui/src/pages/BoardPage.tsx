@@ -1,4 +1,4 @@
-import { Activity, Bot, Clock, GripVertical, HelpCircle, Inbox, Loader2, Plus, Trash2, User } from "lucide-react";
+import { Activity, Bot, Clock, GripVertical, HelpCircle, Inbox, Loader2, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -26,7 +26,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useCachedState, useFirstLoad } from "@/hooks/useCachedState";
 import { tStatic, useI18n } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
-import { useTenantMembers } from "@/hooks/useTenantMembers";
 import {
   CACHE_AGENTS,
   CACHE_CONFIG,
@@ -39,7 +38,6 @@ import {
   formatResumeIn,
   mergeTaskList,
   pipelineGateReasonLabel,
-  shortMemberLabel,
   taskPipelineCardIcon,
   taskPriorityLabel,
   taskTypeLabel,
@@ -73,9 +71,6 @@ const TASK_POLL_MS = 5000;
 
 export function BoardPage() {
   const { t } = useI18n();
-  // Only to NAME the person on a card. The picker itself lives in the create
-  // dialog and the detail drawer, which read the same roster.
-  const { labelFor: memberLabelFor } = useTenantMembers();
   // Cached across navigations: coming back to the board paints the last known
   // cards immediately and refreshes behind them, instead of showing the
   // full-page skeleton on every click through the sidebar.
@@ -317,10 +312,6 @@ export function BoardPage() {
 
   const TaskCard = ({ task }: { task: BoardTask }) => {
     const assignee = agentName(task.assignee_agent_id);
-    // The person whose Mac the card runs on. Left unnamed when the roster has
-    // not arrived, or no longer holds them: a raw uid on a card says less than
-    // nothing.
-    const person = memberLabelFor(task.assignee_user_id);
     const initiative = initiativeName(task.initiative_project_id);
     const agentRunning = activeAgentTaskIds.has(task.id);
     const pipelineIcon = taskPipelineCardIcon(task.latest_pipeline_status, task.latest_pipeline_gate_reason);
@@ -457,21 +448,7 @@ export function BoardPage() {
                     <span className="max-w-[6rem] truncate">{assignee}</span>
                   </Badge>
                 )}
-                {/* The same badge the agent gets, with a different icon and a
-                    title that says what the name MEANS — the two sit beside
-                    each other on the card and only the icon tells them apart
-                    at a glance. */}
-                {person && (
-                  <Badge
-                    variant="outline"
-                    className="gap-1 text-[10px]"
-                    title={t("boardArea.board.assignedPersonTitle", { name: person })}
-                  >
-                    <User className="h-3 w-3" />
-                    <span className="max-w-[6rem] truncate">{shortMemberLabel(person)}</span>
-                  </Badge>
-                )}
-                {!assignee && !person && (
+                {!assignee && (
                   <span className="text-[10px] text-muted-foreground">{task.created_by}</span>
                 )}
               </div>
