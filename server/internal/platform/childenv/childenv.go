@@ -1,10 +1,9 @@
 // Package childenv builds the environment for every child process the bridge
 // spawns on behalf of an agent or a repository.
 //
-// The bridge pod's own environment holds DATABASE_URL, INTERNAL_AUTH_KEY,
-// MCP_SECRETS_KEY and every provider API key it was started with (see the
-// tenant Deployment in internal/control/kube). Three code paths used to hand
-// that environment straight to a child process:
+// The bridge process's own environment holds DATABASE_URL, INTERNAL_AUTH_KEY,
+// MCP_SECRETS_KEY and every provider API key it was started with. Three code
+// paths used to hand that environment straight to a child process:
 //
 //   - run_terminal (internal/adapter/tools/shell) — commands an agent writes;
 //   - the verify gate (internal/application/board) — commands the repository
@@ -116,7 +115,7 @@ var forwardedEnvVars = map[string]struct{}{
 	"GIT_AUTHOR_NAME": {}, "GIT_AUTHOR_EMAIL": {},
 	"GIT_COMMITTER_NAME": {}, "GIT_COMMITTER_EMAIL": {},
 
-	// Docker daemon endpoint, present only when the tenant explicitly enabled
+	// Docker daemon endpoint, present only when the operator explicitly enabled
 	// the docker sidecar. It is an address, not a secret, and dropping it would
 	// break the image builds that sidecar exists to serve.
 	"DOCKER_HOST": {},

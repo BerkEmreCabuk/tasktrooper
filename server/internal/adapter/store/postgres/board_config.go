@@ -744,12 +744,12 @@ func (s *TaskAgentRunStore) ClaimRun(ctx context.Context, claim port.RunClaim) (
 
 // FailIfStale re-checks the heartbeat inside the write.
 //
-// The reconciler lists stale runs and then acts on each one, and on a shared
-// deployment the owner of a listed run may heartbeat during that gap — the
-// sweep is a fan-out over every tenant, so the gap is seconds, not
-// microseconds. Re-asserting the cutoff in the WHERE clause is what makes the
-// list advisory and the write authoritative. 'cancelled' is excluded for the
-// same reason Update preserves it: a human's verdict outranks a sweeper's.
+// The reconciler lists stale runs and then acts on each one, and the owner of
+// a listed run may heartbeat during that gap — walking the full list takes
+// real time, so the gap is seconds, not microseconds. Re-asserting the
+// cutoff in the WHERE clause is what makes the list advisory and the write
+// authoritative. 'cancelled' is excluded for the same reason Update
+// preserves it: a human's verdict outranks a sweeper's.
 func (s *TaskAgentRunStore) FailIfStale(ctx context.Context, id uuid.UUID, cutoff time.Time, summary string) (bool, error) {
 	tag, err := s.pool.Exec(ctx, `
 		UPDATE task_agent_runs SET

@@ -119,7 +119,7 @@ func TestListReturnsAllProviders(t *testing.T) {
 }
 
 // A host-executed provider is listed so an agent can be put on it, but it is
-// not something to dial: connecting, testing or making it the tenant default
+// not something to dial: connecting, testing or making it the default
 // would store a configured row for an endpoint that does not exist — and, for
 // Activate, break every chat turn with a missing-client error instead of one
 // honest sentence here.

@@ -51,8 +51,8 @@ func TestAssertCheckoutIsRepo(t *testing.T) {
 }
 
 // A missing value on either side is not a refusal: a repository created here by
-// `git init` legitimately has no origin yet, and the tenant segment in the path
-// is what carries the isolation in that case.
+// `git init` legitimately has no origin yet, and `repositories.root_path`
+// being UNIQUE is what rules out a collision in that case.
 func TestAssertCheckoutIsRepo_MissingRemoteIsNotAMismatch(t *testing.T) {
 	for _, tc := range []struct{ found, want string }{
 		{"", "https://github.com/acme/api.git"},

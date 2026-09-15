@@ -1,6 +1,6 @@
 package domain
 
-// EmbeddingStatus answers "what is producing this tenant's embeddings" in one
+// EmbeddingStatus answers "what is producing this install's embeddings" in one
 // object.
 //
 // It exists because the settings page previously computed the answer from the

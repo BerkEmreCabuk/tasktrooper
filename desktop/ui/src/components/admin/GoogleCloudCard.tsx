@@ -14,7 +14,7 @@ import { tStatic, useI18n } from "@/hooks/useI18n";
 import { formatDate } from "@/lib/utils";
 
 /**
- * Settings → Integrations: the tenant's read-only Google Cloud service
+ * Settings → Integrations: the operator's read-only Google Cloud service
  * account, and the proof it reaches their project.
  *
  * The key behaves like the store credentials next to it — the API never reads

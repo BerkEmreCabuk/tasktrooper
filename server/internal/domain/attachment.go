@@ -9,8 +9,9 @@ import (
 )
 
 // MaxAttachmentBytes caps a single binary attachment. Attachments live as
-// BYTEA rows in Postgres (the tenant pod's disk is ephemeral), so the cap
-// protects the database, the connection and the HTTP path all at once.
+// BYTEA rows in Postgres rather than on disk (a task's own workspace can be
+// wiped by the reaper), so the cap protects the database, the connection and
+// the HTTP path all at once.
 const MaxAttachmentBytes = 10 << 20
 
 // ErrAttachmentTooLarge rejects an upload over MaxAttachmentBytes. The HTTP

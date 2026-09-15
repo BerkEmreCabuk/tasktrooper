@@ -8,7 +8,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// BillingStore persists the tenant's effective plan, per-model credit prices,
+// BillingStore persists the effective plan, per-model credit prices,
 // and the set of tasks paused because the budget was exhausted.
 type BillingStore interface {
 	GetPlan(ctx context.Context) (domain.BillingPlan, error)

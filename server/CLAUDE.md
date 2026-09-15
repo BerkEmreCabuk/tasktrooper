@@ -1,7 +1,6 @@
 # server
 
-The TaskTrooper backend: HTTP API + agent runtime, one Go binary. **Local is
-the only mode** — one machine, one user, one tenant, no control plane. The
+The TaskTrooper backend: HTTP API + agent runtime, one Go binary. **Local is the only mode** — one machine, one user, no control plane. The
 desktop app spawns this binary; `make dev` runs it in a terminal.
 
 Detailed docs:
@@ -38,8 +37,7 @@ internal/
                     postgres — anything external (agentcli = agent CLIs run as
                     a local process, e.g. Claude Code; mcp = MCP client,
                     mcpserver = the /mcp endpoint those CLIs call back on)
-  platform/         process plumbing: runtime wiring, embeddedpg, secrets,
-                    tenant
+  platform/         process plumbing: runtime wiring, embeddedpg, secrets
 migrations/         SQL migrations (embedded)
 resources/          config.yml, openapi.yaml (embedded into the binary)
 ```
@@ -52,8 +50,6 @@ implementing it.
 
 | Invariant | Where |
 |---|---|
-| Every request is `tenant.LocalTenantID` + `RoleOwner` | `adapter/http/middleware_tenant.go` |
-| Every background context carries the same identity | `platform/runtime/runtime.go` (`runCtx`, `localContext()`) |
 | Auth is the `SERVER_API_KEY` bearer token | `adapter/http/handler.go` (`authMiddleware`) |
 | The listener binds `127.0.0.1` only | `platform/runtime/runtime.go` |
 | Exactly one stdout line: `LISTENING http://127.0.0.1:<port>`; logs go to stderr | `platform/runtime/runtime.go` (`ConfigureLogger`) |

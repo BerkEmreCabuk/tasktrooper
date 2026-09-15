@@ -109,7 +109,7 @@ func (q *QuotaBlock) UserMessage(lang string) string {
 //
 // It exists because the two things that need it sit on opposite sides of the
 // process. The LANGUAGE is known in the session service, which has just loaded
-// the tenant's settings; the TRANSPORT is the SSE writer, which runs after the
+// the user's settings; the TRANSPORT is the SSE writer, which runs after the
 // HTTP handler has returned and has no business making a database read on an
 // error path to find out what language to apologise in. Localising once, where
 // the answer is already in hand, and carrying the finished sentence on the error

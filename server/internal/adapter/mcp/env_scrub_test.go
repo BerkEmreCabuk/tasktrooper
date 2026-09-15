@@ -13,7 +13,7 @@ import (
 // server subprocess.
 //
 // MCP server configs are user input — a command, its args and its environment,
-// stored per tenant and re-resolved on every reload. The subprocess used to get
+// stored and re-resolved on every reload. The subprocess used to get
 // the entire bridge environment merged with the config's overrides, so any
 // configured server (an npx package, a script) ran with DATABASE_URL,
 // INTERNAL_AUTH_KEY and MCP_SECRETS_KEY in reach. The scrub has to remove the
@@ -27,8 +27,7 @@ func TestStdioEnvScrubSuite(t *testing.T) {
 	suite.Run(t, new(StdioEnvScrubSuite))
 }
 
-// mcpPlantedSecrets mirrors the tenant Deployment's env
-// (internal/control/kube) plus a provider key.
+// mcpPlantedSecrets mirrors a parent process's env plus a provider key.
 var mcpPlantedSecrets = map[string]string{
 	"DATABASE_URL":      "postgres://tenant:hunter2@10.0.0.5:5432/tenant_x",
 	"INTERNAL_AUTH_KEY": "gateway-hmac-key-9f21",

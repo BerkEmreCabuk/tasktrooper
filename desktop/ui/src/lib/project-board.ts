@@ -153,7 +153,7 @@ export function boardColumnsSplit(
  * This is the single source of truth for the pairing: an ordered list of lanes,
  * each lane an ordered list of column slugs. `boardLanes()` renders from it, so
  * a future pairing is a line here and needs no new markup. Slugs listed here
- * that the tenant does not have are ignored, and any column *not* listed still
+ * that the board does not have are ignored, and any column *not* listed still
  * gets its own lane — a custom column must never vanish from the board.
  */
 export const BOARD_STACKED_LANES: readonly (readonly string[])[] = [
@@ -174,8 +174,8 @@ export interface BoardLane<C> {
  * Order is taken from the board's own column order (`position`), never from the
  * grouping table: a lane sits where its first member sits, and stages inside a
  * lane are stacked in workflow order. So `analiz_review` (position 3) renders
- * above `code_review` (4), and `pm_uat` (8) above `human_uat` (9), and a tenant
- * that reorders its columns still gets its own order back.
+ * above `code_review` (4), and `pm_uat` (8) above `human_uat` (9), and reordering
+ * the board's columns still gets its own order back.
  */
 export function boardLanes<C extends { slug: string; position: number }>(
   columns: C[],

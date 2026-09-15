@@ -50,34 +50,24 @@ Dispatcher writes `board_events`, creates `task_agent_runs`, and enqueues `board
 
 ## On-disk layout under `storage.sessions.workspace_root`
 
-Every path is still derived through `workspace.TenantRoot`, keyed on
-`tenant.LocalTenantID` — the one fixed local tenant. It refuses a context with
-no identity rather than falling back to a shared root.
+Every path is a direct child of the configured root (`workspace.ResolveRoot`);
+there is no per-tenant subtree.
 
 | Path | What |
 |---|---|
-| `<root>/tenants/<tenant-id>/repos/<name>` | index mirror clone, one per repository (`workspace.TenantRepoDir`) |
-| `<root>/tenants/<tenant-id>/task-<task-id>` | a task's own checkout (`workspace.TenantTaskDir`) |
-| `<root>/tenants/<tenant-id>/<session-id>` | an unbound chat's scratch dir (`workspace.SessionDir`) |
-| `<root>/tenants/<tenant-id>/agents/<agent-id>` | an agent chat's persistent scratch dir (`workspace.AgentDir`) |
-| `<root>/tenants/<tenant-id>/agent-cli/<flavor>/<agent-id>` | agent-CLI catalog snapshot (local deployments only) |
+| `<root>/repos/<name>` | index mirror clone, one per repository (`workspace.RepoDir`) |
+| `<root>/task-<task-id>` | a task's own checkout (`workspace.TaskDir`) |
+| `<root>/<session-id>` | an unbound chat's scratch dir (`workspace.SessionDir`) |
+| `<root>/agents/<agent-id>` | an agent chat's persistent scratch dir (`workspace.AgentDir`) |
+| `<root>/agent-cli/<flavor>` | agent-CLI catalog snapshot |
 
-`repos/<name>` is the only non-uuid component, which is why the tenant segment
-above it is load-bearing: migration 114 re-cut `repositories`' unique key to
-`(tenant_id, root_path)`.
+`repos/<name>` is the only non-uuid component directly under the root, which is
+how anything walking the tree tells a mirror clone from a task/session/agent
+directory.
 
-**Existing volumes.** `<root>/repos/<name>` written under the flat layout is
-left where it is and keeps working — its row names it, and `UsableHostPath`
-returns any path that exists unchanged. `GetByRootPath`'s directory-name
-fallback recognises that shape (`hostRoots.preTenantLayout`) so a re-import
-finds the existing row instead of inserting a second one beside it. Nothing new
-can be created there:
-`ValidateProjectRoot`, the import, the restore and `Create` all derive from the
-tenant subtree now. Flat `<root>/task-<uuid>` directories are different — they
-hold uncommitted work — and the reaper MOVES them into the owning tenant's
-subtree on its next pass, but only on proven ownership (the task uuid is in
-that tenant's own RLS-filtered list; task uuids cannot collide across tenants).
-Anything it cannot prove is left untouched, never deleted.
+**Legacy layout.** An install last started before migration 133 may still have
+its data under `<root>/tenants/<local-tenant-id>/…`; `workspace.FlattenLegacyLayout`
+moves it up into the layout above once at boot.
 
 ## Headless Agent Runs
 
@@ -85,7 +75,7 @@ Anything it cannot prove is left untouched, never deleted.
 
 ### Working copy is a cache, not the source of truth
 
-`repositories.remote_url` (064) records the git origin. The clone under `<workspace_root>/tenants/<tenant-id>/repos/<name>` can disappear (a wiped data directory) and is restored from that URL.
+`repositories.remote_url` (064) records the git origin. The clone under `<workspace_root>/repos/<name>` can disappear (a wiped data directory) and is restored from that URL.
 
 Before any agent starts, `board.Runner.ensureWorkingCopy` requires a real git working copy at the repo root **that is this repository**: intact and its origin matches `remote_url` → use it; intact but a different origin → **fail the run** (adopting a checkout is only safe if it is the right one); missing/empty → clone from `remote_url`; no `remote_url`, or the root exists with non-git contents → **fail the run** with an operator-facing error. It previously called `os.MkdirAll` here, so a stale path silently became an empty directory, `HasGit` went false, the clone/branch gate below was skipped, and the agent ran in an empty tree and asked the human for the repository path.
 
@@ -105,14 +95,14 @@ Still host-absolute and read by nothing but the API: `task_agent_runs.workspace_
 
 `postgres.RepositoryStore`/`SessionStore`/`IndexStore` still carry a
 `localizeRootPath` / `hostRoots` path-reanchoring step (`SetHostRoots`,
-`GetByRootPath`'s directory-name fallback) from when one tenant database could
+`GetByRootPath`'s directory-name fallback) from when one database could
 be read by two different hosts sharing the same rows. On this single-machine
 product every stored path already belongs to the one host that wrote it, so
 the reanchoring is a no-op.
 
 ### Per-task git workspace
 
-When the repo root is a git repository, the runner clones it into `<workspace_root>/tenants/<tenant-id>/task-<taskID>/`, checks out `feature/<task-key>` (e.g. `feature/t-12`, `feature/b-3`), and uses that clone as the run's effective workspace (`task_agent_runs.workspace_path`). On success it commits and pushes the branch. A re-run reuses the existing workspace/branch. On workspace setup failure, falls back to the repo root.
+When the repo root is a git repository, the runner clones it into `<workspace_root>/task-<taskID>/`, checks out `feature/<task-key>` (e.g. `feature/t-12`, `feature/b-3`), and uses that clone as the run's effective workspace (`task_agent_runs.workspace_path`). On success it commits and pushes the branch. A re-run reuses the existing workspace/branch. On workspace setup failure, falls back to the repo root.
 
 `EnsureTaskWorkspace` fetches the project root and then the fresh clone before branching, and cuts the task branch from `origin/<default branch>` — otherwise every task branched off whatever stale state the shared root happened to hold. A fetch failure is not fatal (offline runs still work) but is logged and drops the branch back to the cloned HEAD.
 

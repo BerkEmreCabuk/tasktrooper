@@ -115,7 +115,7 @@ export function BoardPage() {
   const { board } = useMemo(() => boardColumnsSplit(columns), [columns]);
   // Lanes, not columns, are what the board renders: the pairing lives in
   // BOARD_STACKED_LANES (lib/project-board) and everything else keeps a lane of
-  // its own, so a tenant's custom column still shows up.
+  // its own, so a custom column still shows up.
   const lanes = useMemo(() => boardLanes(board), [board]);
 
   const repositoryName = useCallback(

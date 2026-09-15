@@ -24,9 +24,9 @@ type TaskPipelineStore interface {
 	//
 	// cutoff is load-bearing and must never be 0 on a shared deployment. It was
 	// called with 0 from PipelineRunner.Start, meaning "fail every unfinished
-	// pipeline in this tenant" — correct when a restart meant the only process
-	// had died, catastrophic when one replica restarting kills every pipeline
-	// the other replicas are actively polling.
+	// pipeline" — correct when a restart meant the only process had died,
+	// catastrophic when one replica restarting kills every pipeline the other
+	// replicas are actively polling.
 	FailStaleRunning(ctx context.Context, cutoffMinutes int) error
 	// ClaimTerminal writes a pipeline's terminal status ONLY if it is still
 	// unfinished, and reports whether this caller was the one that wrote it.

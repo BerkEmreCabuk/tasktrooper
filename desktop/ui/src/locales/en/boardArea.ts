@@ -22,9 +22,9 @@ export const boardArea = {
     deleteConfirm:
       "Delete the \"{name}\" repository? Tasks, comments, pipeline history and index data will be permanently deleted.",
     delete: "Delete",
-    // Restoring a working copy: the folder is missing on the machine running
-    // this tenant, but the repository's git remote is on record, so the code
-    // can be fetched here. Offered only when the server says it is possible.
+    // Restoring a working copy: the folder is missing on this machine, but
+    // the repository's git remote is on record, so the code can be fetched
+    // here. Offered only when the server says it is possible.
     restore: "Fetch to this machine",
     restoreRetry: "Try again",
     restoring: "Fetching the project…",

@@ -77,7 +77,7 @@ type LLMProviderDefinition struct {
 	// activate / embed with" path keys off: those all mean "reach this base URL
 	// with this key", and there is no base URL and no key to reach — the CLI
 	// carries its own subscription auth. An agent may still select the provider
-	// (that is the whole point); what it may not be is the tenant's default
+	// (that is the whole point); what it may not be is the default
 	// chat provider, because a chat turn is an HTTP call and this one cannot
 	// serve it.
 	HostExecuted bool `json:"host_executed"`
@@ -381,14 +381,14 @@ func ErrHostExecutedProvider(t LLMProviderType) error {
 //	  its run rather than report a result it never computed.
 //
 // It replaces a silent fallback that rerouted these calls to whatever HTTP
-// provider the tenant had set as default. That fallback turned a specific,
+// provider was set as default. That fallback turned a specific,
 // fixable error into whatever the unrelated default provider happened to be
-// failing with — for the tenant it was written for, a dead `gemini-2.0-flash`
+// failing with — for the install it was written for, a dead `gemini-2.0-flash`
 // and, before it, an unpaid Mistral.
 var ErrHostExecutedUnservable = errors.New("host-executed provider cannot serve this call")
 
 // EmbeddingProvenanceStale reports whether an index built with (indexModel,
-// indexDimensions) can still be trusted for similarity search against a tenant
+// indexDimensions) can still be trusted for similarity search against an install
 // now configured for (configuredModel, configuredDimensions).
 //
 // This is the guard a dimension change needs and pgvector/JSONB storage does

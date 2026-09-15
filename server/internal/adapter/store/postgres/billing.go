@@ -122,7 +122,7 @@ func (s *BillingStore) DeleteModelPrice(ctx context.Context, model string) error
 //
 // A NULL cache rate resolves to the FULL prompt price, not to zero and not to
 // some other row's discount. Unpriced must mean "charged normally": the failure
-// mode of guessing low is a tenant who blows through their budget for free,
+// mode of guessing low is an install that blows through its budget for free,
 // which the gate can never detect afterwards.
 const usdSpentSinceSQL = `
 	SELECT COALESCE(SUM(
@@ -180,10 +180,9 @@ var _ interface {
 // write lock, which is what the budget gate calls. The gate is a read-then-
 // compare with nothing in between to serialise it, so concurrent runs all read
 // the same pre-spend total and all passed; taking billing_plan's row lock makes
-// the gate one-at-a-time per tenant, so each run sees the usage every earlier
+// the gate one-at-a-time, so each run sees the usage every earlier
 // run has already committed. Nothing else writes billing_plan on the request
-// path (only the period roll and the tenant-manager push), so the lock costs a
-// round trip, not contention.
+// path (only the period roll), so the lock costs a round trip, not contention.
 func (s *BillingStore) LockedUsdSpentSince(ctx context.Context, since time.Time) (float64, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {

@@ -14,11 +14,10 @@ import (
 // user, however, is shown TOKENS, not dollars: BillingStatus renders the USD
 // budget/spend as a token figure via DisplayTokenRate (USD per token).
 //
-// Package definitions are global and admin-editable (their authoritative home is
-// the control plane); BillingPlan below is the effective snapshot the tenant pod
-// enforces against and can also be edited via the tenant admin API.
+// BillingPlan below is the single row this install enforces against, edited
+// directly via PUT /admin/billing/plan.
 
-// BillingPlan is the tenant's effective plan. UsdBudget == 0 means unlimited
+// BillingPlan is the effective plan. UsdBudget == 0 means unlimited
 // (the safe default, so billing is inert until a real plan is assigned).
 type BillingPlan struct {
 	Name        string    `json:"name"`

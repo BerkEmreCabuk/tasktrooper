@@ -445,7 +445,7 @@ The other direction: `adapter/mcpserver` hands a CLI session the registry's tool
 `mcp__tasktrooper__<name>`. The session is always a local `claude` child process, so the URL
 given to it is always `http://127.0.0.1:<bound port>/mcp`, passed as a `--mcp-config` file
 written here, loopback-only, with a token that dies with the process and is bound at mint
-from the run's own tenant context.
+to the run's own context.
 
 A repository's checked-in `.mcp.json` is never loaded (`--strict-mcp-config` on every run) and
 nothing here reads or records one — a profile naming those servers would promise tools the run

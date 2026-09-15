@@ -592,8 +592,8 @@ func (f sessionFinisher) finish(ctx context.Context, label string, s session) (d
 	// recording client feeds, so the task detail shows what this run cost.
 	//
 	// It is deliberately NOT recorded to llm_usage: that table drives the
-	// tenant's USD budget, and these tokens were paid for by a flat-rate
-	// subscription. Billing them would charge the tenant twice and could pause
+	// USD budget, and these tokens were paid for by a flat-rate
+	// subscription. Billing them would charge it twice and could pause
 	// the board on a budget nothing was actually drawn from. The CLI's own
 	// total_cost_usd is logged and traced instead — it is the API-equivalent
 	// price of the session, useful to see, wrong to bill.
@@ -835,7 +835,7 @@ func flattenHistory(history []domain.Message) (systemPrompt, prompt string) {
 // and childenv drops the rest, and this overlay must not put any of them back.
 //
 // ANTHROPIC_API_KEY is deliberately absent even though the CLI would accept it.
-// It is a tenant credential this server holds for its own HTTP provider, and
+// It is a credential this server holds for its own HTTP provider, and
 // forwarding it would both hand a child process a secret it was never given and
 // silently move the session off the subscription onto metered API billing — the
 // opposite of why this provider exists.

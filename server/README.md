@@ -4,9 +4,9 @@ The TaskTrooper backend: one Go binary that serves the HTTP API and runs the
 agent loop — LLM call → tool execution → repeat — with built-in tools, MCP
 servers, git workspaces, the QA/browser pipeline and the orchestration agents.
 
-**Local is the only mode.** One machine, one user, one tenant
-(`00000000-0000-0000-0000-000000000001`), no control plane. The listener binds
-`127.0.0.1` only. With no `DATABASE_URL` it starts its own Postgres.
+**Local is the only mode.** One machine, one user, no control plane. The
+listener binds `127.0.0.1` only. With no `DATABASE_URL` it starts its own
+Postgres.
 
 The architecture is hexagonal: `internal/domain` and `internal/application`
 hold the logic, `internal/port` the interfaces, `internal/adapter` everything

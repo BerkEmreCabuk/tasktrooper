@@ -1,6 +1,6 @@
 package llmprovider_test
 
-// "Test connection" has to test the connection the tenant actually has.
+// "Test connection" has to test the connection the operator actually has.
 //
 // It resolved its base URL as request-or-definition-default and never looked at
 // the stored row, so a provider connected on http://127.0.0.1:11234/v1 was

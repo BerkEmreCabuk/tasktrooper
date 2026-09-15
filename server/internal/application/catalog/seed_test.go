@@ -457,7 +457,7 @@ func TestEnsureRoleAgents_SeedsNoModelsWhereTheCLICannotRun(t *testing.T) {
 	}
 }
 
-// Seeding runs per tenant on first sight, so a tenant seeded before these
+// Seeding runs once, on first sight, so an install seeded before these
 // defaults existed has role agents with empty models. It is reconciled on the
 // next run rather than by a migration.
 func TestEnsureRoleAgents_BackfillsAnAlreadySeededAgent(t *testing.T) {

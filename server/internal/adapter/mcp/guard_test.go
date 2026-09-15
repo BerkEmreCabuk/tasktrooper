@@ -29,7 +29,7 @@ func localPolicy() urlguard.Policy {
 // The MCP host answers 302 to an attacker's host. Go's http.Client would have
 // stripped Authorization from the request it builds, but headerTransport sat
 // below that and re-applied every configured header unconditionally, and
-// nothing capped or checked the redirect — so the tenant's bearer token was
+// nothing capped or checked the redirect — so the configured bearer token was
 // replayed to the attacker in cleartext.
 func TestConfiguredHeadersNeverFollowACrossHostRedirect(t *testing.T) {
 	var mu sync.Mutex

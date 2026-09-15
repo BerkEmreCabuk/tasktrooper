@@ -37,8 +37,8 @@ func TestPathTraversalSuite(t *testing.T) {
 	suite.Run(t, new(PathTraversalSuite))
 }
 
-// secretMarker stands in for what actually sits outside a run's workspace on a
-// tenant pod: DATABASE_URL, INTERNAL_AUTH_KEY, provider API keys.
+// secretMarker stands in for what actually sits outside a run's workspace on
+// this host: DATABASE_URL, INTERNAL_AUTH_KEY, provider API keys.
 const secretMarker = "INTERNAL_AUTH_KEY=must-never-be-read"
 
 func (s *PathTraversalSuite) SetupTest() {

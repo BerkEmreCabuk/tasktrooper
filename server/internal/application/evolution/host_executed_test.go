@@ -103,7 +103,7 @@ func TestReflectionWebResearchRunsOnTheHostExecutor(t *testing.T) {
 // at all — so it stays on the HTTP client. The loop is not involved either way.
 //
 // What the client then DOES with a claude_code request is its own decision, made
-// in one place, and it changed: it used to reroute the call to the tenant's
+// in one place, and it changed: it used to reroute the call to the
 // active default provider with the model blanked, and now it refuses it with a
 // message naming the step, the engine and the fix. This test deliberately does
 // not encode either behaviour — it asserts only that the request leaves here
@@ -144,12 +144,12 @@ func TestReflectionWithoutWebResearchStaysOnTheLLMClient(t *testing.T) {
 
 // promotionModel must not pick up whichever agent happened to sort first: the
 // classification is the evolution engine's own work, and the zero values mean
-// "the tenant's default provider, on that provider's own model".
+// "the default provider, on that provider's own model".
 func TestPromotionModelUsesTheTenantDefault(t *testing.T) {
 	s := &Service{}
 	model, provider := s.promotionModel()
 	if model != "" || provider != "" {
-		t.Fatalf("promotion routing = %q/%q, want the tenant default (empty/empty)", model, provider)
+		t.Fatalf("promotion routing = %q/%q, want the default (empty/empty)", model, provider)
 	}
 
 	s = &Service{cfg: domain.EvolutionConfig{JudgeModel: "strict", JudgeProviderType: "openai"}}

@@ -77,7 +77,7 @@ type Service struct {
 	// there is nothing to restore and a missing folder is already an error from
 	// the walk. See MirrorRestorer.
 	mirrors MirrorRestorer
-	// embeddings answers what this tenant's embed calls resolve to right now,
+	// embeddings answers what this install's embed calls resolve to right now,
 	// which is what a pass STAMPS onto the index it builds and what makes a
 	// model change detectable afterwards. Optional; without it a pass records
 	// the model it was configured with (s.embeddingModel), which is the same
@@ -118,7 +118,7 @@ func (s *Service) SetMirrorRestorer(m MirrorRestorer) {
 }
 
 // SetEmbeddingResolver tells this service — and, through it, its store — what
-// the tenant's embedding calls resolve to.
+// the embedding calls resolve to.
 //
 // The forward to the store is the point of doing it here. Three layers compare
 // against "the configured model" for three different jobs (this one stamps a
@@ -151,13 +151,13 @@ type embeddingResolverAware interface {
 // fallbackEmbeddingResolver is the one definition of "the model this index
 // would be compared against".
 //
-// A tenant-aware resolver wins when it names a model, because that is what the
+// A wired resolver wins when it names a model, because that is what the
 // embed calls will actually reach — including whatever "auto" currently means.
-// It answers blank on a deployment with no per-tenant embedding setting at all,
+// It answers blank on a deployment with no live embedding setting to read,
 // and there the model this service was CONSTRUCTED with is the honest answer:
 // an operator who changes it in config.yml has changed what every future query
 // is embedded by, and the indexes built before that change are exactly as stale
-// as they would be after a tenant switched providers.
+// as they would be after an operator switched providers.
 //
 // An error is passed through rather than swallowed into the fallback. It means
 // "the setting could not be read just now", which is not evidence of anything,
@@ -206,7 +206,7 @@ func NewService(
 		projectRunning: make(map[uuid.UUID]context.CancelFunc),
 	}
 	// Installed here, not only in SetEmbeddingResolver, so a deployment that
-	// never wires a tenant-aware resolver still has ONE answer to "what would a
+	// never wires a live resolver still has ONE answer to "what would a
 	// query be embedded by" — the configured model — shared by the pass, the
 	// store's search guard and the status warning. Without it those three would
 	// disagree on exactly the deployments least able to notice.

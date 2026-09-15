@@ -193,7 +193,7 @@ func TestQuotaBlockBecomesAnActionableChatMessage(t *testing.T) {
 }
 
 // The Turkish rendering exists because this is a user-facing sentence and the
-// tenant's language is already loaded where it is built.
+// operator's language is already loaded where it is built.
 func TestQuotaMessageFollowsTheTenantLanguage(t *testing.T) {
 	block := &domain.QuotaBlock{ResumeAt: time.Now().Add(time.Hour)}
 

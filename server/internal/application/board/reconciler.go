@@ -146,7 +146,7 @@ func (r *Reconciler) run(ctx context.Context, cutoff time.Time) {
 	// orphaned, whatever its age.
 	//
 	// This is what left a card spinning after a control-plane restart handed the
-	// tenant from the cloud pod to the local runner mid-dispatch: the pod created
+	// work from the cloud pod to the local runner mid-dispatch: the pod created
 	// the row, went away with the job still in its memory, and the runner that
 	// took over had booted BEFORE the row existed, so the startup sweep had
 	// already passed it by. Nothing looked at it again for half an hour, and the
@@ -188,7 +188,7 @@ func (r *Reconciler) run(ctx context.Context, cutoff time.Time) {
 // reconciler treats it as orphaned. Short on purpose — see the sweep for why a
 // pending row is not the same kind of evidence as a running one. It is not zero
 // because the ownership check is per process: a dispatch and the worker picking
-// it up are two moments, and a control plane that has just handed the tenant
+// it up are two moments, and a control plane that has just handed the run
 // over needs a beat for the new owner to be the one answering.
 const pendingStaleAfter = 2 * time.Minute
 
@@ -269,13 +269,13 @@ func (r *Reconciler) recoverStale(ctx context.Context, run domain.TaskAgentRun, 
 	if summary == "" {
 		summary = "reconciler: no progress before stale timeout, recovered for re-dispatch"
 	}
-	// FailIfStale, not Update: the list and this write are two moments, and on a
-	// shared deployment the gap between them is however long a fan-out over
-	// every tenant takes. Update wrote 'failed' unconditionally, so a run whose
-	// owner heartbeated during that gap — a live run, on another replica — was
-	// marked failed under it and its task re-dispatched to a second agent on
-	// the same branch. Re-asserting the cutoff in the WHERE clause makes the
-	// list advisory and the write authoritative.
+	// FailIfStale, not Update: the list and this write are two moments, and the
+	// gap between them can be arbitrarily long. Update wrote 'failed'
+	// unconditionally, so a run whose owner heartbeated during that gap — a
+	// live run, on another replica — was marked failed under it and its task
+	// re-dispatched to a second agent on the same branch. Re-asserting the
+	// cutoff in the WHERE clause makes the list advisory and the write
+	// authoritative.
 	failed, err := r.runs.FailIfStale(ctx, run.ID, cutoff, summary)
 	if err != nil {
 		log.Warn().Err(err).Str("run_id", run.ID.String()).Msg("reconciler: mark stale run failed failed")

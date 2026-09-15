@@ -380,8 +380,8 @@ func TestToolsCallRefusesWhatToolsListWithheld(t *testing.T) {
 	assert.Empty(t, reg.calls(), "a refused name must never reach the registry")
 }
 
-// The bearer token is the only thing between a local process and this tenant's
-// board. Missing, wrong or revoked all end the same way, and nothing runs.
+// The bearer token is the only thing between a local process and the board.
+// Missing, wrong or revoked all end the same way, and nothing runs.
 func TestBearerAuth(t *testing.T) {
 	reg := &fakeRegistry{defs: fullCatalog()}
 	app, tokens, token := newTestServer(t, reg, Run{})
@@ -448,7 +448,7 @@ func sortedAscending(values []string) bool {
 // In cloud mode the listener binds 0.0.0.0, which puts this route on the pod
 // network — and it sits outside the prefixes the gateway auth middlewares gate,
 // so without an address check a run token would be the only thing between the
-// cluster and a tenant's board tools. The only legitimate client is a `claude`
+// cluster and this server's board tools. The only legitimate client is a `claude`
 // child on this host.
 func TestCloudModeRefusesClientsThatAreNotOnThisHost(t *testing.T) {
 	reg := &fakeRegistry{defs: fullCatalog()}

@@ -20,11 +20,11 @@ import (
 // monitor as "we broke, back off and send it again", which is the one thing
 // none of these should do.
 //
-// 409, and the codes below, match tenant-manager: its onboarding route already
-// answers `provider_unavailable` with 409 for the very same refusal
-// (internal/control/gateway/gateway_onboarding.go), and a refusal that gets one
-// number from the control plane and a different one from this server is a
-// refusal the web app has to learn twice.
+// 409, and the codes below, were originally chosen to match tenant-manager
+// (this product's cloud sibling, since removed from this repository), whose
+// onboarding route answered `provider_unavailable` with 409 for the very same
+// refusal. Kept as-is: changing it now buys nothing and would be a refusal
+// the web app has to re-learn.
 //
 // Checked on the ERROR rather than per route, for the reason internalError
 // gives for doing the same: these are raised deep in the provider service and
@@ -32,7 +32,7 @@ import (
 // paths would go stale the first time somebody added a handler.
 const (
 	// codeProviderUnavailable: a declared-but-not-built provider was named.
-	// Same string tenant-manager writes.
+	// Same string tenant-manager used to write.
 	codeProviderUnavailable = "provider_unavailable"
 	// codeHostExecutedProvider: a provider that is executed as a process was
 	// asked to behave like an endpoint.
@@ -100,8 +100,9 @@ func typedBadRequest(c *fiber.Ctx, err error) (bool, error) {
 
 // codedErrorResponse carries the code at the TOP level as well as in
 // error.type, for the reason runnerNotAttachedResponse does: tenant-manager
-// writes `{"error":…,"code":…}` and a client that learned to read the code off
-// one of the two programs must not have to learn a second place for the other.
+// used to write `{"error":…,"code":…}` and a client that learned to read the
+// code off one of the two programs must not have to learn a second place for
+// the other.
 type codedErrorResponse struct {
 	Error errorDetail `json:"error"`
 	Code  string      `json:"code"`

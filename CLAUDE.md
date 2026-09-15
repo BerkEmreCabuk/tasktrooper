@@ -13,10 +13,10 @@ Three parts, one product: the macOS desktop app. Read the directory's own
 
 ## Shape
 
-- **Local only.** One user, one tenant (`tenant.LocalTenantID`), no login. The
-  UI authenticates to the backend with one bearer token: the desktop generates
-  it and passes it to the server as `SERVER_API_KEY` and to the page as
-  `window.__tasktrooperDesktop.apiToken`; `make dev` uses `VITE_API_KEY`.
+- **Local only.** One user, no login. The UI authenticates to the backend with
+  one bearer token: the desktop generates it and passes it to the server as
+  `SERVER_API_KEY` and to the page as `window.__tasktrooperDesktop.apiToken`;
+  `make dev` uses `VITE_API_KEY`.
 - **The desktop app is the backend's supervisor.** It spawns `bin/agent-server`
   with `PORT=0`, reads the `LISTENING http://127.0.0.1:<port>` line, polls
   `/health`, then opens the window. The server starts its own Postgres from

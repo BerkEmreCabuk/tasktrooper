@@ -75,7 +75,7 @@ func TestPresencePlainDirectoryHasNoRepository(t *testing.T) {
 }
 
 // The defect this whole distinction exists for: a root_path that does not
-// resolve on the host currently serving the tenant.
+// resolve on this host.
 func TestPresenceMissingPathIsNotReportedAsMissingGit(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "gone")
 

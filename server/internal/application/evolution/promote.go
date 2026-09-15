@@ -386,10 +386,10 @@ func (s *Service) recordPromotionEvent(ctx context.Context, agentRec domain.Agen
 }
 
 // promotionModel routes the classification calls: judge model first (this is
-// judging work), then the evolution override, then the tenant's default.
+// judging work), then the evolution override, then the configured default.
 //
-// The tenant default is expressed as the ZERO value of both — an empty provider
-// routes at whatever the tenant configured, and an empty model lets that
+// The default is expressed as the ZERO value of both — an empty provider
+// routes at whatever is configured, and an empty model lets that
 // provider use its own configured model. It used to be agents[0]'s model and
 // provider instead, which was provider roulette independent of any one
 // provider's quirks: the classification is the evolution engine's own work, not

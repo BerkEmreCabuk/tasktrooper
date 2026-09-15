@@ -39,8 +39,8 @@ const maxPlannerRetries = 2
 // It exists to keep one particular failure from reading like a flaky provider.
 // A request naming a host-executed provider (an agent on the Claude Code CLI)
 // is refused before any endpoint is touched, and it used to be silently
-// rerouted to whatever HTTP provider the tenant had as its default — which, for
-// the tenant this was written for, was a dead model. Removing that reroute makes
+// rerouted to whatever HTTP provider was configured as default — which, for
+// the install this was written for, was a dead model. Removing that reroute makes
 // the refusal reach here, and "planner failed after 3 attempts: ..." would
 // invite exactly the wrong diagnosis: the stage did not fail three times, and
 // no fourth attempt would help. llmretry.Classify already stops the retry loop

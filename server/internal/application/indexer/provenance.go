@@ -15,7 +15,7 @@ import (
 // place — inside the pass, while it is making the embed calls — and nowhere
 // else afterwards. Deriving it later from configuration is precisely the
 // mistake migration 116 was written to end: configuration is the thing that
-// MOVES, and an index built last week says nothing about what the tenant
+// MOVES, and an index built last week says nothing about what the install
 // switched to yesterday.
 //
 // The dimension is observed rather than assumed. llmprovider.Service
@@ -143,11 +143,11 @@ func (p *passProvenance) staleAgainst(index domain.WorkspaceIndex) bool {
 
 // AnnotateEmbeddingProvenance fills in the read-time half of the guard on an
 // index a caller is about to show a person: is what it holds still comparable
-// with what this tenant embeds queries with, and if not, what to say about it.
+// with what queries are embedded with now, and if not, what to say about it.
 //
 // It lives on the indexer because the indexer is what holds the resolver, and
 // because the alternative — every consumer of an index status resolving the
-// tenant's embedding setting for itself — is how two pages end up disagreeing
+// embedding setting for itself — is how two pages end up disagreeing
 // about whether the same index is usable.
 //
 // Nothing is annotated when no model can be resolved: with nothing to compare

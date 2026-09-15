@@ -77,10 +77,10 @@ func (r *RecordingClient) Embed(ctx context.Context, input, model string) ([]flo
 
 // record writes the call's tokens to llm_usage in the background.
 //
-// ctx is taken for the tenant on it and nothing else — the write must outlive
-// the request whose tokens it is recording (context.WithoutCancel). It ran on a bare
-// context.Background(), so on a shared server EVERY chat and embedding call's
-// usage was dropped with one Warn line: no spend, no budget gate, no billing.
+// The write must outlive the request whose tokens it is recording
+// (context.WithoutCancel) — it once ran on a bare context.Background(), so
+// EVERY chat and embedding call's usage was dropped with one Warn line: no
+// spend, no budget gate, no billing.
 func (r *RecordingClient) record(ctx context.Context, model string, u domain.Usage) {
 	if u.PromptTokens == 0 && u.CompletionTokens == 0 {
 		return

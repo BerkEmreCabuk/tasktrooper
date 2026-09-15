@@ -18,7 +18,7 @@ func TestStaleEmbeddingRefusal(t *testing.T) {
 		// the index's recorded provenance (migration 116)
 		indexModel string
 		indexDims  int
-		// what the tenant embeds with now
+		// what the install embeds with now
 		configuredModel string
 		configuredDims  int
 		// the length of the vector the query was embedded into

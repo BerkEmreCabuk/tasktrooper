@@ -66,8 +66,8 @@ func TestPermanentProviderRefusalsAnswer409(t *testing.T) {
 			if err := json.Unmarshal(body, &out); err != nil {
 				t.Fatalf("decode: %v (%s)", err, string(body))
 			}
-			// Both places, because tenant-manager writes the code at the top
-			// level and this server's own errors carry it in error.type; a
+			// Both places, because tenant-manager used to write the code at the
+			// top level and this server's own errors carry it in error.type; a
 			// client that learned one must not have to learn the other.
 			if out.Code != tc.code || out.Error.Type != tc.code {
 				t.Fatalf("code = %q / type = %q, want %q", out.Code, out.Error.Type, tc.code)
@@ -105,7 +105,7 @@ func TestHostExecutedRefusalDoesNotClaimTheServerHost(t *testing.T) {
 }
 
 // decodeCoded reads the two places a code appears. Both, always: tenant-manager
-// writes it at the top level and this server's own errors carry it in
+// used to write it at the top level and this server's own errors carry it in
 // error.type, and a client that learned one must not have to learn the other.
 func decodeCoded(t *testing.T, body []byte) (message, typ, code string) {
 	t.Helper()

@@ -247,7 +247,7 @@ func (s *Service) runPipeline(ctx context.Context, userMessage string, history [
 		if err != nil {
 			// A permanent refusal is a different animal from an unparseable
 			// reply, and it used to be indistinguishable from one: the silent
-			// provider fallback rerouted this call to the tenant's default HTTP
+			// provider fallback rerouted this call to the default HTTP
 			// provider, so what arrived here was that provider's error and the
 			// run shipped "unverified results" with a warning nobody connected
 			// to an agent's engine choice. Now the refusal itself arrives, and

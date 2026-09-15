@@ -61,7 +61,7 @@ func invalidInput(format string, a ...any) error {
 
 // SeedingInProgress reports whether EnsureRoleAgents is still creating/syncing
 // the default role agents (each with its own skill-embedding calls). On a
-// brand-new tenant this can take a while; callers (the /admin/agents handler)
+// brand-new install this can take a while; callers (the /admin/agents handler)
 // surface it so the frontend can wait for the full roster instead of
 // rendering agents one at a time as they're inserted.
 func (s *Service) SeedingInProgress() bool {
@@ -256,9 +256,10 @@ func (s *Service) SearchSkills(ctx context.Context, query string, topK int) ([]d
 }
 
 // resolveTechStack refuses a skill filed under a stack that is not this
-// agent's. The foreign key cannot catch it: both rows belong to the same
-// tenant, so the reference is valid to Postgres and wrong to everybody else —
-// the skill would show up under an agent that has no such stack to render it.
+// agent's. The foreign key cannot catch it: any real stack id is valid to
+// Postgres regardless of which agent it belongs to, so the reference is valid
+// to Postgres and wrong to everybody else — the skill would show up under an
+// agent that has no such stack to render it.
 // The nil uuid is read as "general", so a client that sends an empty id gets
 // the same answer as one that sends none.
 func (s *Service) resolveTechStack(ctx context.Context, agentID uuid.UUID, stackID *uuid.UUID) (*uuid.UUID, error) {

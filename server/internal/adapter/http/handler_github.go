@@ -10,11 +10,10 @@ import (
 	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/github"
 )
 
-// GitHub bağlantısı OAuth App akışıyla kurulur (bkz. tenant-manager gateway
-// /api/github/oauth/start ve /oauth/github/callback); kullanıcı hiçbir zaman
-// token görmez/girmez. SetGitHubToken burada, gateway'in OAuth'tan aldığı
-// token'ı iletmesi için kalır — doğrudan PAT yapıştırma yolu yok. Token
-// şifreli olarak app_settings'te saklanır; gh CLI kullanılmaz.
+// GitHub bağlantısı doğrudan yapıştırılan bir personal access token ile
+// kurulur (SetGitHubToken); kullanıcı token'ı GitHub'da oluşturup buraya
+// yapıştırır. Token doğrulanır (githubapi.User) ve şifreli olarak
+// app_settings'te saklanır; gh CLI kullanılmaz.
 
 type githubStatusResponse struct {
 	Connected bool   `json:"connected"`

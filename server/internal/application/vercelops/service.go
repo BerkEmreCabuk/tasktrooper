@@ -31,7 +31,7 @@ import (
 )
 
 // ErrNotConnected means no Vercel token has been stored yet. It is the first
-// state every tenant is in, not a failure, and it is answered differently from
+// state every install is in, not a failure, and it is answered differently from
 // ErrListingUnavailable: that one means the token IS there and Vercel refuses
 // it, which sends the operator to Settings to paste a fresh one. Neither is a
 // 5xx — see the reason dictionary in the HTTP layer.

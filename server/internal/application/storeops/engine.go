@@ -78,8 +78,8 @@ type ActionsProbe func(ctx context.Context, repo domain.Repository, platform, wo
 
 // LocalRunnerHost is what a paired local runner can build. The zero value is
 // "nothing paired", which is a different answer from "paired but cannot build
-// iOS" and has to stay distinguishable — the second one is the state a tenant
-// with a Linux runner and an iOS app is actually in.
+// iOS" and has to stay distinguishable — the second one is the state an
+// install with a Linux runner and an iOS app is actually in.
 type LocalRunnerHost struct {
 	Paired bool
 	// MacOS reports whether the paired host is a Mac. Signalled by its ability

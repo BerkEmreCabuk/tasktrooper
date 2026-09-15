@@ -76,11 +76,11 @@ func ValidAgentCLIFlavor(f AgentCLIFlavor) bool {
 	return ok
 }
 
-// AgentCLIConnection is one local agent CLI the tenant has connected. A tenant
-// may hold several at once, one per flavor (see AgentCLIState.Connections) —
+// AgentCLIConnection is one local agent CLI this install has connected. An
+// install may hold several at once, one per flavor (see AgentCLIState.Connections) —
 // each AGENT already names its own provider, so "which CLI runs my board" was
-// always really "which CLI runs THIS agent's tasks", answered per agent. A
-// tenant with a Claude Code agent and a Cursor agent gains nothing from being
+// always really "which CLI runs THIS agent's tasks", answered per agent. An
+// install with a Claude Code agent and a Cursor agent gains nothing from being
 // forced to disconnect one to use the other.
 //
 // Multiple connected flavors do not collide on disk: application/agentfs
@@ -123,7 +123,7 @@ type AgentCLIFlavorView struct {
 // result into a list it fetched separately.
 type AgentCLIState struct {
 	// Connections is empty when no CLI is connected, which is a normal state
-	// and not an error: a tenant running entirely on API providers never
+	// and not an error: an install running entirely on API providers never
 	// connects one. It may hold more than one entry — connecting a flavor no
 	// longer disconnects any other.
 	Connections []AgentCLIConnection `json:"connections"`
@@ -151,7 +151,7 @@ var ErrAgentCLIBinaryMissing = errors.New("agent cli binary is not installed whe
 var ErrAgentCLIUnauthenticated = errors.New("agent cli binary is installed but not signed in")
 
 // ErrAgentCLINotConnected marks every refusal caused by dispatching work onto a
-// host-executed provider whose CLI this tenant has not connected.
+// host-executed provider whose CLI this install has not connected.
 //
 // Permanent, like ErrProviderUnavailable: nothing about it becomes true on a
 // retry — somebody has to press the button — so a caller inside a retry loop

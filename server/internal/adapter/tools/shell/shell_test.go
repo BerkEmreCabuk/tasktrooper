@@ -206,7 +206,7 @@ func (s *ShellToolSuite) TestSandboxBlocklistStillRestrictsWorkingDir() {
 	s.Contains(result.Content, "outside")
 }
 
-// The sandbox every cloud tenant runs. A developer agent's loop is edit → build
+// The sandbox every install runs. A developer agent's loop is edit → build
 // → verify, and the shipped allowlist held no command that can write a file:
 // `cat`/`head` read fine, every edit came back "not in allowlist", and the
 // agent reported to the board that it lacked permission to edit files.

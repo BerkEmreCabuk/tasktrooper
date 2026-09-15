@@ -168,7 +168,7 @@ type Repository struct {
 	//
 	// English, and rendered verbatim by the web app — it is a server-composed
 	// string, not a translation key, so there is nowhere on the client to look
-	// one up. Localising it would mean threading the tenant's language into
+	// one up. Localising it would mean threading the user's language into
 	// every read path that returns a repository and turning Warning() into
 	// Warning(lang), the way QuotaBlock.UserMessage takes one. That is a
 	// deliberate not-yet, not an oversight.

@@ -23,8 +23,9 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 )
 
-// chromeNotFoundMsg is deliberately operator-facing: the bridge itself ships
-// without a browser; only the tools image (TENANT_IMAGE) bundles chromium.
+// chromeNotFoundMsg is deliberately operator-facing: this process ships
+// without a bundled browser, so only a host with Chromium already installed
+// (or CHROME_BIN pointed at one) can use these tools.
 const chromeNotFoundMsg = "chromium not found — this tool requires the tools image (TENANT_IMAGE)"
 
 // errChromeNotFound lets tools surface chromeNotFoundMsg verbatim instead of

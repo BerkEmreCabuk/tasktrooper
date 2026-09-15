@@ -157,9 +157,9 @@ func (s *Service) ensureRoleAgent(ctx context.Context, def roleAgentDef, byName 
 	// every registered tool so a grant never silently drops one.
 	//
 	// The one exception is additive and paired: a tool introduced after this
-	// tenant was seeded, granted only where the capability it completes is
+	// install was seeded, granted only where the capability it completes is
 	// already granted. See roleToolGrants — it is how a new tool reaches an
-	// existing install now that a migration cannot write tenant rows.
+	// existing install without a migration backfilling it.
 	if grantMissingRoleTools(&agent) {
 		needsAgentUpdate = true
 	}
@@ -176,7 +176,7 @@ func (s *Service) ensureRoleAgent(ctx context.Context, def roleAgentDef, byName 
 // fillRoleAgentModels puts the seeded provider and model pair on an agent that
 // has none, and reports whether it changed anything.
 //
-// This one IS reconciled, unlike ToolPolicy and Effort above, because a tenant
+// This one IS reconciled, unlike ToolPolicy and Effort above, because an install
 // seeded before the defaults existed has agents whose models are empty for no
 // reason anyone chose — and the escalation to ModelHeavy that a "hard" subtask
 // wants cannot be reached until something fills it in. The rule that makes that
@@ -200,7 +200,7 @@ func (s *Service) fillRoleAgentModels(agent *domain.Agent) bool {
 	case "":
 		// Never chosen, so it is still the seed's to set. Set together with the
 		// names for the reason roleAgentProvider gives: shipping `sonnet` to
-		// whichever HTTP provider the tenant happens to have activated is the
+		// whichever HTTP provider happens to be activated is the
 		// exact failure the constant exists to prevent.
 		if !s.claudeCodeRunnable() {
 			return false

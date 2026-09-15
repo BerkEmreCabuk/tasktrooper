@@ -10,8 +10,8 @@ import type { SetupStepId } from "@/lib/setup";
  *
  * The mechanism is the settings affordance itself — `GitHubCard`, the same
  * component Settings → General renders — surfaced here rather than copied. It
- * is one connection per tenant, so a second button for it would be a second
- * place to read a different answer from.
+ * is one connection for the whole install, so a second button for it would be
+ * a second place to read a different answer from.
  *
  */
 export function GitHubStep({ onContinue }: { onContinue: (next: SetupStepId) => void }) {

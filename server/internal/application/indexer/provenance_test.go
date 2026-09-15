@@ -13,8 +13,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeEmbeddingResolver stands in for llmprovider.Service: what the tenant's
-// embed calls resolve to right now, which is the half of the staleness
+// fakeEmbeddingResolver stands in for llmprovider.Service: what embed calls
+// resolve to right now, which is the half of the staleness
 // comparison that lives outside the index row.
 type fakeEmbeddingResolver struct {
 	model string
@@ -83,10 +83,9 @@ func TestIndexPassRecordsWhatItEmbeddedWith(t *testing.T) {
 }
 
 // With no resolver the pass still records something honest: the model this
-// service was configured with. A self-hosted deployment has no per-tenant
-// setting to move underneath it, so that name is the whole truth there — and
-// recording nothing would make every such index read as stale the moment a
-// resolver was ever wired.
+// service was configured with. There is only one embedding setting for this
+// install, so that name is the whole truth — and recording nothing would make
+// every such index read as stale the moment a resolver was ever wired.
 func TestIndexPassFallsBackToTheConfiguredModel(t *testing.T) {
 	store := newFakeIndexStore()
 	svc := newProvenanceService(t, store, &fakeLLM{})
@@ -249,7 +248,7 @@ func TestStaleIndexIsReEmbeddedWhole(t *testing.T) {
 		t.Fatalf("an unchanged tree re-embedded %d chunks", embeds)
 	}
 
-	// Now the tenant switches model. The tree is still unchanged — and every
+	// Now the install switches model. The tree is still unchanged — and every
 	// chunk must be embedded again anyway.
 	svc.SetEmbeddingResolver(&fakeEmbeddingResolver{model: "model-b", dims: 1536})
 	embeds = 0

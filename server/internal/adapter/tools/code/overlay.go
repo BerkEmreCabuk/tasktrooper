@@ -43,8 +43,8 @@ type workspaceOverlay struct {
 // The overlay shells `git` in the session's workspace directory and reads the
 // changed files' bytes back as tool results, which is a filesystem read on a
 // path this process does not own: in the cloud that path is either the
-// assignee's Mac (meaningless here) or, before the workspace layout carried a
-// tenant segment, another customer's clone on the shared volume. It is also
+// assignee's Mac (meaningless here) or another customer's clone on a shared
+// volume. It is also
 // what made the claim that codebase_search and expand_symbol_context are "pure
 // index reads" — the stated reason those two survive the cloud tool gate —
 // false. With the overlay off, that claim is true.

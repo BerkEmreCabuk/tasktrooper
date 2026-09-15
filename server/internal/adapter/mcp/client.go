@@ -220,8 +220,8 @@ func toolInputSchema(schema any) (map[string]interface{}, error) {
 //
 // Two things were wrong with the plain &http.Client{Timeout: 30s} this replaces.
 //
-// First, the endpoint is agent-configured: a tenant (or a prompt injection that
-// reaches the MCP settings) picks the URL, and cfg.Headers is an arbitrary
+// First, the endpoint is agent-configured: the operator (or a prompt injection
+// that reaches the MCP settings) picks the URL, and cfg.Headers is an arbitrary
 // attacker-chosen map — which is what makes this the one outbound path that can
 // satisfy GCP's Metadata-Flavor: Google gate. So the destination is resolved and
 // checked here, at connect time, not only where the row was written: rows stored
@@ -231,7 +231,7 @@ func toolInputSchema(schema any) (map[string]interface{}, error) {
 // redirect changes host, but it strips them from the request it builds, and
 // headerTransport sits below that and used to put them straight back. With no
 // CheckRedirect set, the default ten hops applied. A compromised or lookalike
-// MCP host answering 302 replayed the tenant's bearer token to the attacker in
+// MCP host answering 302 replayed the caller's bearer token to the attacker in
 // cleartext. Cross-host redirects are now refused outright — the same defence
 // adapter/appstore/client.go already applies to ASC's paging links, where the
 // host always stays the configured one.

@@ -42,8 +42,8 @@ func (e *Executor) ExecuteChat(ctx context.Context, req domain.ChatExecution, ou
 
 	// One credential per TURN, minted when it starts and revoked when the turn
 	// ends — not one per conversation. The thread may stay open for days; a
-	// token that lived that long would authorise this tenant's board tools
-	// during every minute nobody was talking.
+	// token that lived that long would authorise the board tools during every
+	// minute nobody was talking.
 	mcpCfg, releaseMCP, err := e.resolveMCP(ctx, MCPRun{Policy: req.Policy, Label: req.SessionID})
 	defer releaseMCP()
 	if err != nil {

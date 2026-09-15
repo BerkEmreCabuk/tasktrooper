@@ -75,8 +75,8 @@ func (s *Service) EnsureIndexMirror(ctx context.Context, repositoryID uuid.UUID,
 		// and this is the one adoption path that needs no user action at all: a
 		// webhook or a freshness check reaches it on its own. Answering the
 		// weaker question is what let an index pass walk a checkout it had no
-		// business reading and write its contents into this tenant's chunks.
-		// The record is read BEFORE the shortcut for that reason.
+		// business reading and write its contents into the wrong repository's
+		// chunks. The record is read BEFORE the shortcut for that reason.
 		return s.assertSameRepo(ctx, rootPath, repo.RemoteURL)
 	}
 	remote := strings.TrimSpace(repo.RemoteURL)

@@ -153,7 +153,7 @@ func TestExecuteScrubsTheChildEnvironment(t *testing.T) {
 	assert.NotContains(t, env, "DATABASE_URL")
 	assert.NotContains(t, env, "gateway-hmac-secret")
 	assert.NotContains(t, env, "ANTHROPIC_API_KEY",
-		"the tenant's API key is not Claude Code's credential, and forwarding it would move the session off the subscription")
+		"the configured API key is not Claude Code's credential, and forwarding it would move the session off the subscription")
 	assert.Contains(t, env, "CLAUDE_CONFIG_DIR=/home/agent/.claude", "the CLI's own config location has to survive")
 	assert.Contains(t, env, "PATH=", "a child with no PATH cannot run a single build command")
 	assert.Contains(t, env, "HOME=", "the CLI reads its subscription credentials out of HOME")

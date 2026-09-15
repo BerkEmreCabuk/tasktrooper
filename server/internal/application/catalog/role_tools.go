@@ -290,12 +290,12 @@ var roleReleaseWatchTools = []string{
 // roleToolGrant is one tool that was added to a role policy AFTER installs
 // existed, plus the tool whose presence proves the role already does that job.
 //
-// It exists because the two ways a new tool used to reach an existing tenant
+// It exists because the two ways a new tool used to reach an existing install
 // are both closed. ToolPolicy is not reconciled on restart — an admin's
-// customization has to survive — and since migration 114 a migration cannot
-// backfill it either: `agents` carries FORCE ROW LEVEL SECURITY and the
-// migration runner has no tenant in scope, so migration 073's UPDATE pattern
-// now matches zero rows in every tenant. Without this, a tenant that upgraded
+// customization has to survive — and before migration 133 a migration could
+// not backfill it either: `agents` carried FORCE ROW LEVEL SECURITY and the
+// migration runner had no tenant in scope, so migration 073's UPDATE pattern
+// matched zero rows in every tenant. Without this, an install that upgraded
 // would read a refusal naming `record_test_cases` from an agent that does not
 // hold it.
 //

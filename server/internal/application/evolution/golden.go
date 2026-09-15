@@ -184,7 +184,7 @@ type gateVerdict struct {
 // perfectly, so a change set the system never measured was kept with the reason
 // "kept on non-regression" — a sentence that reads on the dashboard exactly like
 // evidence. The silent provider fallback is what made that state reachable: the
-// judge and the suite were both rerouted to the tenant's default HTTP provider,
+// judge and the suite were both rerouted to the default HTTP provider,
 // and when that provider was a dead `gemini-2.0-flash` they both failed while
 // the gate kept saying non-regression. Now an unmeasured change set REVERTS.
 func (s *Service) judgeGoldenGate(ctx context.Context, agentRec domain.Agent, before, after goldenRun, changes []string) gateVerdict {

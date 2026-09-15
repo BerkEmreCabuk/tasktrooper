@@ -57,7 +57,7 @@ func TestSummarizeForCapsItsOwnRequestAtSummarizeMaxTokens(t *testing.T) {
 // This is the housekeeping call that broke a long chat with an agent on a
 // host-executed provider: the model on such an agent is a CLI routing alias
 // ("opus", "sonnet[1m]"), and SummarizeRolling sent it with no provider — so it
-// was routed at the tenant default, which answers 400 to a name that means
+// was routed at the default provider, which answers 400 to a name that means
 // nothing to it. Named, the provider reaches the llm client, which is the one
 // place that knows to redirect the call AND drop the alias with it.
 func TestSummarizeRollingForCarriesTheProvider(t *testing.T) {

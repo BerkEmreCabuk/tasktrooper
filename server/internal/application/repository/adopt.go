@@ -15,16 +15,16 @@ import (
 // explicit restore, the index mirror, and the board runner's ensureWorkingCopy
 // — and all four used to reduce to "is there a .git here?". That question was
 // sufficient while a directory could only have been put there by this
-// repository. It is not sufficient on a volume shared by every customer, where
-// "yes, a repository" and "yes, THIS repository" came apart the moment two
-// tenants could name one path.
+// repository. It stops being sufficient once a repository is deleted and its
+// directory name reused by a later import, where "yes, a repository" and
+// "yes, THIS repository" come apart.
 //
 // The comparison is on the origin URL because that is the only identity a
 // checkout carries that this process did not itself write into the row. A
 // positive mismatch is a refusal; a missing value on either side is not,
 // because a repository created here by `git init` legitimately has no origin
-// yet, and the tenant segment in the path is what carries the isolation in that
-// case. This check is the second lock, not the first.
+// yet, and `repositories.root_path` being UNIQUE is what rules out a
+// collision in that case. This check is the second lock, not the first.
 func (s *Service) assertSameRepo(ctx context.Context, dir, wantRemote string) error {
 	if s.git == nil {
 		return nil

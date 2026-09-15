@@ -151,8 +151,8 @@ func (h *Handler) ListEmbeddingModels(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{"models": models})
 }
 
-// EmbeddingStatus answers "what is producing this tenant's embeddings, and can
-// it do it right now".
+// EmbeddingStatus answers "what is producing these embeddings, and can it do
+// it right now".
 //
 // A separate call from ListLLMProviders on purpose. When embeddings resolve to
 // a member's Mac this reaches that Mac through the tunnel, and folding a
@@ -161,8 +161,8 @@ func (h *Handler) ListEmbeddingModels(c *fiber.Ctx) error {
 // can render late, or not at all.
 //
 // It never fails because the Mac is unreachable — that is one of the states it
-// reports. An error from here is a tenant whose stored settings could not be
-// read, which is a 500 and not a fact about anybody's laptop.
+// reports. An error from here means the stored settings could not be read,
+// which is a 500 and not a fact about anybody's laptop.
 func (h *Handler) EmbeddingStatus(c *fiber.Ctx) error {
 	if h.llmProviderSvc == nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(errorResponse{

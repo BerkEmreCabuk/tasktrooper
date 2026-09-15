@@ -25,8 +25,8 @@ type skillSeed struct {
 
 func mdSkill(scope, name string) skillSeed {
 	// One directory per skill, holding SKILL.md: the shape Claude Code and
-	// Cursor discover natively, and the shape application/agentfs writes a
-	// tenant's catalog into a task workspace as. A seed file and the file an
+	// Cursor discover natively, and the shape application/agentfs writes the
+	// catalog into a task workspace as. A seed file and the file an
 	// agent reads at run time are then the same kind of file.
 	path := fmt.Sprintf("seeddata/skills/%s/%s/SKILL.md", scope, name)
 	meta, body := mustSeedDoc(path)

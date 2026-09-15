@@ -77,7 +77,7 @@ export function BacklogPage() {
   const columns = config?.columns ?? [];
   const { backlog, board } = useMemo(() => boardColumnsSplit(columns), [columns]);
   const backlogSlug = backlog?.slug ?? "backlog";
-  // Where a dropped card lands. `todo` by name when the tenant has it (every
+  // Where a dropped card lands. `todo` by name when the board has it (every
   // default board does); otherwise the first board column, which is the one a
   // custom board starts with. Never the backlog itself.
   const dropColumn = useMemo(

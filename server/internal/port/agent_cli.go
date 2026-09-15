@@ -6,14 +6,14 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// AgentCLIStore persists which local agent CLIs this tenant has connected —
-// zero or more, one row per flavor. See domain.AgentCLIConnection for why a
-// tenant may hold several at once.
+// AgentCLIStore persists which local agent CLIs this install has connected —
+// zero or more, one row per flavor. See domain.AgentCLIConnection for why an
+// install may hold several at once.
 type AgentCLIStore interface {
 	// Get returns flavor's own connection, and false when that flavor is not
 	// connected. Not connected is a normal state, not an error.
 	Get(ctx context.Context, flavor domain.AgentCLIFlavor) (domain.AgentCLIConnection, bool, error)
-	// List returns every flavor this tenant currently has connected, in no
+	// List returns every flavor this install currently has connected, in no
 	// particular order.
 	List(ctx context.Context) ([]domain.AgentCLIConnection, error)
 	// Set upserts conn's own flavor, leaving every other flavor's connection

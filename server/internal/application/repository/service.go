@@ -38,9 +38,8 @@ type RevisionNotifier interface {
 // agent-maintained project profile in the background. Wired late by runtime
 // (same setter style as SetEvolution) so this package stays decoupled from it.
 type ProfileRefresher interface {
-	// RefreshAsync starts a rebuild; false = one is already running. ctx is
-	// taken for the tenant on it, not for its lifetime — the rebuild outlives
-	// the request.
+	// RefreshAsync starts a rebuild; false = one is already running. The
+	// rebuild outlives the request, so ctx's cancellation is not honoured.
 	RefreshAsync(ctx context.Context, repositoryID uuid.UUID, reason string) bool
 	// RefreshIfStale rebuilds only when the profile is missing or stale.
 	RefreshIfStale(ctx context.Context, repositoryID uuid.UUID, reason string)
@@ -753,7 +752,7 @@ func (s *Service) Open(ctx context.Context, req domain.OpenRepositoryRequest) (d
 		buildTargets = DetectBuildTargets(absRoot)
 	}
 	// absRoot is deliberately this host's absolute path, even though the same
-	// tenant database may also be served by another host (the cloud pod and the
+	// database may also be served by another host (the cloud pod and the
 	// user's Mac behind a reverse tunnel both run this binary). root_path is
 	// advisory across hosts: the store re-anchors a foreign path onto the
 	// reading host's workspace root (postgres.RepositoryStore.localizeRootPath),
@@ -863,9 +862,9 @@ func (s *Service) ImportFromGitHub(ctx context.Context, req domain.ImportGitHubR
 			return domain.Repository{}, fmt.Errorf("directory already exists but is not a git repository: %s", dest)
 		}
 		// Skipping the clone means ADOPTING whatever is already there, so what
-		// is there has to be this repository and not merely a repository. The
-		// tenant segment in dest is what makes a stray checkout unlikely; this
-		// is what makes acting on one impossible.
+		// is there has to be this repository and not merely a repository.
+		// Naming dest from the GitHub owner/repo is what makes a stray
+		// checkout unlikely; this is what makes acting on one impossible.
 		if err := s.assertSameRepo(ctx, dest, cloneURL); err != nil {
 			return domain.Repository{}, err
 		}
@@ -904,9 +903,9 @@ func (s *Service) ensureGitSync(ctx context.Context, rootPath, name, owner strin
 	return s.git.EnsureRepoWithRemote(gctx, rootPath, name, owner)
 }
 
-// ctx for its identity only (context.WithoutCancel): EnsureRepoWithRemote resolves the
-// tenant's GitHub token through the client's token source, which is a read on a
-// policy-protected settings row.
+// ctx is taken via context.WithoutCancel so this goroutine is not killed when
+// the request returns: EnsureRepoWithRemote resolves the GitHub token through
+// the client's token source, a read from the settings row.
 func (s *Service) ensureGitAsync(ctx context.Context, repositoryID uuid.UUID, rootPath, name string) {
 	if s.git == nil || s.git.HasGit(rootPath) {
 		return
@@ -1252,11 +1251,10 @@ func (s *Service) pullAndRestartIndex(ctx context.Context, repositoryID uuid.UUI
 // which the webhook debounce uses to learn when the pass is over. onDone also
 // fires when the indexer is disabled, so a caller waiting on it never hangs.
 //
-// ctx is the caller's, and what matters about it is not its deadline (the pass
-// deliberately outlives the request) but its TENANT: every store write the pass
-// makes is scoped by the identity on the context, so a pass started from a bare
-// context.Background() cannot write its own status. See
-// indexer.detachIndexContext, which strips the cancellation and keeps the rest.
+// ctx is the caller's, not a bare context.Background(), and what matters about
+// it is not its deadline (the pass deliberately outlives the request) but the
+// rest of what it carries. See indexer.detachIndexContext, which strips the
+// cancellation and keeps that.
 func (s *Service) pullAndRestartIndexNotify(ctx context.Context, repositoryID uuid.UUID, rootPath string, onDone func()) {
 	if s.indexer == nil {
 		if onDone != nil {
@@ -1363,8 +1361,8 @@ func (s *Service) ensureIndexFresh(ctx context.Context, repo domain.Repository, 
 		return
 	}
 
-	// The caller's tenant, not its deadline: the probe outlives the poll that
-	// triggered it, and the rebuild it may start writes as this tenant.
+	// The caller's context, not its deadline: the probe outlives the poll that
+	// triggered it.
 	freshCtx := context.WithoutCancel(ctx)
 	go func() {
 		pullCtx, cancel := context.WithTimeout(freshCtx, 2*time.Minute)
@@ -1407,9 +1405,8 @@ func (s *Service) ensureIndexFresh(ctx context.Context, repo domain.Repository, 
 // page. Booting is exactly when the missed pushes are known to exist, so this
 // is where they are picked up.
 //
-// One tenant per call, for the same reason ReconcileWebhooks is: the repository
-// list is per-tenant. It built its own context.Background() and therefore swept
-// nothing at all on a shared server; the fan-out belongs to the caller.
+// Called once per process (boot, then the periodic sweep loop): s.repos.List
+// here is every repository on this install, so there is nothing to fan out.
 func (s *Service) SweepIndexFreshness(ctx context.Context) {
 	if s.indexer == nil || s.git == nil {
 		return
@@ -1438,9 +1435,9 @@ func (s *Service) restartIndex(ctx context.Context, repositoryID uuid.UUID, root
 	s.startIndexWith(ctx, repositoryID, rootPath, true)
 }
 
-// startIndexWith hands the pass the caller's context so it inherits the tenant
-// it is being run for; the indexer strips the cancellation itself, because a
-// pass must survive the request that started it.
+// startIndexWith hands the pass the caller's context; the indexer strips the
+// cancellation itself, because a pass must survive the request that started
+// it.
 func (s *Service) startIndexWith(ctx context.Context, repositoryID uuid.UUID, rootPath string, force bool) {
 	if s.indexer == nil {
 		return
@@ -2096,8 +2093,8 @@ func (s *Service) ReplaceDeployDependencies(ctx context.Context, taskID uuid.UUI
 // request path. It was createDraftPRAsync and opened a draft; task PRs are
 // opened ready for review now — see git.EnsurePullRequest for why a draft made
 // every task PR unmergeable.
-// ctx for its identity only (context.WithoutCancel): it resolves the tenant's GitHub
-// token, writes the PR back onto the task row and comments on the card.
+// ctx is taken via context.WithoutCancel: it resolves the GitHub token, writes
+// the PR back onto the task row and comments on the card.
 func (s *Service) ensurePullRequestAsync(ctx context.Context, task domain.BoardTask) {
 	if s.git == nil || s.workspaceRoot == "" || s.comments == nil {
 		return
@@ -2202,9 +2199,9 @@ func (s *Service) DeleteTask(ctx context.Context, repositoryID, taskID uuid.UUID
 	}
 	// The checkout outlives the row unless something removes it, and until now
 	// nothing did: a repository with node_modules is a few hundred megabytes per
-	// task, the volume is per tenant, and the only symptom is an ENOSPC weeks
-	// later in an unrelated task. A deleted task is the unambiguous case — no
-	// row is left to reopen, so nothing can want the directory back.
+	// task, and the only symptom is an ENOSPC weeks later in an unrelated task.
+	// A deleted task is the unambiguous case — no row is left to reopen, so
+	// nothing can want the directory back.
 	//
 	// After the delete rather than before, and never fatal: the row is what the
 	// caller asked to remove, and a wedged unlink must not resurrect it.

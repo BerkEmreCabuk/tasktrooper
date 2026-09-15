@@ -36,8 +36,8 @@ func IsWithinRoot(path, root string) (bool, error) {
 // that key every file the pod can read and the policy means nothing.
 //
 // Symlinks are resolved before the comparison. A repository checked out into
-// the workspace can carry a symlink pointing at /etc or at another tenant's
-// directory, and a textual prefix test on the unresolved path accepts it.
+// the workspace can carry a symlink pointing at /etc or anywhere else outside
+// the workspace root, and a textual prefix test on the unresolved path accepts it.
 func ResolveWithinRoot(root, rel string) (string, error) {
 	absRoot, err := filepath.Abs(strings.TrimSpace(root))
 	if err != nil {

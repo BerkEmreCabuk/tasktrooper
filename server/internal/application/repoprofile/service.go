@@ -308,13 +308,11 @@ func (s *Service) RefreshAsync(ctx context.Context, repositoryID uuid.UUID, reas
 	return s.refreshAsyncScoped(ctx, repositoryID, reason, nil)
 }
 
-// refreshAsyncScoped takes the CALLER's context, and uses it for nothing except
-// the identity on it (context.WithoutCancel): the rebuild outlives the request that
-// asked for it, so it cannot hold the request's cancellation, but it is still
-// that tenant's rebuild and every store it touches is policy-protected. It ran
-// on a bare context.Background(), so on a live stack every repository import on
-// every tenant produced "profile refresh failed: tenant: no tenant in context"
-// and no profile.
+// refreshAsyncScoped takes the CALLER's context and strips its cancellation
+// (context.WithoutCancel): the rebuild outlives the request that asked for
+// it, so it cannot hold the request's cancellation. It once ran on a bare
+// context.Background(), so on a live stack every repository import produced
+// "profile refresh failed: tenant: no tenant in context" and no profile.
 func (s *Service) refreshAsyncScoped(ctx context.Context, repositoryID uuid.UUID, reason string, only []string) bool {
 	st, ok := s.begin(repositoryID)
 	if !ok {

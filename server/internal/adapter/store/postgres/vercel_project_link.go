@@ -67,7 +67,7 @@ func (s *VercelProjectLinkStore) Get(ctx context.Context, repositoryID uuid.UUID
 	return l, nil
 }
 
-// Save upserts on the tenant-leading key migration 128 declares. Re-linking a
+// Save upserts on the key migration 128 declares. Re-linking a
 // path to a different project is an UPDATE of the same row rather than a
 // second row, which is what keeps the binding single-valued: the details view
 // asks "which project is web/" and there has to be one answer.

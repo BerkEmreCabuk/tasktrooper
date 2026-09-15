@@ -586,7 +586,7 @@ Three things make a chat different, all in `domain.ChatExecution`:
   shorter persisted text.
 - **Tools.** A per-**turn** MCP token, minted after the concurrency slot and revoked when the
   turn ends, serving the chat's computed `workspacePolicy`. Per turn, not per conversation: a
-  thread can stay open for days and a credential for this tenant's board tools must not be
+  thread can stay open for days and a credential for the board tools must not be
   live while nobody is talking.
 
 **Quota in a chat is not a park** — there is no card and no sweeper, only the person who
@@ -649,7 +649,7 @@ value, and `guardHostExecuted` refuses **every** request naming a host-executed 
   an HTTP provider for this agent, or turn the step off.
 
 **This used to be a reroute, and removing it was deliberate.** A utility call was sent to the
-tenant's active default HTTP provider with the model blanked. The reasoning — the CLI cannot
+active default HTTP provider with the model blanked. The reasoning — the CLI cannot
 serve it anyway — was sound and the conclusion wrong: the default provider is one the operator
 did not choose *for this agent*, so every reroute converted "this agent cannot serve this
 step", which is true, specific and fixable, into a 404 from a provider nobody was thinking
@@ -680,7 +680,7 @@ On a host **with** a runner, for an agent on `claude_code`:
 | chat turn (`session/`) | CLI | `port.ChatExecutor`; resumes the CLI session |
 
 And the steps needing an HTTP provider configured **for this agent** — previously rerouted to
-the tenant default, now refused, so "if refused" is what the operator sees:
+the configured default, now refused, so "if refused" is what the operator sees:
 
 | step (needs HTTP) | load-bearing? | if refused |
 | --- | --- | --- |
@@ -697,11 +697,11 @@ the tenant default, now refused, so "if refused" is what the operator sees:
 | loop wrap-up (`agent/loop.go`) | no | the run's own last message stands (unreachable for a CLI run) |
 
 `appcontext.SummarizeRollingFor` takes a provider for this reason: model and provider are one
-decision, and a summarize call naming the model alone was routed at the tenant default, which
+decision, and a summarize call naming the model alone was routed at the default provider, which
 answers 400 to a name that means nothing to it.
 
 **Billing.** Flat-rate CLI tokens go to `usage.TokenUsage` and never to `llm_usage`, so they
-never touch the tenant's USD budget. The HTTP steps above are metered API calls and DO bill,
+never touch the USD budget. The HTTP steps above are metered API calls and DO bill,
 through the recording client. A `claude_code` run row can legitimately mix billed and unbilled
 tokens: the work was free, the JSON-shaped bookkeeping was not.
 
@@ -766,7 +766,7 @@ platform/runtime ── RunTokenRegistry ── adapter/mcpserver ◄───�
 ```
 
 **Per-run tokens.** `RunTokenRegistry` (in-memory mutex map) mints 32 bytes of `crypto/rand`
-per run and stores the runner's `runCtx`, the run's **tenant** and its policy. The token is
+per run and stores the runner's `runCtx` and its policy. The token is
 written into a 0600 file, never onto a command line, which is world-readable in `ps` — and
 revoked on every exit path: a finished session, a failure, or the quota park. In memory is
 enough precisely because of that: a resumed park is a new run row with a fresh token, and a
@@ -796,11 +796,10 @@ access control.
 **Mounted without the auth middlewares.** `/mcp` is neither `/v1` nor `/admin` and
 `isPublicPath` names it explicitly: the caller is a CLI session holding *none* of this
 server's credentials, and it authenticates with the per-run bearer token alone.
-`tenantMiddleware` therefore never runs for it and **there is no signed header here to read**
-— the tenant is bound into the token at mint time (`Run.Tenant`, from the board runner's
-`runCtx`) and re-applied per call by `Run.Scoped()`. No valid token ⇒ `401`; never a default
-tenant. `SetLoopbackOnly(true)` on this product: the listener already binds `127.0.0.1`, and
-the only legitimate caller is a `claude` child process on this same machine.
+**There is no signed identity header here to read** — the token alone carries the run's
+context (`Run.Ctx`, from the board runner's `runCtx`) and policy. No valid token ⇒ `401`;
+never a default. `SetLoopbackOnly(true)` on this product: the listener already binds
+`127.0.0.1`, and the only legitimate caller is a `claude` child process on this same machine.
 
 `c.IP()` is the peer's real address (the fiber app is built with no `ProxyHeader`).
 
@@ -906,49 +905,25 @@ machine — see "Local simulators and emulators" above for the full `remote_adb`
 talks to one Appium hub on this host, and a park (`ResourceBlock{mobile_device}`) is released
 by `DeviceSweeper` probing that same hub.
 
-## One tenant (migrations 114, 115)
+## Single install, no isolation (migration 133)
 
-Multi-tenancy is a `tenant_id` column and a row-level-security policy, still present because
-this schema is shared with a hosted version of the product; this product always runs with
-exactly one tenant, `tenant.LocalTenantID`.
+Migration 133 dropped the multi-tenant schema this code once shared with a hosted version of
+the product: row-level security, every `tenant_id` column and tenant-scoped key, and the
+`tenants` / `tenant_members` tables. What replaced it:
 
 | Piece | Where | Rule |
 |---|---|---|
-| identity in | `adapter/http/middleware_tenant.go` | every request is stamped `tenant.LocalTenantID` + `RoleOwner` after the bearer `SERVER_API_KEY` check — no per-request identity header exists |
-| identity down | `adapter/store/postgres/db.go` | every statement in its own tx opening `SET LOCAL app.tenant_id`; no un-scoped path exists |
-| isolation | migration 114 | 85 tables carry `tenant_id NOT NULL DEFAULT current_setting('app.tenant_id')::uuid`, `ENABLE`+`FORCE` RLS, one `tenant_isolation` policy each |
-| global | `schema_migrations`, `tenants` | one schema, and the registry OF tenants — neither is a tenant's data |
-| uniqueness | migration 114 | every UNIQUE key re-cut to lead with `tenant_id`; single-row tables (`board_settings`, `billing_plan`, `agent_cli_connection`) became single-row-per-tenant |
-| per-tenant seed | `application/tenantboot` | migrations no longer seed; the first request seeds the board (see `.ai/projects.md` for `tenant_members`, which stays empty on this product) |
-| background loops | `platform/runtime` `Run` | the root context carries `tenant.LocalTenantID` + `RoleOwner`; every loop calls its tick directly on it |
-| board runs | `board.RunJob.Tenant` | the queue severs request and worker, so the tenant rides the job |
-| CI pipelines | `board.pipelineJob.Tenant` | same queue, same fix; without it every run logged `get task pipeline: tenant: no tenant in context` and failed the pipeline |
-| roles | `adapter/http/middleware_role.go` | mutations of `/admin`, `/v1/settings`, `/v1/board/`, `/v1/llm/`, `/v1/projects`, `/v1/store/credentials`, repository config and agent subscriptions need admin/owner; reads and board work are open to member |
+| auth | `adapter/http/handler.go` (`authMiddleware`) | bearer `SERVER_API_KEY` check only — no identity is stamped on the request afterward |
+| db access | `adapter/store/postgres/db.go` | every statement goes straight to the pool; no session-scoped setting |
+| board seed | `application/bootseed` | seeds the default board once per install, gated by `install_state.board_seeded_at` so a board the user has since edited is never reseeded; `bootSeedMiddleware` retries a failed seed on every non-public request until it succeeds |
+| boot steps | `application/bootseed` (`Step`) | seed mcp servers, role agents, llm providers, mobile devices; run once per process, idempotent |
+| background loops | `platform/runtime` `Run` | the root context carries no identity; every loop calls its tick directly on it |
 
-The application role must be **neither SUPERUSER nor BYPASSRLS**: both ignore
-policies unconditionally, `FORCE` included. `TenantIsolationSuite` connects as an
-unprivileged role for exactly that reason.
+There is no role system: every request that clears `authMiddleware` can do everything the
+API exposes.
 
-### RLS does not reach the disk: the tenant is in the path
-
-A filesystem path is outside anything Postgres RLS can narrow, so every on-disk path is
-derived from `workspace.TenantRoot` — `<root>/tenants/<tenant-id>/…`, always
-`tenant.LocalTenantID` on this product — rather than trusted from a caller. See
-`.ai/workspace.md` for the full path table. `HasLiveRunForTask` follows the same rule: it is
-tenant-scoped, so `WorkspaceReaper` never derives a delete decision from an unscoped query.
-
-## Boot-time work has no tenant
-
-A process has no tenant identity at boot — nothing tenant-scoped runs until the first request
-names one. `tenantboot.AddStep` then seeds mcp servers, role agents, llm providers and mobile
-devices once per process; the background loops (billing period, webhook reconcile, index freshness,
-the board sweepers) run on the runtime's root context, which carries the local identity.
-
-**A goroutine started from a request loses the tenant with the cancellation.**
-`context.WithoutCancel(ctx)` replaces `context.Background()`: keep the
-identity, drop the deadline — a background continuation (a repository import's profile pass,
-a push webhook registration) needs the identity to still resolve after its parent request has
-returned.
+Filesystem paths are still derived from the configured workspace root rather than trusted
+from a caller — see `.ai/workspace.md` for the full path table.
 
 ## Embeddings
 
@@ -977,8 +952,8 @@ account on this host directly.
 | `claude-account` `missing`/`unusable` | `ErrAgentCLIUnauthenticated`, so signed-out ≠ no-plan | 400 `agent_cli_unauthenticated` |
 | either item absent | plain error naming a version-skew problem — never a sentinel | 500 |
 
-The catalog snapshot for each agent-CLI flavor is written under `<tenant-root>/agent-cli/<flavor>`
-(`workspace.TenantRoot`) and read straight off this host's disk.
+The catalog snapshot for each agent-CLI flavor is written under `<workspace-root>/agent-cli/<flavor>`
+and read straight off this host's disk.
 
 ## `toolchain.detect` — the repository's own pins, read where the files are
 

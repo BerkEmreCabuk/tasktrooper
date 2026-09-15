@@ -3,13 +3,12 @@
 // shell inside the Appium pod.
 //
 // A device now has a KIND (domain.DeviceKind*), and the kind is what this
-// package switches on. It exists because the same installation can be a cluster
-// tenant driving a physical phone through the adb bridge, or a tenant running
-// on somebody's Mac driving an iOS simulator and an Android emulator that live
-// on that very machine. Registration, connect, status and removal mean
-// different things in those two worlds; everything downstream — the eleven
-// mobile_* tools, the lease, the parked-task sweep, the QA grounding gates —
-// means exactly the same thing, and that is the property this design protects.
+// package switches on. It exists because a physical phone reached through the
+// adb bridge and an iOS simulator or Android emulator running on this same
+// Mac are different worlds: registration, connect, status and removal mean
+// different things in each; everything downstream — the eleven mobile_* tools,
+// the lease, the parked-task sweep, the QA grounding gates — means exactly the
+// same thing, and that is the property this design protects.
 package mobiledevice
 
 import (

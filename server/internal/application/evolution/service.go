@@ -186,9 +186,9 @@ func (s *Service) reflectionDue(ctx context.Context, agentRec domain.Agent, now 
 
 // NotifyRevision triggers a debounced mini-reflection for the task assignee.
 //
-// ctx is taken for the tenant on it, not for its lifetime: the reflection
-// outlives the board move that triggered it, and every row it reads and writes
-// is policy-protected (context.WithoutCancel).
+// The reflection outlives the board move that triggered it, so ctx is
+// stripped of the request's cancellation (context.WithoutCancel) and given
+// its own timeout instead.
 func (s *Service) NotifyRevision(ctx context.Context, task domain.BoardTask) {
 	if !s.cfg.Enabled || task.AssigneeAgentID == nil {
 		return

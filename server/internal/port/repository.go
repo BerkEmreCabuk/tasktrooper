@@ -19,10 +19,9 @@ type RepositoryStore interface {
 	// came from, so a missing RootPath can be restored by cloning.
 	UpdateRemoteURL(ctx context.Context, id uuid.UUID, remoteURL string) (domain.Repository, error)
 	// UpdateRootPath re-points a repository at the working copy that is
-	// actually on disk. Used when a registered repository is re-cloned onto the
-	// machine currently running the tenant: the recorded path belonged to a
-	// runtime that no longer holds the code, and every consumer reaches the
-	// tree through this column.
+	// actually on disk. Used when a registered repository is re-cloned onto
+	// this machine: the recorded path belonged to a runtime that no longer
+	// holds the code, and every consumer reaches the tree through this column.
 	UpdateRootPath(ctx context.Context, id uuid.UUID, rootPath string) (domain.Repository, error)
 	Get(ctx context.Context, id uuid.UUID) (domain.Repository, error)
 	GetByRootPath(ctx context.Context, rootPath string) (domain.Repository, error)

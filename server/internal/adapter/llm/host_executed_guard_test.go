@@ -95,15 +95,15 @@ func TestMultiClientRefusesAgenticHostExecutedRequests(t *testing.T) {
 // produce — is REFUSED, and the refusal reaches nobody else.
 //
 // This test was the inverse of itself until the fallback was removed. It used to
-// assert that such a call was rerouted to the tenant's active default HTTP
+// assert that such a call was rerouted to the active default HTTP
 // provider with the model blanked, on the reasoning that the CLI could not serve
 // it anyway so a refusal only deleted the feature.
 //
 // The reasoning was sound and the conclusion was wrong. The default provider is
 // one the operator did not choose FOR THIS AGENT, and its health has nothing to
-// do with the health of anything they did choose: for the tenant this was
-// written for it was a dead `gemini-2.0-flash`, and an unpaid Mistral before
-// that. So every reroute converted "this agent cannot serve this step" — true,
+// do with the health of anything they did choose: for this test it was a dead
+// `gemini-2.0-flash`, and an unpaid Mistral before that. So every reroute
+// converted "this agent cannot serve this step" — true,
 // specific, fixable — into a 404 from a provider nobody was thinking about. The
 // fallback saved no call and made every failure harder to read.
 //
@@ -143,7 +143,7 @@ func TestMultiClientRefusesUtilityCallsOnHostExecutedProviders(t *testing.T) {
 			// present and healthy here precisely so the test can prove the call
 			// does NOT drift onto it.
 			if def.called {
-				t.Fatal("the utility call reached the tenant's default provider; the silent fallback is back")
+				t.Fatal("the utility call reached the default provider; the silent fallback is back")
 			}
 			if !errors.Is(err, domain.ErrHostExecutedUnservable) {
 				t.Fatalf("the refusal must be recognisable to callers (llmretry stops retrying on it), got %#v", err)
@@ -197,7 +197,7 @@ func TestMultiClientRefusalNamesTheCallSiteWhenThereIsNoSchema(t *testing.T) {
 		t.Fatal("expected a refusal for a toolless plain-text call on a host-executed provider")
 	}
 	if def.called {
-		t.Fatal("the call reached the tenant's default provider")
+		t.Fatal("the call reached the default provider")
 	}
 	if !strings.Contains(err.Error(), "host_executed_guard_test.go") {
 		t.Fatalf("a schema-less refusal must name the call site, got %q", err)
@@ -246,7 +246,7 @@ func TestMultiClientRefusesRegardlessOfTheConfiguredDefault(t *testing.T) {
 				Messages:     []domain.Message{{Role: domain.RoleUser, Content: "hello"}},
 			})
 			if err == nil {
-				t.Fatal("expected a refusal whatever the tenant default is")
+				t.Fatal("expected a refusal whatever the default is")
 			}
 			if spy != nil && spy.called {
 				t.Fatal("the call reached a client; the refusal must happen before any client is resolved")
@@ -262,7 +262,7 @@ func TestMultiClientRefusesRegardlessOfTheConfiguredDefault(t *testing.T) {
 // fallback client — the refusal must key on the provider being host-executed,
 // not on the client map being empty. This is the guard against the refusal
 // widening into "anything unconfigured is refused", which would break every
-// tenant that runs one client for several providers.
+// install that runs one client for several providers.
 func TestMultiClientStillFallsBackForEndpointProviders(t *testing.T) {
 	fallback := &spyClient{}
 	multi := NewMultiProviderClient(fallback, StaticResolver(staticSet(domain.LLMProviderOpenAI, nil)))

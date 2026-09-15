@@ -43,16 +43,16 @@ type WorkspaceIndex struct {
 	// EmbeddingModel and EmbeddingDims are what this index was ACTUALLY built
 	// with (migration 116), written by the pass that embedded it rather than
 	// inferred afterwards. They are the left-hand side of
-	// EmbeddingProvenanceStale; the right-hand side is whatever the tenant's
+	// EmbeddingProvenanceStale; the right-hand side is whatever this install's
 	// embedding provider resolves to now.
 	//
 	// Both are blank/zero on an index built before migration 116, and "unknown"
 	// is never read as "matches" — see EmbeddingProvenanceStale.
 	EmbeddingModel string `json:"embedding_model,omitempty"`
 	EmbeddingDims  int    `json:"embedding_dims,omitempty"`
-	// EmbeddingStale reports that this index's vectors are not comparable with a
-	// query embedded by the tenant's CURRENT model, so search against it is
-	// refused until it has been rebuilt.
+	// EmbeddingStale reports that this index's vectors are not comparable with
+	// a query embedded by the CURRENT model, so search against it is refused
+	// until it has been rebuilt.
 	//
 	// Runtime state, like SyncWarning, and for the reason migration 116 stored
 	// no boolean: staleness is a comparison against a setting that moves

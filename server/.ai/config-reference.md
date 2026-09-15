@@ -217,7 +217,7 @@ every call — no restart needed.
 | Key | Default | Description |
 |---|---|---|
 | `indexer.query_rewrite` | `false` | Rewrites the task text into 2 extra code-search queries (multi-query retrieval) |
-| `indexer.allowed_roots` | `[]` | Roots a repository or session may be pointed at, **in addition to** the calling tenant's own subtree of `storage.sessions.workspace_root`, which is always allowed |
+| `indexer.allowed_roots` | `[]` | Roots a repository or session may be pointed at, **in addition to** `storage.sessions.workspace_root`, which is always allowed |
 
 `allowed_roots` only ever WIDENS the set. Empty means nothing extra — not
 "anywhere", which is what it used to mean and what let `POST /v1/repositories/open`

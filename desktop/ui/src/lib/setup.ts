@@ -46,7 +46,7 @@ export interface SetupStep {
    * False in a browser for `environment`: it acts on the user's own Mac
    * through the desktop shell's bridge, and no browser tab has one. The step is still shown — with the download, not with a button that
    * cannot work — and its state may still be readable (a CLI connected from
-   * some Mac is visible to every browser in the tenant).
+   * some Mac is visible to every browser hitting this server).
    */
   actionable: boolean;
   /** Present only for `unknown`: the sentence from the call that could not answer. */

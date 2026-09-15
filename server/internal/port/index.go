@@ -8,7 +8,7 @@ import (
 )
 
 // EmbeddingProvenanceResolver answers "what model, and what vector length, do
-// this tenant's embedding calls resolve to right now" — the right-hand side of
+// this install's embedding calls resolve to right now" — the right-hand side of
 // domain.EmbeddingProvenanceStale.
 //
 // It is declared here, in port, rather than imported as a concrete type,

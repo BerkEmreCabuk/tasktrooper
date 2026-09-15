@@ -50,7 +50,7 @@ var (
 // Service turns stored embeddings into a low-dimensional projection.
 type Service struct {
 	store port.EmbeddingMapStore
-	// embeddings answers what this tenant embeds with now, so a source whose
+	// embeddings answers what this install embeds with now, so a source whose
 	// index predates a model change can be labelled instead of silently
 	// projected. Optional: unlike the indexer, this package has no configured
 	// model of its own to fall back on, so with no resolver it labels nothing
@@ -65,7 +65,7 @@ func New(store port.EmbeddingMapStore) *Service {
 }
 
 // SetEmbeddingResolver lets the map say when what it is drawing is not
-// comparable with what the tenant embeds today.
+// comparable with what is embedded today.
 //
 // The map is the one consumer of these vectors that cannot simply refuse: it
 // exists to show a person the shape of their corpus, and refusing would leave
@@ -82,7 +82,7 @@ func (s *Service) SetEmbeddingResolver(r port.EmbeddingProvenanceResolver) {
 	s.embeddings = r
 }
 
-// resolvedEmbedding is the tenant's current model, or blank when nothing can
+// resolvedEmbedding is the install's current model, or blank when nothing can
 // answer. A resolver failure is not a verdict: it leaves the model blank, which
 // domain.EmbeddingProvenanceStale reads as "nothing to compare against" and
 // which therefore labels nothing, rather than marking every source stale
@@ -127,8 +127,9 @@ type RepositorySource struct {
 	// can show it next to the chunk count rather than presenting every index as
 	// interchangeable.
 	EmbeddingModel string `json:"embedding_model,omitempty"`
-	// EmbeddingStale marks a source whose vectors no longer match the tenant's
-	// embedding model, and EmbeddingWarning is the sentence that says so. The
+	// EmbeddingStale marks a source whose vectors no longer match the
+	// currently configured embedding model, and EmbeddingWarning is the
+	// sentence that says so. The
 	// source stays listed and stays drawable — it is still the only picture
 	// there is of that repository — but it is drawable with a caveat, not
 	// silently.
@@ -195,7 +196,7 @@ func (s *Service) Sources(ctx context.Context) (Sources, error) {
 		Repositories: make([]RepositorySource, 0, len(repos)),
 	}
 	// Resolved once for the whole list, not once per repository: it is one
-	// tenant-wide setting, and asking per row would put a settings read behind
+	// install-wide setting, and asking per row would put a settings read behind
 	// every entry in a selector.
 	configuredModel, configuredDims := s.resolvedEmbedding(ctx)
 	for _, r := range repos {

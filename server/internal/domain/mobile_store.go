@@ -245,8 +245,8 @@ func (t StoreTracks) Channel(name string) (TrackRelease, bool) {
 // runner when Actions cannot run" — the failure this exists for is an org
 // whose Actions are blocked at the billing level, which is not a build error
 // and must not read as one. When NEITHER engine can run, the release is
-// blocked rather than quietly downgraded: an iOS build needs macOS, and a
-// tenant with no paired Mac and no Actions minutes has no honest way to ship.
+// blocked rather than quietly downgraded: an iOS build needs macOS, and an
+// install with no paired Mac and no Actions minutes has no honest way to ship.
 const (
 	ReleaseEngineAuto    = "auto"
 	ReleaseEngineActions = "github_actions"

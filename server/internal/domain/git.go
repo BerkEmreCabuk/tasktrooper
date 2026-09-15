@@ -17,9 +17,9 @@ type GitStatus struct {
 // all" are different questions, and answering both with one bool conflated
 // them: a root path that does not exist on this host was reported as "not a
 // git repository yet", which sends the user off to run `git init` on a folder
-// that is not there. That is not a hypothetical — a tenant's runtime can be a
-// cloud pod or the user's own paired Mac, and the same root_path resolves on
-// one and not the other.
+// that is not there. That is not a hypothetical — the database can be restored
+// from a backup, or the workspace directory wiped and re-created, and the
+// recorded root_path stops resolving either way.
 type GitPresenceState string
 
 const (
@@ -53,8 +53,8 @@ type GitPresence struct {
 // want, and the whole of what HasGit reports.
 func (p GitPresence) IsRepository() bool { return p.State == GitPresenceRepository }
 
-// CanRestoreWorkingCopy answers "may this repository's code be fetched onto the
-// machine that is running the tenant right now", and when it may not, why not.
+// CanRestoreWorkingCopy answers "may this repository's code be fetched onto
+// this machine right now", and when it may not, why not.
 //
 // It reads the four-state GitPresence rather than re-deriving anything from the
 // filesystem, because the distinctions the restore offer needs are exactly the

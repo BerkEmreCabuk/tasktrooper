@@ -65,9 +65,10 @@ const maxCheckedFrameURLs = 64
 // the reason this is AllowLoopback rather than AllowPrivate or a hand-rolled
 // check: 169.254.169.254 and the rest of link-local, RFC1918, IPv6 ULA, CGNAT,
 // multicast, the unspecified address and every alternate encoding of those stay
-// refused. Those are the other tenants' pods, the database, the VPC and the
-// cloud metadata service — things on the far side of a boundary the NetworkPolicy
-// is supposed to hold but that is applied and not positively verified. Loopback
+// refused. Those are other devices on the operator's network, the database,
+// internal infrastructure and the cloud metadata service — things on the far
+// side of a boundary a NetworkPolicy is supposed to hold on a shared
+// deployment, but that is applied and not positively verified. Loopback
 // is the one range that same NetworkPolicy structurally cannot see, and it is
 // also the only one this tool needs.
 //

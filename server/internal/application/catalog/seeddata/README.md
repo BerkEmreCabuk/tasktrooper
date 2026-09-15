@@ -12,9 +12,9 @@ skills/<role>/<skill>/SKILL.md    one directory per skill
 
 These files are a **starting point**, not what a running board uses.
 
-On first boot the server imports them into its database. From there each tenant
+On first boot the server imports them into its database. From there the install
 owns its own copy: skills are edited in the UI, and the self-evolution loop
-rewrites them from that tenant's KPIs and run reflections. A skill installed
+rewrites them from the install's KPIs and run reflections. A skill installed
 from this repository will therefore differ — sometimes a lot — from the skill of
 the same name on a board that has been running for a while. That is the design,
 not drift.
@@ -53,6 +53,6 @@ A new file is not live until the role claims it: roles list their skills in
 ## Layout
 
 One directory per skill, holding `SKILL.md` — the same shape Claude Code and
-Cursor discover natively. That is deliberate: the server materialises a
-tenant's catalog into a task workspace in exactly this format, so what is
+Cursor discover natively. That is deliberate: the server materialises the
+catalog into a task workspace in exactly this format, so what is
 written here and what an agent reads at run time are the same kind of file.

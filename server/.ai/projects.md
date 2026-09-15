@@ -1,6 +1,6 @@
 # Repositories & Initiative Projects
 
-Code repositories bind a filesystem directory to codebase indexing and the kanban board. Repository-scoped chat is removed; agents are triggered by board events instead. Every repo carries a `tenant_id` (migration 114, always `tenant.LocalTenantID` on this product) and the board is global **within** it — there is no second grouping under a tenant, which is what the removed `team_id` used to be. See [Person columns](#person-columns-migration-115) for the per-person columns migration 115 added, which no code uses.
+Code repositories bind a filesystem directory to codebase indexing and the kanban board. Repository-scoped chat is removed; agents are triggered by board events instead. The board is global — there is no team or tenant grouping (`team_id` removed migration 038, `tenant_id` removed migration 133). See [Person columns](#person-columns-migrations-115-133) for the per-person columns migration 115 added and migration 133 then dropped.
 
 ## Data Model
 
@@ -82,13 +82,11 @@ Repository resolution: tools read `repository_id` from context; if absent they f
 
 See [Workspace](workspace.md) for the board/dispatch layer.
 
-## Person columns (migration 115)
+## Person columns (migrations 115, 133)
 
-| Table / column | Purpose |
-|---|---|
-| `tenants` | one-row registry (`tenant.LocalTenantID`) |
-| `tenant_members` | schema only; nothing reads or writes it |
-| `agents.owner_user_id`, `board_tasks.assignee_user_id`, `agent_memories.owner_user_id` | schema only; no code reads or writes them |
+Migration 115 added `tenants`, `tenant_members` and per-row `owner_user_id`/`assignee_user_id`
+columns for a person layer no code ever used; migration 133 dropped all of them along with the
+rest of the tenant schema.
 
 The install has one person and no login: a task is assigned to an agent only
 (`assignee_agent_id`), the dispatcher wakes every column subscriber, and memory reads have

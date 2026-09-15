@@ -154,8 +154,8 @@ func geminiError(status int, code int, message, rpcStatus string, details string
 	}
 }
 
-// The incident was a Mistral tenant, but a Gemini/Vertex tenant hit the same
-// wall with none of the protection: its refusals came back as
+// The incident was on Mistral, but Gemini/Vertex hits the same wall with none
+// of the protection: its refusals came back as
 // `gemini embed: Error 403, Message: ...`, so codebase_search had nothing to
 // match on and kept telling the agent, in the provider's words, to try again.
 func TestGeminiEmbedTypesTheRefusalsNoRetryCanClear(t *testing.T) {

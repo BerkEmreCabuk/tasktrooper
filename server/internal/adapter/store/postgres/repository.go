@@ -217,7 +217,7 @@ func (s *RepositoryStore) UpdateRemoteURL(ctx context.Context, id uuid.UUID, rem
 }
 
 // UpdateRootPath re-points a repository at the working copy that is really on
-// disk, after it was restored onto the host currently serving the tenant.
+// disk, after it was restored onto the host currently serving this install.
 //
 // The written value is this host's absolute path, exactly as at registration:
 // root_path stays advisory across hosts and the other host re-anchors it on

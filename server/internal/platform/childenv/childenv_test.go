@@ -20,8 +20,8 @@ func TestChildEnvSuite(t *testing.T) {
 	suite.Run(t, new(ChildEnvSuite))
 }
 
-// The tenant Deployment's environment (internal/control/kube) plus the shapes
-// a future credential is likely to arrive in.
+// A parent process's environment plus the shapes a future credential is
+// likely to arrive in.
 var parentWithSecrets = []string{
 	"PATH=/usr/bin:/bin",
 	"HOME=/home/bridge",

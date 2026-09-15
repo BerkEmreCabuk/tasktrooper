@@ -1,8 +1,8 @@
 import type { LLMProviderDefinition, LLMProviderType } from "@/api";
 
 /**
- * Providers that run as a local process on the tenant's runner host instead of
- * being reached over HTTP.
+ * Providers that run as a local process on this host instead of being reached
+ * over HTTP.
  *
  * They have no base URL and no API key, so the LLM settings page's connect /
  * test / activate / embedding calls have nothing to send and the server rejects

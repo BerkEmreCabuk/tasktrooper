@@ -185,10 +185,8 @@ func (s *Service) processOne(ctx context.Context) {
 	s.fireCallback(ctx, job.CallbackURL, job.ID, domain.JobStatusCompleted, raw, "")
 }
 
-// ctx is carried for its VALUES, not its lifetime: the callback outlives the
-// job whose result it reports. Nothing here reads a tenant row today, and that
-// is exactly why it is worth carrying — the next thing added to this path would
-// otherwise inherit a context with no identity and fail silently.
+// ctx is stripped of its cancellation (context.WithoutCancel), not its
+// lifetime: the callback outlives the job whose result it reports.
 func (s *Service) fireCallback(ctx context.Context, url string, jobID uuid.UUID, status domain.JobStatus, result []byte, errMsg string) {
 	if url == "" {
 		return

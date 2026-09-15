@@ -28,8 +28,7 @@ func TestVerifyEnvScrubSuite(t *testing.T) {
 	suite.Run(t, new(VerifyEnvScrubSuite))
 }
 
-// verifyPlantedSecrets mirrors the tenant Deployment's env
-// (internal/control/kube) plus a provider key.
+// verifyPlantedSecrets mirrors a parent process's env plus a provider key.
 var verifyPlantedSecrets = map[string]string{
 	"DATABASE_URL":      "postgres://tenant:hunter2@10.0.0.5:5432/tenant_x",
 	"INTERNAL_AUTH_KEY": "gateway-hmac-key-9f21",

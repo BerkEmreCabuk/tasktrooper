@@ -97,7 +97,7 @@ func applyDefaults(cfg *domain.Config) {
 	// One minute, not five: the sweep is now the recovery path for an orphaned
 	// PENDING run (board.pendingStaleAfter), and the interval is what a user
 	// actually waits with a spinning card. The work is two queries against one
-	// tenant's board, so the extra ticks cost nothing worth counting.
+	// board, so the extra ticks cost nothing worth counting.
 	if cfg.Board.ReconcileInterval <= 0 {
 		cfg.Board.ReconcileInterval = time.Minute
 	}

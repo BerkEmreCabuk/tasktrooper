@@ -230,8 +230,8 @@ func TestExecuteChatOmitsTheModelFlagWhenNoneIsChosen(t *testing.T) {
 
 // A chat turn is credentialled exactly like a board run: its own token, minted
 // for the turn and revoked at the end of it. A thread that stays open for days
-// must not leave a live credential for this tenant's board tools lying around
-// between messages.
+// must not leave a live credential for the board tools lying around between
+// messages.
 func TestExecuteChatMintsAndRevokesItsOwnMCPToken(t *testing.T) {
 	provider := &recordingMCPProvider{cfg: MCPConfig{URL: "http://127.0.0.1:9/mcp", Token: "chat-token"}}
 	ex, workDir := newTestExecutor(t, Config{MCPProvider: provider}, "chat_reply.jsonl")

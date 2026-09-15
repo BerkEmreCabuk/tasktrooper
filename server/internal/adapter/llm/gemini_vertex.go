@@ -362,9 +362,9 @@ func (c *geminiVertexClient) Embed(ctx context.Context, input string, model stri
 // OpenAI-compatible client does, so codebase_search can word it the same way.
 //
 // It exists because the two clients failed differently for the same reason: a
-// Gemini/Vertex tenant whose key was rejected got `gemini embed: Error 403,
-// Message: ...` — the provider's own prose, which the agent reads as worth
-// another go — while a Mistral tenant got a typed error and a tool result that
+// rejected Gemini/Vertex key got `gemini embed: Error 403, Message: ...` —
+// the provider's own prose, which the agent reads as worth another go —
+// while the same failure on Mistral got a typed error and a tool result that
 // told it to stop. The classification belongs to the failure, not to the SDK
 // that happened to report it.
 //

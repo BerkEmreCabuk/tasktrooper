@@ -20,16 +20,16 @@ import (
 )
 
 // InvalidateFunc is called after any write that changes what Resolve would
-// return for the tenant on ctx.
+// return.
 //
-// It replaced a ReloadFunc that took the tenant's entries and PUSHED them into
-// a process-wide client. That push was the credential leak: the last tenant to
-// save LLM settings decided which clients every other tenant used. Nothing is
-// pushed anywhere now — a save only says "this tenant's answer changed", and
-// the next call for that tenant resolves it again.
+// It replaced a ReloadFunc that took the stored entries and PUSHED them into
+// a process-wide client. That push was the credential leak: whichever save
+// ran last decided which clients every caller used. Nothing is pushed
+// anywhere now — a save only says "the answer changed", and the next call
+// resolves it again.
 type InvalidateFunc func(ctx context.Context)
 
-// Resolved is one tenant's LLM configuration, as DATA.
+// Resolved is the install's LLM configuration, as DATA.
 //
 // Deliberately not a set of built clients: constructing those needs
 // adapter/llm, and this package is application-layer. The composition root
@@ -55,8 +55,8 @@ type Service struct {
 	endpoints port.LLMEndpointStore
 	cipher    *secrets.Cipher
 	timeout   time.Duration
-	// invalidate tells the resolver cache that this tenant's answer changed.
-	// Nil is valid and means nothing caches.
+	// invalidate tells the resolver cache that the answer changed. Nil is
+	// valid and means nothing caches.
 	invalidate InvalidateFunc
 }
 
@@ -67,7 +67,7 @@ func NewService(store port.LLMProviderStore, endpoints port.LLMEndpointStore, ci
 	return &Service{store: store, endpoints: endpoints, cipher: cipher, timeout: timeout, invalidate: invalidate}
 }
 
-// ResolvedEmbedding answers "what model, and what dimension, is this tenant's
+// ResolvedEmbedding answers "what model, and what dimension, is the
 // embedding search actually running on right now", exposed as its own call so
 // a caller outside this package (the indexer, comparing against
 // workspace_indexes.embedding_model/embedding_dims — see
@@ -86,7 +86,7 @@ func (s *Service) ResolvedEmbedding(ctx context.Context) (model string, dimensio
 	return model, dimensions, nil
 }
 
-// EmbeddingStatus answers "what is producing this tenant's embeddings" — the
+// EmbeddingStatus answers "what is producing the embeddings" — the
 // question the settings page has to answer and the provider catalog cannot,
 // because a named endpoint is not in the catalog at all.
 func (s *Service) EmbeddingStatus(ctx context.Context) (domain.EmbeddingStatus, error) {
@@ -170,7 +170,7 @@ func (s *Service) List(ctx context.Context) (domain.LLMProvidersResponse, error)
 // on an AGENT, and the board runner hands that agent's task to the CLI on
 // whichever machine that agent's work belongs to. Letting these paths proceed
 // would store a configured row for an endpoint that does not exist, and — for
-// Activate — make it the tenant's default chat provider, which would break
+// Activate — make it the default chat provider, which would break
 // every chat turn with a missing-client error rather than one honest sentence
 // here.
 //
@@ -480,10 +480,10 @@ func (s *Service) Test(ctx context.Context, providerType domain.LLMProviderType,
 //
 // Its callers are every write that changes what Resolve returns — Connect,
 // Disconnect, the active-provider switch, the embedding pin, endpoint CRUD. It
-// used to rebuild the process-wide client map from THIS tenant's rows, which is
-// what handed the next caller somebody else's credentials. It now says only
-// "this tenant's answer changed"; the cache drops that tenant's entry and the
-// next call for that tenant resolves it again.
+// used to rebuild the process-wide client map straight from the stored rows,
+// which is what handed the next caller somebody else's credentials on a
+// shared server. It now says only "the answer changed"; the cache drops its
+// entry and the next call resolves it again.
 //
 // The name is kept because every call site reads correctly with it, and because
 // the diff is easier to review as a change of meaning than as a rename of ten
@@ -495,12 +495,11 @@ func (s *Service) reloadAllConfigured(ctx context.Context) error {
 	return nil
 }
 
-// Resolve reads the LLM configuration of the tenant on ctx.
+// Resolve reads the LLM configuration.
 //
-// Every read below is policy-scoped, so what comes back is that tenant's rows
-// and nobody else's — including the decrypted API keys. This used to be the
-// first half of reloadAllConfigured, whose second half pushed the result into a
-// process-wide client; the push is gone and the result is returned instead.
+// This used to be the first half of reloadAllConfigured, whose second half
+// pushed the result into a process-wide client; the push is gone and the
+// result is returned instead.
 func (s *Service) Resolve(ctx context.Context) (Resolved, error) {
 	stored, err := s.store.List(ctx)
 	if err != nil {
@@ -582,7 +581,7 @@ func (s *Service) EmbeddingProvider(ctx context.Context) (domain.LLMProviderType
 // provider, a ref that matches no endpoint, a ref that is not even shaped like
 // one. It is deliberately about EMBEDDINGS and never about storage: everything
 // below it used to be able to reach a user's screen, and the failure that
-// prompted this was a tenant being shown `invalid input syntax for type uuid`
+// prompted this was an operator being shown `invalid input syntax for type uuid`
 // by a page whose subject is which model indexes their code.
 func errNoEmbeddingsFromProvider() error {
 	return fmt.Errorf("this provider cannot produce embeddings")

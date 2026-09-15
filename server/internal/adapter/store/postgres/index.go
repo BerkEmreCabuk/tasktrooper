@@ -25,7 +25,7 @@ type IndexStore struct {
 	// localizeIndexRootPath.
 	hosts hostRoots
 
-	// embeddings answers what this tenant's embedding calls resolve to right
+	// embeddings answers what this install's embedding calls resolve to right
 	// now, which is the only thing this store cannot read out of its own
 	// tables. Optional: nil leaves the model-name half of the staleness check
 	// unanswerable, and the dimension half (which needs no configuration at
@@ -107,7 +107,7 @@ func (s *IndexStore) SetCapabilities(caps VectorCapabilities) {
 }
 
 // SetEmbeddingResolver gives the store the one fact it cannot read from its own
-// tables: which embedding model this tenant's queries are produced by NOW.
+// tables: which embedding model queries are produced by NOW.
 //
 // It is wired late (from platform/runtime, once the LLM-provider service
 // exists) and is optional, so a deployment without one keeps the behaviour it
@@ -438,7 +438,7 @@ type scoredWorkspaceChunk struct {
 //
 // Two independent proofs, either of which is enough:
 //
-//	the CONFIGURATION proof — the tenant's embedding model is not the one this
+//	the CONFIGURATION proof — the configured embedding model is not the one this
 //	  index was built with (domain.EmbeddingProvenanceStale, which also treats a
 //	  blank index model as stale, because an index from before migration 116
 //	  records no model and "unknown" is not "matches").
@@ -477,7 +477,7 @@ func staleEmbeddingRefusal(indexModel string, indexDimensions int, configuredMod
 // hybrid search calls it and then only ADDS trigram matches).
 //
 // A resolver failure is deliberately NOT a refusal. It means "this process
-// could not read the tenant's setting just now" — a database hiccup, not
+// could not read the embedding setting just now" — a database hiccup, not
 // evidence of a mismatch — and turning that into a blocked code search for
 // every agent on the box is a worse outcome than one search served on an index
 // that is very probably fine. The arithmetic proof still runs, and it is the

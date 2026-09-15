@@ -226,7 +226,7 @@ export function AgentSettingsPage() {
     if (form.provider_type) return;
     // Only a lone CONNECTED provider is picked for the user. Claude Code is
     // always in the list (it needs no connecting), and auto-selecting a provider
-    // that runs on the tenant's own host is not a default anybody asked for.
+    // that runs on this host is not a default anybody asked for.
     const connectable = connectedProviders.filter((p) => !p.hostExecuted);
     if (connectable.length === 1) {
       const only = connectable[0].value as LLMProviderType;

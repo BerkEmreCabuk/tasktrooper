@@ -318,7 +318,7 @@ func TestHostWithNoToolchainReportsNothing(t *testing.T) {
 }
 
 // adb and the emulator are children of this process like any other, and this
-// process holds the tenant's database DSN and gateway key until the boot scrub
+// process holds the database DSN and gateway key until the boot scrub
 // runs (platform/runtime/envscrub.go) — plus whatever an operator has exported
 // on the laptop this runs on. `adb shell` runs an arbitrary command on a device
 // and an emulator outlives the request that started it, so of everything here

@@ -322,7 +322,7 @@ func TestDefaultPolicy(t *testing.T) {
 		t.Fatal("defaultPolicy must allow loopback: the QA agent tests the app it just booted")
 	}
 	if p.AllowPrivate {
-		t.Fatal("defaultPolicy must not allow RFC1918: that is other tenants' pods and the database")
+		t.Fatal("defaultPolicy must not allow RFC1918: that is other devices on the operator's network and the database")
 	}
 	if _, err := p.Precheck("http://127.0.0.1:8080/login"); err != nil {
 		t.Fatalf("loopback must pass: %v", err)

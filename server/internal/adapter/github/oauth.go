@@ -1,5 +1,6 @@
 // OAuth App (Authorization Code) akışı — PAT'e alternatif olarak "GitHub ile
-// bağlan" butonu için. Client secret sadece tenant-manager'de tutulur.
+// bağlan" butonu için tasarlandı, ama bu serverda bağlı değil: GitHub
+// bağlantısı doğrudan yapıştırılan bir PAT ile kuruluyor (bkz. handler_github.go).
 package github
 
 import (

@@ -31,7 +31,7 @@ interface GCloudResourceListingState {
 }
 
 /**
- * Reads what the saved service account can see in the tenant's Google Cloud
+ * Reads what the saved service account can see in the operator's Google Cloud
  * project, on demand.
  *
  * `enabled` keeps it on demand for the same reason the store listing does:

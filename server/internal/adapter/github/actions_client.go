@@ -12,21 +12,20 @@ import (
 // deployops can be tested against a fake. It adds no behaviour of its own
 // beyond resolving the token per call.
 //
-// Per call, not per construction, and that is the whole point: the GitHub token
-// is a TENANT's, stored encrypted on that tenant's settings row, while this
-// client is built once for the process. Holding a string meant one tenant's
-// token was baked into the client every other tenant then used — and because
-// the token could only be resolved at boot, where there is no tenant, what
-// actually happened was that the deploy console was gated off a read that
-// always failed and never got built at all. The source below is handed the
-// caller's context and reads the token belonging to whoever is being served.
+// Per call, not per construction, and that is the whole point: the GitHub
+// token lives, encrypted, on the settings row, and can change (reconnect,
+// revoke) after this client is built once for the process. Holding a plain
+// string meant a token read too early — before the settings row could even
+// be read yet at boot — was baked in forever: the deploy console ended up
+// gated behind a read that always failed and was never built at all. The
+// source below is handed the caller's context and reads the token fresh.
 type ActionsAPI struct {
 	token   TokenSource
 	baseURL string
 }
 
-// TokenSource resolves the GitHub token for the tenant on ctx. It is satisfied
-// directly by pgSettings.GitHubToken.
+// TokenSource resolves the GitHub token on ctx. It is satisfied directly by
+// pgSettings.GitHubToken.
 type TokenSource func(ctx context.Context) (string, error)
 
 // NewActionsAPI builds a client that presents one fixed token. It is for the
@@ -37,10 +36,10 @@ func NewActionsAPI(token string) *ActionsAPI {
 	return &ActionsAPI{token: func(context.Context) (string, error) { return token, nil }}
 }
 
-// NewActionsAPIFor builds a client that resolves the acting tenant's token on
-// every call. A nil source yields a client that presents no token, which GitHub
-// answers for public reads and refuses for everything else — the same outcome
-// as an unconnected tenant, and a truthful one.
+// NewActionsAPIFor builds a client that resolves the token on every call. A
+// nil source yields a client that presents no token, which GitHub answers for
+// public reads and refuses for everything else — the same outcome as GitHub
+// not being connected, and a truthful one.
 func NewActionsAPIFor(source TokenSource) *ActionsAPI {
 	return &ActionsAPI{token: source}
 }
@@ -48,7 +47,7 @@ func NewActionsAPIFor(source TokenSource) *ActionsAPI {
 // SetBaseURL redirects requests at a test server. Empty means the real API.
 func (a *ActionsAPI) SetBaseURL(u string) { a.baseURL = u }
 
-// resolve reads the acting tenant's token. An error is returned to the caller
+// resolve reads the connected GitHub token. An error is returned to the caller
 // rather than degraded to an empty token: "GitHub is not connected" and "the
 // settings row could not be read" are different problems and only one of them
 // is the user's to fix.

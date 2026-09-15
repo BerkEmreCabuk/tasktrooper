@@ -36,7 +36,7 @@ const (
 
 	// DeviceKindIOSSimulator is an `xcrun simctl` simulator on THIS host.
 	// Available only where the host reports one — in practice a macOS machine
-	// running the tenant locally, because Appium's XCUITest driver needs Xcode
+	// running this server locally, because Appium's XCUITest driver needs Xcode
 	// and Xcode needs macOS. The bridge is never involved: there is no adb, and
 	// the simulator is a process this host starts and stops itself.
 	DeviceKindIOSSimulator = "ios_simulator"

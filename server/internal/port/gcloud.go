@@ -33,7 +33,7 @@ type GCloudCredentialRow struct {
 	UpdatedAt   time.Time
 }
 
-// GCloudCredentialStore persists the tenant's single encrypted Google Cloud
+// GCloudCredentialStore persists the install's single encrypted Google Cloud
 // service-account credential.
 type GCloudCredentialStore interface {
 	// Set writes the whole credential. projectID and clientEmail are stored in

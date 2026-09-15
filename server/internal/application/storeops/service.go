@@ -241,7 +241,7 @@ func (s *Service) DeleteCredential(ctx context.Context, provider string) error {
 }
 
 // ErrProviderNotConnected means nobody has saved a credential for this
-// provider yet. It is the first state every tenant is in, not a failure, and
+// provider yet. It is the first state every install is in, not a failure, and
 // it is answered differently from ErrAppListingUnavailable: that one means the
 // credential is there but the store will not enumerate, which is what opens
 // the manual identifier field. Typing an identifier by hand is useless with no

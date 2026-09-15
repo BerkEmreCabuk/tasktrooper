@@ -115,7 +115,7 @@ func SummarizeRolling(ctx gocontext.Context, b Budget, s Summarizer, messages []
 // provider crossed the summarize threshold and then failed on its own
 // housekeeping, because the alias its board runs on is not a model name anybody
 // can serve. Named here, the provider reaches the client, which redirects the
-// call to the tenant's default provider AND drops the alias with it.
+// call to the default provider AND drops the alias with it.
 func SummarizeRollingFor(
 	ctx gocontext.Context,
 	b Budget,

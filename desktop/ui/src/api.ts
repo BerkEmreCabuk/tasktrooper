@@ -181,8 +181,8 @@ export interface Repository {
   project_ids?: string[];
   git_warning?: string;
   /**
-   * The server's answer to "may this project's code be fetched onto the machine
-   * currently running the tenant" — true only when the folder is genuinely
+   * The server's answer to "may this project's code be fetched onto this
+   * machine" — true only when the folder is genuinely
    * missing here AND a git remote is on record. Never re-derive it from
    * `git_warning`: the rule lives on the server (domain.CanRestoreWorkingCopy)
    * and a folder that exists, or holds something that is not a repository, must
@@ -1213,7 +1213,7 @@ export interface VercelProject {
 }
 
 // ---- Google Cloud -------------------------------------------------------
-// The tenant's own project, read-only, behind a service account they saved.
+// The operator's own project, read-only, behind a service account they saved.
 
 export type GCloudResourceType = "cloud_run_service" | "gke_cluster";
 
@@ -1459,10 +1459,10 @@ export interface GitHubRepoInfo {
 
 // "claude_code", "cursor_agent", "antigravity" and "opencode" are not HTTP
 // endpoints: a task on an agent with one of these providers is handed to a
-// headless CLI session on the tenant's runner host, which carries its own
-// subscription auth. They are therefore selectable on an AGENT only — the
-// tenant LLM settings page (connect / test / activate / embed) rejects them
-// server-side, because there is no base URL and no key to reach.
+// headless CLI session on this host, which carries its own subscription auth.
+// They are therefore selectable on an AGENT only — the LLM settings page
+// (connect / test / activate / embed) rejects them server-side, because there
+// is no base URL and no key to reach.
 export type LLMProviderType =
   | "local"
   | "openai"
@@ -2947,7 +2947,7 @@ export const api = {
     ),
 
   /**
-   * Fetch a registered repository's code onto the machine running the tenant,
+   * Fetch a registered repository's code onto this machine,
    * from the remote already on its record, into this runtime's own workspace.
    *
    * Returns as soon as the clone has STARTED (202) — the returned repository

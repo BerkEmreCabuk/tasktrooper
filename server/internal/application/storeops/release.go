@@ -515,7 +515,7 @@ func (s *Service) PromoteChannel(ctx context.Context, repositoryID uuid.UUID, pl
 // the distinction survives, because domain.TrackRelease deliberately carries
 // no store-specific track name. With nothing cached yet, open testing is the
 // assumption: it is the stage a build leaving internal is heading for, and the
-// closed-testing tenants are the ones whose Tracks read will say so.
+// closed-testing case is the one whose Tracks read will say so.
 func playTrack(channel string, tracks domain.StoreTracks) string {
 	switch channel {
 	case domain.StoreChannelInternal:

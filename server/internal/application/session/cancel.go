@@ -267,7 +267,7 @@ func (s *Service) cancelSessionRows(ctx context.Context, sessionID uuid.UUID) (b
 
 // cancelSessionRow flips one named run, having first proved it belongs to this
 // session. The scope check is not decoration: a run id alone would let any turn
-// in the tenant be stopped by naming a session the caller happens to hold.
+// on the install be stopped by naming a session the caller happens to hold.
 func (s *Service) cancelSessionRow(ctx context.Context, sessionID, runID uuid.UUID) (bool, error) {
 	if s.activityStore == nil {
 		return false, nil

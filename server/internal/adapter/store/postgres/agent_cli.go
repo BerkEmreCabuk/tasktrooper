@@ -10,9 +10,9 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// AgentCLIStore reads and writes agent_cli_connection, one row per flavor per
-// tenant. See migrations/120_agent_cli_multi_connection.up.sql for why a
-// tenant may hold more than one at once.
+// AgentCLIStore reads and writes agent_cli_connection, one row per flavor.
+// See migrations/120_agent_cli_multi_connection.up.sql for why an install may
+// hold more than one at once.
 type AgentCLIStore struct {
 	pool *DB
 }
@@ -44,7 +44,7 @@ func (s *AgentCLIStore) Get(ctx context.Context, flavor domain.AgentCLIFlavor) (
 	return conn, true, nil
 }
 
-// List returns every flavor this tenant currently has connected.
+// List returns every flavor currently connected.
 func (s *AgentCLIStore) List(ctx context.Context) ([]domain.AgentCLIConnection, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT flavor, provider_type, binary_path, binary_version, catalog_path, agent_count, skill_count, connected_at

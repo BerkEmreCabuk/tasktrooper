@@ -117,8 +117,8 @@ func (f *fakeHost) StopEmulator(_ context.Context, serial string) error {
 
 var _ LocalHost = (*fakeHost)(nil)
 
-// macHost is a host with both local toolchains, which is what a tenant running
-// on somebody's laptop looks like.
+// macHost is a host with both local toolchains, which is what this install
+// looks like on somebody's laptop.
 func macHost() *fakeHost {
 	h := newFakeHost()
 	h.ios, h.android = true, true

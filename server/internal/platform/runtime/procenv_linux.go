@@ -44,7 +44,7 @@ const prSetDumpable = 4
 // procfs — so the loss is accepted and pinned by the tests.
 //
 // The other cost is core dumps: an undumpable process produces none. For a
-// process whose address space holds the tenant's database password and the
+// process whose address space holds the database password and the
 // gateway HMAC key, a core dump on disk is a liability rather than a debugging
 // asset.
 //

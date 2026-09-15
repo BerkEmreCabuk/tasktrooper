@@ -16,7 +16,7 @@ type GitClient interface {
 	// could not be read. Callers that only gate a git command keep using
 	// HasGit; callers that have to explain the answer to a person need this,
 	// because "not a git repository yet" told the user to `git init` a folder
-	// that does not exist on the machine this tenant is currently running on.
+	// that does not exist on this machine.
 	//
 	// Not on a context: it is a stat, and it is called once per repository in
 	// every list response.

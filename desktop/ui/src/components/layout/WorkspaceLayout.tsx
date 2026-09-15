@@ -6,7 +6,7 @@ import { useCachedState, useFirstLoad } from "@/hooks/useCachedState";
 import { CACHE_CONFIG } from "@/lib/project-board";
 import { cn } from "@/lib/utils";
 
-// A brand-new tenant seeds its default agents in the background (each one
+// A brand-new install seeds its default agents in the background (each one
 // runs its own LLM skill-embedding calls), so the roster can take a few
 // seconds to finish. Rather than showing agents one at a time as they're
 // inserted, poll until the backend reports seeding is done and reveal the
@@ -28,7 +28,7 @@ export function WorkspaceLayout() {
   const fullBleed = isChat || isBoard || isBacklog || isReleased;
   // The sidebar's roster and column config come back from cache first: a
   // reload (or the desktop shell restoring a tab) renders the nav immediately
-  // instead of holding it on skeletons until the tenant answers.
+  // instead of holding it on skeletons until the server answers.
   const [config, setConfig] = useCachedState<WorkspaceConfig | null>(CACHE_CONFIG, null);
   const [agents, setAgents] = useCachedState<Agent[]>(SIDEBAR_AGENTS_CACHE, []);
   const [loading, setLoading] = useFirstLoad(CACHE_CONFIG, SIDEBAR_AGENTS_CACHE);

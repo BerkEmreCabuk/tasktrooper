@@ -212,7 +212,7 @@ func (e *erroringLLM) Embed(context.Context, string, string) ([]float32, error) 
 // the suite did not get worse", which is sound — as long as the suite RAN.
 //
 // It did not, and the old silent provider fallback is why: the judge call was
-// rerouted to the tenant's active default HTTP provider, which for this tenant
+// rerouted to the active default HTTP provider, which at the time
 // was a dead `gemini-2.0-flash`. So the judge failed, `after >= before` held
 // trivially, and the change set was kept with the reason "kept on
 // non-regression" — a phrase that reads on the dashboard exactly like evidence,

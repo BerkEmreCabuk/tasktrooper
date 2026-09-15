@@ -2,7 +2,7 @@
 //
 // # Threat model
 //
-// This is a multi-tenant agent platform, and the LLM picks the URL. The model's
+// This is an agent platform, and the LLM picks the URL. The model's
 // context is full of text fetched from the open internet, so every outbound
 // request whose destination comes from a tool argument, an agent-owned config
 // row or an API request body is reachable by prompt injection and has to be
@@ -18,9 +18,9 @@
 //   - http://169.254.169.254/... is the cloud metadata service. fetch_url on its
 //     own cannot set the Metadata-Flavor header GCP demands, but an MCP server
 //     config carries an arbitrary header map and can.
-//   - 10/8, 172.16/12, 192.168/16, fc00::/7 and 100.64/10 are the cluster and
-//     the VPC around it: other tenants' pods, the database, internal control
-//     planes.
+//   - 10/8, 172.16/12, 192.168/16, fc00::/7 and 100.64/10 are the operator's own
+//     network: routers, NAS boxes and other services reachable from this
+//     machine.
 //   - Even without a reachable service, distinguishable transport errors
 //     ("connection refused" versus "i/o timeout") turn any of the above into a
 //     working port scanner whose output lands back in the model's context.
@@ -56,9 +56,9 @@
 // Self-hosted and desktop installs legitimately point tools at services on the
 // same machine. That is a real product use, so it is an explicit policy switch
 // (Policy.AllowLoopback) that is off in the zero value and off in PublicOnly.
-// Default turns it on only when the operator sets ALLOW_LOOPBACK_TOOL_URLS,
-// which no cloud tenant can reach — a tenant edits config rows, not the pod
-// environment.
+// Default turns it on only when the operator sets ALLOW_LOOPBACK_TOOL_URLS: a
+// process environment variable, never a database config row an agent (or a
+// prompt injection) could reach.
 package urlguard
 
 import (
@@ -77,8 +77,8 @@ import (
 
 // AllowLoopbackEnv is the operator switch that re-enables loopback destinations
 // for self-hosted installs. It is read once per Default call, from the process
-// environment, which is deliberately the one input surface a tenant of the
-// hosted product has no way to write to.
+// environment, which is deliberately not something an agent (or an
+// attacker-controlled config row) can write to.
 const AllowLoopbackEnv = "ALLOW_LOOPBACK_TOOL_URLS"
 
 // defaultMaxRedirects caps a redirect chain. Five is well past what any real
