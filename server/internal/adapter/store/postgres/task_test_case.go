@@ -66,7 +66,7 @@ func (s *TaskTestCaseStore) UpsertForTask(ctx context.Context, taskID uuid.UUID,
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO task_test_cases (task_id, criterion_id, title, category, status, expected, actual, evidence, notes, position)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-			ON CONFLICT (tenant_id, task_id, title) DO UPDATE SET
+			ON CONFLICT (task_id, title) DO UPDATE SET
 				criterion_id = COALESCE(EXCLUDED.criterion_id, task_test_cases.criterion_id),
 				category     = EXCLUDED.category,
 				status       = EXCLUDED.status,

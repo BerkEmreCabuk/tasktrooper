@@ -13,21 +13,15 @@ import (
 // request context: a tenant.
 //
 // One machine, one person, who owns it. The tenant is a FIXED uuid rather than
-// a generated one, or every restart would look like a new tenant and the
-// previous run's rows would become invisible. Every store method below opens
-// its transaction from this value (postgres.DB, SET LOCAL app.tenant_id), so a
-// path that skips this middleware reaches tenant.ErrNoTenant rather than
-// somebody else's rows.
+// a generated one, or every restart would look like a new tenant. The workspace
+// path helpers still derive directories from it and refuse without one.
 func (h *Handler) tenantMiddleware(c *fiber.Ctx) error {
 	// The GitHub webhook is public — GitHub holds no credential of ours and
 	// authenticates with the per-repository HMAC over the raw body — but it
-	// still needs a tenant: the repository it names, the reindex it triggers
-	// and the board event it writes are all row-level-security scoped and reach
-	// tenant.ErrNoTenant without one. Short-circuiting it here is what once
-	// dropped every push, with a green 204 and nothing red anywhere.
-	// Public paths get the identity too: /health probes the LLM provider set
-	// and the MCP endpoint opens transactions, and both reach ErrNoTenant
-	// without it. Only the board seed below is withheld from them.
+	// still gets the identity every other request gets. Short-circuiting it
+	// here is what once dropped every push, with a green 204 and nothing red
+	// anywhere. Public paths get the identity too; only the board seed below is
+	// withheld from them.
 	webhook := c.Path() == githubWebhookPath
 	public := !webhook && h.isPublicPath(c.Path())
 	id := tenant.Identity{TenantID: tenant.LocalTenantID, Role: tenant.RoleOwner}

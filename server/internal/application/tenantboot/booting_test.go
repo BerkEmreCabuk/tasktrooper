@@ -13,7 +13,7 @@ import (
 // Booting is what lets the agents endpoint tell an empty roster from one that is
 // still being written: true while the steps run, false once they have finished.
 func TestBootingIsTrueOnlyWhileStepsRun(t *testing.T) {
-	svc, _, _ := newService()
+	svc, _ := newService()
 	release := make(chan struct{})
 	finished := make(chan struct{})
 	svc.AddStep("slow", func(context.Context) error {

@@ -70,7 +70,7 @@ func (s *AgentTemplateStore) UpsertByName(ctx context.Context, tpl domain.AgentT
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO agent_templates (name, description, subagent_type, system_prompt, provider_type, model, tool_policy, skills, rules, kpis, self_evolution_enabled, built_in)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		ON CONFLICT (tenant_id, name) DO UPDATE SET
+		ON CONFLICT (name) DO UPDATE SET
 			description = EXCLUDED.description,
 			subagent_type = EXCLUDED.subagent_type,
 			system_prompt = EXCLUDED.system_prompt,

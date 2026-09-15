@@ -304,12 +304,8 @@ func (s *Service) StartIndexProject(ctx context.Context, projectID uuid.UUID, ro
 //
 // context.WithoutCancel, not context.Background: the pass outlives the request
 // that started it (an HTTP handler that only kicks it off), but it must keep
-// that request's VALUES — above all the tenant identity, which every store call
-// this pass makes reads off the context to scope its transaction
-// (postgres.DB.begin → SET LOCAL app.tenant_id). A pass started from
-// context.Background() has no tenant, so its very first status write fails with
-// tenant.ErrNoTenant and the index never moves off "pending" — and the pass
-// itself is where the error is logged, far from the page that asked for it.
+// that request's values, including the identity the workspace path helpers
+// still read.
 func detachIndexContext(ctx context.Context) context.Context {
 	if ctx == nil {
 		ctx = context.Background()

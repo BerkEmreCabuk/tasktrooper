@@ -94,7 +94,7 @@ func (s *DeployTargetStore) Save(ctx context.Context, in domain.DeployTarget) (d
 	t, err := scanDeployTarget(s.pool.QueryRow(ctx, `
 		INSERT INTO repository_deploy_targets (repository_id, sub_project_path, env, provider, template_id, vars, health_url, logs_url, base_url, app_package, app_url, auto_rollback)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		ON CONFLICT (tenant_id, repository_id, sub_project_path, env) DO UPDATE SET
+		ON CONFLICT (repository_id, sub_project_path, env) DO UPDATE SET
 			provider = EXCLUDED.provider,
 			template_id = EXCLUDED.template_id,
 			vars = EXCLUDED.vars,

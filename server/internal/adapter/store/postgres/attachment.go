@@ -116,7 +116,7 @@ func (s *AttachmentStore) LinkTask(ctx context.Context, taskID, attachmentID uui
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO task_attachments (task_id, attachment_id, position)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (tenant_id, task_id, attachment_id) DO NOTHING
+		ON CONFLICT (task_id, attachment_id) DO NOTHING
 	`, taskID, attachmentID, position)
 	if err != nil {
 		return fmt.Errorf("link task attachment: %w", err)
@@ -141,7 +141,7 @@ func (s *AttachmentStore) LinkMessage(ctx context.Context, messageID, attachment
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO session_message_attachments (message_id, attachment_id)
 		VALUES ($1, $2)
-		ON CONFLICT (tenant_id, message_id, attachment_id) DO NOTHING
+		ON CONFLICT (message_id, attachment_id) DO NOTHING
 	`, messageID, attachmentID)
 	if err != nil {
 		return fmt.Errorf("link message attachment: %w", err)

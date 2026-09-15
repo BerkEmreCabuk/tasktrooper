@@ -33,7 +33,7 @@ func (s *BoardConfigStore) UpdateSettings(ctx context.Context, keyPrefix string)
 	var settings domain.BoardSettings
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO board_settings (id, key_prefix) VALUES (1, $1)
-		ON CONFLICT (tenant_id, id) DO UPDATE SET key_prefix = EXCLUDED.key_prefix
+		ON CONFLICT (id) DO UPDATE SET key_prefix = EXCLUDED.key_prefix
 		RETURNING key_prefix
 	`, keyPrefix).Scan(&settings.KeyPrefix)
 	if err != nil {
@@ -426,7 +426,7 @@ func (s *TaskAgentRunStore) Create(ctx context.Context, run domain.TaskAgentRun)
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO task_agent_runs (task_id, agent_id, board_event_id, session_run_id, status, summary, workspace_path)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		ON CONFLICT (tenant_id, task_id, agent_id) WHERE status = 'pending'
+		ON CONFLICT (task_id, agent_id) WHERE status = 'pending'
 		DO UPDATE SET updated_at = task_agent_runs.updated_at
 		RETURNING `+taskAgentRunColumns+`
 	`, run.TaskID, run.AgentID, run.BoardEventID, run.SessionRunID, run.Status, run.Summary, run.WorkspacePath).Scan(
@@ -655,11 +655,8 @@ func (s *TaskAgentRunStore) Touch(ctx context.Context, id uuid.UUID) (string, er
 //     than a wait: if another replica is inside this statement for the
 //     same run, the honest answer is "somebody else has it", not a
 //     queue.
-//   - live     the tenant's genuinely-executing runs. Row-level security scopes
-//     this to the tenant for free — the statement runs inside the
-//     tenant's own transaction — so "count of live runs" IS the
-//     tenant's concurrency without a tenant_id in the text. The
-//     heartbeat window is what excludes runs whose pod was killed.
+//   - live     the genuinely-executing runs. The heartbeat window is what
+//     excludes runs whose process was killed.
 //   - gate     the two budgets, evaluated together so the caller learns WHICH
 //     one refused without a second query.
 //   - claimed  the transition. 'pending' -> 'running' is the claim; there is no
@@ -698,8 +695,8 @@ SELECT
 // with the migration runner's, which uses the single-argument form.
 const claimLockClass int32 = 521202603
 
-// claimTenantLockSQL serialises claims for the length of the claiming
-// transaction only.
+// claimLockSQL serialises claims for the length of the claiming transaction
+// only.
 //
 // FOR UPDATE SKIP LOCKED locks the ONE row being claimed, not the task it
 // belongs to. Under READ COMMITTED two runs of the same task claimed at once
@@ -708,9 +705,9 @@ const claimLockClass int32 = 521202603
 // that check and the write serial, and it releases at commit with no cleanup
 // path to get wrong.
 //
-// The key is read from the GUC rather than passed in, so it can only ever name
-// the scope this transaction is already in.
-const claimTenantLockSQL = `SELECT pg_advisory_xact_lock($1, hashtext(current_setting('app.tenant_id')))`
+// The two-argument form keeps it apart from the migration runner's
+// single-argument lock.
+const claimLockSQL = `SELECT pg_advisory_xact_lock($1, 0)`
 
 func (s *TaskAgentRunStore) ClaimRun(ctx context.Context, claim port.RunClaim) (port.RunClaimResult, error) {
 	live := claim.LiveWithin
@@ -719,8 +716,8 @@ func (s *TaskAgentRunStore) ClaimRun(ctx context.Context, claim port.RunClaim) (
 	}
 	var claimed, pending, taskBusy bool
 	err := s.pool.InTx(ctx, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, claimTenantLockSQL, claimLockClass); err != nil {
-			return fmt.Errorf("lock tenant for claim: %w", err)
+		if _, err := tx.Exec(ctx, claimLockSQL, claimLockClass); err != nil {
+			return fmt.Errorf("lock for claim: %w", err)
 		}
 		return tx.QueryRow(ctx, claimRunSQL,
 			claim.RunID,

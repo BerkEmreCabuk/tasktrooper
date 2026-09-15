@@ -67,7 +67,7 @@ func (s *LLMProviderStore) Upsert(ctx context.Context, cfg domain.LLMProviderCon
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO llm_provider_configs (provider_type, base_url, default_model, timeout_seconds, configured, updated_at)
 		VALUES ($1, $2, $3, $4, $5, now())
-		ON CONFLICT (tenant_id, provider_type) DO UPDATE SET
+		ON CONFLICT (provider_type) DO UPDATE SET
 			base_url = EXCLUDED.base_url,
 			default_model = EXCLUDED.default_model,
 			timeout_seconds = EXCLUDED.timeout_seconds,
@@ -84,7 +84,7 @@ func (s *LLMProviderStore) SetAPIKey(ctx context.Context, providerType domain.LL
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO llm_provider_secrets (provider_type, api_key_encrypted, updated_at)
 		VALUES ($1, $2, now())
-		ON CONFLICT (tenant_id, provider_type) DO UPDATE SET
+		ON CONFLICT (provider_type) DO UPDATE SET
 			api_key_encrypted = EXCLUDED.api_key_encrypted,
 			updated_at = now()
 	`, string(providerType), encrypted)
@@ -136,7 +136,7 @@ func (s *LLMProviderStore) GetActiveProvider(ctx context.Context) (domain.LLMPro
 func (s *LLMProviderStore) SetActiveProvider(ctx context.Context, providerType domain.LLMProviderType) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO app_settings (key, value, updated_at) VALUES ('active_llm_provider', $1, now())
-		ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
 	`, string(providerType))
 	if err != nil {
 		return fmt.Errorf("set active llm provider: %w", err)
@@ -162,7 +162,7 @@ func (s *LLMProviderStore) GetEmbeddingProvider(ctx context.Context) (domain.LLM
 func (s *LLMProviderStore) SetEmbeddingProvider(ctx context.Context, providerType domain.LLMProviderType) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO app_settings (key, value, updated_at) VALUES ('embedding_llm_provider', $1, now())
-		ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
 	`, string(providerType))
 	if err != nil {
 		return fmt.Errorf("set embedding llm provider: %w", err)
@@ -185,7 +185,7 @@ func (s *LLMProviderStore) GetEmbeddingModel(ctx context.Context) (string, error
 func (s *LLMProviderStore) SetEmbeddingModel(ctx context.Context, model string) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO app_settings (key, value, updated_at) VALUES ('embedding_llm_model', $1, now())
-		ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
 	`, model)
 	if err != nil {
 		return fmt.Errorf("set embedding llm model: %w", err)

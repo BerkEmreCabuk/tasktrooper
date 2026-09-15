@@ -68,7 +68,7 @@ func (s *HostingLinkStore) Save(ctx context.Context, in domain.HostingLink) (dom
 		INSERT INTO repository_hosting_links
 			(repository_id, area, provider, external_id, external_name, scope_id, scope_slug, root_directory, production_url, source, evidence)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		ON CONFLICT (tenant_id, repository_id, area) DO UPDATE SET
+		ON CONFLICT (repository_id, area) DO UPDATE SET
 			provider = EXCLUDED.provider,
 			external_id = EXCLUDED.external_id,
 			external_name = EXCLUDED.external_name,

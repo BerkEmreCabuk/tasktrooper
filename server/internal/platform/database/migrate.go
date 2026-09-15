@@ -109,6 +109,26 @@ type migrationConn interface {
 // error here into log.Fatal -> CrashLoopBackOff, i.e. the tenant is down for
 // minutes because two pods agreed on what to do.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
+	return runMigrationsPool(ctx, pool, "")
+}
+
+// RunMigrationsUpTo is RunMigrations stopping after version (a file name
+// without ".up.sql"), so a test can stand a database at an older schema and
+// then apply one migration to populated data.
+func RunMigrationsUpTo(ctx context.Context, pool *pgxpool.Pool, version string) error {
+	names, err := listMigrationFiles(migrations.Up)
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if migrationVersion(name) == version {
+			return runMigrationsPool(ctx, pool, version)
+		}
+	}
+	return fmt.Errorf("no migration named %q", version)
+}
+
+func runMigrationsPool(ctx context.Context, pool *pgxpool.Pool, upTo string) error {
 	// The lock is session-scoped and pgxpool hands out a different connection
 	// per Exec/Query/Begin, so locking "through the pool" would take the lock on
 	// one session and then run the DDL on another - guarding nothing. Everything
@@ -120,12 +140,12 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 	defer conn.Release()
 
-	return runMigrationsOn(ctx, conn, func() {
+	return runMigrationsThrough(ctx, conn, func() {
 		// Closing makes Release destroy the connection instead of pooling it.
 		// Postgres frees session advisory locks when the backend goes away, so
 		// this is the guaranteed escape hatch when the unlock itself failed.
 		_ = conn.Conn().Close(context.WithoutCancel(ctx))
-	})
+	}, upTo)
 }
 
 // runMigrationsOn is RunMigrations minus the pool bookkeeping: it holds the
@@ -133,6 +153,12 @@ func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 // given. discard is invoked only when the unlock fails, to get a connection of
 // unknown lock state out of circulation.
 func runMigrationsOn(ctx context.Context, conn migrationConn, discard func()) error {
+	return runMigrationsThrough(ctx, conn, discard, "")
+}
+
+// runMigrationsThrough is runMigrationsOn applying nothing past upTo; empty
+// means every migration.
+func runMigrationsThrough(ctx context.Context, conn migrationConn, discard func(), upTo string) error {
 	if err := acquireMigrationLock(ctx, conn); err != nil {
 		return err
 	}
@@ -140,12 +166,12 @@ func runMigrationsOn(ctx context.Context, conn migrationConn, discard func()) er
 	// held would stall the next pod for as long as this process lives.
 	defer releaseMigrationLock(ctx, conn, discard)
 
-	return runMigrationsLocked(ctx, conn)
+	return runMigrationsLocked(ctx, conn, upTo)
 }
 
 // runMigrationsLocked is the body of a run; callers must already hold the
 // advisory lock on conn.
-func runMigrationsLocked(ctx context.Context, conn migrationConn) error {
+func runMigrationsLocked(ctx context.Context, conn migrationConn, upTo string) error {
 	// ensureSchemaTable sits inside the lock on purpose: CREATE TABLE IF NOT
 	// EXISTS is not race-safe in Postgres, concurrent identical DDL can raise
 	// 23505 on pg_class_relname_nsp_index.
@@ -162,6 +188,9 @@ func runMigrationsLocked(ctx context.Context, conn migrationConn) error {
 	}
 	for _, name := range names {
 		version := migrationVersion(name)
+		if upTo != "" && version > upTo {
+			break
+		}
 		if applied[version] {
 			continue
 		}

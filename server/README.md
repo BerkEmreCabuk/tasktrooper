@@ -119,9 +119,11 @@ Parsing: `application/toolchain`. Confinement to `DATA_DIR/workspaces`: `adapter
 With `DATABASE_URL` empty, `internal/platform/embeddedpg` starts PostgreSQL 17
 on a free loopback port: data in `$DATA_DIR/postgres`, binaries in
 `$EMBEDDED_POSTGRES_CACHE_DIR`, downloaded from Maven Central on first start
-(one log line before, one after). The role is a superuser, which bypasses the
-row-level-security policies migration 114 installs — correct here, where there
-is exactly one tenant for them to separate. Postgres stops after the HTTP
+(one log line before, one after). Before the first start on a build with
+migration 133 (which drops the multi-tenant schema and cannot be undone), the
+stopped cluster is copied to `$DATA_DIR/postgres-backup-pre-133`; to go back,
+put that copy in place of `$DATA_DIR/postgres`. A `DATABASE_URL` database gets
+no such copy. Postgres stops after the HTTP
 shutdown drain, and a stale `postmaster.pid` left by a crash is cleared on the
 next start.
 

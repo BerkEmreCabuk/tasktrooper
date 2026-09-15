@@ -28,7 +28,7 @@ func (s *StoreCredentialStore) Set(ctx context.Context, provider string, encrypt
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO store_credentials (provider, data)
 		VALUES ($1, $2)
-		ON CONFLICT (tenant_id, provider) DO UPDATE SET
+		ON CONFLICT (provider) DO UPDATE SET
 			data = EXCLUDED.data,
 			updated_at = now()
 	`, provider, encrypted)
@@ -140,7 +140,7 @@ func (s *MobileStoreAppStore) Upsert(ctx context.Context, app domain.MobileStore
 			tracks, tracks_synced_at
 		)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-		ON CONFLICT (tenant_id, repository_id, platform) DO UPDATE SET
+		ON CONFLICT (repository_id, platform) DO UPDATE SET
 			identifier = EXCLUDED.identifier,
 			store_app_id = EXCLUDED.store_app_id,
 			app_name = EXCLUDED.app_name,
@@ -259,7 +259,7 @@ func (s *SigningAssetStore) Upsert(ctx context.Context, asset domain.SigningAsse
 	a, err := scanSigningAsset(s.pool.QueryRow(ctx, `
 		INSERT INTO signing_assets (kind, identifier, serial, data, expires_at)
 		VALUES ($1, $2, $3, $4, $5)
-		ON CONFLICT (tenant_id, kind, identifier) DO UPDATE SET
+		ON CONFLICT (kind, identifier) DO UPDATE SET
 			serial = EXCLUDED.serial,
 			data = EXCLUDED.data,
 			expires_at = EXCLUDED.expires_at,

@@ -53,7 +53,7 @@ func (s *PerformanceStore) ApplyDelta(ctx context.Context, input domain.ApplySco
 	err = tx.QueryRow(ctx, `
 		INSERT INTO agent_performance_scores (agent_id, score, runs_total, runs_passed, runs_revised)
 		VALUES ($1, GREATEST(0, 100.0 + $2::numeric), 1, $3, $4)
-		ON CONFLICT (tenant_id, agent_id) DO UPDATE SET
+		ON CONFLICT (agent_id) DO UPDATE SET
 			score        = GREATEST(0, agent_performance_scores.score + $2::numeric),
 			runs_total   = agent_performance_scores.runs_total + 1,
 			runs_passed  = agent_performance_scores.runs_passed + $3,

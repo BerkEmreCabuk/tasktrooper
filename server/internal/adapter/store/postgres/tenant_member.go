@@ -2,25 +2,45 @@ package postgres
 
 import (
 	"context"
+	"errors"
 
 	"github.com/jackc/pgx/v5"
 )
 
-// TenantSeedStore runs the per-tenant board seed through the ordinary
-// tenant-scoped handle, so it is policy-protected like every other write: a
-// tenant can only seed its own board.
+// TenantSeedStore runs the default board seed and records in install_state
+// that it ran, so a board the user has since edited is never seeded again.
 type TenantSeedStore struct {
 	pool *DB
 }
 
 func NewTenantSeedStore(pool *DB) *TenantSeedStore { return &TenantSeedStore{pool: pool} }
 
-// Seed runs the per-tenant board seed in ONE tenant-scoped transaction, so a
-// tenant that half-seeds does not exist: either it has a board or it has
-// nothing and the next request tries again.
-func (s *TenantSeedStore) Seed(ctx context.Context, sql string) error {
-	return s.pool.InTx(ctx, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, sql)
+// SeedBoardOnce runs sql unless install_state says the board is already seeded,
+// and stamps board_seeded_at in the same transaction, so a half-seeded board
+// never counts as seeded. It reports whether the seed ran.
+//
+// The conditional upsert doubles as the lock: a concurrent caller waits on the
+// row, then finds board_seeded_at set and skips.
+func (s *TenantSeedStore) SeedBoardOnce(ctx context.Context, sql string) (bool, error) {
+	var ran bool
+	err := s.pool.InTx(ctx, func(tx pgx.Tx) error {
+		err := tx.QueryRow(ctx, `
+			INSERT INTO install_state (id, board_seeded_at) VALUES (1, now())
+			ON CONFLICT (id) DO UPDATE SET board_seeded_at = EXCLUDED.board_seeded_at
+			WHERE install_state.board_seeded_at IS NULL
+			RETURNING true
+		`).Scan(&ran)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(ctx, sql)
 		return err
 	})
+	if err != nil {
+		return false, err
+	}
+	return ran, nil
 }

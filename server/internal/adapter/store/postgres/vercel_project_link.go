@@ -77,7 +77,7 @@ func (s *VercelProjectLinkStore) Save(ctx context.Context, in domain.VercelProje
 			(repository_id, sub_project_path, project_id, project_name, team_id, team_slug,
 			 framework, root_directory, production_url)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (tenant_id, repository_id, sub_project_path) DO UPDATE SET
+		ON CONFLICT (repository_id, sub_project_path) DO UPDATE SET
 			project_id = EXCLUDED.project_id,
 			project_name = EXCLUDED.project_name,
 			team_id = EXCLUDED.team_id,

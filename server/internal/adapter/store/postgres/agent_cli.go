@@ -35,7 +35,7 @@ func (s *AgentCLIStore) Get(ctx context.Context, flavor domain.AgentCLIFlavor) (
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// This flavor is not connected. Not an error: most flavors on most
-		// tenants never are.
+		// installs never are.
 		return domain.AgentCLIConnection{}, false, nil
 	}
 	if err != nil {
@@ -72,7 +72,7 @@ func (s *AgentCLIStore) List(ctx context.Context) ([]domain.AgentCLIConnection, 
 	return out, nil
 }
 
-// Set upserts conn's own flavor row. The UPSERT onto (tenant_id, flavor) is
+// Set upserts conn's own flavor row. The UPSERT onto flavor is
 // what makes reconnecting the SAME flavor atomic; it has no bearing on any
 // OTHER flavor's row, which this statement never touches.
 func (s *AgentCLIStore) Set(ctx context.Context, conn domain.AgentCLIConnection) error {
@@ -80,7 +80,7 @@ func (s *AgentCLIStore) Set(ctx context.Context, conn domain.AgentCLIConnection)
 		INSERT INTO agent_cli_connection
 			(flavor, provider_type, binary_path, binary_version, catalog_path, agent_count, skill_count, connected_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, now())
-		ON CONFLICT (tenant_id, flavor) DO UPDATE SET
+		ON CONFLICT (flavor) DO UPDATE SET
 			provider_type  = EXCLUDED.provider_type,
 			binary_path    = EXCLUDED.binary_path,
 			binary_version = EXCLUDED.binary_version,

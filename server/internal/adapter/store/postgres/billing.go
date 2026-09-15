@@ -85,7 +85,7 @@ func (s *BillingStore) UpsertModelPrice(ctx context.Context, price domain.ModelP
 		INSERT INTO model_prices (model, usd_per_1m_prompt, usd_per_1m_completion,
 			usd_per_1m_cache_read, usd_per_1m_cache_write, updated_at)
 		VALUES ($1, $2, $3, $4, $5, now())
-		ON CONFLICT (tenant_id, model) DO UPDATE SET
+		ON CONFLICT (model) DO UPDATE SET
 			usd_per_1m_prompt = EXCLUDED.usd_per_1m_prompt,
 			usd_per_1m_completion = EXCLUDED.usd_per_1m_completion,
 			usd_per_1m_cache_read = EXCLUDED.usd_per_1m_cache_read,
@@ -220,7 +220,7 @@ func (s *BillingStore) TokensSince(ctx context.Context, since time.Time) (int64,
 func (s *BillingStore) AddPausedTask(ctx context.Context, task domain.QuotaPausedTask) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO quota_paused_tasks (task_id, repository_id) VALUES ($1, $2)
-		ON CONFLICT (tenant_id, task_id) DO NOTHING
+		ON CONFLICT (task_id) DO NOTHING
 	`, task.TaskID, task.RepositoryID)
 	return err
 }

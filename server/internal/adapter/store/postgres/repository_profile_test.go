@@ -18,7 +18,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/database"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 // RepositoryProfileStoreSuite pins the upserts behind the project profile.
@@ -57,7 +56,6 @@ func (s *RepositoryProfileStoreSuite) SetupSuite() {
 	s.Require().NoError(err)
 	s.pool = pool
 	db := postgres.NewDB(pool)
-	s.ctx = tenant.With(s.ctx, tenant.Identity{TenantID: uuid.New(), Role: tenant.RoleOwner})
 	s.store = postgres.NewRepositoryProfileStore(db)
 
 	repo, err := postgres.NewRepositoryStore(db).Create(s.ctx, "profile-test", "", "/tmp/profile-test", "", "")

@@ -12,7 +12,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// GCloudCredentialStore persists the tenant's single encrypted Google Cloud
+// GCloudCredentialStore persists the single encrypted Google Cloud
 // service-account credential.
 type GCloudCredentialStore struct {
 	pool *DB
@@ -24,14 +24,14 @@ func NewGCloudCredentialStore(pool *DB) *GCloudCredentialStore {
 
 var _ port.GCloudCredentialStore = (*GCloudCredentialStore)(nil)
 
-// Set writes the whole credential. The conflict target is tenant_id alone
-// because that IS the primary key here — one Google Cloud connection per
-// tenant, unlike store_credentials which is keyed by (tenant_id, provider).
+// Set writes the whole credential. gcloud_credentials holds one row (id = 1,
+// the column default): one Google Cloud connection per install, unlike
+// store_credentials which is keyed by provider.
 func (s *GCloudCredentialStore) Set(ctx context.Context, projectID, clientEmail string, encrypted []byte) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO gcloud_credentials (project_id, client_email, data)
 		VALUES ($1, $2, $3)
-		ON CONFLICT (tenant_id) DO UPDATE SET
+		ON CONFLICT (id) DO UPDATE SET
 			project_id   = EXCLUDED.project_id,
 			client_email = EXCLUDED.client_email,
 			data         = EXCLUDED.data,
@@ -90,16 +90,13 @@ func scanGCloudResource(row pgx.Row) (domain.GCloudResourceBinding, error) {
 	return b, nil
 }
 
-// Save upserts on (repository_id, sub_project_path). tenant_id is left to the
-// column default, which reads app.tenant_id — the same session setting the RLS
-// policy checks, so a row can never be written into a tenant the connection is
-// not currently acting as.
+// Save upserts on (repository_id, sub_project_path).
 func (s *GCloudResourceStore) Save(ctx context.Context, binding domain.GCloudResourceBinding) (domain.GCloudResourceBinding, error) {
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO repository_gcloud_resources
 			(repository_id, sub_project_path, resource_type, resource_name, display_name, project_id, location, source)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (tenant_id, repository_id, sub_project_path) DO UPDATE SET
+		ON CONFLICT (repository_id, sub_project_path) DO UPDATE SET
 			resource_type = EXCLUDED.resource_type,
 			resource_name = EXCLUDED.resource_name,
 			display_name  = EXCLUDED.display_name,

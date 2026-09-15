@@ -1598,7 +1598,7 @@ func (s *BoardTaskStore) NextTaskNumber(ctx context.Context, taskType domain.Tas
 	// the counter row instead of racing to read the same maximum.
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO board_task_counters (task_type, last_number) VALUES ($1, 1)
-		ON CONFLICT (tenant_id, task_type) DO UPDATE SET last_number = board_task_counters.last_number + 1
+		ON CONFLICT (task_type) DO UPDATE SET last_number = board_task_counters.last_number + 1
 		RETURNING last_number
 	`, string(taskType)).Scan(&next)
 	if err != nil {
@@ -1727,7 +1727,7 @@ func (s *AcceptanceCriterionStore) UpsertCheck(ctx context.Context, check domain
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO task_criterion_checks (criterion_id, role, agent_id, approved, note, checked_at)
 		VALUES ($1, $2, $3, $4, $5, now())
-		ON CONFLICT (tenant_id, criterion_id, role) DO UPDATE
+		ON CONFLICT (criterion_id, role) DO UPDATE
 		SET agent_id = EXCLUDED.agent_id, approved = EXCLUDED.approved, note = EXCLUDED.note, checked_at = now()
 		RETURNING id, criterion_id, role, agent_id, approved, note, checked_at
 	`, check.CriterionID, check.Role, check.AgentID, check.Approved, check.Note).Scan(
@@ -1849,7 +1849,7 @@ func (s *TaskRelationStore) ReplaceForTaskOfType(ctx context.Context, sourceTask
 		err := tx.QueryRow(ctx, `
 			INSERT INTO task_relations (source_task_id, target_task_id, relation_type)
 			VALUES ($1, $2, $3)
-			ON CONFLICT (tenant_id, source_task_id, target_task_id, relation_type) DO NOTHING
+			ON CONFLICT (source_task_id, target_task_id, relation_type) DO NOTHING
 			RETURNING id, source_task_id, target_task_id, relation_type, created_at
 		`, sourceTaskID, rel.TargetTaskID, string(relationType)).Scan(
 			&r.ID, &r.SourceTaskID, &r.TargetTaskID, &r.RelationType, &r.CreatedAt,
@@ -1951,7 +1951,7 @@ func (s *TaskRelationStore) AddBlockers(ctx context.Context, targetTaskID uuid.U
 		err := tx.QueryRow(ctx, `
 			INSERT INTO task_relations (source_task_id, target_task_id, relation_type)
 			VALUES ($1, $2, 'blocks')
-			ON CONFLICT (tenant_id, source_task_id, target_task_id, relation_type) DO NOTHING
+			ON CONFLICT (source_task_id, target_task_id, relation_type) DO NOTHING
 			RETURNING id, source_task_id, target_task_id, relation_type, created_at
 		`, sourceID, targetTaskID).Scan(
 			&r.ID, &r.SourceTaskID, &r.TargetTaskID, &r.RelationType, &r.CreatedAt,

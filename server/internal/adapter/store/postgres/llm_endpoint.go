@@ -104,7 +104,7 @@ func (s *LLMEndpointStore) SetAPIKey(ctx context.Context, id string, encrypted [
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO llm_endpoint_secrets (endpoint_id, api_key_encrypted, updated_at)
 		VALUES ($1, $2, now())
-		ON CONFLICT (tenant_id, endpoint_id) DO UPDATE SET
+		ON CONFLICT (endpoint_id) DO UPDATE SET
 			api_key_encrypted = EXCLUDED.api_key_encrypted,
 			updated_at = now()
 	`, id, encrypted)

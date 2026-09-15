@@ -59,7 +59,7 @@ INSERT INTO deployment_runs (repository_id, env, run_id, run_number, workflow_fi
     head_sha, head_ref, status, conclusion, html_url, trigger_source, triggered_by,
     rollback_of_sha, started_at, completed_at)
 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-ON CONFLICT (tenant_id, repository_id, run_id) DO UPDATE SET
+ON CONFLICT (repository_id, run_id) DO UPDATE SET
     status = EXCLUDED.status,
     conclusion = EXCLUDED.conclusion,
     run_number = EXCLUDED.run_number,

@@ -58,10 +58,10 @@ implementing it.
 | The listener binds `127.0.0.1` only | `platform/runtime/runtime.go` |
 | Exactly one stdout line: `LISTENING http://127.0.0.1:<port>`; logs go to stderr | `platform/runtime/runtime.go` (`ConfigureLogger`) |
 | Empty `DATABASE_URL` ⇒ embedded Postgres 17 | `platform/embeddedpg` |
-| `SET LOCAL app.tenant_id` per store call | `adapter/store/postgres/db.go` |
 
-RLS (migration 114) stays in the schema as history. The embedded cluster runs
-as a superuser and bypasses it, which is correct with one tenant.
+Migration 133 dropped the multi-tenant schema (row-level security, every
+`tenant_id`, `tenants`). It cannot be undone, so the embedded cluster is copied
+to `$DATA_DIR/postgres-backup-pre-133` before its first start on that build.
 
 ## Build
 

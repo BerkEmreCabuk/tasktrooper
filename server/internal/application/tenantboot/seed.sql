@@ -1,18 +1,11 @@
--- The board a brand-new tenant starts with.
+-- The board a new install starts with.
 --
 -- This is what migrations 010/018/041/042/049/051/054/056/093 used to INSERT
--- at migration time, when one database was one tenant. It runs inside a
--- transaction whose app.tenant_id is already the new tenant, so every row
--- picks its tenant_id up from the column default (migration 114) and none of
--- these statements has to mention it.
+-- at migration time. It runs once per install, gated by
+-- install_state.board_seeded_at, in the same transaction that sets it.
 --
--- ON CONFLICT DO NOTHING throughout: two requests from the same brand-new
--- tenant can race here, and losing that race must be a no-op rather than a
--- failed first page load.
---
--- **New seed data belongs here, not in a migration.** A migration runs once
--- for the whole fleet; this runs once per tenant. Adding a board column in a
--- migration would give it to nobody.
+-- ON CONFLICT DO NOTHING throughout, so a row that already exists is kept
+-- rather than failing the seed.
 
 -- The default column template. Order matters only through `position`; the
 -- slugs are what board_tasks.board_column is validated against and what agent

@@ -90,7 +90,7 @@ func (s *RepositoryProfileStore) UpsertSections(ctx context.Context, repositoryI
 			INSERT INTO repository_profile_sections
 				(repository_id, section, body_md, evidence, source_paths, source_commit, origin, stale, updated_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, now())
-			ON CONFLICT (tenant_id, repository_id, sub_project_path, section) DO UPDATE SET
+			ON CONFLICT (repository_id, sub_project_path, section) DO UPDATE SET
 				body_md = EXCLUDED.body_md,
 				evidence = EXCLUDED.evidence,
 				source_paths = EXCLUDED.source_paths,
@@ -214,7 +214,7 @@ func (s *RepositoryProfileStore) ReplaceProposals(ctx context.Context, repositor
 			INSERT INTO repository_profile_proposals
 				(repository_id, field, slot, value, current_value, label, evidence, status, created_at, applied_at)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now(), $9)
-			ON CONFLICT (tenant_id, repository_id, sub_project_path, field, slot) DO UPDATE SET
+			ON CONFLICT (repository_id, sub_project_path, field, slot) DO UPDATE SET
 				value = EXCLUDED.value,
 				current_value = EXCLUDED.current_value,
 				label = EXCLUDED.label,

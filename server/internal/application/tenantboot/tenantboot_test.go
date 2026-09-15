@@ -12,35 +12,23 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
-type fakeRegistry struct {
-	mu           sync.Mutex
-	needs        map[uuid.UUID]bool
-	bootstrapped []uuid.UUID
-}
-
-func (r *fakeRegistry) EnsureTenant(_ context.Context, id uuid.UUID) (bool, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.needs[id], nil
-}
-
-func (r *fakeRegistry) MarkBootstrapped(_ context.Context, id uuid.UUID) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.bootstrapped = append(r.bootstrapped, id)
-	return nil
-}
-
+// fakeSeeds stands in for install_state: once the board is seeded it stays
+// seeded.
 type fakeSeeds struct {
-	mu     sync.Mutex
-	seeded int
+	mu      sync.Mutex
+	already bool
+	seeded  int
 }
 
-func (m *fakeSeeds) Seed(context.Context, string) error {
+func (m *fakeSeeds) SeedBoardOnce(context.Context, string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.already {
+		return false, nil
+	}
+	m.already = true
 	m.seeded++
-	return nil
+	return true, nil
 }
 
 // stepRecorder captures the tenant each step run was scoped to. That is the
@@ -85,16 +73,15 @@ func (r *stepRecorder) waitFor(t *testing.T, n int) {
 	}
 }
 
-func newService() (*Service, *fakeRegistry, *fakeSeeds) {
-	reg := &fakeRegistry{needs: map[uuid.UUID]bool{}}
+func newService() (*Service, *fakeSeeds) {
 	seeds := &fakeSeeds{}
-	return NewService(reg, seeds), reg, seeds
+	return NewService(seeds), seeds
 }
 
 // A step runs for the tenant on the request, and it runs once per tenant per
 // process however busy that tenant is.
 func TestStepsRunOncePerTenantScopedToIt(t *testing.T) {
-	svc, _, _ := newService()
+	svc, _ := newService()
 	rec := newStepRecorder()
 	svc.AddStep("probe", rec.run)
 
@@ -123,7 +110,7 @@ func TestStepsRunOncePerTenantScopedToIt(t *testing.T) {
 // The identity is what the whole mechanism exists to carry. A step that reads
 // no tenant off its context is the bug, not a degraded mode.
 func TestStepContextCarriesTheTenant(t *testing.T) {
-	svc, _, _ := newService()
+	svc, _ := newService()
 	rec := newStepRecorder()
 	svc.AddStep("probe", rec.run)
 
@@ -142,7 +129,7 @@ func TestStepContextCarriesTheTenant(t *testing.T) {
 // catalog did not seed still has a working board, and the request that happened
 // to be first must not fail because of a seed nobody asked for.
 func TestAFailingStepDoesNotFailTheRequest(t *testing.T) {
-	svc, _, _ := newService()
+	svc, _ := newService()
 	bad := newStepRecorder()
 	bad.fail = errors.New("nope")
 	good := newStepRecorder()
@@ -160,12 +147,12 @@ func TestAFailingStepDoesNotFailTheRequest(t *testing.T) {
 // once-per-process half. A tenant seeded by an earlier build still gets the
 // steps, which is how new seed data reaches tenants that already exist.
 func TestStepsRunForAnAlreadySeededTenant(t *testing.T) {
-	svc, reg, seeds := newService()
+	svc, seeds := newService()
 	rec := newStepRecorder()
 	svc.AddStep("probe", rec.run)
 
 	id := uuid.New()
-	reg.needs[id] = false // the registry says this tenant's board already exists
+	seeds.already = true // install_state says the board already exists
 
 	if err := svc.Sight(context.Background(), tenant.Identity{TenantID: id, Role: tenant.RoleOwner}); err != nil {
 		t.Fatalf("Sight: %v", err)

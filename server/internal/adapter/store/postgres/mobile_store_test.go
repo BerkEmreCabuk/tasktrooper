@@ -13,7 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/database"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -55,12 +54,7 @@ func (s *MobileStoreAppStoreSuite) SetupSuite() {
 	pool, err := pgxpool.New(s.ctx, pg.DSN())
 	s.Require().NoError(err)
 	s.pool = pool
-	// Stores take the tenant-scoped handle now, and every statement it issues
-	// reads app.tenant_id off the context - so the suite has to BE a tenant.
-	// A fresh uuid per suite means two suites sharing an embedded Postgres
-	// cannot see each other's rows, which is the property under test anyway.
 	s.db = postgres.NewDB(pool)
-	s.ctx = tenant.With(s.ctx, tenant.Identity{TenantID: uuid.New(), Role: tenant.RoleOwner})
 	s.store = postgres.NewMobileStoreAppStore(s.db)
 
 	repos := postgres.NewRepositoryStore(s.db)

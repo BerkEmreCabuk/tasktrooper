@@ -37,7 +37,7 @@ func (s *MCPStore) SetSecret(ctx context.Context, serverID, location, key string
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO mcp_server_secrets (server_id, location, key, encrypted_value)
 		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (tenant_id, server_id, location, key)
+		ON CONFLICT (server_id, location, key)
 		DO UPDATE SET encrypted_value = EXCLUDED.encrypted_value, updated_at = now()
 	`, serverID, location, key, encrypted)
 	if err != nil {

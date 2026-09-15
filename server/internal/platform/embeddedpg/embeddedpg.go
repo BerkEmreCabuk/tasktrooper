@@ -24,10 +24,6 @@ const (
 	password = "tasktrooper"
 	dbName   = "tasktrooper"
 
-	// The role initdb creates is a SUPERUSER, so it bypasses the RLS policies
-	// migration 114 installs. That is correct here and nowhere else: this
-	// process serves exactly one tenant (tenant.LocalTenantID) on one machine,
-	// so the policies have nothing to separate.
 	version = embedded.V17
 )
 
@@ -50,7 +46,13 @@ func Start(ctx context.Context, dataDir, cacheDir string) (string, func(), error
 		return "", nil, fmt.Errorf("create postgres cache dir: %w", err)
 	}
 
+	backupDir := filepath.Join(dataDir, preDropTenancyBackup)
 	if port, ok := liveCluster(ctx, pgData); ok {
+		if !backupSettled(pgData, backupDir) {
+			// Copying the files of a running cluster would not be a backup.
+			log.Warn().Str("data_dir", pgData).
+				Msg("postgres is already running on this data directory, so no copy was taken before migration 133")
+		}
 		log.Info().Uint32("port", port).Msg("reusing the embedded postgres already running on this data directory")
 		return dsn(port), func() {}, nil
 	}
@@ -58,6 +60,18 @@ func Start(ctx context.Context, dataDir, cacheDir string) (string, func(), error
 	// process it names died with the machine, which is how a crash turns into a
 	// desktop that never starts again.
 	clearStalePID(pgData)
+
+	// The cluster is stopped here, which is the only point a file copy is a
+	// consistent backup. Migration 133 cannot be undone, so an install that
+	// cannot be copied does not start rather than migrate unprotected.
+	fresh := !fileExists(filepath.Join(pgData, "PG_VERSION"))
+	copied, err := backupClusterOnce(pgData, backupDir)
+	if err != nil {
+		return "", nil, fmt.Errorf("copy %s to %s before migration 133 (free some disk space and start again): %w", pgData, backupDir, err)
+	}
+	if copied {
+		log.Info().Str("backup_dir", backupDir).Msg("copied the postgres data directory before migration 133; restore it from here to go back")
+	}
 
 	port, err := freePort()
 	if err != nil {
@@ -88,6 +102,11 @@ func Start(ctx context.Context, dataDir, cacheDir string) (string, func(), error
 
 	if err := pg.Start(); err != nil {
 		return "", nil, fmt.Errorf("start embedded postgres: %w", err)
+	}
+	if fresh {
+		if err := markBackupNotNeeded(backupDir); err != nil {
+			log.Warn().Err(err).Msg("could not record that this new cluster needs no pre-133 copy")
+		}
 	}
 	if !downloaded {
 		log.Info().Str("cache_dir", cacheDir).Msg("postgres binaries ready")

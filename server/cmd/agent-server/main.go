@@ -48,6 +48,8 @@ func main() {
 		}
 		stopPostgres = stop
 		cfg.Options.PostgresDSN = dsn
+	} else {
+		log.Info().Msg("DATABASE_URL is set: no copy of the database is taken before migrations; backing it up is the operator's job")
 	}
 
 	pool, err := pgxpool.New(ctx, cfg.Options.PostgresDSN)

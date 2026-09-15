@@ -49,7 +49,7 @@ func (s *WebhookDeliveryStore) MarkSeen(ctx context.Context, deliveryID string, 
 		WITH ins AS (
 			INSERT INTO github_webhook_deliveries (delivery_id)
 			VALUES ($1)
-			ON CONFLICT (tenant_id, delivery_id) DO NOTHING
+			ON CONFLICT (delivery_id) DO NOTHING
 			RETURNING delivery_id
 		)
 		SELECT EXISTS (SELECT 1 FROM ins)

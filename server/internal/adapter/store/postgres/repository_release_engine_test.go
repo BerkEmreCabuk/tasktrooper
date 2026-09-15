@@ -6,14 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/database"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 // RepositoryReleaseEngineSuite covers release_engine's persistence: it must
@@ -50,7 +48,6 @@ func (s *RepositoryReleaseEngineSuite) SetupSuite() {
 	s.Require().NoError(err)
 	s.pool = pool
 	s.db = postgres.NewDB(pool)
-	s.ctx = tenant.With(s.ctx, tenant.Identity{TenantID: uuid.New(), Role: tenant.RoleOwner})
 	s.repos = postgres.NewRepositoryStore(s.db)
 }
 

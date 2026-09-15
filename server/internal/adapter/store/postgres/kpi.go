@@ -90,7 +90,7 @@ func (s *KPIStore) UpsertResult(ctx context.Context, r domain.AgentKPIResult) (d
 	row := s.pool.QueryRow(ctx, `
 		INSERT INTO agent_kpi_results (kpi_id, agent_id, period_start, period_end, measured_value, attainment)
 		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (tenant_id, kpi_id, period_start) DO UPDATE SET
+		ON CONFLICT (kpi_id, period_start) DO UPDATE SET
 			measured_value = EXCLUDED.measured_value,
 			attainment     = EXCLUDED.attainment,
 			period_end     = EXCLUDED.period_end,

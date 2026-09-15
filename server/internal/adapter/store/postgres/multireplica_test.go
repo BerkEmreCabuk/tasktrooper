@@ -3,7 +3,6 @@ package postgres_test
 import (
 	"context"
 	"path/filepath"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,7 +14,6 @@ import (
 	pgstore "github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/database"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -40,22 +38,11 @@ type replicaFixture struct {
 	poolB    *pgxpool.Pool
 	a        *pgstore.DB
 	b        *pgstore.DB
-	tenantID uuid.UUID
 	repoID   uuid.UUID
 	agentID  uuid.UUID
 	agentID2 uuid.UUID
 	eventID  uuid.UUID
 	nextTask int
-}
-
-// ctx returns a context scoped to the fixture's tenant, which is what every
-// store call needs: DB.begin refuses anything else, and the row-level-security
-// policies read it out of app.tenant_id.
-func (f *replicaFixture) ctx() context.Context {
-	return tenant.With(context.Background(), tenant.Identity{
-		TenantID: f.tenantID,
-		Role:     tenant.RoleOwner,
-	})
 }
 
 func newReplicaFixture(t *testing.T) *replicaFixture {
@@ -76,15 +63,7 @@ func newReplicaFixture(t *testing.T) *replicaFixture {
 	}
 	t.Cleanup(func() { _ = pg.Stop() })
 
-	// Connect as an UNPRIVILEGED role, not as the embedded server's superuser.
-	//
-	// This is the same point scripts/dev-db-init.sql makes at length, and it is
-	// not a formality: a superuser bypasses every row-level-security policy
-	// unconditionally, so a test that connects as one cannot tell a working
-	// policy from a missing one. The first run of this file did connect as the
-	// superuser and "proved" that one tenant's runs consumed another's
-	// concurrency budget — a cross-tenant read, reported as a cap bug.
-	dsn := unprivilegedDSN(t, pg)
+	dsn := pg.DSN()
 
 	// Two pools, not two handles on one pool. A pod is a pool: separate
 	// connections, separate transactions, no shared Go state whatsoever — which
@@ -107,23 +86,18 @@ func newReplicaFixture(t *testing.T) *replicaFixture {
 		poolB:    poolB,
 		a:        pgstore.NewDB(poolA),
 		b:        pgstore.NewDB(poolB),
-		tenantID: uuid.New(),
 		nextTask: 1,
 	}
 	f.seed(t)
 	return f
 }
 
-// seed writes the minimum a run needs to exist: a tenant, a repository, an
-// agent and the board event a run points at. Raw SQL rather than the stores,
-// because what is under test is one statement and everything else is scaffold.
+// seed writes the minimum a run needs to exist: a repository, an agent and the
+// board event a run points at. Raw SQL rather than the stores, because what is
+// under test is one statement and everything else is scaffold.
 func (f *replicaFixture) seed(t *testing.T) {
 	t.Helper()
-	ctx := f.ctx()
-	if _, err := f.poolA.Exec(context.Background(),
-		`INSERT INTO tenants (id) VALUES ($1) ON CONFLICT DO NOTHING`, f.tenantID); err != nil {
-		t.Fatalf("seed tenant: %v", err)
-	}
+	ctx := context.Background()
 	if err := f.a.QueryRow(ctx, `
 		INSERT INTO repositories (name, root_path) VALUES ('probe', '/tmp/probe') RETURNING id
 	`).Scan(&f.repoID); err != nil {
@@ -159,7 +133,7 @@ func (f *replicaFixture) newTask(t *testing.T) uuid.UUID {
 	var id uuid.UUID
 	number := f.nextTask
 	f.nextTask++
-	if err := f.a.QueryRow(f.ctx(), `
+	if err := f.a.QueryRow(context.Background(), `
 		INSERT INTO board_tasks (repository_id, title, task_number)
 		VALUES ($1, 'probe task', $2) RETURNING id
 	`, f.repoID, number).Scan(&id); err != nil {
@@ -175,7 +149,7 @@ func (f *replicaFixture) newPendingRun(t *testing.T, taskID uuid.UUID) uuid.UUID
 func (f *replicaFixture) newPendingRunFor(t *testing.T, taskID, agentID uuid.UUID) uuid.UUID {
 	t.Helper()
 	var id uuid.UUID
-	if err := f.a.QueryRow(f.ctx(), `
+	if err := f.a.QueryRow(context.Background(), `
 		INSERT INTO task_agent_runs (task_id, agent_id, board_event_id, status)
 		VALUES ($1, $2, $3, 'pending') RETURNING id
 	`, taskID, agentID, f.eventID).Scan(&id); err != nil {
@@ -184,79 +158,10 @@ func (f *replicaFixture) newPendingRunFor(t *testing.T, taskID, agentID uuid.UUI
 	return id
 }
 
-// unprivilegedDSN creates the NOSUPERUSER NOBYPASSRLS role the policies are
-// written for, hands it the database, and returns its DSN. It mirrors
-// scripts/dev-db-init.sql; the migrations have already run as the superuser by
-// the time this is called, so ownership is transferred rather than granted
-// piecemeal.
-func unprivilegedDSN(t *testing.T, pg *database.Embedded) string {
-	t.Helper()
-	ctx := context.Background()
-	admin, err := pgxpool.New(ctx, pg.DSN())
-	if err != nil {
-		t.Fatalf("admin pool: %v", err)
-	}
-	defer admin.Close()
-
-	for _, stmt := range []string{
-		`DROP ROLE IF EXISTS agent_app`,
-		`CREATE ROLE agent_app LOGIN PASSWORD 'agent_app_test'
-			NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION NOINHERIT`,
-		`GRANT USAGE, CREATE ON SCHEMA public TO agent_app`,
-		`GRANT ALL ON ALL TABLES IN SCHEMA public TO agent_app`,
-		`GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO agent_app`,
-	} {
-		if _, err := admin.Exec(ctx, stmt); err != nil {
-			t.Fatalf("prepare unprivileged role (%s): %v", stmt, err)
-		}
-	}
-	// Ownership, so FORCE ROW LEVEL SECURITY has an owner to force. Without it
-	// plain ENABLE exempts whoever owns the table and the policies would be
-	// exercised for a role nobody connects as.
-	rows, err := admin.Query(ctx,
-		`SELECT tablename FROM pg_tables WHERE schemaname = 'public'`)
-	if err != nil {
-		t.Fatalf("list tables: %v", err)
-	}
-	var tables []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			t.Fatalf("scan table: %v", err)
-		}
-		tables = append(tables, name)
-	}
-	rows.Close()
-	for _, name := range tables {
-		if _, err := admin.Exec(ctx, `ALTER TABLE public.`+pgQuote(name)+` OWNER TO agent_app`); err != nil {
-			t.Fatalf("chown %s: %v", name, err)
-		}
-	}
-
-	// Proof, asserted rather than printed: if either attribute is true the
-	// policies are inert and every isolation claim below is vacuous.
-	var super, bypass bool
-	if err := admin.QueryRow(ctx,
-		`SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'agent_app'`).Scan(&super, &bypass); err != nil {
-		t.Fatalf("check role: %v", err)
-	}
-	if super || bypass {
-		t.Fatalf("the test role bypasses row-level security (super=%v bypassrls=%v)", super, bypass)
-	}
-
-	return strings.Replace(pg.DSN(), "local_llm:local_llm_desktop@", "agent_app:agent_app_test@", 1)
-}
-
-// pgQuote double-quotes an identifier. The table names come from pg_tables, so
-// this is about reserved words rather than about injection.
-func pgQuote(name string) string {
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-}
-
 func (f *replicaFixture) status(t *testing.T, runID uuid.UUID) string {
 	t.Helper()
 	var status string
-	if err := f.a.QueryRow(f.ctx(), `SELECT status FROM task_agent_runs WHERE id = $1`, runID).Scan(&status); err != nil {
+	if err := f.a.QueryRow(context.Background(), `SELECT status FROM task_agent_runs WHERE id = $1`, runID).Scan(&status); err != nil {
 		t.Fatalf("read status: %v", err)
 	}
 	return status
@@ -301,7 +206,7 @@ type claimPair struct {
 // Two pools, two pending runs on one task, one instant — one winner.
 func TestClaimRunGivesOneReplicaTheTask(t *testing.T) {
 	f := newReplicaFixture(t)
-	ctx := f.ctx()
+	ctx := context.Background()
 
 	taskID := f.newTask(t)
 	runA := f.newPendingRunFor(t, taskID, f.agentID)
@@ -335,7 +240,7 @@ func TestClaimRunGivesOneReplicaTheTask(t *testing.T) {
 // what makes the loser see zero rows instead of waiting and then overwriting.
 func TestClaimRunOnTheSameRowHasOneWinner(t *testing.T) {
 	f := newReplicaFixture(t)
-	ctx := f.ctx()
+	ctx := context.Background()
 
 	taskID := f.newTask(t)
 	runID := f.newPendingRun(t, taskID)
@@ -354,7 +259,7 @@ func TestClaimRunOnTheSameRowHasOneWinner(t *testing.T) {
 // touching stops blocking the task within one staleness window.
 func TestClaimRunIgnoresRunsWithNoHeartbeat(t *testing.T) {
 	f := newReplicaFixture(t)
-	ctx := f.ctx()
+	ctx := context.Background()
 
 	taskID := f.newTask(t)
 	abandoned := f.newPendingRun(t, taskID)
@@ -382,7 +287,7 @@ func TestClaimRunIgnoresRunsWithNoHeartbeat(t *testing.T) {
 // a sweep and a hazard once there is more than one pod sweeping.
 func TestFailIfStaleLosesToAHeartbeat(t *testing.T) {
 	f := newReplicaFixture(t)
-	ctx := f.ctx()
+	ctx := context.Background()
 
 	taskID := f.newTask(t)
 	runID := f.newPendingRun(t, taskID)
@@ -419,7 +324,7 @@ func TestFailIfStaleLosesToAHeartbeat(t *testing.T) {
 // beat.
 func TestTouchReportsACancelWrittenByAnotherReplica(t *testing.T) {
 	f := newReplicaFixture(t)
-	ctx := f.ctx()
+	ctx := context.Background()
 
 	taskID := f.newTask(t)
 	runID := f.newPendingRun(t, taskID)
@@ -448,7 +353,7 @@ func TestTouchReportsACancelWrittenByAnotherReplica(t *testing.T) {
 // however many arrive together.
 func TestWebhookDeliveryDedupeAcrossReplicas(t *testing.T) {
 	f := newReplicaFixture(t)
-	ctx := f.ctx()
+	ctx := context.Background()
 
 	const delivery = "9f1c0f8e-0000-4000-8000-000000000001"
 	var first atomic.Int32

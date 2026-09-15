@@ -397,7 +397,7 @@ func (s *IndexStore) SaveFileHashes(ctx context.Context, indexID uuid.UUID, hash
 		batch.Queue(`
 			INSERT INTO workspace_file_hashes (index_id, file_path, content_hash)
 			VALUES ($1, $2, $3)
-			ON CONFLICT (tenant_id, index_id, file_path) DO UPDATE SET content_hash = EXCLUDED.content_hash
+			ON CONFLICT (index_id, file_path) DO UPDATE SET content_hash = EXCLUDED.content_hash
 		`, indexID, h.FilePath, h.Hash)
 	}
 	return sendBatch(ctx, s.pool, batch, "file hash")

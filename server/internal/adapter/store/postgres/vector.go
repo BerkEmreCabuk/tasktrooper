@@ -8,8 +8,6 @@ import (
 	"sync"
 
 	"github.com/rs/zerolog/log"
-
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 // VectorCapabilities reports which optional Postgres extensions are usable.
@@ -20,10 +18,7 @@ type VectorCapabilities struct {
 
 func DetectVectorCapabilities(ctx context.Context, db *DB) VectorCapabilities {
 	caps := VectorCapabilities{}
-	// pg_extension is a catalog table, identical for every tenant and covered
-	// by no policy, so this is one of the two reads in this package that
-	// deliberately does not open a tenant transaction.
-	rows, err := db.schemaPool().Query(ctx, `SELECT extname FROM pg_extension WHERE extname IN ('vector','pg_trgm')`)
+	rows, err := db.Query(ctx, `SELECT extname FROM pg_extension WHERE extname IN ('vector','pg_trgm')`)
 	if err != nil {
 		return caps
 	}
@@ -56,11 +51,6 @@ const workspaceVectorIndex = "idx_workspace_chunks_embedding_hnsw"
 // arbitrary row: after an embedding-model change the table holds both the old
 // and the new model's vectors for as long as the reindex is running, and
 // typing the column to the dying model would reject every new write.
-// The dimension question is now asked of the WHOLE database, not of one
-// tenant: embedding_vec is one column shared by every tenant's chunks, so its
-// type cannot be a per-tenant decision. workspace_chunks is policy-protected,
-// so the probe runs once per known tenant and the winner is the dimension with
-// the most rows across the fleet.
 func BootstrapWorkspaceVectors(ctx context.Context, db *DB) bool {
 	dim := dominantEmbeddingDimension(ctx, db)
 	if dim <= 0 {
@@ -68,9 +58,7 @@ func BootstrapWorkspaceVectors(ctx context.Context, db *DB) bool {
 		return false
 	}
 	for _, stmt := range retypeVectorStatements(dim) {
-		// DDL, so the schema pool: re-typing a column and building an index are
-		// not writes to anybody's rows.
-		if _, err := db.schemaPool().Exec(ctx, stmt); err != nil {
+		if _, err := db.Exec(ctx, stmt); err != nil {
 			log.Warn().Err(err).Msg("pgvector bootstrap step failed, in-Go cosine fallback stays active")
 			return false
 		}
@@ -79,38 +67,27 @@ func BootstrapWorkspaceVectors(ctx context.Context, db *DB) bool {
 	return true
 }
 
-// dominantEmbeddingDimension counts embeddings per dimension across every
-// tenant this database serves and returns the most common one, or 0 when there
-// are none anywhere.
+// dominantEmbeddingDimension returns the most common embedding dimension, or 0
+// when there are no embeddings.
 func dominantEmbeddingDimension(ctx context.Context, db *DB) int {
-	ids, err := db.Tenants(ctx)
+	rows, err := db.Query(ctx, `
+		SELECT jsonb_array_length(embedding) AS dim, count(*)
+		FROM workspace_chunks
+		WHERE embedding IS NOT NULL AND jsonb_typeof(embedding) = 'array'
+		GROUP BY dim
+	`)
 	if err != nil {
-		log.Warn().Err(err).Msg("pgvector bootstrap could not list tenants")
+		log.Warn().Err(err).Msg("pgvector bootstrap could not count embedding dimensions")
 		return 0
 	}
-	counts := map[int]int64{}
-	for _, id := range ids {
-		scoped := tenant.With(ctx, tenant.Identity{TenantID: id, Role: tenant.RoleMember})
-		rows, err := db.Query(scoped, `
-			SELECT jsonb_array_length(embedding) AS dim, count(*)
-			FROM workspace_chunks
-			WHERE embedding IS NOT NULL AND jsonb_typeof(embedding) = 'array'
-			GROUP BY dim
-		`)
-		if err != nil {
+	defer rows.Close()
+	best, bestN := 0, int64(0)
+	for rows.Next() {
+		var dim int
+		var n int64
+		if rows.Scan(&dim, &n) != nil || dim <= 0 {
 			continue
 		}
-		for rows.Next() {
-			var dim int
-			var n int64
-			if rows.Scan(&dim, &n) == nil && dim > 0 {
-				counts[dim] += n
-			}
-		}
-		rows.Close()
-	}
-	best, bestN := 0, int64(0)
-	for dim, n := range counts {
 		// Ties break on the larger dimension, matching the previous ORDER BY.
 		if n > bestN || (n == bestN && dim > best) {
 			best, bestN = dim, n

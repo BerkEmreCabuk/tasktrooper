@@ -83,7 +83,7 @@ func (s *SettingsStore) Update(ctx context.Context, req domain.UpdateSettingsReq
 	if req.WorkspaceRoot != "" && !s.lockWorkspaceRoot {
 		_, err := s.pool.Exec(ctx, `
 			INSERT INTO app_settings (key, value, updated_at) VALUES ('workspace_root', $1, now())
-			ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
 		`, req.WorkspaceRoot)
 		if err != nil {
 			return domain.AppSettings{}, fmt.Errorf("update workspace_root: %w", err)
@@ -92,7 +92,7 @@ func (s *SettingsStore) Update(ctx context.Context, req domain.UpdateSettingsReq
 	if req.DefaultLanguage != "" {
 		_, err := s.pool.Exec(ctx, `
 			INSERT INTO app_settings (key, value, updated_at) VALUES ('default_language', $1, now())
-			ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
 		`, req.DefaultLanguage)
 		if err != nil {
 			return domain.AppSettings{}, fmt.Errorf("update default_language: %w", err)
@@ -110,7 +110,7 @@ func (s *SettingsStore) Update(ctx context.Context, req domain.UpdateSettingsReq
 		}
 		_, err := s.pool.Exec(ctx, `
 			INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, now())
-			ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
 		`, key, value)
 		if err != nil {
 			return domain.AppSettings{}, fmt.Errorf("update %s: %w", key, err)
@@ -188,7 +188,7 @@ func (s *SettingsStore) setSecret(ctx context.Context, key, plaintext string) er
 func (s *SettingsStore) setPlain(ctx context.Context, key, value string) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, now())
-		ON CONFLICT (tenant_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
 	`, key, value)
 	if err != nil {
 		return fmt.Errorf("set %s: %w", key, err)

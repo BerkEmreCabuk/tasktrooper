@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/suite"
 
@@ -60,26 +59,16 @@ func (s *BillingCacheSuite) SetupSuite() {
 	pool, err := pgxpool.New(s.ctx, pg.DSN())
 	s.Require().NoError(err)
 	s.pool = pool
-	// Stores take the tenant-scoped handle now, and every statement it issues
-	// reads app.tenant_id off the context - so the suite has to BE a tenant.
-	// A fresh uuid per suite means two suites sharing an embedded Postgres
-	// cannot see each other's rows, which is the property under test anyway.
 	s.db = postgres.NewDB(pool)
-	s.ctx = tenant.With(s.ctx, tenant.Identity{TenantID: uuid.New(), Role: tenant.RoleOwner})
 	s.store = postgres.NewBillingStore(s.db)
 	s.usage = postgres.NewLLMUsageStore(s.db)
 
-	// Seed this suite's tenant exactly as its first HTTP request would.
-	s.Require().NoError(tenantboot.NewService(s.db, postgres.NewTenantSeedStore(s.db)).
-		Sight(s.ctx, tenant.Identity{TenantID: tenantIDOf(s.ctx), Role: tenant.RoleOwner}))
+	// Seed the default board exactly as boot does.
+	s.Require().NoError(tenantboot.NewService(postgres.NewTenantSeedStore(s.db)).
+		Sight(s.ctx, tenant.Identity{TenantID: tenant.LocalTenantID, Role: tenant.RoleOwner}))
 
 	s.seeded, err = s.store.ListModelPrices(s.ctx)
 	s.Require().NoError(err)
-}
-
-func tenantIDOf(ctx context.Context) uuid.UUID {
-	id, _ := tenant.ID(ctx)
-	return id
 }
 
 func (s *BillingCacheSuite) TearDownSuite() {

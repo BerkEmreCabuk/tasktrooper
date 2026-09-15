@@ -17,8 +17,8 @@
 //     and doing nothing at all. They are registered here instead and run once
 //     per tenant per process, which is the same cost they always had.
 //
-// Both are idempotent and both are cheap after the first time: a gate read that
-// the tenants row answers, and a map lookup for the steps.
+// Both are idempotent and both are cheap after the first time: the board seed
+// is gated by install_state.board_seeded_at, and the steps by a map lookup.
 package tenantboot
 
 import (
@@ -35,9 +35,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
-// seedSQL is the per-tenant board seed, run with app.tenant_id already set to
-// the new tenant, so every INSERT picks the tenant up from the column default
-// (migration 114) exactly as an ordinary write does.
+// seedSQL is the default board, run once per install.
 //
 // It is a .sql file rather than Go string literals so a schema change and its
 // seed can be read side by side, and so this file can be diffed against the
@@ -46,17 +44,10 @@ import (
 //go:embed seed.sql
 var seedSQL string
 
-// Registry is the tenant-registry half of postgres.DB — the only part of the
-// database that is not policy-protected, because it is the index of tenants
-// rather than one tenant's rows.
-type Registry interface {
-	EnsureTenant(ctx context.Context, id uuid.UUID) (needsBootstrap bool, err error)
-	MarkBootstrapped(ctx context.Context, id uuid.UUID) error
-}
-
-// SeedStore runs the per-tenant board seed.
+// SeedStore runs the board seed unless it already ran on this install, and
+// reports whether it ran.
 type SeedStore interface {
-	Seed(ctx context.Context, sql string) error
+	SeedBoardOnce(ctx context.Context, sql string) (bool, error)
 }
 
 // Step is per-tenant setup that used to happen once, at process boot, back when
@@ -83,8 +74,7 @@ type Step struct {
 }
 
 type Service struct {
-	registry Registry
-	seeds    SeedStore
+	seeds SeedStore
 
 	// steps run once per tenant per PROCESS, not once per tenant ever.
 	//
@@ -97,23 +87,23 @@ type Service struct {
 	steps []Step
 
 	// seeded remembers the tenants this process has already seeded, so a busy
-	// tenant does not pay a registry read per request. It is a cache of a fact
-	// that only ever goes one way (a tenant is never un-seeded), so a cold
+	// tenant does not pay a database round trip per request. It caches a fact
+	// that only ever goes one way (a board is never un-seeded), so a cold
 	// process simply asks the database once more.
 	seeded sync.Map
 	// booted is the same idea for the steps above, and it is a SEPARATE map
-	// because the two answer different questions: seeded is "does this tenant's
-	// board exist" (durable, shared by every replica through the registry row),
-	// booted is "has THIS process run its ensure-steps for this tenant" (local,
-	// and correctly re-done by the next pod).
+	// because the two answer different questions: seeded is "does the board
+	// exist" (durable, in install_state), booted is "has THIS process run its
+	// ensure-steps for this tenant" (local, and correctly re-done by the next
+	// pod).
 	booted sync.Map
 	// running counts the step runs in flight in this process, so a caller can
 	// tell an empty roster from one that is still being written.
 	running atomic.Int32
 }
 
-func NewService(registry Registry, seeds SeedStore) *Service {
-	return &Service{registry: registry, seeds: seeds}
+func NewService(seeds SeedStore) *Service {
+	return &Service{seeds: seeds}
 }
 
 // AddStep registers per-tenant setup. Called during wiring, before the listener
@@ -133,7 +123,7 @@ func (s *Service) AddStep(name string, run func(context.Context) error) {
 // request. It is deliberately the whole per-request cost at the edge: a map
 // lookup.
 func (s *Service) Sight(ctx context.Context, id tenant.Identity) error {
-	if s == nil || s.registry == nil {
+	if s == nil || s.seeds == nil {
 		return nil
 	}
 	if err := s.ensureSeeded(ctx, id.TenantID); err != nil {
@@ -210,23 +200,13 @@ func (s *Service) ensureSeeded(ctx context.Context, id uuid.UUID) error {
 	if _, done := s.seeded.Load(id); done {
 		return nil
 	}
-	needs, err := s.registry.EnsureTenant(ctx, id)
+	ran, err := s.seeds.SeedBoardOnce(ctx, seedSQL)
 	if err != nil {
-		return err
-	}
-	if !needs {
-		s.seeded.Store(id, struct{}{})
-		return nil
-	}
-	if s.seeds != nil {
-		if err := s.seeds.Seed(ctx, seedSQL); err != nil {
-			return fmt.Errorf("seed tenant board: %w", err)
-		}
-	}
-	if err := s.registry.MarkBootstrapped(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("seed board: %w", err)
 	}
 	s.seeded.Store(id, struct{}{})
-	log.Info().Str("tenant_id", id.String()).Msg("tenant board seeded")
+	if ran {
+		log.Info().Msg("default board seeded")
+	}
 	return nil
 }

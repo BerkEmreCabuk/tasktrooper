@@ -69,7 +69,7 @@ func (s *IncidentStore) Upsert(ctx context.Context, in domain.IncidentInput) (do
 	inc, err := scanIncident(s.pool.QueryRow(ctx, `
 		INSERT INTO prod_incidents (repository_id, env, source, fingerprint, title, detail, severity, payload)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (tenant_id, repository_id, env, fingerprint) WHERE status NOT IN ('resolved', 'ignored')
+		ON CONFLICT (repository_id, env, fingerprint) WHERE status NOT IN ('resolved', 'ignored')
 		DO UPDATE SET
 			occurrences = prod_incidents.occurrences + 1,
 			last_seen_at = now(),

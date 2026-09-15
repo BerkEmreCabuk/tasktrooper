@@ -255,7 +255,7 @@ type engine struct {
 	// Everything else in the process reaches Postgres through pgDB.
 	pgPool *pgxpool.Pool
 	pgDB   *pgstore.DB
-	// tenantOnboarder seeds a first-seen tenant and mirrors its members.
+	// tenantOnboarder seeds the default board once and runs the boot steps.
 	tenantOnboarder *tenantboot.Service
 	pendingMCP      []domain.MCPServerConfig
 	// mcpServer and mcpEndpoint are the two halves of the per-run tool endpoint
@@ -804,15 +804,11 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			log.Warn().Err(err).Msg("postgres connection failed, sessions/jobs/audit/rag disabled")
 		} else {
 			e.pgPool = pgPool
-			// Every store from here down takes the tenant-scoped handle. It is
-			// the pool with one difference: no statement can leave it without a
-			// tenant on the context (internal/adapter/store/postgres/db.go).
 			pgDB := pgstore.NewDB(pgPool)
 			e.pgDB = pgDB
-			// The first request from a tenant is what seeds its board; it needs
-			// the database, so the service is built here and handed to the HTTP
-			// layer below.
-			e.tenantOnboarder = tenantboot.NewService(pgDB, pgstore.NewTenantSeedStore(pgDB))
+			// Seeds the default board once per install (install_state) and runs
+			// the boot steps; built here because it needs the database.
+			e.tenantOnboarder = tenantboot.NewService(pgstore.NewTenantSeedStore(pgDB))
 			// SetHostRoots, same reason as the repository store below:
 			// sessions.workspace_dir and sessions.project_root are absolute
 			// paths belonging to whichever host wrote the row. Resuming a
@@ -901,12 +897,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		// caller (engine.reload, via POST /admin/reload) walked straight past a
 		// guard that only ever covered this one. One guard, on the resource.
 		mcpService = mcpsvc.NewService(mcpStore, e.secretsCipher, e.reloadMCP)
-		// The catalog of stdio/http MCP servers a tenant starts with. It is
-		// PER-TENANT data (mcp_servers carries tenant_id), so it cannot be
-		// seeded from here: this context has no identity and the seed raised
-		// tenant.ErrNoTenant, logged one Warn and wrote nothing — for every
-		// tenant, forever. Registered as a tenant boot step instead, which runs
-		// it once per tenant on its first request.
+		// The default catalog of stdio/http MCP servers, seeded as a boot step
+		// so it runs after the board seed, once per process.
 		e.tenantOnboarder.AddStep("mcp_servers", mcpService.SeedDefaultsIfEmpty)
 		resolved, err := mcpService.ResolvedConfigs(ctx)
 		if err != nil {
@@ -1048,13 +1040,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		indexInjector = indexer.NewInjector(indexStore, llmClient, mapperSvc, embeddingModel, cfg.Graph)
 		indexInjector.SetQueryRewrite(cfg.Indexer.QueryRewrite)
 		if pgIndexStore, ok := indexStore.(*pgstore.IndexStore); ok && e.pgDB != nil {
-			// Boot-time work that legitimately has NO tenant, and the only one
-			// in this function: both calls are schema — pg_extension, a column
-			// type, an index — and the answer is the same for every tenant in
-			// the database. They go through DB.schemaPool rather than the
-			// tenant-scoped surface, deliberately and with their own comment
-			// saying so, which is what tells a reader this is correct rather
-			// than forgotten.
 			caps := pgstore.DetectVectorCapabilities(ctx, e.pgDB)
 			if caps.Vector {
 				caps.Vector = pgstore.BootstrapWorkspaceVectors(ctx, e.pgDB)
