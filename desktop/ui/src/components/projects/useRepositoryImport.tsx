@@ -70,11 +70,15 @@ export function useRepositoryImport(onChanged: () => void | Promise<void>): Repo
   // The dialog components only report a label; onAdded needs the flow too, to
   // keep showing the right wording through the finalizing phase.
   const analyzeFlow = useRef<AnalyzePhase["flow"]>("import");
+  // The name the analyzing dialog is showing, kept for the finishing step so the
+  // bar carries on instead of restarting under a different label.
+  const analyzeLabel = useRef("");
 
   const pendingSetup = setupRepo !== null || setupError !== null;
 
   const startAnalyze = useCallback((flow: AnalyzePhase["flow"], label: string) => {
     analyzeFlow.current = flow;
+    analyzeLabel.current = label;
     setAnalyzing({ flow, label });
   }, []);
   const endAnalyze = useCallback(() => setAnalyzing(null), []);
@@ -119,7 +123,10 @@ export function useRepositoryImport(onChanged: () => void | Promise<void>): Repo
       // dialog mounting (list reload + repo re-fetch): without this, the
       // analyzing dialog's onAnalyzeEnd() and this cover the same instant, so
       // React batches the two setAnalyzing calls and there is no flicker.
-      setAnalyzing({ flow: analyzeFlow.current, label: t("projectAdmin.analyzing.finalizing") });
+      setAnalyzing({
+        flow: analyzeFlow.current,
+        label: analyzeLabel.current || t("projectAdmin.analyzing.finalizing"),
+      });
       void (async () => {
         try {
           await onChanged();

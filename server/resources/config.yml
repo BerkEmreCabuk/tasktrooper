@@ -115,7 +115,12 @@ indexer:
   concurrency: 1
 
 embedding:
-  requests_per_minute: 20
+  # 0 = unthrottled. The desktop embeds on this machine, where a fixed pace only
+  # adds waiting: 20 a minute held every index to one chunk per three seconds
+  # (a 1,200-chunk repository took over an hour) and made each code search wait
+  # too. A hosted provider that answers 429 is still slowed down by the retries
+  # below; set a number here only for one that needs a steady pace.
+  requests_per_minute: 0
   max_retries: 8
   retry_backoff: 2s
   max_retry_wait: 60s

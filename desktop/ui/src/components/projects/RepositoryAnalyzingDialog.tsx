@@ -60,14 +60,15 @@ export function RepositoryAnalyzingDialog({ phase }: { phase: AnalyzePhase | nul
         clearInterval(tickTimer.current);
         tickTimer.current = null;
       }
-      setPct((p) => {
-        if (p === 0) return p;
-        holdTimer.current = setTimeout(() => {
-          setVisible(false);
-          phaseRef.current = null;
-        }, HOLD_MS);
-        return 100;
-      });
+      // Hide whether or not the bar has moved. A local import can finish inside
+      // the first tick, and a bar still at 0 used to skip scheduling the hide,
+      // so the dialog stayed open for good. A bar that moved shows 100% first.
+      setPct((p) => (p === 0 ? p : 100));
+      if (holdTimer.current) clearTimeout(holdTimer.current);
+      holdTimer.current = setTimeout(() => {
+        setVisible(false);
+        phaseRef.current = null;
+      }, HOLD_MS);
     }
     return () => {
       if (tickTimer.current) {
