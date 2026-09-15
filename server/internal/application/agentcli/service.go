@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -93,6 +94,14 @@ type Deps struct {
 	WorkspaceRoot string
 	Probe         ProbeFunc
 	Models        ModelsFunc
+	// Runtimes moves agents onto a connected CLI whenever the set of connected
+	// CLIs changes. Optional.
+	Runtimes AgentRuntimeReconciler
+}
+
+// AgentRuntimeReconciler is catalog.Service's ReconcileAgentRuntimes.
+type AgentRuntimeReconciler interface {
+	ReconcileAgentRuntimes(ctx context.Context, connected []domain.LLMProviderType) (int, error)
 }
 
 type Service struct {
@@ -101,6 +110,7 @@ type Service struct {
 	workspaceRoot string
 	probe         ProbeFunc
 	models        ModelsFunc
+	runtimes      AgentRuntimeReconciler
 }
 
 func NewService(deps Deps) *Service {
@@ -116,6 +126,7 @@ func NewService(deps Deps) *Service {
 		store:         deps.Store,
 		catalog:       deps.Catalog,
 		workspaceRoot: strings.TrimSpace(deps.WorkspaceRoot),
+		runtimes:      deps.Runtimes,
 		probe:         probe,
 		models:        models,
 	}
@@ -200,6 +211,7 @@ func (s *Service) Connect(ctx context.Context, flavor domain.AgentCLIFlavor) (do
 	}); err != nil {
 		return domain.AgentCLIState{}, err
 	}
+	s.reconcileRuntimes(ctx)
 	return s.State(ctx)
 }
 
@@ -213,7 +225,33 @@ func (s *Service) Disconnect(ctx context.Context, flavor domain.AgentCLIFlavor) 
 	if root, err := s.snapshotRoot(ctx, flavor); err == nil {
 		_ = os.RemoveAll(root)
 	}
+	s.reconcileRuntimes(ctx)
 	return s.State(ctx)
+}
+
+// reconcileRuntimes never fails the connect: the CLI is connected either way,
+// and an agent left on its old runtime can still be moved by hand.
+func (s *Service) reconcileRuntimes(ctx context.Context) {
+	if s.runtimes == nil {
+		return
+	}
+	conns, err := s.store.List(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("agent cli: could not list connections to reconcile agent runtimes")
+		return
+	}
+	providers := make([]domain.LLMProviderType, 0, len(conns))
+	for _, conn := range conns {
+		providers = append(providers, conn.ProviderType)
+	}
+	moved, err := s.runtimes.ReconcileAgentRuntimes(ctx, providers)
+	if err != nil {
+		log.Warn().Err(err).Msg("agent cli: reconciling agent runtimes failed")
+		return
+	}
+	if moved > 0 {
+		log.Info().Int("moved", moved).Msg("agent cli: agents moved onto a connected CLI")
+	}
 }
 
 func (s *Service) snapshotRoot(ctx context.Context, flavor domain.AgentCLIFlavor) (string, error) {

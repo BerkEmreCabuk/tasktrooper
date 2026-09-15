@@ -10,6 +10,7 @@ import {
 import {
   api,
   type AgentCLIState,
+  type LLMProvidersResponse,
   type GitHubConnectionStatus,
   type InitiativeProject,
   type Repository,
@@ -51,7 +52,12 @@ const PREFLIGHT_POLL_MS = 30_000;
  */
 const GATE_DECIDE_TIMEOUT_MS = 8_000;
 
-const SERVER_STEP_IDS = ["claude-code", "github", "project"] as const;
+const SERVER_STEP_IDS = ["agent", "github", "project"] as const;
+
+// The desktop registers its bundled embedder as the "local" OpenAI-compatible
+// provider so retrieval works with no clicks. That row is configured on every
+// install, so by itself it is not an API provider the user connected.
+const BUNDLED_EMBEDDING_MODEL = "nomic-embed-text-v1.5";
 
 /** What a piece of derived state can say. `null` = not read yet, not "absent". */
 type Read<T> = { value: T; error: "" } | { value: null; error: string } | null;
@@ -68,6 +74,8 @@ interface SetupContextValue {
   /** The shell's local half, or null in a browser. */
   host: DesktopRunnerHost | null;
   snapshot: DesktopRunnerSnapshot | null;
+  /** The shell's environment report, or null before it answers and in a browser. */
+  preflightReport: DesktopPreflightReport | null;
   /** The connected CLI row, or null when it has not been read. */
   cliState: AgentCLIState | null;
   /** Everything the four steps read, again. Call after any step's own action. */
@@ -119,6 +127,7 @@ export function SetupProvider({ children }: { children: ReactNode }) {
 
   const [preflight, setPreflight] = useState<Read<DesktopPreflightReport>>(null);
   const [cli, setCli] = useState<Read<AgentCLIState>>(null);
+  const [providers, setProviders] = useState<Read<LLMProvidersResponse>>(null);
   const [github, setGithub] = useState<Read<GitHubConnectionStatus>>(null);
   const [work, setWork] = useState<Read<{ projects: InitiativeProject[]; repositories: Repository[] }>>(null);
   const [dismissed, setDismissed] = useState(() => readCache<boolean>(SETUP_DISMISSED_KEY) ?? false);
@@ -162,6 +171,10 @@ export function SetupProvider({ children }: { children: ReactNode }) {
       api.getAgentCLIState().then(
         (value) => setCli({ value, error: "" }),
         (e: unknown) => setCli({ value: null, error: e instanceof Error ? e.message : String(e) }),
+      ),
+      api.listLLMProviders().then(
+        (value) => setProviders({ value, error: "" }),
+        (e: unknown) => setProviders({ value: null, error: e instanceof Error ? e.message : String(e) }),
       ),
       api.githubStatus().then(
         (value) => setGithub({ value, error: "" }),
@@ -228,13 +241,23 @@ export function SetupProvider({ children }: { children: ReactNode }) {
     //    through exactly that state on its way up, and calling it "not done"
     //    would open the sequence in front of someone whose server is seconds
     //    from answering.
-    const claudeCode: SetupSteps["claude-code"] = !settledHost || !backendUp
-      ? { id: "claude-code", state: "unknown", actionable: true }
-      : cli === null
-        ? { id: "claude-code", state: "unknown", actionable: true }
-        : cli.value
-          ? { id: "claude-code", state: cliConnected ? "done" : "todo", actionable: true }
-          : { id: "claude-code", state: "unknown", actionable: true, error: cli.error };
+    const apiProviderConfigured =
+      (providers?.value?.endpoints?.length ?? 0) > 0 ||
+      (providers?.value?.providers ?? []).some(
+        (p) =>
+          !p.definition.host_executed &&
+          p.config.configured &&
+          !(p.definition.type === "local" && p.config.default_model === BUNDLED_EMBEDDING_MODEL),
+      );
+    const agent: SetupSteps["agent"] = !settledHost || !backendUp
+      ? { id: "agent", state: "unknown", actionable: true }
+      : cliConnected || apiProviderConfigured
+        ? { id: "agent", state: "done", actionable: true }
+        : cli === null || providers === null
+          ? { id: "agent", state: "unknown", actionable: true }
+          : cli.value && providers.value
+            ? { id: "agent", state: "todo", actionable: true }
+            : { id: "agent", state: "unknown", actionable: true, error: cli.error || providers.error };
 
     const githubStep: SetupSteps["github"] = !backendUp
       ? { id: "github", state: "unknown", actionable: true }
@@ -252,8 +275,8 @@ export function SetupProvider({ children }: { children: ReactNode }) {
           ? { id: "project", state: hasProjectWithRepository(work.value) ? "done" : "todo", actionable: true }
           : { id: "project", state: "unknown", actionable: true, error: work.error };
 
-    return { environment, "claude-code": claudeCode, github: githubStep, project };
-  }, [host, backendUp, settledHost, preflight, cli, github, work]);
+    return { environment, agent, github: githubStep, project };
+  }, [host, backendUp, settledHost, preflight, cli, providers, github, work]);
 
   const complete = setupComplete(steps);
   const needsWork = setupNeedsWork(steps);
@@ -275,6 +298,7 @@ export function SetupProvider({ children }: { children: ReactNode }) {
       inShell: host !== null,
       host,
       snapshot,
+      preflightReport: preflight?.value ?? null,
       cliState: cli?.value ?? null,
       refresh,
       reportEnvironment,
@@ -289,6 +313,7 @@ export function SetupProvider({ children }: { children: ReactNode }) {
       complete,
       host,
       snapshot,
+      preflight,
       cli,
       refresh,
       reportEnvironment,
@@ -310,13 +335,11 @@ export function useSetup() {
 }
 
 /**
- * Is a Claude Code CLI connected server-side?
- *
- * `flavor` is checked rather than mere presence: a row for a different flavor
- * is a row that says this step is NOT done.
+ * Is any agent CLI connected server-side? Any flavor will do: which CLI an
+ * agent runs on is chosen per agent, and one connected CLI is enough to run.
  */
 function cliIsConnected(cli: Read<AgentCLIState>): boolean {
-  return cli?.value?.connections?.some((c) => c.flavor === "claude") ?? false;
+  return (cli?.value?.connections?.length ?? 0) > 0;
 }
 
 /**

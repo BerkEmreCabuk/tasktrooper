@@ -51,7 +51,7 @@ export function EnvironmentStep({ onContinue }: { onContinue: (next: SetupStepId
           <Notice variant="info" title={t("setup.environment.readyTitle")}>
             {t("setup.environment.readyBody")}
           </Notice>
-          <Button onClick={() => onContinue("claude-code")}>{t("setup.environment.continue")}</Button>
+          <Button onClick={() => onContinue("agent")}>{t("setup.environment.continue")}</Button>
         </>
       )}
     </div>

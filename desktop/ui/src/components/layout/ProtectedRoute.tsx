@@ -20,12 +20,15 @@ export function ProtectedRoute() {
   const location = useLocation();
 
   const onSetup = location.pathname.startsWith(SETUP_PATH);
-  if (!onSetup && setup.redirectToSetup) {
+  // Settings is where several steps are finished — an API key, a provider — so
+  // the sequence links there and must not bounce the user straight back.
+  const exempt = onSetup || location.pathname.startsWith("/settings");
+  if (!exempt && setup.redirectToSetup) {
     // The search string travels: the GitHub callback lands on /settings?github=…
     // and this is the hop that has to carry that answer to the step waiting for it.
     return <Navigate to={SETUP_PATH + location.search} replace />;
   }
-  if (!onSetup && setup.deciding) {
+  if (!exempt && setup.deciding) {
     return (
       <div className="flex h-screen items-center justify-center">
         <Spinner size="lg" />

@@ -197,3 +197,11 @@ evolution:
   # judge_provider_type: ""
   # Bos birakilirsa reflection ve judge, ajanin zor isler icin ayarlanan
   # model_heavy'si ile calisir (model_heavy da bossa ajanin normal modeli).
+
+# The other agent CLIs. An empty binary resolves on PATH.
+antigravity:
+  binary: "${ANTIGRAVITY_BIN}"
+cursor_agent:
+  binary: "${CURSOR_AGENT_BIN}"
+opencode:
+  binary: "${OPENCODE_BIN}"

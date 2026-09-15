@@ -22,23 +22,30 @@ export const setup = {
     description:
       "TaskTrooper'ın bu makinede ihtiyaç duydukları: git, Claude Code CLI ve içinde giriş yapılmış bir hesap. Aşağıda kırmızı olan her satır neyin eksik olduğunu ve ne çalıştırmanız gerektiğini söyler.",
     readyTitle: "Gerekli her şey yerinde",
-    readyBody: "Artık Claude Code'u bağlayabilirsiniz.",
+    readyBody: "Artık bir ajan çalışma ortamı bağlayabilirsiniz.",
     notReadyTitle: "Gerekli bir şey eksik",
     notReadyBody:
       "Aşağıda işaretli maddeleri düzeltip Tekrar kontrol et'e basın. Hepsi yeşil olana kadar Bağlan kapalı kalır.",
     continue: "Devam et",
   },
-  claudeCode: {
-    title: "Claude Code'u bağla",
+  agent: {
+    title: "Bir ajan çalışma ortamı bağlayın",
     description:
-      "Bu, bu Mac'ten TaskTrooper'a giden tüneli başlatır ve ajan kataloğunu Claude Code CLI'nıza kurar. Bir iki dakika sürebilir.",
-    connect: "Claude Code'u bağla",
+      "Ajanlar işlerini bu Mac'teki bir kodlama CLI'ı üzerinden yapar. Kullandıklarınızdan istediğinizi bağlayın — biri yeterli, sonradan başkalarını da ekleyebilirsiniz.",
+    connect: "Bağla",
     connecting: "Bağlanıyor…",
-    connectedTitle: "Claude Code bağlı",
+    disconnect: "Bağlantıyı kes",
+    connected: "Bağlı",
     connectedBody: "{binary}{version} — {agents} ajan ve {skills} beceri kuruldu.",
-    disconnectedTitle: "Henüz bağlı değil",
-    disconnectedBody: "Bu Mac çalışma alanınız için yanıt verene kadar hiçbir şey çalışmaz.",
-    blockedByEnvironment: "Önce ortam kontrolünün geçmesi gerekiyor — {item} hâlâ başarısız.",
+    notInstalled: "Kurulu değil",
+    installWith: "Kurmak için: {command}",
+    notInstalledBody: "Bu Mac'te bulunamadı.",
+    noneTitle: "Henüz bir şey bağlı değil",
+    noneBody: "Ajanların çalışabilmesi için en az bir CLI bağlayın ya da aşağıdan bir API sağlayıcısı ekleyin.",
+    apiKeyTitle: "API anahtarı mı kullanmak istiyorsunuz?",
+    apiKeyBody:
+      "Ajanlar CLI yerine bir model API'si üzerinden de çalışabilir: OpenAI, Anthropic, Google Gemini, Groq ya da kendi anahtarınız ve base URL'inizle herhangi bir OpenAI uyumlu endpoint.",
+    apiKeyAction: "API sağlayıcısı ekle",
     failed: "Bağlanma başarısız",
   },
   github: {

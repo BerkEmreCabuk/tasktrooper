@@ -100,8 +100,9 @@ start. Required items refuse the start and the refusal names the item.
 |---|---|---|
 | `agent-server` | yes | bundled; missing means a broken build |
 | `postgres` | no | always `ok`; says the download is coming |
-| `git`, `claude`, `claude-account` | yes | `claude-account` is separate because a free plan passes every "is it there" check and fails inside the first run |
-| `chrome`, `xcode-clt`, `appium*`, `android-sdk`, `agy`, `cursor-agent`, `opencode` | no | capabilities; never block |
+| `git` | yes | every task clones and commits |
+| `claude`, `claude-account`, `cursor-agent`, `agy`, `opencode` | no | agent runtimes; any one of them, or an API provider, is enough. `claude-account` is separate because a free plan passes every "is it there" check and fails inside the first run |
+| `chrome`, `xcode-clt`, `appium*`, `android-sdk` | no | capabilities; never block |
 
 ## Packaging and signing
 

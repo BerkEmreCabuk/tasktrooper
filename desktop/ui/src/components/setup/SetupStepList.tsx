@@ -13,7 +13,7 @@ interface SetupStepListProps {
 /** Title key per step, so the list and the bodies cannot name them differently. */
 export const SETUP_STEP_TITLE_KEY: Record<SetupStepId, string> = {
   environment: "setup.environment.title",
-  "claude-code": "setup.claudeCode.title",
+  agent: "setup.agent.title",
   github: "setup.github.title",
   project: "setup.project.title",
 };

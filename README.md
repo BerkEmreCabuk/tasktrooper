@@ -114,9 +114,10 @@ Agents rewrite their own playbooks from how their work actually went.
 
 ### First run
 
-A guided setup checks this Mac (git, the Claude Code CLI and its plan, and
-optionally Chrome, Xcode, Appium and the Android SDK), connects Claude Code and
-GitHub, and imports your first project.
+A guided setup checks this Mac (git, the agent CLIs you have, and optionally
+Chrome, Xcode, Appium and the Android SDK), lets you connect any of Claude Code,
+Cursor, Antigravity and OpenCode, or an API provider with your own key, then
+connects GitHub and imports your first project.
 
 ## Install
 
@@ -140,9 +141,10 @@ install by hand may need right-click → Open the first time; the install script
 and the cask both clear the quarantine flag for you.
 
 First launch downloads two things into the app's data directory: the Postgres
-binaries (~30 MB) and the embedding model (~140 MB). You need `git` and the
-`claude` CLI signed in to a plan that includes Claude Code — the app checks both
-and shows the exact command if one is missing.
+binaries (~30 MB) and the embedding model (~140 MB). You need `git` and at least
+one way to run agents: the Claude Code, Cursor, Antigravity or OpenCode CLI, or
+an API key for a model provider. The app checks what is installed and shows the
+exact command for anything missing.
 
 Or grab the `.dmg` from [Releases](https://github.com/makifbaysal/tasktrooper/releases) and drag TaskTrooper to Applications.
 

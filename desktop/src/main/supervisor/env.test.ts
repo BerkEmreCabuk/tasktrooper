@@ -63,6 +63,21 @@ describe("agentServerEnv", () => {
   });
 
   /**
+   * The GUI app's PATH is not the user's shell PATH, so a CLI installed into
+   * ~/.local/bin is only findable by the server if its path is handed over.
+   */
+  it("hands over every other agent CLI it found, and none it did not", () => {
+    const e = env([
+      { id: "cursor-agent", label: "Cursor CLI", required: false, status: "ok", path: "/Users/me/.local/bin/cursor-agent" },
+      { id: "opencode", label: "OpenCode CLI", required: false, status: "ok", path: "/opt/homebrew/bin/opencode" },
+      { id: "agy", label: "Antigravity CLI", required: false, status: "missing" },
+    ]);
+    expect(e.CURSOR_AGENT_BIN).toBe("/Users/me/.local/bin/cursor-agent");
+    expect(e.OPENCODE_BIN).toBe("/opt/homebrew/bin/opencode");
+    expect(e.ANTIGRAVITY_BIN).toBeUndefined();
+  });
+
+  /**
    * OMITTED, not empty: the backend treats an absent value as "this Mac cannot
    * do that" and an empty one as a path to exec.
    */

@@ -1520,10 +1520,10 @@ export interface LLMProviderDefinition {
  * by its provider. See the server's domain.AgentCLIFlavor for why the two are
  * kept as separate words.
  */
-export type AgentCLIFlavor = "claude" | "cursor";
+export type AgentCLIFlavor = "claude" | "cursor" | "antigravity" | "opencode";
 
 /**
- * The tenant's ONE connected local agent CLI.
+ * One connected local agent CLI.
  *
  * Connecting is not the same act as connecting an HTTP provider, which is why
  * it has its own endpoints: there is no base URL and no key, and what "connect"
@@ -1531,7 +1531,7 @@ export type AgentCLIFlavor = "claude" | "cursor";
  * enabled agent's role, rules and skills to disk in the layout that binary
  * discovers on its own.
  *
- * At most one is connected at a time — connecting one disconnects the other.
+ * Several flavors can be connected at once, one row each.
  */
 export interface AgentCLIConnection {
   flavor: AgentCLIFlavor;

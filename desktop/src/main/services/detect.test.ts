@@ -348,23 +348,42 @@ describe("preflight: what blocks the start", () => {
   });
 
   /**
-   * Connect is refused while a required item fails, and the refusal NAMES the
-   * item. Before this, a Mac with a free Claude account connected happily and
-   * failed minutes later inside a run.
+   * The start is refused while a required item fails, and the refusal NAMES the
+   * item and carries its remediation.
    */
   it("produces a blocker that names the failing item and carries its remediation", async () => {
+    const report = await run(
+      fakeClaude({ auth: { stdout: '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":"max"}', code: 0 } }),
+    );
+    const gitMissing: PreflightReport = {
+      ...report,
+      items: report.items.map((i) =>
+        i.id === "git"
+          ? { ...i, status: "missing" as const, remediation: "Install the Xcode command line tools.", command: "xcode-select --install" }
+          : i,
+      ),
+    };
+    const blocker = firstBlocker(gitMissing);
+    expect(blocker?.id).toBe("git");
+    expect(blocker?.title).toMatch(/git/i);
+    expect(blocker?.remediation).toMatch(/xcode/i);
+  });
+
+  /**
+   * Agents can run on Cursor, Antigravity, OpenCode or an API key, so a Claude
+   * account without Claude Code is reported and never stops the start.
+   */
+  it("reports a Claude plan without Claude Code but does not block on it", async () => {
     const report = await run(
       fakeClaude({
         auth: { stdout: '{"loggedIn":true,"authMethod":"claude.ai","subscriptionType":null}', code: 0 },
       }),
     );
-    expect(report.ready).toBe(false);
-
-    const blocker = firstBlocker(report);
-    expect(blocker?.id).toBe("claude-account");
-    expect(blocker?.remediation).toMatch(/upgrade/i);
-    // Nothing this app could run unattended, so nothing offers to.
-    expect(blocker?.runnable).toBe(false);
+    const account = report.items.find((i) => i.id === "claude-account");
+    expect(account?.status).toBe("unusable");
+    expect(account?.required).toBe(false);
+    expect(report.ready).toBe(true);
+    expect(firstBlocker(report)).toBeUndefined();
   });
 
   it("never blocks on an optional item", async () => {

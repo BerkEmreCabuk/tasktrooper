@@ -20,24 +20,31 @@ export const setup = {
   environment: {
     title: "Check this Mac",
     description:
-      "What TaskTrooper needs on this machine: git, the Claude Code CLI and an account signed into it. Anything red below says what's wrong and what to run.",
+      "What TaskTrooper needs on this machine: git, plus whichever agent CLIs you use. Anything red below says what's wrong and what to run.",
     readyTitle: "Everything required is in place",
-    readyBody: "You can connect Claude Code now.",
+    readyBody: "You can connect an agent runtime now.",
     notReadyTitle: "Something required is missing",
     notReadyBody: "Fix the items marked below, then press Check again. Connect stays closed until they're all green.",
     continue: "Continue",
   },
-  claudeCode: {
-    title: "Connect Claude Code",
+  agent: {
+    title: "Connect an agent runtime",
     description:
-      "This starts the tunnel from this Mac to TaskTrooper and installs the agent catalog into your Claude Code CLI. It takes up to a minute or two.",
-    connect: "Connect Claude Code",
+      "Agents do their work through a coding CLI on this Mac. Connect any of the ones you use — one is enough, and you can add more later.",
+    connect: "Connect",
     connecting: "Connecting…",
-    connectedTitle: "Claude Code is connected",
+    disconnect: "Disconnect",
+    connected: "Connected",
     connectedBody: "{binary}{version} — {agents} agents and {skills} skills installed.",
-    disconnectedTitle: "Not connected yet",
-    disconnectedBody: "Nothing will run until this Mac is answering for your workspace.",
-    blockedByEnvironment: "The environment check has to pass first — {item} is still failing.",
+    notInstalled: "Not installed",
+    installWith: "Install it with: {command}",
+    notInstalledBody: "Not found on this Mac.",
+    noneTitle: "Nothing connected yet",
+    noneBody: "Connect at least one CLI, or add an API provider below, before agents can run.",
+    apiKeyTitle: "Prefer an API key?",
+    apiKeyBody:
+      "Agents can also run through a model API instead of a CLI: OpenAI, Anthropic, Google Gemini, Groq, or any OpenAI-compatible endpoint with your own key and base URL.",
+    apiKeyAction: "Add an API provider",
     failed: "Connecting failed",
   },
   github: {

@@ -313,6 +313,15 @@ func localContext() context.Context {
 	})
 }
 
+// agentRuntimes keeps a nil catalog service from becoming a non-nil interface
+// that panics on the first connect.
+func agentRuntimes(svc *catalog.Service) agentcli.AgentRuntimeReconciler {
+	if svc == nil {
+		return nil
+	}
+	return svc
+}
+
 // DefaultCORSOrigins is what the desktop shell and a `make dev` checkout call
 // this server from.
 var DefaultCORSOrigins = []string{"app://tasktrooper", "http://localhost:3200", "http://127.0.0.1:3200"}
@@ -1259,6 +1268,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			WorkspaceRoot: cfg.Storage.Sessions.WorkspaceRoot,
 			Probe:         agentcli.DefaultProbe(bins),
 			Models:        agentcli.DefaultModels(bins),
+			Runtimes:      agentRuntimes(catalogSvc),
 		})
 	}
 

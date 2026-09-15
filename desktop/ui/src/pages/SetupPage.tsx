@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
 import { SetupShell } from "@/components/setup/SetupShell";
-import { ClaudeCodeStep } from "@/components/setup/ClaudeCodeStep";
+import { AgentRuntimeStep } from "@/components/setup/AgentRuntimeStep";
 import { EnvironmentStep } from "@/components/setup/EnvironmentStep";
 import { FirstProjectStep } from "@/components/setup/FirstProjectStep";
 import { GitHubStep } from "@/components/setup/GitHubStep";
@@ -16,8 +16,8 @@ import { SETUP_STEP_IDS, setupStepUnlocked, type SetupStepId } from "@/lib/setup
  * `/setup` — the guided first-run sequence, in order and resumable.
  *
  * Four steps, each gated on the previous one having actually succeeded rather
- * than having been visited: the environment preflight, connecting Claude Code,
- * connecting GitHub, and a first project with a repository in it. Every one of
+ * than having been visited: the environment preflight, connecting an agent
+ * runtime, connecting GitHub, and a first project with a repository in it. Every one of
  * those verdicts is derived in `useSetup` from the thing itself, so a reload,
  * an app restart, or someone disconnecting GitHub next week all land on the
  * right screen with no stored progress to go stale.
@@ -68,7 +68,7 @@ export function SetupPage() {
         </div>
 
         {shown === "environment" && <EnvironmentStep onContinue={setSelected} />}
-        {shown === "claude-code" && <ClaudeCodeStep onContinue={setSelected} />}
+        {shown === "agent" && <AgentRuntimeStep onContinue={setSelected} />}
         {shown === "github" && <GitHubStep onContinue={setSelected} />}
         {shown === "project" && <FirstProjectStep />}
       </div>

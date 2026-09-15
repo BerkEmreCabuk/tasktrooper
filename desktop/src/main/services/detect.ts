@@ -384,7 +384,7 @@ async function probeClaude(override?: string): Promise<PreflightItem> {
     return {
       id: "claude",
       label: "Claude Code CLI",
-      required: true,
+      required: false,
       status: "missing",
       detail: "Every task on this Mac runs as a headless Claude Code session, which is this binary.",
       remediation: "Install the Claude Code CLI, then press Connect again.",
@@ -403,7 +403,7 @@ async function probeClaude(override?: string): Promise<PreflightItem> {
     return {
       id: "claude",
       label: "Claude Code CLI",
-      required: true,
+      required: false,
       status: "unusable",
       path: found.path,
       source: found.source,
@@ -417,7 +417,7 @@ async function probeClaude(override?: string): Promise<PreflightItem> {
     return {
       id: "claude",
       label: "Claude Code CLI",
-      required: true,
+      required: false,
       status: "unusable",
       path: found.path,
       source: found.source,
@@ -431,7 +431,7 @@ async function probeClaude(override?: string): Promise<PreflightItem> {
   return {
     id: "claude",
     label: "Claude Code CLI",
-    required: true,
+    required: false,
     status: "ok",
     path: found.path,
     source: found.source,
@@ -522,7 +522,7 @@ async function probeClaudeAccount(claude: PreflightItem): Promise<PreflightItem>
   const base: PreflightItem = {
     id: "claude-account",
     label: "Claude account",
-    required: true,
+    required: false,
     status: "missing",
   };
 
@@ -699,10 +699,10 @@ async function probeClaudeAccountByRunning(claudeBin: string): Promise<Partial<P
 /**
  * Binary-presence checks for the other local agent CLIs a task can run on
  * (`internal/adapter/agentcli/{antigravity,cursor,opencode}` on the server
- * side). All three are OPTIONAL, unlike `claude`: this Mac is not required to
- * have any particular one, because which CLI a task uses is chosen per AGENT,
- * not per Mac, and blocking Connect on a binary nobody selected would stop a
- * person who only ever uses Claude Code.
+ * side). Optional, like `claude` itself: this Mac is not required to have any
+ * particular one, because which CLI a task uses is chosen per AGENT, not per
+ * Mac, and blocking the backend on a binary nobody selected would stop someone
+ * who only uses another CLI or an API key.
  *
  * Deliberately binary-and-version only, with no `claude-account`-style split.
  * That split exists because `claude auth status --json` is a fast, documented,

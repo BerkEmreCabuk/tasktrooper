@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/rs/zerolog/log"
 	"io"
 	"net/http"
 	"os"
@@ -299,6 +300,15 @@ func (s *Service) BootstrapEmbeddings(ctx context.Context, baseURL string) error
 	const providerType = domain.LLMProviderLocal
 
 	existing, _ := s.store.Get(ctx, providerType)
+	// The OpenAI-compatible slot is also what a person configures for their own
+	// endpoint. A configured row serving some other model is theirs: rewriting
+	// its base URL would point their chat model at the embedder, so the row and
+	// the embedding choice are both left alone.
+	if existing.Configured && existing.DefaultModel != "" && existing.DefaultModel != domain.PinnedLocalEmbeddingModel {
+		log.Info().Str("model", existing.DefaultModel).
+			Msg("embeddings: the OpenAI-compatible provider is configured for another model; leaving it and the embedding choice alone")
+		return nil
+	}
 	if !existing.Configured || existing.BaseURL != baseURL || existing.DefaultModel == "" {
 		if err := s.store.Upsert(ctx, domain.LLMProviderConfig{
 			ProviderType:   providerType,

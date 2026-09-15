@@ -20,11 +20,11 @@ export const SETUP_PATH = "/setup";
  * genuinely done, not merely visited.
  *
  *  1. environment  — the preflight checklist; required items must be `ok`.
- *  2. claude-code  — connect the CLI, which needs 1 and is refused without it.
+ *  2. agent        — connect an agent CLI, or an API provider with your own key.
  *  3. github       — connect the account the agents push with.
  *  4. project      — a project, and the first repository imported into it.
  */
-export const SETUP_STEP_IDS = ["environment", "claude-code", "github", "project"] as const;
+export const SETUP_STEP_IDS = ["environment", "agent", "github", "project"] as const;
 export type SetupStepId = (typeof SETUP_STEP_IDS)[number];
 
 /**
@@ -43,9 +43,8 @@ export interface SetupStep {
   /**
    * Can this step be PERFORMED on this surface?
    *
-   * False in a browser for `environment` and `claude-code`: both act on the
-   * user's own Mac through the desktop shell's bridge, and no browser tab has
-   * one. The step is still shown — with the download, not with a button that
+   * False in a browser for `environment`: it acts on the user's own Mac
+   * through the desktop shell's bridge, and no browser tab has one. The step is still shown — with the download, not with a button that
    * cannot work — and its state may still be readable (a CLI connected from
    * some Mac is visible to every browser in the tenant).
    */

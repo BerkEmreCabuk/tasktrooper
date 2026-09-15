@@ -71,6 +71,9 @@ export const SERVER_CONTRACT_KEYS = [
   "PUBLIC_BASE_URL",
   "CORS_ORIGINS",
   "CLAUDE_CODE_BIN",
+  "CURSOR_AGENT_BIN",
+  "ANTIGRAVITY_BIN",
+  "OPENCODE_BIN",
   "EMBEDDINGS_BASE_URL",
   "EMBEDDED_POSTGRES_CACHE_DIR",
   "CHROME_BIN",
@@ -106,6 +109,9 @@ export interface AgentServerEnvInputs {
 export function agentServerEnv(inputs: AgentServerEnvInputs): NodeJS.ProcessEnv {
   const { preflight } = inputs;
   const claude = itemById(preflight, "claude");
+  const cursorAgent = itemById(preflight, "cursor-agent");
+  const antigravity = itemById(preflight, "agy");
+  const opencode = itemById(preflight, "opencode");
   const chrome = itemById(preflight, "chrome");
   const appium = itemById(preflight, "appium");
 
@@ -124,6 +130,9 @@ export function agentServerEnv(inputs: AgentServerEnvInputs): NodeJS.ProcessEnv 
     SERVER_API_KEY: inputs.apiToken,
     MCP_SECRETS_KEY: inputs.mcpSecretsKey,
     ...(claude?.status === "ok" && claude.path ? { CLAUDE_CODE_BIN: claude.path } : {}),
+    ...(cursorAgent?.status === "ok" && cursorAgent.path ? { CURSOR_AGENT_BIN: cursorAgent.path } : {}),
+    ...(antigravity?.status === "ok" && antigravity.path ? { ANTIGRAVITY_BIN: antigravity.path } : {}),
+    ...(opencode?.status === "ok" && opencode.path ? { OPENCODE_BIN: opencode.path } : {}),
     ...(inputs.embeddingsBaseURL ? { EMBEDDINGS_BASE_URL: inputs.embeddingsBaseURL } : {}),
     ...(chrome?.status === "ok" && chrome.path ? { CHROME_BIN: chrome.path } : {}),
     // Sent whenever Appium is INSTALLED, whether this app started the hub or
