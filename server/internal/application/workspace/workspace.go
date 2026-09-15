@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,29 +24,28 @@ func ResolveRoot(configured string) (string, error) {
 	return abs, nil
 }
 
-func SessionDir(ctx context.Context, root string, sessionID uuid.UUID) (string, error) {
-	tenantRoot, err := TenantRoot(ctx, root)
+func SessionDir(root string, sessionID uuid.UUID) (string, error) {
+	absRoot, err := ResolveRoot(root)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(tenantRoot, sessionID.String()), nil
+	return filepath.Join(absRoot, sessionID.String()), nil
 }
 
-// AgentDir, ajanın kalıcı çalışma klasörü:
-// {root}/tenants/{tenant-id}/agents/{agent-id}. Aynı ajanın tüm oturumları bu
-// klasörü paylaşır.
-func AgentDir(ctx context.Context, root string, agentID uuid.UUID) (string, error) {
-	tenantRoot, err := TenantRoot(ctx, root)
+// AgentDir, ajanın kalıcı çalışma klasörü: {root}/agents/{agent-id}. Aynı
+// ajanın tüm oturumları bu klasörü paylaşır.
+func AgentDir(root string, agentID uuid.UUID) (string, error) {
+	absRoot, err := ResolveRoot(root)
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(tenantRoot, "agents", agentID.String()), nil
+	return filepath.Join(absRoot, "agents", agentID.String()), nil
 }
 
 // CleanDirName accepts only a plain single directory name. Anything with a
 // separator, or any form of "..", is rejected rather than sanitised: the value
 // is joined onto a workspace root, and a name that can climb out of it is a bug
-// wherever it came from — and now also a way out of a tenant's own subtree.
+// wherever it came from.
 func CleanDirName(name string) string {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" || trimmed == "." || trimmed == ".." {
@@ -110,7 +108,7 @@ func RemoveDir(path string) error {
 // been handed a stored session directory; a reaper hands it the result of
 // joining a root with an ID, and a root that arrives empty turns that join into
 // something rooted at the process's working directory. An os.RemoveAll one
-// component too high erases every tenant workspace on the volume, and nothing
+// component too high erases every workspace on the volume, and nothing
 // downstream would report it as anything but a missing checkout.
 func RemoveDirWithin(root, path string) error {
 	if strings.TrimSpace(path) == "" {

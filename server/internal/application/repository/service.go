@@ -671,7 +671,7 @@ func (s *Service) Open(ctx context.Context, req domain.OpenRepositoryRequest) (d
 	if err := validateRequestKind(req.Kind); err != nil {
 		return domain.Repository{}, err
 	}
-	absRoot, err := workspace.ValidateProjectRoot(ctx, req.RootPath, s.workspaceRoot, s.allowedRoots)
+	absRoot, err := workspace.ValidateProjectRoot(req.RootPath, s.workspaceRoot, s.allowedRoots)
 	if err != nil {
 		return domain.Repository{}, err
 	}
@@ -850,7 +850,7 @@ func (s *Service) ImportFromGitHub(ctx context.Context, req domain.ImportGitHubR
 	}
 	// Same layout helper the restore path uses, so a re-cloned working copy
 	// always lands where a freshly imported one would.
-	dest, err := s.workspaceRepoPath(ctx, name)
+	dest, err := s.workspaceRepoPath(name)
 	if err != nil {
 		return domain.Repository{}, err
 	}
@@ -996,9 +996,8 @@ func (s *Service) Create(ctx context.Context, req domain.CreateRepositoryRequest
 	}
 	parent := strings.TrimSpace(req.ParentDir)
 	if parent == "" {
-		// Cloud: klasör seçimi yok, depolar çalışma alanının tenant alt
-		// ağacında yaşar.
-		repos, err := workspace.TenantReposDir(ctx, s.workspaceRoot)
+		// Klasör seçilmediyse depolar çalışma alanının repos/ klasöründe yaşar.
+		repos, err := workspace.ReposDir(s.workspaceRoot)
 		if err != nil {
 			return domain.Repository{}, err
 		}
@@ -1007,7 +1006,7 @@ func (s *Service) Create(ctx context.Context, req domain.CreateRepositoryRequest
 			return domain.Repository{}, fmt.Errorf("create repos dir: %w", err)
 		}
 	}
-	parentDir, err := workspace.ValidateProjectRoot(ctx, parent, s.workspaceRoot, s.allowedRoots)
+	parentDir, err := workspace.ValidateProjectRoot(parent, s.workspaceRoot, s.allowedRoots)
 	if err != nil {
 		return domain.Repository{}, err
 	}
@@ -2103,7 +2102,7 @@ func (s *Service) ensurePullRequestAsync(ctx context.Context, task domain.BoardT
 	if s.git == nil || s.workspaceRoot == "" || s.comments == nil {
 		return
 	}
-	workspacePath := s.taskWorkspacePath(ctx, task.ID)
+	workspacePath := s.taskWorkspacePath(task.ID)
 	if workspacePath == "" || !s.git.HasGit(workspacePath) {
 		return
 	}
@@ -2210,7 +2209,7 @@ func (s *Service) DeleteTask(ctx context.Context, repositoryID, taskID uuid.UUID
 	// After the delete rather than before, and never fatal: the row is what the
 	// caller asked to remove, and a wedged unlink must not resurrect it.
 	if s.workspaceRoot != "" {
-		if err := workspace.RemoveDirWithin(s.workspaceRoot, s.taskWorkspacePath(ctx, taskID)); err != nil {
+		if err := workspace.RemoveDirWithin(s.workspaceRoot, s.taskWorkspacePath(taskID)); err != nil {
 			log.Warn().Err(err).Str("task_id", taskID.String()).Msg("board: removing the workspace of a deleted task failed")
 		}
 	}

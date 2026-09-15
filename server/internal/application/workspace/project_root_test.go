@@ -1,83 +1,55 @@
 package workspace_test
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/stretchr/testify/require"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 )
 
-// tenantRootDir makes the calling tenant's subtree on disk and returns it.
-func tenantRootDir(t *testing.T, wsRoot string, id [16]byte) string {
-	t.Helper()
-	dir, err := workspace.TenantRoot(ctxFor(id), wsRoot)
-	require.NoError(t, err)
-	require.NoError(t, os.MkdirAll(dir, 0o755))
-	return dir
-}
-
-func TestValidateProjectRoot_InsideOwnTenantSubtree(t *testing.T) {
+func TestValidateProjectRoot_InsideWorkspaceRoot(t *testing.T) {
 	wsRoot := filepath.Join(t.TempDir(), "workspaces")
-	repo := filepath.Join(tenantRootDir(t, wsRoot, tenantA), "repos", "api")
+	repo := filepath.Join(wsRoot, "repos", "api")
 	require.NoError(t, os.MkdirAll(repo, 0o755))
 
-	root, err := workspace.ValidateProjectRoot(ctxFor(tenantA), repo, wsRoot, nil)
+	root, err := workspace.ValidateProjectRoot(repo, wsRoot, nil)
 	require.NoError(t, err)
 	require.Equal(t, mustAbs(repo), root)
 }
 
-// An empty allowed_roots is the shipped cloud configuration. It used to mean
-// "any absolute path on the pod", which is what made POST /v1/repositories/open
-// a one-request read of another customer's checkout.
+// An empty allowed_roots is not a wildcard. It used to mean "any absolute
+// path", which made POST /v1/repositories/open a one-request read of any
+// directory the server could see.
 func TestValidateProjectRoot_EmptyAllowlistRefusesArbitraryPaths(t *testing.T) {
 	wsRoot := filepath.Join(t.TempDir(), "workspaces")
-	tenantRootDir(t, wsRoot, tenantA)
+	require.NoError(t, os.MkdirAll(wsRoot, 0o755))
 	outside := t.TempDir()
 
-	_, err := workspace.ValidateProjectRoot(ctxFor(tenantA), outside, wsRoot, nil)
+	_, err := workspace.ValidateProjectRoot(outside, wsRoot, nil)
 	require.Error(t, err)
-	// The refusal must not confirm the directory exists: on a shared volume
-	// that difference enumerates other customers' repository names.
+	// The refusal must not confirm the directory exists.
 	require.NotContains(t, err.Error(), outside)
 }
 
-func TestValidateProjectRoot_RefusesAnotherTenantsSubtree(t *testing.T) {
-	wsRoot := filepath.Join(t.TempDir(), "workspaces")
-	victim := filepath.Join(tenantRootDir(t, wsRoot, tenantB), "repos", "api")
-	require.NoError(t, os.MkdirAll(victim, 0o755))
-	tenantRootDir(t, wsRoot, tenantA)
-
-	_, err := workspace.ValidateProjectRoot(ctxFor(tenantA), victim, wsRoot, nil)
-	require.Error(t, err)
-}
-
-// allowed_roots only ever WIDENS the set, for the self-hosted install that
-// keeps its checkouts outside the managed workspace.
+// allowed_roots only ever WIDENS the set, for the install that keeps its
+// checkouts outside the managed workspace.
 func TestValidateProjectRoot_AllowedRootWidens(t *testing.T) {
 	wsRoot := filepath.Join(t.TempDir(), "workspaces")
 	outside := t.TempDir()
 
-	root, err := workspace.ValidateProjectRoot(ctxFor(tenantA), outside, wsRoot, []string{outside})
+	root, err := workspace.ValidateProjectRoot(outside, wsRoot, []string{outside})
 	require.NoError(t, err)
 	require.Equal(t, mustAbs(outside), root)
-}
-
-func TestValidateProjectRoot_NoTenantIsRefused(t *testing.T) {
-	wsRoot := filepath.Join(t.TempDir(), "workspaces")
-	dir := t.TempDir()
-
-	_, err := workspace.ValidateProjectRoot(context.Background(), dir, wsRoot, []string{dir})
-	require.Error(t, err)
 }
 
 func TestValidateProjectRoot_NotDirectory(t *testing.T) {
 	f, err := os.CreateTemp("", "file-*")
 	require.NoError(t, err)
 	_ = f.Close()
-	_, err = workspace.ValidateProjectRoot(ctxFor(tenantA), f.Name(), t.TempDir(), nil)
+	_, err = workspace.ValidateProjectRoot(f.Name(), t.TempDir(), nil)
 	require.Error(t, err)
 }
 

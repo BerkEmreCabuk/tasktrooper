@@ -39,7 +39,7 @@ func (s *Service) DetectTaskMigration(ctx context.Context, task domain.BoardTask
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer cancel()
 
-		workspacePath := s.taskWorkspacePath(ctx, task.ID)
+		workspacePath := s.taskWorkspacePath(task.ID)
 		if workspacePath == "" {
 			return
 		}
@@ -152,14 +152,12 @@ const releaseTargetResolveTimeout = 15 * time.Second
 
 // taskWorkspacePath is where a task's branch is checked out. Same layout the
 // PR-open and migration detectors use.
-func (s *Service) taskWorkspacePath(ctx context.Context, taskID uuid.UUID) string {
-	// Through workspace.TenantTaskDir rather than a local Join: creating a
-	// checkout and deleting one have to agree on the path exactly — including
-	// on the tenant segment — and they no longer live in the same file. An
-	// empty path is already the "no workspace" answer both callers handle, and
-	// it is also the right answer for a context with no identity: nothing may
-	// derive a task path without knowing whose task it is.
-	path, err := workspace.TenantTaskDir(ctx, s.workspaceRoot, taskID)
+func (s *Service) taskWorkspacePath(taskID uuid.UUID) string {
+	// Through workspace.TaskDir rather than a local Join: creating a checkout
+	// and deleting one have to agree on the path exactly, and they no longer
+	// live in the same file. An empty path is already the "no workspace"
+	// answer both callers handle.
+	path, err := workspace.TaskDir(s.workspaceRoot, taskID)
 	if err != nil {
 		return ""
 	}
@@ -177,7 +175,7 @@ func (s *Service) resolveReleaseTargetSHA(ctx context.Context, taskID uuid.UUID)
 	if s.git == nil || s.workspaceRoot == "" {
 		return "", errors.New("git is not wired into the control plane")
 	}
-	path := s.taskWorkspacePath(ctx, taskID)
+	path := s.taskWorkspacePath(taskID)
 	if !s.git.HasGit(path) {
 		return "", fmt.Errorf("no git working copy at %s", path)
 	}

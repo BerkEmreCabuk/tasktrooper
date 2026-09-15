@@ -1,7 +1,6 @@
 package workspace
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,20 +8,18 @@ import (
 )
 
 // ValidateProjectRoot resolves a caller-supplied project root and refuses
-// anything outside the roots this tenant may register.
+// anything outside the roots a repository may be registered from.
 //
-// The allowlist is [this tenant's workspace subtree] + the operator's
-// configured allowed_roots, and the first term is why an EMPTY allowed_roots is
-// not a wildcard. It used to be: `len(allowedRoots) == 0` returned the path
-// unconditionally, which is the shipped cloud configuration, so
-// POST /v1/repositories/open would index any readable directory on the pod —
-// including another customer's clone — for whoever asked. An empty allowlist
-// now means what an empty allowlist means everywhere else here: nothing extra.
+// The allowlist is [the managed workspace root] + the operator's configured
+// allowed_roots, and the first term is why an EMPTY allowed_roots is not a
+// wildcard. It used to be: `len(allowedRoots) == 0` returned the path
+// unconditionally, so POST /v1/repositories/open would index any readable
+// directory for whoever asked. An empty allowlist now means what an empty
+// allowlist means everywhere else here: nothing extra.
 //
-// allowed_roots therefore only ever WIDENS the set, and exists for the
-// self-hosted install that keeps its checkouts outside the managed workspace.
-// A deployment that wants that back has to say so.
-func ValidateProjectRoot(ctx context.Context, path, workspaceRoot string, allowedRoots []string) (string, error) {
+// allowed_roots therefore only ever WIDENS the set, and exists for the install
+// that keeps its checkouts outside the managed workspace.
+func ValidateProjectRoot(path, workspaceRoot string, allowedRoots []string) (string, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
 		return "", fmt.Errorf("project root is empty")
@@ -39,15 +36,11 @@ func ValidateProjectRoot(ctx context.Context, path, workspaceRoot string, allowe
 		return "", fmt.Errorf("project root is not a directory")
 	}
 
-	// The tenant's own subtree comes first and is not optional. Resolving it
-	// can fail only when the context carries no identity, and that is a
-	// refusal: a request nobody can be identified for must not be able to
-	// register a path.
-	tenantRoot, err := TenantRoot(ctx, workspaceRoot)
+	root, err := ResolveRoot(workspaceRoot)
 	if err != nil {
 		return "", err
 	}
-	roots := append([]string{tenantRoot}, allowedRoots...)
+	roots := append([]string{root}, allowedRoots...)
 	for _, allowed := range roots {
 		allowed = strings.TrimSpace(allowed)
 		if allowed == "" {
@@ -61,10 +54,9 @@ func ValidateProjectRoot(ctx context.Context, path, workspaceRoot string, allowe
 			return abs, nil
 		}
 	}
-	// The path is not echoed back. On a shared volume the distinction between
-	// "that directory is not yours" and "that directory does not exist" is an
-	// oracle for enumerating other customers' repository names, and the caller
-	// already knows what they asked for.
+	// The path is not echoed back: "not allowed" versus "does not exist" would
+	// tell a caller which directories exist, and they already know what they
+	// asked for.
 	return "", fmt.Errorf("project root is outside this workspace's allowed roots")
 }
 

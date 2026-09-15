@@ -14,7 +14,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/database"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 // SessionPathSuite is RepositoryRootPathSuite for the session columns. Same
@@ -32,11 +31,7 @@ type SessionPathSuite struct {
 	db     *postgres.DB
 	// hostRoot stands in for this host's cfg.Storage.Sessions.WorkspaceRoot.
 	hostRoot string
-	// tenantRoot is hostRoot/tenants/<suite tenant>: every re-anchor lands
-	// inside the calling tenant's subtree, never at the shared root.
-	tenantRoot string
-	tenantID   uuid.UUID
-	store      *postgres.SessionStore
+	store    *postgres.SessionStore
 }
 
 func TestSessionPathSuite(t *testing.T) {
@@ -76,13 +71,8 @@ func (s *SessionPathSuite) SetupSuite() {
 	pool, err := pgxpool.New(s.ctx, pg.DSN())
 	s.Require().NoError(err)
 	s.pool = pool
-	// The workspace layout still has a tenant segment, so the expected paths
-	// below need an identity on the context.
 	s.db = postgres.NewDB(pool)
-	s.tenantID = uuid.New()
-	s.ctx = tenant.With(s.ctx, tenant.Identity{TenantID: s.tenantID, Role: tenant.RoleOwner})
 	s.hostRoot = filepath.Join(tmp, "local-runner", "data", "workspaces")
-	s.tenantRoot = filepath.Join(s.hostRoot, "tenants", s.tenantID.String())
 	s.store = postgres.NewSessionStore(s.db).SetHostRoots(s.hostRoot, nil)
 }
 
@@ -111,7 +101,7 @@ func (s *SessionPathSuite) TestCloudWrittenWorkspaceDirIsReanchoredOnEveryRead()
 	taskID := uuid.New()
 	cloudPath := "/data/workspaces/task-" + taskID.String()
 	s.skipIfDataExists("/data")
-	want := filepath.Join(s.tenantRoot, "task-"+taskID.String())
+	want := filepath.Join(s.hostRoot, "task-"+taskID.String())
 
 	created, err := s.store.Create(s.ctx, "pod chat", "sonnet", cloudPath, nil, nil, nil)
 	s.Require().NoError(err)
@@ -149,7 +139,7 @@ func (s *SessionPathSuite) TestCloudWrittenProjectRootIsReanchored() {
 
 	got, err := s.store.Get(s.ctx, created.ID)
 	s.Require().NoError(err)
-	want := filepath.Join(s.tenantRoot, "repos", "acme-web")
+	want := filepath.Join(s.hostRoot, "repos", "acme-web")
 	s.Equal(want, got.ProjectRoot)
 	s.Equal(want, got.WorkspaceDir)
 }
@@ -157,7 +147,7 @@ func (s *SessionPathSuite) TestCloudWrittenProjectRootIsReanchored() {
 // A workspace this host can really use is left alone — the guarantee that a
 // live local checkout is never traded for an empty new directory.
 func (s *SessionPathSuite) TestLocallyValidPathIsUntouched() {
-	local := filepath.Join(s.tenantRoot, "task-"+uuid.NewString())
+	local := filepath.Join(s.hostRoot, "task-"+uuid.NewString())
 	s.Require().NoError(os.MkdirAll(local, 0o755))
 
 	created, err := s.store.Create(s.ctx, "local chat", "", local, nil, nil, nil)
@@ -171,10 +161,10 @@ func (s *SessionPathSuite) TestLocallyValidPathIsUntouched() {
 
 // Neither host owns the column, so the translation has to round-trip: a row
 // written here reads as the pod's own path on the pod, and reads back as this
-// host's original path when the tenant comes home.
+// host's original path when it is read here again.
 func (s *SessionPathSuite) TestSymmetricAcrossHosts() {
 	taskID := uuid.New()
-	macPath := filepath.Join(s.tenantRoot, "task-"+taskID.String())
+	macPath := filepath.Join(s.hostRoot, "task-"+taskID.String())
 	s.skipIfDataExists("/data")
 
 	created, err := s.store.Create(s.ctx, "mac chat", "", macPath, nil, nil, nil)
@@ -184,7 +174,7 @@ func (s *SessionPathSuite) TestSymmetricAcrossHosts() {
 	onPod := postgres.NewSessionStore(s.db).SetHostRoots("/data/workspaces", nil)
 	podSess, err := onPod.Get(s.ctx, created.ID)
 	s.Require().NoError(err)
-	s.Equal("/data/workspaces/tenants/"+s.tenantID.String()+"/task-"+taskID.String(), podSess.WorkspaceDir)
+	s.Equal("/data/workspaces/task-"+taskID.String(), podSess.WorkspaceDir)
 
 	// Whatever the pod would then write back, read here, lands where it began.
 	s.Require().NoError(s.store.UpdateWorkspaceDir(s.ctx, created.ID, podSess.WorkspaceDir))
@@ -199,7 +189,7 @@ func (s *SessionPathSuite) TestFindByTaskIsReanchored() {
 	s.skipIfDataExists("/data")
 
 	repo, err := postgres.NewRepositoryStore(s.db).Create(
-		s.ctx, "findbytask-repo", "", filepath.Join(s.tenantRoot, "repos", "findbytask-repo"), "", "")
+		s.ctx, "findbytask-repo", "", filepath.Join(s.hostRoot, "repos", "findbytask-repo"), "", "")
 	s.Require().NoError(err)
 	tasks := postgres.NewBoardTaskStore(s.db)
 	number, err := tasks.NextTaskNumber(s.ctx, domain.TaskTypeTask)
@@ -233,5 +223,5 @@ func (s *SessionPathSuite) TestFindByTaskIsReanchored() {
 	got, ok, err := s.store.FindByTask(s.ctx, taskID)
 	s.Require().NoError(err)
 	s.Require().True(ok)
-	s.Equal(filepath.Join(s.tenantRoot, "task-"+taskID.String()), got.WorkspaceDir)
+	s.Equal(filepath.Join(s.hostRoot, "task-"+taskID.String()), got.WorkspaceDir)
 }

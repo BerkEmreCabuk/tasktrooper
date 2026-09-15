@@ -62,7 +62,7 @@ func (w taskChatWorkspace) ResolveTaskWorkspace(ctx context.Context, repositoryI
 		return binding, nil
 	}
 	branch := domain.TaskBranchName(task)
-	workspacePath, err := workspace.TenantTaskDir(ctx, w.workspaceRoot, taskID)
+	workspacePath, err := workspace.TaskDir(w.workspaceRoot, taskID)
 	if err != nil {
 		return session.TaskBinding{}, err
 	}

@@ -111,7 +111,7 @@ func TestCommitTaskChangesPushesAndRecordsThePR(t *testing.T) {
 	}
 	svc, tasks := newCommitFixture(task, repositoryID, git)
 
-	result, err := svc.CommitTaskChanges(reaperCtx(reaperTenantA), repositoryID, task.ID, "add the store link to the footer")
+	result, err := svc.CommitTaskChanges(context.Background(), repositoryID, task.ID, "add the store link to the footer")
 	require.NoError(t, err)
 
 	assert.True(t, result.Committed)
@@ -141,7 +141,7 @@ func TestCommitTaskChangesReportsNothingToCommit(t *testing.T) {
 	}
 	svc, _ := newCommitFixture(task, repositoryID, git)
 
-	result, err := svc.CommitTaskChanges(reaperCtx(reaperTenantA), repositoryID, task.ID, "no-op")
+	result, err := svc.CommitTaskChanges(context.Background(), repositoryID, task.ID, "no-op")
 	require.NoError(t, err)
 
 	assert.False(t, result.Committed)
@@ -158,7 +158,7 @@ func TestCommitTaskChangesWithoutAWorkspaceIsANoOp(t *testing.T) {
 	git := &taskPRGit{hasGit: false}
 	svc, _ := newCommitFixture(task, repositoryID, git)
 
-	result, err := svc.CommitTaskChanges(reaperCtx(reaperTenantA), repositoryID, task.ID, "anything")
+	result, err := svc.CommitTaskChanges(context.Background(), repositoryID, task.ID, "anything")
 	require.NoError(t, err)
 
 	assert.False(t, result.Committed)
@@ -179,7 +179,7 @@ func TestCommitTaskChangesSurvivesAFailedPROpen(t *testing.T) {
 	}
 	svc, _ := newCommitFixture(task, repositoryID, git)
 
-	result, err := svc.CommitTaskChanges(reaperCtx(reaperTenantA), repositoryID, task.ID, "wip")
+	result, err := svc.CommitTaskChanges(context.Background(), repositoryID, task.ID, "wip")
 	require.NoError(t, err)
 	assert.True(t, result.Committed)
 	assert.Empty(t, result.PRURL)
@@ -193,7 +193,7 @@ func TestPullRequestSaysSoWhenNoPRIsKnown(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), RepositoryID: repositoryID, Key: "DE-1", Title: "Add the store link"}
 	svc, _ := newCommitFixture(task, repositoryID, &taskPRGit{hasGit: true})
 
-	pr, err := svc.PullRequest(reaperCtx(reaperTenantA), repositoryID, task.ID, true)
+	pr, err := svc.PullRequest(context.Background(), repositoryID, task.ID, true)
 	require.NoError(t, err)
 
 	assert.False(t, pr.Known)
@@ -211,7 +211,7 @@ func TestPullRequestKeepsAnUnparsableLink(t *testing.T) {
 	}
 	svc, _ := newCommitFixture(task, repositoryID, &taskPRGit{hasGit: true})
 
-	pr, err := svc.PullRequest(reaperCtx(reaperTenantA), repositoryID, task.ID, true)
+	pr, err := svc.PullRequest(context.Background(), repositoryID, task.ID, true)
 	require.NoError(t, err)
 
 	assert.True(t, pr.Known)

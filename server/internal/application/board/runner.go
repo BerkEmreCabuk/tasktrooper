@@ -970,7 +970,7 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 		// the LLM on the shared project root (it would work on the wrong tree,
 		// on someone else's branch, and could push to the default branch). Fail
 		// the run instead so nothing runs until the workspace is ready.
-		wsPath, wsPathErr := workspace.TenantTaskDir(ctx, r.workspaceRoot, job.Task.ID)
+		wsPath, wsPathErr := workspace.TaskDir(r.workspaceRoot, job.Task.ID)
 		if wsPathErr != nil {
 			return fail(fmt.Errorf("task workspace path could not be resolved, agent was not started: %w", wsPathErr))
 		}

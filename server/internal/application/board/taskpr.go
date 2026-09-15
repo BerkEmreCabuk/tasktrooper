@@ -159,16 +159,15 @@ const maxPRCommentBody = 4000
 
 // TaskWorkspacePath is where a task's isolated checkout lives. Derived, not
 // stored — the same derivation the runner, the pipeline and the repository
-// service already use, tenant segment included.
+// service already use.
 //
 // An empty string means "no workspace here", which every caller already
-// handles, and it is also the answer for a context with no identity: a task
-// path cannot be derived without knowing whose task it is.
-func (s *TaskPRService) TaskWorkspacePath(ctx context.Context, taskID uuid.UUID) string {
+// handles.
+func (s *TaskPRService) TaskWorkspacePath(taskID uuid.UUID) string {
 	if s.workspaceRoot == "" {
 		return ""
 	}
-	path, err := workspace.TenantTaskDir(ctx, s.workspaceRoot, taskID)
+	path, err := workspace.TaskDir(s.workspaceRoot, taskID)
 	if err != nil {
 		return ""
 	}
@@ -298,7 +297,7 @@ func (s *TaskPRService) CommitTaskChanges(ctx context.Context, repositoryID, tas
 	if s.git == nil {
 		return domain.TaskCommitResult{}, fmt.Errorf("git is not configured on this deployment")
 	}
-	workspaceDir := s.TaskWorkspacePath(ctx, taskID)
+	workspaceDir := s.TaskWorkspacePath(taskID)
 	if workspaceDir == "" || !s.git.HasGit(workspaceDir) {
 		// No workspace means no edits were made here — there is literally
 		// nothing to push. Creating one now would only produce an empty branch.
@@ -462,7 +461,7 @@ func (s *TaskPRService) ownerRepo(ctx context.Context, repositoryID, taskID uuid
 	if s.git == nil {
 		return "", "", fmt.Errorf("git is not configured on this deployment")
 	}
-	if dir := s.TaskWorkspacePath(ctx, taskID); dir != "" && s.git.HasGit(dir) {
+	if dir := s.TaskWorkspacePath(taskID); dir != "" && s.git.HasGit(dir) {
 		if info, err := s.git.TaskGitInfo(ctx, dir); err == nil && info.Owner != "" && info.Repo != "" {
 			return info.Owner, info.Repo, nil
 		}

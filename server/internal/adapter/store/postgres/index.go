@@ -69,7 +69,7 @@ func (s *IndexStore) SetHostRoots(workspaceRoot string, allowedRoots []string) *
 //
 // Invalidate-and-rebuild was the alternative and is far more destructive: it
 // would discard every embedding for a repository on a condition that flips each
-// time the tenant changes host, so the two hosts would take turns re-embedding
+// time the repository changes host, so the two hosts would take turns re-embedding
 // the same tree forever — real provider spend and minutes of latency, to
 // correct a staleness the hash-incremental pass (workspace_file_hashes →
 // DeleteFileData/SaveFileHashes) already fixes file by file on the next pass.
@@ -81,11 +81,11 @@ func (s *IndexStore) SetHostRoots(workspaceRoot string, allowedRoots []string) *
 // root_path with this host's absolute root (indexer.Service → UpdateIndexTree),
 // so a row converges on whoever indexed last and the read-time translation
 // keeps the other host safe in the meantime.
-func (s *IndexStore) localizeIndexRootPath(ctx context.Context, idx *domain.WorkspaceIndex) {
+func (s *IndexStore) localizeIndexRootPath(idx *domain.WorkspaceIndex) {
 	if s == nil || idx == nil || idx.RootPath == "" {
 		return
 	}
-	resolved, reanchored, first := s.hosts.localize(ctx, idx.RootPath)
+	resolved, reanchored, first := s.hosts.localize(idx.RootPath)
 	if !reanchored {
 		return
 	}
@@ -144,7 +144,7 @@ func (s *IndexStore) CreateIndex(ctx context.Context, sessionID uuid.UUID, rootP
 	}
 	idx.SessionID = &sid
 	idx.Status = domain.IndexStatus(status)
-	s.localizeIndexRootPath(ctx, &idx)
+	s.localizeIndexRootPath(&idx)
 	return idx, nil
 }
 
@@ -172,7 +172,7 @@ func (s *IndexStore) CreateProjectIndex(ctx context.Context, projectID uuid.UUID
 	}
 	idx.ProjectID = &pid
 	idx.Status = domain.IndexStatus(status)
-	s.localizeIndexRootPath(ctx, &idx)
+	s.localizeIndexRootPath(&idx)
 	return idx, nil
 }
 
@@ -203,7 +203,7 @@ func (s *IndexStore) CreateProjectBranchIndex(ctx context.Context, projectID uui
 	}
 	idx.ProjectID = &pid
 	idx.Status = domain.IndexStatus(status)
-	s.localizeIndexRootPath(ctx, &idx)
+	s.localizeIndexRootPath(&idx)
 	return idx, nil
 }
 
@@ -242,7 +242,7 @@ func (s *IndexStore) GetIndexByProjectBranch(ctx context.Context, projectID uuid
 		return domain.WorkspaceIndex{}, fmt.Errorf("get branch index: %w", err)
 	}
 	idx.Status = domain.IndexStatus(status)
-	s.localizeIndexRootPath(ctx, &idx)
+	s.localizeIndexRootPath(&idx)
 	return idx, nil
 }
 
@@ -259,7 +259,7 @@ func (s *IndexStore) scanIndex(ctx context.Context, query string, arg any) (doma
 		return domain.WorkspaceIndex{}, fmt.Errorf("get index: %w", err)
 	}
 	idx.Status = domain.IndexStatus(status)
-	s.localizeIndexRootPath(ctx, &idx)
+	s.localizeIndexRootPath(&idx)
 	return idx, nil
 }
 

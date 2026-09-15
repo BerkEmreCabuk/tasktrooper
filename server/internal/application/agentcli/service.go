@@ -222,7 +222,7 @@ func (s *Service) Disconnect(ctx context.Context, flavor domain.AgentCLIFlavor) 
 	if err := s.store.Clear(ctx, flavor); err != nil {
 		return domain.AgentCLIState{}, err
 	}
-	if root, err := s.snapshotRoot(ctx, flavor); err == nil {
+	if root, err := s.snapshotRoot(flavor); err == nil {
 		_ = os.RemoveAll(root)
 	}
 	s.reconcileRuntimes(ctx)
@@ -254,11 +254,11 @@ func (s *Service) reconcileRuntimes(ctx context.Context) {
 	}
 }
 
-func (s *Service) snapshotRoot(ctx context.Context, flavor domain.AgentCLIFlavor) (string, error) {
+func (s *Service) snapshotRoot(flavor domain.AgentCLIFlavor) (string, error) {
 	if s.workspaceRoot == "" {
 		return "", errors.New("this server has no workspace root configured, so there is nowhere it owns to write the agent catalog")
 	}
-	root, err := workspace.TenantRoot(ctx, s.workspaceRoot)
+	root, err := workspace.ResolveRoot(s.workspaceRoot)
 	if err != nil {
 		return "", err
 	}
@@ -267,7 +267,7 @@ func (s *Service) snapshotRoot(ctx context.Context, flavor domain.AgentCLIFlavor
 
 func (s *Service) snapshotCatalog(ctx context.Context, flavor domain.AgentCLIFlavor) (root string, agentCount, skillCount int, err error) {
 
-	root, err = s.snapshotRoot(ctx, flavor)
+	root, err = s.snapshotRoot(flavor)
 	if err != nil {
 		return "", 0, 0, err
 	}

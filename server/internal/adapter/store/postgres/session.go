@@ -45,7 +45,7 @@ func (s *SessionStore) SetHostRoots(workspaceRoot string, allowedRoots []string)
 // task's checkout (<workspace_root>/task-<id>), or the chat's own scratch dir —
 // and project_root is the subtree the indexer and the code tools are scoped to.
 // Both are absolute paths belonging to whichever host wrote the row, and one
-// tenant database is now served by two of them. Resuming a pod-written chat on
+// database is now served by two of them. Resuming a pod-written chat on
 // the Mac reached `os.MkdirAll("/data/workspaces/...")` in
 // session.Service.ensureSessionWorkspace and failed the turn with
 // `mkdir /data: read-only file system`, the same way the board run did before
@@ -60,16 +60,16 @@ func (s *SessionStore) SetHostRoots(workspaceRoot string, allowedRoots []string)
 // roots — is left alone and no live local workspace is ever traded for an empty
 // new one. The stored columns are untouched, which is what keeps the
 // translation symmetric: the pod re-anchors a Mac-written path the same way.
-func (s *SessionStore) localizeSessionPaths(ctx context.Context, sess *domain.Session) {
+func (s *SessionStore) localizeSessionPaths(sess *domain.Session) {
 	if s == nil || sess == nil {
 		return
 	}
-	sess.WorkspaceDir = s.localizeSessionPath(ctx, sess.ID, "workspace_dir", sess.WorkspaceDir)
-	sess.ProjectRoot = s.localizeSessionPath(ctx, sess.ID, "project_root", sess.ProjectRoot)
+	sess.WorkspaceDir = s.localizeSessionPath(sess.ID, "workspace_dir", sess.WorkspaceDir)
+	sess.ProjectRoot = s.localizeSessionPath(sess.ID, "project_root", sess.ProjectRoot)
 }
 
-func (s *SessionStore) localizeSessionPath(ctx context.Context, id uuid.UUID, column, stored string) string {
-	resolved, reanchored, first := s.hosts.localize(ctx, stored)
+func (s *SessionStore) localizeSessionPath(id uuid.UUID, column, stored string) string {
+	resolved, reanchored, first := s.hosts.localize(stored)
 	if !reanchored {
 		return stored
 	}
@@ -87,12 +87,12 @@ func (s *SessionStore) localizeSessionPath(ctx context.Context, id uuid.UUID, co
 // scanSession reads one sessions row in sessionColumns order and re-anchors its
 // paths onto this host. Every SELECT/RETURNING in this file goes through it, so
 // no read path can hand a consumer another host's directory.
-func (s *SessionStore) scanSession(ctx context.Context, row interface{ Scan(dest ...any) error }) (domain.Session, error) {
+func (s *SessionStore) scanSession(row interface{ Scan(dest ...any) error }) (domain.Session, error) {
 	var sess domain.Session
 	if err := row.Scan(sessionScanTargets(&sess)...); err != nil {
 		return domain.Session{}, err
 	}
-	s.localizeSessionPaths(ctx, &sess)
+	s.localizeSessionPaths(&sess)
 	return sess, nil
 }
 
@@ -113,7 +113,7 @@ func sessionScanTargets(sess *domain.Session) []any {
 }
 
 func (s *SessionStore) Create(ctx context.Context, title, model, workspaceDir string, projectID, agentID *uuid.UUID, expiresAt *time.Time) (domain.Session, error) {
-	sess, err := s.scanSession(ctx, s.pool.QueryRow(ctx, `
+	sess, err := s.scanSession(s.pool.QueryRow(ctx, `
 		INSERT INTO sessions (title, model, workspace_dir, repository_id, agent_id, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING `+sessionColumns+`
@@ -146,7 +146,7 @@ func (s *SessionStore) BindTask(ctx context.Context, id, taskID uuid.UUID) error
 // raced another, a restored backup) reopens the one that was last spoken in
 // rather than an abandoned one.
 func (s *SessionStore) FindByTask(ctx context.Context, taskID uuid.UUID) (domain.Session, bool, error) {
-	sess, err := s.scanSession(ctx, s.pool.QueryRow(ctx, `
+	sess, err := s.scanSession(s.pool.QueryRow(ctx, `
 		SELECT `+sessionColumns+`
 		FROM sessions WHERE task_id = $1
 		ORDER BY updated_at DESC LIMIT 1
@@ -201,7 +201,7 @@ func (s *SessionStore) UpdateCLISessionID(ctx context.Context, id uuid.UUID, cli
 }
 
 func (s *SessionStore) Get(ctx context.Context, id uuid.UUID) (domain.Session, error) {
-	sess, err := s.scanSession(ctx, s.pool.QueryRow(ctx, `
+	sess, err := s.scanSession(s.pool.QueryRow(ctx, `
 		SELECT `+sessionColumns+`
 		FROM sessions WHERE id = $1
 	`, id))
@@ -278,7 +278,7 @@ func (s *SessionStore) scanSessions(ctx context.Context, rows interface {
 }) ([]domain.Session, error) {
 	var sessions []domain.Session
 	for rows.Next() {
-		sess, err := s.scanSession(ctx, rows)
+		sess, err := s.scanSession(rows)
 		if err != nil {
 			return nil, err
 		}

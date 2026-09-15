@@ -20,9 +20,9 @@ func TestLocalizeIndexRootPath_ForeignProjectRootReanchored(t *testing.T) {
 	store := (&IndexStore{}).SetHostRoots(wsRoot, nil)
 
 	idx := domain.WorkspaceIndex{ID: uuid.New(), RootPath: "/data/workspaces/repos/acme-web"}
-	store.localizeIndexRootPath(tenantCtx(hostTenantA), &idx)
+	store.localizeIndexRootPath(&idx)
 
-	if want := filepath.Join(tenantRoot(wsRoot, hostTenantA), "repos", "acme-web"); idx.RootPath != want {
+	if want := filepath.Join(wsRoot, "repos", "acme-web"); idx.RootPath != want {
 		t.Fatalf("root path = %q, want %q", idx.RootPath, want)
 	}
 }
@@ -39,9 +39,9 @@ func TestLocalizeIndexRootPath_ForeignBranchRootReanchored(t *testing.T) {
 		Branch:   "feature/t-12",
 		RootPath: "/data/workspaces/task-" + taskID.String(),
 	}
-	store.localizeIndexRootPath(tenantCtx(hostTenantA), &idx)
+	store.localizeIndexRootPath(&idx)
 
-	if want := filepath.Join(tenantRoot(wsRoot, hostTenantA), "task-"+taskID.String()); idx.RootPath != want {
+	if want := filepath.Join(wsRoot, "task-"+taskID.String()); idx.RootPath != want {
 		t.Fatalf("root path = %q, want %q", idx.RootPath, want)
 	}
 }
@@ -50,11 +50,11 @@ func TestLocalizeIndexRootPath_ForeignBranchRootReanchored(t *testing.T) {
 // nothing is moved.
 func TestLocalizeIndexRootPath_LocalPathUnchanged(t *testing.T) {
 	wsRoot := filepath.Join(t.TempDir(), "workspaces")
-	local := filepath.Join(tenantRoot(wsRoot, hostTenantA), "repos", "acme-web")
+	local := filepath.Join(wsRoot, "repos", "acme-web")
 	store := (&IndexStore{}).SetHostRoots(wsRoot, nil)
 
 	idx := domain.WorkspaceIndex{ID: uuid.New(), RootPath: local}
-	store.localizeIndexRootPath(tenantCtx(hostTenantA), &idx)
+	store.localizeIndexRootPath(&idx)
 
 	if idx.RootPath != local {
 		t.Fatalf("root path = %q, want %q", idx.RootPath, local)
@@ -64,7 +64,7 @@ func TestLocalizeIndexRootPath_LocalPathUnchanged(t *testing.T) {
 func TestLocalizeIndexRootPath_NoHostRootsIsIdentity(t *testing.T) {
 	store := &IndexStore{}
 	idx := domain.WorkspaceIndex{ID: uuid.New(), RootPath: "/data/workspaces/repos/acme-web"}
-	store.localizeIndexRootPath(tenantCtx(hostTenantA), &idx)
+	store.localizeIndexRootPath(&idx)
 	if idx.RootPath != "/data/workspaces/repos/acme-web" {
 		t.Fatalf("root path = %q, want it unchanged", idx.RootPath)
 	}

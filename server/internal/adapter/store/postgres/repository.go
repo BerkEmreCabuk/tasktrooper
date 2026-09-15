@@ -49,7 +49,7 @@ func (s *RepositoryStore) SetHostRoots(workspaceRoot string, allowedRoots []stri
 // actually use, and is applied to every repositories row leaving this store.
 //
 // root_path is an absolute path belonging to whichever host wrote the row, and
-// one tenant database is now served by two of them: the cloud pod (PVC at
+// one database is now served by two of them: the cloud pod (PVC at
 // /data) and the user's Mac behind a reverse tunnel (DATA_DIR under the repo).
 // A board run on the Mac read the pod's "/data/..." and died in git clone with
 // `mkdir /data: read-only file system`. Translating here rather than at each
@@ -60,11 +60,11 @@ func (s *RepositoryStore) SetHostRoots(workspaceRoot string, allowedRoots []stri
 // The path is only rewritten when it is genuinely foreign (see
 // workspace.HostRootPath); anything that exists here, or that lies under one of
 // this host's roots, is left alone.
-func (s *RepositoryStore) localizeRootPath(ctx context.Context, r *domain.Repository) {
+func (s *RepositoryStore) localizeRootPath(r *domain.Repository) {
 	if s == nil || r == nil || r.RootPath == "" {
 		return
 	}
-	resolved, reanchored, first := s.hosts.localize(ctx, r.RootPath)
+	resolved, reanchored, first := s.hosts.localize(r.RootPath)
 	if !reanchored {
 		return
 	}
@@ -85,12 +85,12 @@ const repositoryCols = `id, name, description, root_path, remote_url, verify_com
 // scanRepository reads a single repositories row in repositoryCols order and
 // re-anchors its root_path onto this host. Every SELECT/RETURNING in this file
 // goes through it, so no read path can hand a consumer another host's path.
-func (s *RepositoryStore) scanRepository(ctx context.Context, row interface{ Scan(dest ...any) error }) (domain.Repository, error) {
+func (s *RepositoryStore) scanRepository(row interface{ Scan(dest ...any) error }) (domain.Repository, error) {
 	r, err := scanRepositoryRow(row)
 	if err != nil {
 		return r, err
 	}
-	s.localizeRootPath(ctx, &r)
+	s.localizeRootPath(&r)
 	return r, nil
 }
 
@@ -191,7 +191,7 @@ func (s *RepositoryStore) WebhookSecret(ctx context.Context, id uuid.UUID) (stri
 func (s *RepositoryStore) Create(ctx context.Context, name, description, rootPath, remoteURL, kind string) (domain.Repository, error) {
 	// NULLIF keeps the column default ('backend') for callers that pass no
 	// kind, so the insert stays valid against the NOT NULL column.
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		INSERT INTO repositories (name, description, root_path, remote_url, kind)
 		VALUES ($1, $2, $3, $4, COALESCE(NULLIF($5, ''), 'backend'))
 		RETURNING `+repositoryCols,
@@ -206,7 +206,7 @@ func (s *RepositoryStore) Create(ctx context.Context, name, description, rootPat
 // registration and to backfill rows created before remote_url existed, by
 // reading the origin out of an existing working copy while one is still there.
 func (s *RepositoryStore) UpdateRemoteURL(ctx context.Context, id uuid.UUID, remoteURL string) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET remote_url = $2, updated_at = now()
 		WHERE id = $1
 		RETURNING `+repositoryCols, id, remoteURL))
@@ -225,7 +225,7 @@ func (s *RepositoryStore) UpdateRemoteURL(ctx context.Context, id uuid.UUID, rem
 // inventing a second notion of "where the code is" for the one host that can
 // answer it.
 func (s *RepositoryStore) UpdateRootPath(ctx context.Context, id uuid.UUID, rootPath string) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET root_path = $2, updated_at = now()
 		WHERE id = $1
 		RETURNING `+repositoryCols, id, rootPath))
@@ -239,7 +239,7 @@ func (s *RepositoryStore) UpdateRootPath(ctx context.Context, id uuid.UUID, root
 }
 
 func (s *RepositoryStore) Get(ctx context.Context, id uuid.UUID) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `SELECT `+repositoryCols+` FROM repositories WHERE id = $1`, id))
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `SELECT `+repositoryCols+` FROM repositories WHERE id = $1`, id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Repository{}, fmt.Errorf("get repository: %w", port.ErrNotFound)
@@ -265,22 +265,13 @@ func (s *RepositoryStore) Get(ctx context.Context, id uuid.UUID) (domain.Reposit
 // id are then split across two ids that never converge.
 //
 // The fallback matches on the directory name, but only against rows whose
-// stored path is foreign to this host, or which name this host's PRE-TENANT
-// layout: a row naming a path that exists here under this tenant's own roots is
-// a different repository which merely shares a directory name, and conflating
-// those would be worse than the duplicate. Name collision across hosts is the
-// accepted residue — two hosts serving one tenant are expected to hold the same
-// repositories.
-//
-// The pre-tenant clause is what keeps a volume written before the layout
-// carried a tenant segment working: those rows still name <root>/repos/<name>,
-// which exists and is therefore "usable", but is no longer a path this host
-// derives — so without it a re-import would insert a second row beside the one
-// already holding that repository's tasks, indexes and runs. Row-level security
-// has already established the row is this tenant's; the shared directory it
-// names is left in place rather than migrated.
+// stored path is foreign to this host: a row naming a path that is usable here
+// is a different repository which merely shares a directory name, and
+// conflating those would be worse than the duplicate. Name collision across
+// hosts is the accepted residue — two hosts serving one database are expected
+// to hold the same repositories.
 func (s *RepositoryStore) GetByRootPath(ctx context.Context, rootPath string) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `SELECT `+repositoryCols+` FROM repositories WHERE root_path = $1`, rootPath))
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `SELECT `+repositoryCols+` FROM repositories WHERE root_path = $1`, rootPath))
 	if err == nil {
 		return r, nil
 	}
@@ -308,7 +299,7 @@ func (s *RepositoryStore) GetByRootPath(ctx context.Context, rootPath string) (d
 		if scanErr != nil {
 			return domain.Repository{}, fmt.Errorf("get repository by root: %w", scanErr)
 		}
-		if s.hosts.usable(ctx, candidate.RootPath) && !s.hosts.preTenantLayout(ctx, candidate.RootPath) {
+		if s.hosts.usable(candidate.RootPath) {
 			continue
 		}
 		log.Info().
@@ -316,7 +307,7 @@ func (s *RepositoryStore) GetByRootPath(ctx context.Context, rootPath string) (d
 			Str("stored_root_path", candidate.RootPath).
 			Str("requested_root_path", rootPath).
 			Msg("repository matched by directory name; its root_path belongs to another host")
-		s.localizeRootPath(ctx, &candidate)
+		s.localizeRootPath(&candidate)
 		return candidate, nil
 	}
 	if rowsErr := rows.Err(); rowsErr != nil {
@@ -371,7 +362,7 @@ func (s *RepositoryStore) List(ctx context.Context) ([]domain.Repository, error)
 func (s *RepositoryStore) scanRepositories(ctx context.Context, rows pgx.Rows) ([]domain.Repository, error) {
 	var repos []domain.Repository
 	for rows.Next() {
-		r, err := s.scanRepository(ctx, rows)
+		r, err := s.scanRepository(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -381,7 +372,7 @@ func (s *RepositoryStore) scanRepositories(ctx context.Context, rows pgx.Rows) (
 }
 
 func (s *RepositoryStore) Update(ctx context.Context, id uuid.UUID, name, description string, verifyCommand, buildCommand, testCommand *string, requireHumanReview *bool) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET
 			name = COALESCE(NULLIF($2, ''), name),
 			description = COALESCE($3, description),
@@ -403,7 +394,7 @@ func (s *RepositoryStore) Update(ctx context.Context, id uuid.UUID, name, descri
 // It is separate from Update so the incident settings screen cannot blank an
 // unrelated command field by omitting it.
 func (s *RepositoryStore) UpdateIncidentPolicy(ctx context.Context, id uuid.UUID, policy domain.IncidentPolicy) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET incident_policy = $2, updated_at = now()
 		WHERE id = $1
 		RETURNING `+repositoryCols,
@@ -417,7 +408,7 @@ func (s *RepositoryStore) UpdateIncidentPolicy(ctx context.Context, id uuid.UUID
 // UpdateTestStrategy sets how the repo's tasks are verified (local / stage /
 // per_step).
 func (s *RepositoryStore) UpdateTestStrategy(ctx context.Context, id uuid.UUID, strategy string) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET test_strategy = $2, updated_at = now()
 		WHERE id = $1
 		RETURNING `+repositoryCols, id, strategy))
@@ -431,7 +422,7 @@ func (s *RepositoryStore) UpdateTestStrategy(ctx context.Context, id uuid.UUID, 
 // Update for the same reason UpdateIncidentPolicy is: a settings screen that
 // posts one toggle must not blank an unrelated command field by omitting it.
 func (s *RepositoryStore) UpdateLifecycleGates(ctx context.Context, id uuid.UUID, requireReviewChain, requireReleaseDeploy, requirePipelineForReview, requireOverallCoverage *bool, coverageThreshold *float64) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET
 			require_review_chain = COALESCE($2, require_review_chain),
 			require_release_deploy = COALESCE($3, require_release_deploy),
@@ -453,7 +444,7 @@ func (s *RepositoryStore) UpdateLifecycleGates(ctx context.Context, id uuid.UUID
 // single-purpose setters are: the tool that writes it must not be able to
 // blank an unrelated field.
 func (s *RepositoryStore) UpdateProfile(ctx context.Context, id uuid.UUID, profileMD string) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET profile_md = $2, profile_updated_at = now(), updated_at = now()
 		WHERE id = $1
 		RETURNING `+repositoryCols, id, profileMD))
@@ -474,7 +465,7 @@ func (s *RepositoryStore) UpdateDocs(ctx context.Context, id uuid.UUID, docs dom
 	if err != nil {
 		return domain.Repository{}, fmt.Errorf("marshal repository docs: %w", err)
 	}
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET docs = $2, updated_at = now()
 		WHERE id = $1
 		RETURNING `+repositoryCols, id, body))
@@ -492,7 +483,7 @@ func (s *RepositoryStore) UpdateDocs(ctx context.Context, id uuid.UUID, docs dom
 // it is written by import detection and by one field of a settings form, and
 // neither may blank an unrelated column by omitting it.
 func (s *RepositoryStore) UpdateMobilePlatform(ctx context.Context, id uuid.UUID, platform string) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET mobile_platform = $2, updated_at = now()
 		WHERE id = $1
 		RETURNING `+repositoryCols, id, platform))
@@ -510,7 +501,7 @@ func (s *RepositoryStore) UpdateMobilePlatform(ctx context.Context, id uuid.UUID
 // is: it is written by one field of a settings form, and must not blank an
 // unrelated column by omitting it.
 func (s *RepositoryStore) UpdateReleaseEngine(ctx context.Context, id uuid.UUID, engine string) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET release_engine = $2, updated_at = now()
 		WHERE id = $1
 		RETURNING `+repositoryCols, id, engine))
@@ -527,7 +518,7 @@ func (s *RepositoryStore) UpdateReleaseEngine(ctx context.Context, id uuid.UUID,
 // working copy. Its own setter for the same reason UpdateMobilePlatform is:
 // import detection writes it and nothing else may blank it in passing.
 func (s *RepositoryStore) UpdateDetectedAppIdentity(ctx context.Context, id uuid.UUID, identity domain.AppIdentity) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET detected_bundle_id = $2, detected_package_name = $3, updated_at = now()
 		WHERE id = $1
 		RETURNING `+repositoryCols, id, identity.BundleID, identity.PackageName))
@@ -546,7 +537,7 @@ func (s *RepositoryStore) UpdateDetectedAppIdentity(ctx context.Context, id uuid
 // the other, and a detection pass that read no scheme must not blank a package
 // name it never looked at.
 func (s *RepositoryStore) UpdateDetectedBuildTargets(ctx context.Context, id uuid.UUID, targets domain.BuildTargets) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET detected_xcode_scheme = $2, detected_gradle_module = $3, updated_at = now()
 		WHERE id = $1
 		RETURNING `+repositoryCols, id, targets.XcodeScheme, targets.GradleModule))
@@ -564,7 +555,7 @@ func (s *RepositoryStore) UpdateDetectedBuildTargets(ctx context.Context, id uui
 // non-nil. The coverage half of the same pair lives on UpdateLifecycleGates,
 // which the operations settings screen owns.
 func (s *RepositoryStore) UpdateMutationGate(ctx context.Context, id uuid.UUID, enabled *bool, threshold *float64) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET
 			mutation_enabled = COALESCE($2, mutation_enabled),
 			mutation_threshold = COALESCE($3, mutation_threshold),
@@ -598,7 +589,7 @@ func (s *RepositoryStore) SetDocsTaskID(ctx context.Context, id uuid.UUID, taskI
 // UpdateMeta applies kind / sub-repo kinds / auto-release only when the
 // matching pointer is non-nil, leaving unspecified fields untouched.
 func (s *RepositoryStore) UpdateMeta(ctx context.Context, id uuid.UUID, kind *string, subRepoKinds *[]string, autoReleaseOnDone *bool) (domain.Repository, error) {
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET
 			kind = COALESCE($2, kind),
 			sub_repo_kinds = COALESCE($3, sub_repo_kinds),
@@ -624,7 +615,7 @@ func (s *RepositoryStore) UpdateSubProjects(ctx context.Context, id uuid.UUID, s
 	if err != nil {
 		return domain.Repository{}, fmt.Errorf("marshal sub-projects: %w", err)
 	}
-	r, err := s.scanRepository(ctx, s.pool.QueryRow(ctx, `
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `
 		UPDATE repositories SET sub_projects = $2, updated_at = now()
 		WHERE id = $1
 		RETURNING `+repositoryCols, id, body))

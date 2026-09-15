@@ -13,10 +13,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
-var (
-	repoTenantA = uuid.MustParse("aaaaaaaa-0000-0000-0000-00000000000a")
-	repoTenantB = uuid.MustParse("bbbbbbbb-0000-0000-0000-00000000000b")
-)
+var repoTenantA = uuid.MustParse("aaaaaaaa-0000-0000-0000-00000000000a")
 
 func repoCtx(id uuid.UUID) context.Context {
 	return tenant.With(context.Background(), tenant.Identity{TenantID: id, Role: tenant.RoleOwner})
@@ -32,32 +29,21 @@ type originGit struct {
 
 func (g *originGit) OriginURL(_ context.Context, path string) string { return g.origins[path] }
 
-// TestRepoPathCarriesTheTenant is finding 2 in one assertion. Repository names
-// collide by default — api, web, backend — and migration 114 re-cut
-// repositories' unique key to (tenant_id, root_path), so two rows naming one
-// directory became legal exactly when the directory stopped being per-customer.
-func TestRepoPathCarriesTheTenant(t *testing.T) {
-	svc := &Service{workspaceRoot: t.TempDir()}
+// TestRepoPathRefusesATraversingName: the name is the repository's directory
+// name, joined onto the workspace root, so one that could climb out of repos/
+// is refused rather than sanitised.
+func TestRepoPathRefusesATraversingName(t *testing.T) {
+	root := t.TempDir()
+	svc := &Service{workspaceRoot: root}
 
-	forA, err := svc.workspaceRepoPath(repoCtx(repoTenantA), "api")
+	got, err := svc.workspaceRepoPath("api")
 	if err != nil {
 		t.Fatal(err)
 	}
-	forB, err := svc.workspaceRepoPath(repoCtx(repoTenantB), "api")
-	if err != nil {
-		t.Fatal(err)
+	if want := filepath.Join(root, "repos", "api"); got != want {
+		t.Fatalf("path = %q, want %q", got, want)
 	}
-	if forA == forB {
-		t.Fatalf("two tenants derive one working copy for the same repository name: %q", forA)
-	}
-	if !strings.Contains(forA, repoTenantA.String()) {
-		t.Fatalf("path %q does not name its owner", forA)
-	}
-	if _, err := svc.workspaceRepoPath(context.Background(), "api"); err == nil {
-		t.Fatal("a repository path was derived with no tenant on the context")
-	}
-	// A name that could climb out of the subtree is refused, not sanitised.
-	if _, err := svc.workspaceRepoPath(repoCtx(repoTenantA), "../"+repoTenantB.String()); err == nil {
+	if _, err := svc.workspaceRepoPath("../task-x"); err == nil {
 		t.Fatal("a path-traversing repository name was accepted")
 	}
 }
@@ -123,7 +109,7 @@ func TestRestoreRefusesToAdoptADifferentRepository(t *testing.T) {
 	svc, store, workspaceRoot := newRestoreService(t, repo, &git.fakeRestoreGit)
 	svc.git = git
 
-	dest := filepath.Join(workspaceRoot, "tenants", repoTenantA.String(), "repos", "app")
+	dest := filepath.Join(workspaceRoot, "repos", "app")
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		t.Fatal(err)
 	}

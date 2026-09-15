@@ -7,17 +7,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/database"
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
-// RepositoryRootPathSuite covers what happens when one tenant database is
-// served by two hosts: the cloud pod (PVC at /data) and the user's Mac behind a
+// RepositoryRootPathSuite covers what happens when one database is served by
+// two hosts: the cloud pod (PVC at /data) and the user's Mac behind a
 // reverse tunnel. Rows written by one carry an absolute path the other cannot
 // use — the production failure was a board run on the Mac calling git clone
 // into "/data/..." and getting "mkdir /data: read-only file system".
@@ -30,12 +28,7 @@ type RepositoryRootPathSuite struct {
 	db     *postgres.DB
 	// hostRoot stands in for this host's cfg.Storage.Sessions.WorkspaceRoot.
 	hostRoot string
-	// tenantRoot is hostRoot/tenants/<suite tenant>, which is where every
-	// re-anchor now lands: the final segment of a foreign repository path is a
-	// NAME, and names collide across customers.
-	tenantRoot string
-	tenantID   uuid.UUID
-	store      *postgres.RepositoryStore
+	store    *postgres.RepositoryStore
 }
 
 func TestRepositoryRootPathSuite(t *testing.T) {
@@ -57,13 +50,8 @@ func (s *RepositoryRootPathSuite) SetupSuite() {
 	pool, err := pgxpool.New(s.ctx, pg.DSN())
 	s.Require().NoError(err)
 	s.pool = pool
-	// The workspace layout still has a tenant segment, so the expected paths
-	// below need an identity on the context.
 	s.db = postgres.NewDB(pool)
-	s.tenantID = uuid.New()
-	s.ctx = tenant.With(s.ctx, tenant.Identity{TenantID: s.tenantID, Role: tenant.RoleOwner})
 	s.hostRoot = filepath.Join(tmp, "local-runner", "data", "workspaces")
-	s.tenantRoot = filepath.Join(s.hostRoot, "tenants", s.tenantID.String())
 	s.store = postgres.NewRepositoryStore(s.db).SetHostRoots(s.hostRoot, nil)
 }
 
@@ -85,7 +73,7 @@ func (s *RepositoryRootPathSuite) TestCloudWrittenPathIsReanchoredOnEveryRead() 
 	if _, err := os.Stat(cloudPath); err == nil {
 		s.T().Skip("/data exists on this host; the foreign-path case cannot be simulated")
 	}
-	want := filepath.Join(s.tenantRoot, "repos", "acme-web")
+	want := filepath.Join(s.hostRoot, "repos", "acme-web")
 
 	created, err := s.store.Create(s.ctx, "acme-web", "", cloudPath, "https://github.com/makifbaysal/acme-web.git", "")
 	s.Require().NoError(err)
@@ -127,11 +115,11 @@ func (s *RepositoryRootPathSuite) TestGetByRootPathResolvesAcrossHosts() {
 	exact, err := s.store.GetByRootPath(s.ctx, cloudPath)
 	s.Require().NoError(err)
 	s.Equal(created.ID, exact.ID)
-	s.Equal(filepath.Join(s.tenantRoot, "repos", "tunnel-repo"), exact.RootPath)
+	s.Equal(filepath.Join(s.hostRoot, "repos", "tunnel-repo"), exact.RootPath)
 
 	// What repository.Service.Open passes on this host: its own absolute path,
 	// which no row contains.
-	local, err := s.store.GetByRootPath(s.ctx, filepath.Join(s.tenantRoot, "repos", "tunnel-repo"))
+	local, err := s.store.GetByRootPath(s.ctx, filepath.Join(s.hostRoot, "repos", "tunnel-repo"))
 	s.Require().NoError(err)
 	s.Equal(created.ID, local.ID)
 }
@@ -139,29 +127,11 @@ func (s *RepositoryRootPathSuite) TestGetByRootPathResolvesAcrossHosts() {
 // A row that names a path this host can really use is a different repository
 // that merely shares a directory name, and must not be folded into the lookup.
 func (s *RepositoryRootPathSuite) TestGetByRootPathDoesNotMatchALocalRowByNameAlone() {
-	localPath := filepath.Join(s.tenantRoot, "repos", "samename")
+	localPath := filepath.Join(s.hostRoot, "repos", "samename")
 	s.Require().NoError(os.MkdirAll(localPath, 0o755))
 	_, err := s.store.Create(s.ctx, "samename", "", localPath, "", "")
 	s.Require().NoError(err)
 
 	_, err = s.store.GetByRootPath(s.ctx, filepath.Join(s.T().TempDir(), "elsewhere", "samename"))
 	s.Require().Error(err, "a usable local row must not be matched by directory name")
-}
-
-// A volume written before the workspace layout carried a tenant segment still
-// names `<root>/repos/<name>`. That path exists, so it is used unchanged — but
-// it is not a path this host derives today, and a re-import must find the row
-// already holding that repository's tasks, indexes and runs rather than insert
-// a second one beside it.
-func (s *RepositoryRootPathSuite) TestGetByRootPathFindsAPreTenantLayoutRow() {
-	legacy := filepath.Join(s.hostRoot, "repos", "legacy-repo")
-	s.Require().NoError(os.MkdirAll(legacy, 0o755))
-	created, err := s.store.Create(s.ctx, "legacy-repo", "", legacy, "https://github.com/acme/legacy-repo.git", "")
-	s.Require().NoError(err)
-	s.Equal(legacy, created.RootPath, "an existing pre-tenant path must be left where it is")
-
-	// What an import derives today.
-	found, err := s.store.GetByRootPath(s.ctx, filepath.Join(s.tenantRoot, "repos", "legacy-repo"))
-	s.Require().NoError(err)
-	s.Equal(created.ID, found.ID, "a re-import inserted a second row beside the pre-tenant one")
 }

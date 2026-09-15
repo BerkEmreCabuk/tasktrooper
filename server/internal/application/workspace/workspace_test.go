@@ -1,15 +1,12 @@
 package workspace
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
-
-	"github.com/makifbaysal/tasktrooper/server/internal/platform/tenant"
 )
 
 type WorkspaceSuite struct {
@@ -33,17 +30,34 @@ func (s *WorkspaceSuite) TearDownTest() {
 
 func (s *WorkspaceSuite) TestSessionDir() {
 	id := uuid.MustParse("00000000-0000-0000-0000-000000000001")
-	tid := uuid.MustParse("00000000-0000-0000-0000-0000000000aa")
-	ctx := tenant.With(context.Background(), tenant.Identity{TenantID: tid, Role: tenant.RoleMember})
 
-	dir, err := SessionDir(ctx, s.tmpRoot, id)
+	dir, err := SessionDir(s.tmpRoot, id)
 	s.Require().NoError(err)
-	s.Equal(filepath.Join(s.tmpRoot, "tenants", tid.String(), id.String()), dir)
+	s.Equal(filepath.Join(s.tmpRoot, id.String()), dir)
+}
 
-	// No identity, no path: a scratch directory nobody owns would sit in the
-	// namespace every tenant shares.
-	_, err = SessionDir(context.Background(), s.tmpRoot, id)
-	s.Require().Error(err)
+func (s *WorkspaceSuite) TestLayout() {
+	taskID := uuid.New()
+	dir, err := TaskDir(s.tmpRoot, taskID)
+	s.Require().NoError(err)
+	s.Equal(filepath.Join(s.tmpRoot, "task-"+taskID.String()), dir)
+
+	repo, err := RepoDir(s.tmpRoot, "api")
+	s.Require().NoError(err)
+	s.Equal(filepath.Join(s.tmpRoot, "repos", "api"), repo)
+
+	// A name that could climb out of repos/ is refused, not sanitised.
+	for _, name := range []string{"", "..", "../task-x", "a/b"} {
+		_, err := RepoDir(s.tmpRoot, name)
+		s.Error(err, name)
+	}
+
+	in, err := WithinRoot(s.tmpRoot, repo)
+	s.Require().NoError(err)
+	s.True(in)
+	out, err := WithinRoot(s.tmpRoot, filepath.Dir(s.tmpRoot))
+	s.Require().NoError(err)
+	s.False(out)
 }
 
 func (s *WorkspaceSuite) TestSubtaskDir() {

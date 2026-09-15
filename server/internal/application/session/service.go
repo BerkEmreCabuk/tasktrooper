@@ -202,7 +202,7 @@ func (s *Service) Create(ctx context.Context, req domain.CreateSessionRequest) (
 		return sess, nil
 	}
 
-	workspaceDir, err := workspaceDirFor(ctx, settings.WorkspaceRoot, sess)
+	workspaceDir, err := workspaceDirFor(settings.WorkspaceRoot, sess)
 	if err != nil {
 		_ = s.store.Delete(ctx, sess.ID)
 		return domain.Session{}, err
@@ -281,11 +281,11 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
-func workspaceDirFor(ctx context.Context, root string, sess domain.Session) (string, error) {
+func workspaceDirFor(root string, sess domain.Session) (string, error) {
 	if sess.AgentID != nil {
-		return workspace.AgentDir(ctx, root, *sess.AgentID)
+		return workspace.AgentDir(root, *sess.AgentID)
 	}
-	return workspace.SessionDir(ctx, root, sess.ID)
+	return workspace.SessionDir(root, sess.ID)
 }
 
 func (s *Service) List(ctx context.Context, limit, offset int) ([]domain.Session, error) {
@@ -618,7 +618,7 @@ func (s *Service) SetProjectRoot(ctx context.Context, sessionID uuid.UUID, proje
 	if err != nil {
 		return domain.Session{}, err
 	}
-	abs, err := workspace.ValidateProjectRoot(ctx, projectRoot, settings.WorkspaceRoot, allowedRoots)
+	abs, err := workspace.ValidateProjectRoot(projectRoot, settings.WorkspaceRoot, allowedRoots)
 	if err != nil {
 		return domain.Session{}, err
 	}
@@ -773,7 +773,7 @@ func (s *Service) ensureSessionWorkspace(ctx context.Context, sess domain.Sessio
 		return sess.WorkspaceDir, nil, nil
 	}
 
-	workspaceDir, err := workspaceDirFor(ctx, settings.WorkspaceRoot, sess)
+	workspaceDir, err := workspaceDirFor(settings.WorkspaceRoot, sess)
 	if err != nil {
 		return "", nil, err
 	}

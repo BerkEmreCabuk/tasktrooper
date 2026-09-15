@@ -62,7 +62,7 @@ func (s *Service) RestoreWorkingCopy(ctx context.Context, repositoryID uuid.UUID
 	if ok, why := domain.CanRestoreWorkingCopy(s.git.Presence(repo.RootPath), repo.RemoteURL); !ok {
 		return domain.Repository{}, fmt.Errorf("%s", why)
 	}
-	dest, err := s.restoreDestination(ctx, repo)
+	dest, err := s.restoreDestination(repo)
 	if err != nil {
 		return domain.Repository{}, err
 	}
@@ -157,7 +157,7 @@ func (s *Service) runRestore(parent context.Context, repositoryID uuid.UUID, clo
 // being imported today — not where the record says it once lived. A row written
 // by the cloud pod names a directory under the pod's PVC; putting the clone
 // there is either impossible (a read-only root filesystem) or wrong.
-func (s *Service) restoreDestination(ctx context.Context, repo domain.Repository) (string, error) {
+func (s *Service) restoreDestination(repo domain.Repository) (string, error) {
 	if strings.TrimSpace(s.workspaceRoot) == "" {
 		return "", fmt.Errorf("this runtime has no workspace root configured, so there is nowhere to put the working copy")
 	}
@@ -165,20 +165,14 @@ func (s *Service) restoreDestination(ctx context.Context, repo domain.Repository
 	if name == "" {
 		return "", fmt.Errorf("could not work out a folder name for this project")
 	}
-	return s.workspaceRepoPath(ctx, name)
+	return s.workspaceRepoPath(name)
 }
 
 // workspaceRepoPath is the one definition of this runtime's repository layout,
 // shared with the GitHub import so a restored checkout and a fresh one can
 // never drift apart.
-//
-// The tenant segment is the whole point. The name here is the REPOSITORY's
-// directory name, and migration 114 re-cut repositories' unique key to
-// (tenant_id, root_path) — so two customers with a repository called "api"
-// became two rows legally naming one directory, and every adoption path below
-// would have handed the second one the first one's checkout.
-func (s *Service) workspaceRepoPath(ctx context.Context, name string) (string, error) {
-	return workspace.TenantRepoDir(ctx, s.workspaceRoot, name)
+func (s *Service) workspaceRepoPath(name string) (string, error) {
+	return workspace.RepoDir(s.workspaceRoot, name)
 }
 
 // restoreDirName picks the directory name for the restored checkout.

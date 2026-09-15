@@ -313,6 +313,32 @@ func localContext() context.Context {
 	})
 }
 
+// flattenLegacyWorkspaces moves an install still on the per-tenant workspace
+// layout to the flat one (see workspace.FlattenLegacyLayout). It opens its own
+// short-lived pool because the long-lived one is created inside buildHandler,
+// which starts workers as soon as it exists. Nothing here is fatal: a path that
+// could not be moved or re-pointed is still re-anchored on read, and the next
+// boot tries again.
+func flattenLegacyWorkspaces(ctx context.Context, cfg *domain.Config) {
+	root := cfg.Storage.Sessions.WorkspaceRoot
+	if strings.TrimSpace(root) == "" {
+		return
+	}
+	var paths workspace.StoredPathRewriter
+	if dsn := cfg.Storage.Postgres.DSN; dsn != "" {
+		pool, err := pgstore.NewPool(ctx, dsn, 2)
+		if err != nil {
+			log.Warn().Err(err).Msg("workspace layout: database unavailable, stored paths were not re-pointed this boot")
+		} else {
+			defer pool.Close()
+			paths = pgstore.NewWorkspacePathStore(pgstore.NewDB(pool))
+		}
+	}
+	if _, err := workspace.FlattenLegacyLayout(ctx, root, paths); err != nil {
+		log.Warn().Err(err).Msg("workspace layout: stored paths were not re-pointed; they are re-anchored on read and retried next boot")
+	}
+}
+
 // agentRuntimes keeps a nil catalog service from becoming a non-nil interface
 // that panics on the first connect.
 func agentRuntimes(svc *catalog.Service) agentcli.AgentRuntimeReconciler {
@@ -421,6 +447,10 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 		e.cfg.Server.PublicBaseURL = "http://" + addr
 		e.opts.PublicBaseURL = e.cfg.Server.PublicBaseURL
 	}
+
+	// Before buildHandler: every store, service and worker it builds reads
+	// workspace paths, and all of them must see the flat layout.
+	flattenLegacyWorkspaces(runCtx, e.cfg)
 
 	handler := e.buildHandler(runCtx, opts)
 	// One machine, one tenant: seed it now rather than on the first request, so
@@ -1968,12 +1998,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// takes its directory with it; this collects the rest, once they
 			// have been finished long enough that nobody is about to drag the
 			// card back.
-			//
-			// The configured root is the SHARED one and stays that way: the
-			// sweep runs per tenant and narrows it to that tenant's own subtree
-			// itself, because it also has to recognise (and adopt) checkouts
-			// left at the shared root by the layout that predates the tenant
-			// segment. See WorkspaceReaper.
 			if boardTaskStore != nil && cfg.Storage.Sessions.WorkspaceRoot != "" {
 				// The run STORE is the "is this checkout in use" probe, not the
 				// local runner: a checkout being written by a run on another

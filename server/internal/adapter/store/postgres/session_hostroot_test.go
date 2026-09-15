@@ -21,11 +21,11 @@ func TestLocalizeSessionPaths_ForeignTaskWorkspaceReanchored(t *testing.T) {
 
 	taskID := uuid.New()
 	sess := domain.Session{ID: uuid.New(), WorkspaceDir: "/data/workspaces/task-" + taskID.String()}
-	store.localizeSessionPaths(tenantCtx(hostTenantA), &sess)
+	store.localizeSessionPaths(&sess)
 
 	// Exactly what board.TaskPRService.TaskWorkspacePath derives on this host,
 	// so a chat resumed here and a board run on the same task share one tree.
-	if want := filepath.Join(tenantRoot(wsRoot, hostTenantA), "task-"+taskID.String()); sess.WorkspaceDir != want {
+	if want := filepath.Join(wsRoot, "task-"+taskID.String()); sess.WorkspaceDir != want {
 		t.Fatalf("workspace dir = %q, want %q", sess.WorkspaceDir, want)
 	}
 }
@@ -39,9 +39,9 @@ func TestLocalizeSessionPaths_ForeignSessionDirReanchored(t *testing.T) {
 
 	id := uuid.New()
 	sess := domain.Session{ID: id, WorkspaceDir: "/data/workspaces/" + id.String()}
-	store.localizeSessionPaths(tenantCtx(hostTenantA), &sess)
+	store.localizeSessionPaths(&sess)
 
-	if want := filepath.Join(tenantRoot(wsRoot, hostTenantA), id.String()); sess.WorkspaceDir != want {
+	if want := filepath.Join(wsRoot, id.String()); sess.WorkspaceDir != want {
 		t.Fatalf("workspace dir = %q, want %q", sess.WorkspaceDir, want)
 	}
 }
@@ -57,9 +57,9 @@ func TestLocalizeSessionPaths_ForeignProjectRootReanchored(t *testing.T) {
 		WorkspaceDir: "/data/workspaces/repos/acme-web",
 		ProjectRoot:  "/data/workspaces/repos/acme-web",
 	}
-	store.localizeSessionPaths(tenantCtx(hostTenantA), &sess)
+	store.localizeSessionPaths(&sess)
 
-	want := filepath.Join(tenantRoot(wsRoot, hostTenantA), "repos", "acme-web")
+	want := filepath.Join(wsRoot, "repos", "acme-web")
 	if sess.WorkspaceDir != want {
 		t.Fatalf("workspace dir = %q, want %q", sess.WorkspaceDir, want)
 	}
@@ -77,7 +77,7 @@ func TestLocalizeSessionPaths_ExistingLocalPathUnchanged(t *testing.T) {
 	store := (&SessionStore{}).SetHostRoots(wsRoot, nil)
 
 	sess := domain.Session{ID: uuid.New(), WorkspaceDir: elsewhere, ProjectRoot: elsewhere}
-	store.localizeSessionPaths(tenantCtx(hostTenantA), &sess)
+	store.localizeSessionPaths(&sess)
 
 	if sess.WorkspaceDir != elsewhere {
 		t.Fatalf("workspace dir = %q, want %q", sess.WorkspaceDir, elsewhere)
@@ -92,11 +92,11 @@ func TestLocalizeSessionPaths_ExistingLocalPathUnchanged(t *testing.T) {
 // first turn of a restored chat runs.
 func TestLocalizeSessionPaths_UnderWorkspaceRootUnchanged(t *testing.T) {
 	wsRoot := filepath.Join(t.TempDir(), "workspaces")
-	stored := filepath.Join(tenantRoot(wsRoot, hostTenantA), "task-"+uuid.NewString())
+	stored := filepath.Join(wsRoot, "task-"+uuid.NewString())
 	store := (&SessionStore{}).SetHostRoots(wsRoot, nil)
 
 	sess := domain.Session{ID: uuid.New(), WorkspaceDir: stored}
-	store.localizeSessionPaths(tenantCtx(hostTenantA), &sess)
+	store.localizeSessionPaths(&sess)
 
 	if sess.WorkspaceDir != stored {
 		t.Fatalf("workspace dir = %q, want it unchanged", sess.WorkspaceDir)
@@ -112,7 +112,7 @@ func TestLocalizeSessionPaths_NoHostRootsIsIdentity(t *testing.T) {
 		WorkspaceDir: "/data/workspaces/x",
 		ProjectRoot:  "/data/workspaces/x/sub",
 	}
-	store.localizeSessionPaths(tenantCtx(hostTenantA), &sess)
+	store.localizeSessionPaths(&sess)
 	if sess.WorkspaceDir != "/data/workspaces/x" || sess.ProjectRoot != "/data/workspaces/x/sub" {
 		t.Fatalf("paths = %q / %q, want them unchanged", sess.WorkspaceDir, sess.ProjectRoot)
 	}
@@ -126,18 +126,18 @@ func TestLocalizeSessionPaths_Symmetric(t *testing.T) {
 	const podRoot = "/data/workspaces"
 	id := uuid.New()
 
-	macStored := filepath.Join(tenantRoot(macRoot, hostTenantA), "task-"+id.String())
+	macStored := filepath.Join(macRoot, "task-"+id.String())
 
 	// On the pod: the Mac's path is nowhere near /data, so it re-anchors.
 	onPod := domain.Session{ID: id, WorkspaceDir: macStored}
-	(&SessionStore{}).SetHostRoots(podRoot, nil).localizeSessionPaths(tenantCtx(hostTenantA), &onPod)
-	if want := filepath.Join(tenantRoot(podRoot, hostTenantA), "task-"+id.String()); onPod.WorkspaceDir != want {
+	(&SessionStore{}).SetHostRoots(podRoot, nil).localizeSessionPaths(&onPod)
+	if want := filepath.Join(podRoot, "task-"+id.String()); onPod.WorkspaceDir != want {
 		t.Fatalf("on pod = %q, want %q", onPod.WorkspaceDir, want)
 	}
 
 	// Back on the Mac: the pod's path re-anchors to exactly where it started.
 	onMac := domain.Session{ID: id, WorkspaceDir: onPod.WorkspaceDir}
-	(&SessionStore{}).SetHostRoots(macRoot, nil).localizeSessionPaths(tenantCtx(hostTenantA), &onMac)
+	(&SessionStore{}).SetHostRoots(macRoot, nil).localizeSessionPaths(&onMac)
 	if onMac.WorkspaceDir != macStored {
 		t.Fatalf("back on mac = %q, want %q", onMac.WorkspaceDir, macStored)
 	}

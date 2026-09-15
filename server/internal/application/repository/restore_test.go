@@ -101,7 +101,7 @@ func TestRestoreClonesMissingWorkingCopyIntoThisRuntimesWorkspace(t *testing.T) 
 		t.Fatalf("RestoreWorkingCopy: %v", err)
 	}
 
-	want := filepath.Join(workspaceRoot, "tenants", repoTenantA.String(), "repos", "app")
+	want := filepath.Join(workspaceRoot, "repos", "app")
 	if len(git.clones) != 1 || !strings.HasSuffix(git.clones[0], "-> "+want) {
 		t.Fatalf("clones = %v, want one clone into %s", git.clones, want)
 	}
@@ -205,7 +205,7 @@ func TestRestoreRefusesOccupiedDestinationAndDeletesNothing(t *testing.T) {
 	}}
 	svc, store, workspaceRoot := newRestoreService(t, repo, git)
 
-	dest := filepath.Join(workspaceRoot, "tenants", repoTenantA.String(), "repos", "app")
+	dest := filepath.Join(workspaceRoot, "repos", "app")
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -238,7 +238,7 @@ func TestRestoreAdoptsAnExistingCheckoutAtTheDestination(t *testing.T) {
 	}}
 	svc, store, workspaceRoot := newRestoreService(t, repo, git)
 
-	dest := filepath.Join(workspaceRoot, "tenants", repoTenantA.String(), "repos", "app")
+	dest := filepath.Join(workspaceRoot, "repos", "app")
 	if err := os.MkdirAll(filepath.Join(dest, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}

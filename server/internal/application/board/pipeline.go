@@ -382,7 +382,7 @@ func (p *PipelineRunner) resolveGitInfo(ctx context.Context, job pipelineJob) (d
 	if p.git == nil {
 		return domain.TaskGitInfo{}, fmt.Errorf("git client is not configured")
 	}
-	dir, dirErr := workspace.TenantTaskDir(ctx, p.workspaceRoot, job.Task.ID)
+	dir, dirErr := workspace.TaskDir(p.workspaceRoot, job.Task.ID)
 	if dirErr != nil {
 		return domain.TaskGitInfo{}, dirErr
 	}
