@@ -42,12 +42,12 @@ build:
 
 test:
 	cd server && go vet ./... && go test ./...
-	cd $(UI) && npx tsc --noEmit && npm run build
+	npm --prefix $(UI) run typecheck && npm --prefix $(UI) run build
 	cd desktop && npm run typecheck && npm run lint && npm test
 
 lint:
 	cd server && go vet ./...
-	cd $(UI) && npx tsc --noEmit
+	npm --prefix $(UI) run typecheck
 	cd desktop && npm run typecheck && npm run lint
 
 clean:

@@ -303,7 +303,7 @@ func runVerification(ctx context.Context, dir string, repo domain.Repository) (b
 		// scrub that closed the terminal door has to close this one too. This is
 		// set unconditionally: an empty overlay used to leave cmd.Env nil, and
 		// exec reads nil as "inherit the parent's environment".
-		cmd.Env = childenv.For(os.Environ(), overlay.Env)
+		cmd.Env = verifyEnv(os.Environ(), overlay.Env)
 		var buf bytes.Buffer
 		cmd.Stdout = &buf
 		cmd.Stderr = &buf
@@ -352,4 +352,16 @@ func runVerification(ctx context.Context, dir string, repo domain.Repository) (b
 		failures = append(failures, "[toolchain] "+strings.Join(overlay.Warnings, "\n[toolchain] "))
 	}
 	return false, strings.Join(failures, "\n\n")
+}
+
+// verifyEnv is the environment a verify stage runs with: the scrubbed parent,
+// the repository's toolchain overlay, and npm_config_yes=false. The last one
+// stops `npx` from installing a package the project does not have, so a missing
+// local binary fails with npm's own "missing packages" error instead of running
+// whatever the registry serves under that name.
+func verifyEnv(parent, overlay []string) []string {
+	extra := make([]string, 0, len(overlay)+1)
+	extra = append(extra, overlay...)
+	extra = append(extra, "npm_config_yes=false")
+	return childenv.For(parent, extra)
 }

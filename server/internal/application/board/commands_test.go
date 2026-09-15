@@ -3,6 +3,7 @@ package board
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -96,5 +97,85 @@ func TestResolveVerifyStages_NPMBuildWithNodeModules(t *testing.T) {
 	stages := ResolveVerifyStages(dir, domain.Repository{})
 	if len(stages) != 1 || stages[0].Command[0] != "npm" {
 		t.Fatalf("unexpected stages: %+v", stages)
+	}
+}
+
+func writeLockedPackage(t *testing.T, dir string, withNodeModules bool) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	touch(t, dir, "package.json")
+	touch(t, dir, "package-lock.json")
+	if withNodeModules {
+		if err := os.MkdirAll(filepath.Join(dir, "node_modules"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func stageNames(stages []Stage) string {
+	names := make([]string, 0, len(stages))
+	for _, s := range stages {
+		names = append(names, s.Name)
+	}
+	return strings.Join(names, ",")
+}
+
+// A declared verify command runs in a fresh task checkout, so it gets the
+// installs a detected command would: `make lint` in a monorepo needs desktop/
+// and desktop/ui/ installed before it can typecheck anything.
+func TestResolveVerifyStages_DeclaredCommandInstallsNestedPackages(t *testing.T) {
+	dir := t.TempDir()
+	touch(t, dir, "go.mod")
+	writeLockedPackage(t, filepath.Join(dir, "desktop"), false)
+	writeLockedPackage(t, filepath.Join(dir, "desktop", "ui"), false)
+	writeLockedPackage(t, filepath.Join(dir, "tools", "node_modules", "dep"), false)
+	writeLockedPackage(t, filepath.Join(dir, "a", "b", "c", "d"), false)
+	if err := os.MkdirAll(filepath.Join(dir, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	touch(t, filepath.Join(dir, "docs"), "package.json")
+
+	stages := ResolveVerifyStages(dir, domain.Repository{VerifyCommand: "make lint"})
+	if got, want := stageNames(stages), "npm-install-desktop,npm-install-desktop/ui,verify"; got != want {
+		t.Fatalf("stages = %s, want %s", got, want)
+	}
+	for _, s := range stages[:2] {
+		if !s.Setup || s.Command[0] != "npm" || s.Command[1] != "ci" {
+			t.Fatalf("setup stage %+v is not an npm ci setup stage", s)
+		}
+	}
+	if last := stages[len(stages)-1]; last.Setup || strings.Join(last.Command, " ") != "make lint" {
+		t.Fatalf("last stage = %+v, want the declared command", last)
+	}
+}
+
+func TestResolveVerifyStages_DeclaredCommandSkipsInstalledPackages(t *testing.T) {
+	dir := t.TempDir()
+	writeLockedPackage(t, dir, true)
+	writeLockedPackage(t, filepath.Join(dir, "web"), true)
+	stages := ResolveVerifyStages(dir, domain.Repository{VerifyCommand: "npm test"})
+	if got := stageNames(stages); got != "verify" {
+		t.Fatalf("stages = %s, want only verify", got)
+	}
+}
+
+func TestResolveVerifyStages_DeclaredCommandInstallsRootPackage(t *testing.T) {
+	dir := t.TempDir()
+	writeLockedPackage(t, dir, false)
+	stages := ResolveVerifyStages(dir, domain.Repository{VerifyCommand: "npm test"})
+	if got := stageNames(stages); got != "npm-install,verify" {
+		t.Fatalf("stages = %s, want npm-install,verify", got)
+	}
+	if strings.Contains(strings.Join(stages[0].Command, " "), "--prefix") {
+		t.Fatalf("root install should run in place: %+v", stages[0])
+	}
+}
+
+func TestVerifyEnvRefusesNpxAutoInstall(t *testing.T) {
+	env := strings.Join(verifyEnv([]string{"PATH=/usr/bin"}, []string{"GOTOOLCHAIN=local"}), "\n")
+	if !strings.Contains(env, "npm_config_yes=false") || !strings.Contains(env, "GOTOOLCHAIN=local") {
+		t.Fatalf("env = %s", env)
 	}
 }
