@@ -254,29 +254,6 @@ func TestNewRefusesAMissingBinary(t *testing.T) {
 	assert.Contains(t, err.Error(), "not found on PATH")
 }
 
-// The concurrency cap is a queue, not a quota: a run without a slot WAITS. It
-// must never come back as a quota park, which would move the card to blocked
-// and wake it on a sweep that has nothing to do with what it is waiting for.
-func TestConcurrencyCapMakesARunWaitRatherThanPark(t *testing.T) {
-	ex, workDir := newTestExecutor(t, Config{MaxConcurrent: 1}, "success.jsonl")
-
-	release, err := ex.acquire(context.Background())
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	_, err = ex.Execute(ctx, taskExecution(workDir))
-	require.Error(t, err)
-	assert.ErrorIs(t, err, context.DeadlineExceeded, "a run that cannot get a slot waits on its own context")
-
-	var block *domain.QuotaBlock
-	assert.False(t, errors.As(err, &block), "waiting for the run in front is not a usage limit")
-
-	release()
-	_, err = ex.Execute(context.Background(), taskExecution(workDir))
-	assert.NoError(t, err, "the freed slot must be reusable")
-}
-
 // The workspace is the only tree this run may touch. A default would put the
 // session in the shared project root, on whatever branch it happens to be on.
 func TestExecuteRefusesToRunWithoutAWorkspace(t *testing.T) {
@@ -456,7 +433,7 @@ func TestOnlyAFailedSessionIsSearchedForAUsageLimit(t *testing.T) {
 
 // A wedged CLI is the one failure nothing else in the system can see: the run's
 // heartbeat keeps the row fresh, so the stale-run reconciler never fires, and
-// the session holds a board worker and a concurrency slot for as long as it
+// the session holds its board run for as long as it
 // lives. The deadline is the only thing that ends it — and it must end it as a
 // FAILURE, because parking would wait out the window and then hand the same
 // hang another hour.
@@ -487,26 +464,6 @@ func TestCallerCancellationIsNotReportedAsATimeout(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "did not finish within")
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
-}
-
-// Waiting for a slot is bounded because the waiting run is holding a board
-// worker the whole time: an unbounded queue idles the pool on runs doing
-// nothing. Giving up is a plain error — never a park, which would blame a
-// subscription for a queue.
-func TestSlotWaitIsBoundedAndFailsPlainly(t *testing.T) {
-	ex, workDir := newTestExecutor(t, Config{MaxConcurrent: 1}, "success.jsonl")
-	ex.slotWait = 50 * time.Millisecond
-
-	release, err := ex.acquire(context.Background())
-	require.NoError(t, err)
-	defer release()
-
-	_, err = ex.Execute(context.Background(), taskExecution(workDir))
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "no session slot came free")
-
-	var block *domain.QuotaBlock
-	assert.False(t, errors.As(err, &block), "a full queue is not a usage limit")
 }
 
 // Tools this server serves the session over MCP are executed by the registry,

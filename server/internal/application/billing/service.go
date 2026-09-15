@@ -47,14 +47,6 @@ func (s *Service) DeleteModelPrice(ctx context.Context, model string) error {
 	return s.store.DeleteModelPrice(ctx, model)
 }
 
-func (s *Service) MaxConcurrency(ctx context.Context) int {
-	plan, err := s.store.GetPlan(ctx)
-	if err != nil || plan.MaxConcurrentTasks <= 0 {
-		return 0
-	}
-	return plan.MaxConcurrentTasks
-}
-
 func (s *Service) Allow(ctx context.Context) (bool, string) {
 	plan, err := s.store.GetPlan(ctx)
 	if err != nil {
@@ -118,14 +110,13 @@ func (s *Service) Status(ctx context.Context) (domain.BillingStatus, error) {
 		rate = defaultDisplayRate
 	}
 	status := domain.BillingStatus{
-		PlanName:           plan.Name,
-		Unlimited:          plan.Unlimited(),
-		UsdBudget:          plan.UsdBudget,
-		UsdSpent:           usd,
-		RawTokensUsed:      rawTokens,
-		PeriodStart:        plan.PeriodStart,
-		ResetAt:            plan.ResetAt(),
-		MaxConcurrentTasks: plan.MaxConcurrentTasks,
+		PlanName:      plan.Name,
+		Unlimited:     plan.Unlimited(),
+		UsdBudget:     plan.UsdBudget,
+		UsdSpent:      usd,
+		RawTokensUsed: rawTokens,
+		PeriodStart:   plan.PeriodStart,
+		ResetAt:       plan.ResetAt(),
 	}
 	status.TokenBudgetUsed = int64(math.Round(usd / rate))
 	if !plan.Unlimited() {

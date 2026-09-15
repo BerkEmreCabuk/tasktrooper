@@ -37,7 +37,6 @@ export const projectAdmin: ProjectAdminDict = {
     repoInfo: "Depo Bilgileri",
     name: "Ad",
     description: "Açıklama",
-    folderPath: "Klasör yolu",
     linkedProjects: "İlişkili projeler",
     stopIndex: "İndekslemeyi durdur",
     indexStopped: "İndeksleme durduruldu. İşlenmiş dosyalar korundu; tekrar başlatınca kaldığı yerden devam eder.",

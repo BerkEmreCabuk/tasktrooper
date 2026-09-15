@@ -28,7 +28,6 @@ export const boardArea = {
     restore: "Fetch to this machine",
     restoreRetry: "Try again",
     restoring: "Fetching the project…",
-    restoringTo: "Cloning into {path} — this can take a few minutes",
     restoreDone: "\"{name}\" was fetched to this machine",
     restoreFailed: "The project could not be fetched",
   },

@@ -108,43 +108,37 @@ type TaskAgentRunStore interface {
 	CancelIfLive(ctx context.Context, id uuid.UUID, reason string) (domain.TaskAgentRun, bool, error)
 }
 
-// RunClaim is a worker asking to execute one run, and the three budgets that
-// answer.
+// RunClaim is the runner asking to execute one run.
 //
-// It exists because every one of those budgets used to be a Go map. One run per
-// task was Runner.activeTasks; the tenant's plan concurrency was the SIZE of
-// the worker pool, fixed at boot from billing_plan; the per-member Claude Code
-// cap was RemoteExecutor.slots, a channel per member uid. All three are correct
-// for one process and all three multiply by the replica count, which is the
-// definition of a limit that is not a limit.
+// It exists because "one run per task" used to be a Go map
+// (Runner.activeTasks), which is correct for one process and wrong as soon as
+// two processes share a database.
 //
-// Answering them in one statement is not an optimisation. Asking "is the task
+// Answering it in one statement is not an optimisation. Asking "is the task
 // free?" and then writing 'running' leaves a window two replicas can both pass
 // through; the answer and the write have to be the same statement or they are
 // not a claim.
+//
+// There is deliberately no concurrency budget: every run whose task is free
+// starts immediately.
 type RunClaim struct {
 	RunID  uuid.UUID
 	TaskID uuid.UUID
 	// LiveWithin is how fresh a heartbeat has to be for a 'running' row to
-	// count against these budgets. A run whose owner was SIGKILLed still has a
+	// count as holding its task. A run whose owner was SIGKILLed still has a
 	// 'running' row until the reconciler gets to it, and treating that as live
-	// would let one dead pod hold a tenant's whole concurrency budget hostage.
+	// would let one dead process hold its task hostage.
 	LiveWithin time.Duration
-	// MaxTenantRuns is the plan's concurrent-task cap. 0 means unlimited. It is
-	// counted over the tenant's live runs — which row-level security scopes for
-	// free, since the count runs inside the tenant's own transaction.
-	MaxTenantRuns int
 }
 
-// RunClaimResult says whether this process won, and if not, which budget said
-// no. The reason is for the log and for nothing else: every refusal leaves the
-// row 'pending', which the reconciler re-dispatches, so no caller has to act
-// differently on one reason than another.
+// RunClaimResult says whether this process won, and if not, why. The reason is
+// for the log and for nothing else: every refusal leaves the row 'pending',
+// which the reconciler re-dispatches, so no caller has to act differently on one
+// reason than another.
 type RunClaimResult struct {
 	Claimed bool
 	// Reason is "" when Claimed. Otherwise one of: "not_pending" (somebody else
-	// claimed it, or it was cancelled while it queued), "task_busy",
-	// "tenant_at_capacity".
+	// claimed it, or it was cancelled while it queued) or "task_busy".
 	Reason string
 }
 

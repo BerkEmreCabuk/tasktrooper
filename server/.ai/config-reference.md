@@ -353,7 +353,6 @@ grounding, verify gate, commit/PR, column advance).
 |---|---|---|---|
 | `binary` | `CLAUDE_CODE_BIN` | `claude` | The CLI to run, resolved on PATH at boot |
 | `max_turns` | — | `100` | Turn budget for one session; a session that hits it returns what it has |
-| `max_concurrent` | — | `3` | Simultaneous sessions. A run without a slot **waits** 10 minutes and then fails plainly — it is not parked, and the reconciler re-dispatches it when there is capacity |
 | `setting_sources` | — | `project,local` | Which CLI settings files a session loads. The operator's own `~/.claude` (hooks, plugins, permission rules) is out: none of it was chosen for TaskTrooper and all of it would otherwise run inside board tasks. Set `user,project,local` only if this host authenticates through a user-level apiKeyHelper |
 | `run_timeout` | — | `1h` | Deadline for one session — the only thing that ever gives up on a wedged CLI, since a subprocess has no provider timeout and the run's heartbeat keeps the row fresh. A plain run failure, never a quota park |
 
@@ -393,7 +392,6 @@ the CLI, so a run's whole history is folded into one prompt; MCP tools reach the
 | Key | Env | Default | Description |
 |---|---|---|---|
 | `binary` | `ANTIGRAVITY_BIN` | `agy` | Resolved on PATH at boot |
-| `max_concurrent` | — | `3` | Simultaneous sessions |
 | `run_timeout` | — | `1h` | Deadline for one session |
 
 No `enabled`/`max_turns` flags — same "binary on PATH is the switch" rule as `claude_code`.
@@ -409,7 +407,6 @@ original bytes when the run ends, since a repository may already have one commit
 | Key | Env | Default | Description |
 |---|---|---|---|
 | `binary` | `CURSOR_AGENT_BIN` | `cursor-agent` | Resolved on PATH at boot |
-| `max_concurrent` | — | `3` | Simultaneous sessions |
 | `run_timeout` | — | `1h` | Deadline for one session |
 
 Auth is probed via `cursor-agent status`, not a real turn — the CLI reports it directly.
@@ -426,7 +423,6 @@ written to the workspace at all.
 | Key | Env | Default | Description |
 |---|---|---|---|
 | `binary` | `OPENCODE_BIN` | `opencode` | Resolved on PATH at boot |
-| `max_concurrent` | — | `3` | Simultaneous sessions |
 | `run_timeout` | — | `1h` | Deadline for one session |
 
 A known upstream bug can end a run without its final `step_finish` event; a clean exit with

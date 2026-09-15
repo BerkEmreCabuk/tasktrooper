@@ -146,7 +146,6 @@ Task comments and runs: `/v1/repositories/:id/tasks/:taskId/comments`, `/runs`.
 ```yaml
 board:
   dispatch_enabled: true
-  max_concurrent_runs: 3
 ```
 
 ## Agent performance (global)

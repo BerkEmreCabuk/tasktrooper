@@ -26,8 +26,8 @@ import (
 //     forwarded to out while the session is still running rather than returned
 //     at the end.
 //
-// Everything else — the concurrency slot, the per-turn MCP credential, the
-// deadline, the quota mapping — is the board path's, unchanged and shared.
+// Everything else — the per-turn MCP credential, the deadline, the quota
+// mapping — is the board path's, unchanged and shared.
 func (e *Executor) ExecuteChat(ctx context.Context, req domain.ChatExecution, out port.ChatStream) (domain.ChatResult, error) {
 	if e == nil {
 		return domain.ChatResult{}, errors.New("claude code executor is not configured")
@@ -40,13 +40,7 @@ func (e *Executor) ExecuteChat(ctx context.Context, req domain.ChatExecution, ou
 		return domain.ChatResult{}, errors.New("claude code executor: no chat workspace to run in")
 	}
 
-	release, err := e.acquire(ctx)
-	if err != nil {
-		return domain.ChatResult{}, err
-	}
-	defer release()
-
-	// One credential per TURN, minted after the slot and revoked when the turn
+	// One credential per TURN, minted when it starts and revoked when the turn
 	// ends — not one per conversation. The thread may stay open for days; a
 	// token that lived that long would authorise this tenant's board tools
 	// during every minute nobody was talking.

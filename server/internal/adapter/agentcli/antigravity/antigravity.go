@@ -29,16 +29,9 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// DefaultMaxConcurrent is how many AGY sessions may run at once.
-const DefaultMaxConcurrent = 3
-
 // DefaultRunTimeout bounds ONE session end to end, the way claudecode's does —
 // nothing else in this path ever gives up on a wedged subprocess.
 const DefaultRunTimeout = time.Hour
-
-// DefaultSlotWait bounds how long a run waits for a concurrency slot before
-// giving up and letting the reconciler re-dispatch it later.
-const DefaultSlotWait = 10 * time.Minute
 
 // stderrTailMax is how much of the child's stderr is kept for a failure
 // message — the tail, since a dying CLI explains itself on its last lines.
@@ -48,9 +41,6 @@ const stderrTailMax = 8 << 10
 type Config struct {
 	// Binary is the CLI to run; empty means "agy", resolved on PATH.
 	Binary string
-	// MaxConcurrent caps simultaneous AGY sessions. <= 0 means
-	// DefaultMaxConcurrent.
-	MaxConcurrent int
 	// RunTimeout bounds one session; <= 0 means DefaultRunTimeout.
 	RunTimeout time.Duration
 	// MCP is a fixed endpoint for every run; used by tests and by any caller
@@ -68,11 +58,7 @@ type Executor struct {
 	runTimeout  time.Duration
 	mcp         MCPConfig
 	mcpProvider MCPProvider
-	// slots is the concurrency cap; a run that cannot get one waits (bounded
-	// by slotWait and by its own context) rather than parking.
-	slots    chan struct{}
-	slotWait time.Duration
-	now      func() time.Time
+	now         func() time.Time
 }
 
 var _ port.TaskExecutor = (*Executor)(nil)
@@ -85,10 +71,6 @@ func New(cfg Config) (*Executor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("antigravity executor: %w", err)
 	}
-	maxConcurrent := cfg.MaxConcurrent
-	if maxConcurrent <= 0 {
-		maxConcurrent = DefaultMaxConcurrent
-	}
 	runTimeout := cfg.RunTimeout
 	if runTimeout <= 0 {
 		runTimeout = DefaultRunTimeout
@@ -98,8 +80,6 @@ func New(cfg Config) (*Executor, error) {
 		runTimeout:  runTimeout,
 		mcp:         cfg.MCP,
 		mcpProvider: cfg.MCPProvider,
-		slots:       make(chan struct{}, maxConcurrent),
-		slotWait:    DefaultSlotWait,
 		now:         time.Now,
 	}, nil
 }
@@ -120,12 +100,6 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 	if strings.TrimSpace(req.WorkDir) == "" {
 		return domain.AgentResponse{}, errors.New("antigravity executor: no task workspace to run in")
 	}
-
-	release, err := e.acquire(ctx)
-	if err != nil {
-		return domain.AgentResponse{}, err
-	}
-	defer release()
 
 	mcpCfg, releaseMCP, err := e.resolveMCP(ctx, MCPRun{Policy: req.Policy, Label: req.TaskKey})
 	defer releaseMCP()
@@ -267,32 +241,6 @@ func (e *Executor) finish(ctx context.Context, label string, s session) (domain.
 		Message: domain.Message{Role: domain.RoleAssistant, Content: out.Text},
 		Usage:   out.Usage,
 	}, nil
-}
-
-// acquire takes a concurrency slot, waiting until one frees, until slotWait
-// passes, or until ctx ends — whichever comes first. Giving up returns a plain
-// error so the task goes back through the reconciler instead of parking.
-func (e *Executor) acquire(ctx context.Context) (func(), error) {
-	select {
-	case e.slots <- struct{}{}:
-		return func() { <-e.slots }, nil
-	default:
-	}
-	wait := e.slotWait
-	if wait <= 0 {
-		wait = DefaultSlotWait
-	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case e.slots <- struct{}{}:
-		return func() { <-e.slots }, nil
-	case <-timer.C:
-		return nil, fmt.Errorf("antigravity executor is busy: no session slot came free within %s (limit %d concurrent sessions)",
-			wait, cap(e.slots))
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 }
 
 // flattenHistory folds the runner's message list into the single positional

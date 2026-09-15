@@ -100,7 +100,7 @@ func (s *QuotaSweeper) Start(ctx context.Context, interval time.Duration) {
 // It is a brake on the pass, not a policy about quotas: the store hands back one
 // task per statement and the loop keeps asking, so without a cap a single sweep
 // could dispatch an unbounded number of runs — every task an outage parked —
-// into a runner with three workers, in one tick. Twenty is far more than a
+// into the runner, in one tick. Twenty is far more than a
 // realistic park backlog for one subscription and small enough that the
 // remainder waits one minute, not an hour.
 const quotaSweepBatchCap = 20

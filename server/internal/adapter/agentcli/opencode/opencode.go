@@ -28,14 +28,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// DefaultMaxConcurrent is how many OpenCode sessions may run at once.
-const DefaultMaxConcurrent = 3
-
 // DefaultRunTimeout bounds ONE session end to end.
 const DefaultRunTimeout = time.Hour
-
-// DefaultSlotWait bounds how long a run waits for a concurrency slot.
-const DefaultSlotWait = 10 * time.Minute
 
 const stderrTailMax = 8 << 10
 
@@ -43,9 +37,6 @@ const stderrTailMax = 8 << 10
 type Config struct {
 	// Binary is the CLI to run; empty means "opencode", resolved on PATH.
 	Binary string
-	// MaxConcurrent caps simultaneous OpenCode sessions. <= 0 means
-	// DefaultMaxConcurrent.
-	MaxConcurrent int
 	// RunTimeout bounds one session; <= 0 means DefaultRunTimeout.
 	RunTimeout  time.Duration
 	MCP         MCPConfig
@@ -59,8 +50,6 @@ type Executor struct {
 	runTimeout  time.Duration
 	mcp         MCPConfig
 	mcpProvider MCPProvider
-	slots       chan struct{}
-	slotWait    time.Duration
 	now         func() time.Time
 }
 
@@ -73,10 +62,6 @@ func New(cfg Config) (*Executor, error) {
 	if err != nil {
 		return nil, fmt.Errorf("opencode executor: %w", err)
 	}
-	maxConcurrent := cfg.MaxConcurrent
-	if maxConcurrent <= 0 {
-		maxConcurrent = DefaultMaxConcurrent
-	}
 	runTimeout := cfg.RunTimeout
 	if runTimeout <= 0 {
 		runTimeout = DefaultRunTimeout
@@ -86,8 +71,6 @@ func New(cfg Config) (*Executor, error) {
 		runTimeout:  runTimeout,
 		mcp:         cfg.MCP,
 		mcpProvider: cfg.MCPProvider,
-		slots:       make(chan struct{}, maxConcurrent),
-		slotWait:    DefaultSlotWait,
 		now:         time.Now,
 	}, nil
 }
@@ -106,12 +89,6 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 	if strings.TrimSpace(req.WorkDir) == "" {
 		return domain.AgentResponse{}, errors.New("opencode executor: no task workspace to run in")
 	}
-
-	release, err := e.acquire(ctx)
-	if err != nil {
-		return domain.AgentResponse{}, err
-	}
-	defer release()
 
 	mcpCfg, releaseMCP, err := e.resolveMCP(ctx, MCPRun{Policy: req.Policy, Label: req.TaskKey})
 	defer releaseMCP()
@@ -241,29 +218,6 @@ func (e *Executor) finish(ctx context.Context, label string, s session) (domain.
 		Message: domain.Message{Role: domain.RoleAssistant, Content: out.Text},
 		Usage:   out.Usage,
 	}, nil
-}
-
-func (e *Executor) acquire(ctx context.Context) (func(), error) {
-	select {
-	case e.slots <- struct{}{}:
-		return func() { <-e.slots }, nil
-	default:
-	}
-	wait := e.slotWait
-	if wait <= 0 {
-		wait = DefaultSlotWait
-	}
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case e.slots <- struct{}{}:
-		return func() { <-e.slots }, nil
-	case <-timer.C:
-		return nil, fmt.Errorf("opencode executor is busy: no session slot came free within %s (limit %d concurrent sessions)",
-			wait, cap(e.slots))
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 }
 
 // flattenHistory folds the runner's message list into the single positional

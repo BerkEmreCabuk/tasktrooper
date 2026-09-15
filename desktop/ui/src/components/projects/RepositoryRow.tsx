@@ -70,7 +70,6 @@ export function RepositoryRow({ repository, projectNameById, onDeleteRequest, on
               ))}
             </div>
           )}
-          <p className="mt-2 truncate font-mono text-[11px] text-muted-foreground">{repository.root_path}</p>
           <p className="mt-1 text-[11px] text-muted-foreground">
             {t("boardArea.repos.updated", { date: formatRelativeDate(repository.updated_at) })}
           </p>

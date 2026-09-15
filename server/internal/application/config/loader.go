@@ -88,9 +88,6 @@ func applyDefaults(cfg *domain.Config) {
 	if cfg.Jobs.Timeout <= 0 {
 		cfg.Jobs.Timeout = 10 * time.Minute
 	}
-	if cfg.Board.MaxConcurrentRuns <= 0 {
-		cfg.Board.MaxConcurrentRuns = 3
-	}
 	if cfg.Board.VerifyMaxFixAttempts <= 0 {
 		cfg.Board.VerifyMaxFixAttempts = 2
 	}
@@ -200,7 +197,7 @@ func applyDefaults(cfg *domain.Config) {
 	if strings.TrimSpace(cfg.ClaudeCode.Binary) == "" {
 		cfg.ClaudeCode.Binary = "claude"
 	}
-	// MaxTurns/MaxConcurrent are left at 0 on purpose: the executor owns those
-	// defaults (claudecode.DefaultMaxTurns / DefaultMaxConcurrent) and a second
+	// MaxTurns is left at 0 on purpose: the executor owns those
+	// defaults (claudecode.DefaultMaxTurns) and a second
 	// copy here is a second number to keep in step.
 }

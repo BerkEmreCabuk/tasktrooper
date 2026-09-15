@@ -37,7 +37,6 @@ export const projectAdmin = {
     repoInfo: "Repository Details",
     name: "Name",
     description: "Description",
-    folderPath: "Folder path",
     linkedProjects: "Linked projects",
     stopIndex: "Stop indexing",
     indexStopped: "Indexing stopped. Files already processed were kept; a new run resumes from there.",

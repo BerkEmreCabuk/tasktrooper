@@ -353,33 +353,6 @@ func TestClaimRunOnTheSameRowHasOneWinner(t *testing.T) {
 	}
 }
 
-// The tenant's plan concurrency, as a budget shared by the fleet rather than as
-// the size of one process's worker pool. Four runs on four different tasks, a
-// cap of two, two replicas: two winners.
-func TestClaimRunEnforcesTheTenantCapAcrossReplicas(t *testing.T) {
-	f := newReplicaFixture(t)
-	ctx := f.ctx()
-
-	pairs := make([]claimPair, 0, 4)
-	for i := 0; i < 4; i++ {
-		taskID := f.newTask(t, "")
-		db := f.a
-		if i%2 == 1 {
-			db = f.b
-		}
-		pairs = append(pairs, claimPair{db, port.RunClaim{
-			RunID:         f.newPendingRun(t, taskID),
-			TaskID:        taskID,
-			LiveWithin:    time.Minute,
-			MaxTenantRuns: 2,
-		}})
-	}
-
-	if granted := raceClaims(t, ctx, pairs); granted != 2 {
-		t.Fatalf("%d concurrent runs granted, want the plan's 2", granted)
-	}
-}
-
 // A run whose owner died does not hold the budget forever. The claim counts
 // only rows whose heartbeat is inside LiveWithin, so a 'running' row nobody is
 // touching stops blocking the task within one staleness window.
@@ -505,57 +478,5 @@ func TestWebhookDeliveryDedupeAcrossReplicas(t *testing.T) {
 
 	if got := first.Load(); got != 1 {
 		t.Fatalf("%d replicas treated one delivery as new, want 1", got)
-	}
-}
-
-// A tenant cannot see another tenant's runs, and therefore cannot be blocked by
-// them. This is the claim's tenant scoping restated: the statement carries no
-// tenant_id at all — row-level security supplies it — so the count of "live
-// runs" is per-tenant by construction rather than by remembering to filter.
-func TestClaimRunCountsOnlyThisTenantsRuns(t *testing.T) {
-	f := newReplicaFixture(t)
-
-	// A second tenant, at its own cap, with a live run.
-	other := uuid.New()
-	if _, err := f.poolA.Exec(context.Background(),
-		`INSERT INTO tenants (id) VALUES ($1) ON CONFLICT DO NOTHING`, other); err != nil {
-		t.Fatalf("seed other tenant: %v", err)
-	}
-	otherCtx := tenant.With(context.Background(), tenant.Identity{TenantID: other, Role: tenant.RoleOwner})
-	var otherRepo, otherAgent, otherTask, otherEvent uuid.UUID
-	if err := f.b.QueryRow(otherCtx, `INSERT INTO repositories (name, root_path) VALUES ('other', '/tmp/other') RETURNING id`).Scan(&otherRepo); err != nil {
-		t.Fatalf("other repo: %v", err)
-	}
-	if err := f.b.QueryRow(otherCtx, `INSERT INTO agents (name) VALUES ('other-dev') RETURNING id`).Scan(&otherAgent); err != nil {
-		t.Fatalf("other agent: %v", err)
-	}
-	if err := f.b.QueryRow(otherCtx, `
-		INSERT INTO board_tasks (repository_id, title, task_number) VALUES ($1, 'other', 1) RETURNING id
-	`, otherRepo).Scan(&otherTask); err != nil {
-		t.Fatalf("other task: %v", err)
-	}
-	if err := f.b.QueryRow(otherCtx, `
-		INSERT INTO board_events (repository_id, task_id, event_type) VALUES ($1, $2, 'task.moved') RETURNING id
-	`, otherRepo, otherTask).Scan(&otherEvent); err != nil {
-		t.Fatalf("other event: %v", err)
-	}
-	if _, err := f.b.Exec(otherCtx, `
-		INSERT INTO task_agent_runs (task_id, agent_id, board_event_id, status)
-		VALUES ($1, $2, $3, 'running')
-	`, otherTask, otherAgent, otherEvent); err != nil {
-		t.Fatalf("other run: %v", err)
-	}
-
-	// The first tenant, cap of one, no runs of its own: it must be granted.
-	taskID := f.newTask(t, "")
-	res, err := pgstore.NewTaskAgentRunStore(f.a).ClaimRun(f.ctx(), port.RunClaim{
-		RunID: f.newPendingRun(t, taskID), TaskID: taskID,
-		LiveWithin: time.Minute, MaxTenantRuns: 1,
-	})
-	if err != nil {
-		t.Fatalf("ClaimRun: %v", err)
-	}
-	if !res.Claimed {
-		t.Fatalf("another tenant's live run consumed this tenant's budget (reason %q)", res.Reason)
 	}
 }

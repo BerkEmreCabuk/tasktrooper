@@ -109,7 +109,7 @@ func TestWorkerSkipsRunsThatAlreadyStopped(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			store := &gatedRunStore{row: tc.row, err: tc.err}
-			r := NewRunner(RunnerDeps{Runs: store, Catalog: &erroringCatalog{}, MaxWorkers: 1})
+			r := NewRunner(RunnerDeps{Runs: store, Catalog: &erroringCatalog{}})
 			r.Start(context.Background())
 			defer r.Stop()
 
@@ -133,7 +133,7 @@ func TestWorkerSkipsRunsThatAlreadyStopped(t *testing.T) {
 func TestCancelStopsTheInFlightRunsContext(t *testing.T) {
 	store := &gatedRunStore{row: domain.TaskAgentRun{Status: domain.TaskAgentRunStatusPending}}
 	catalog := &blockingCatalog{entered: make(chan struct{})}
-	r := NewRunner(RunnerDeps{Runs: store, Catalog: catalog, MaxWorkers: 1})
+	r := NewRunner(RunnerDeps{Runs: store, Catalog: catalog})
 	r.Start(context.Background())
 	defer r.Stop()
 
@@ -180,7 +180,7 @@ func TestStoppedRunWritesNoFailure(t *testing.T) {
 	store := &gatedRunStore{row: domain.TaskAgentRun{Status: domain.TaskAgentRunStatusPending}}
 	catalog := &blockingCatalog{entered: make(chan struct{})}
 	comments := &commentRecorder{}
-	r := NewRunner(RunnerDeps{Runs: store, Catalog: catalog, MaxWorkers: 1})
+	r := NewRunner(RunnerDeps{Runs: store, Catalog: catalog})
 	r.SetTaskUpdater(comments)
 	r.Start(context.Background())
 	defer r.Stop()

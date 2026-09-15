@@ -435,10 +435,6 @@ export function ProjectSettingsPage() {
             <Label>{t("projectAdmin.projectSettings.description")}</Label>
             <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} />
           </div>
-          <div className="space-y-2">
-            <Label>{t("projectAdmin.projectSettings.folderPath")}</Label>
-            <Input value={repository?.root_path ?? ""} readOnly className="font-mono text-sm" />
-          </div>
           {initiativeProjects.length > 0 && (
             <MultiSelectPicker
               label={t("projectAdmin.projectSettings.linkedProjects")}

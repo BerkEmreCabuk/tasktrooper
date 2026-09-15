@@ -36,9 +36,6 @@ type CursorAgentConfig struct {
 	// Binary is the CLI to run, resolved on PATH. Empty means "cursor-agent".
 	// Normally set from CURSOR_AGENT_BIN.
 	Binary string `koanf:"binary"`
-	// MaxConcurrent caps simultaneous CLI sessions. 0 means the executor's
-	// default (3).
-	MaxConcurrent int `koanf:"max_concurrent"`
 	// RunTimeout bounds ONE session end to end. 0 means the executor's default
 	// (1h).
 	RunTimeout time.Duration `koanf:"run_timeout"`
@@ -54,9 +51,6 @@ type OpencodeConfig struct {
 	// Binary is the CLI to run, resolved on PATH. Empty means "opencode".
 	// Normally set from OPENCODE_BIN.
 	Binary string `koanf:"binary"`
-	// MaxConcurrent caps simultaneous CLI sessions. 0 means the executor's
-	// default (3).
-	MaxConcurrent int `koanf:"max_concurrent"`
 	// RunTimeout bounds ONE session end to end. 0 means the executor's default
 	// (1h).
 	RunTimeout time.Duration `koanf:"run_timeout"`
@@ -76,9 +70,6 @@ type AntigravityConfig struct {
 	Binary string `koanf:"binary"`
 	// MaxTurns bounds one CLI session. 0 means the executor's default (100).
 	MaxTurns int `koanf:"max_turns"`
-	// MaxConcurrent caps simultaneous CLI sessions. 0 means the executor's
-	// default (3).
-	MaxConcurrent int `koanf:"max_concurrent"`
 	// RunTimeout bounds ONE session end to end. 0 means the executor's default
 	// (1h).
 	RunTimeout time.Duration `koanf:"run_timeout"`
@@ -102,14 +93,6 @@ type ClaudeCodeConfig struct {
 	// MaxTurns bounds one CLI session, the way llm.task_max_iterations bounds a
 	// loop run. 0 means the executor's default (100).
 	MaxTurns int `koanf:"max_turns"`
-	// MaxConcurrent caps simultaneous CLI sessions. It is a separate number
-	// from board.max_concurrent_runs because it limits a different thing: the
-	// board cap sizes the worker pool for the whole tenant, this one is what
-	// one Claude subscription will serve at a time. A run that cannot get a
-	// slot waits for one (bounded — see the executor's DefaultSlotWait); it is
-	// not parked, because waiting on the run in front is a queue, not a quota.
-	// 0 means the executor's default (3).
-	MaxConcurrent int `koanf:"max_concurrent"`
 	// RunTimeout bounds ONE session end to end. It is the only thing that ever
 	// gives up on a wedged CLI: a subprocess has no equivalent of a provider's
 	// HTTP timeout, and the run's heartbeat keeps the row fresh, so the
@@ -197,7 +180,6 @@ type EvolutionConfig struct {
 
 type BoardConfig struct {
 	DispatchEnabled         bool              `koanf:"dispatch_enabled"`
-	MaxConcurrentRuns       int               `koanf:"max_concurrent_runs"`
 	VerificationEnabled     bool              `koanf:"verification_enabled"`
 	VerifyMaxFixAttempts    int               `koanf:"verify_max_fix_attempts"`
 	RequireCriteriaComplete bool              `koanf:"require_criteria_complete"`

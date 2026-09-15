@@ -80,7 +80,7 @@ func (c *countingRunStore) CancelIfLive(_ context.Context, id uuid.UUID, reason 
 
 func TestDrainStopsAcceptingNewJobs(t *testing.T) {
 	store := &countingRunStore{}
-	r := NewRunner(RunnerDeps{Runs: store, MaxWorkers: 2})
+	r := NewRunner(RunnerDeps{Runs: store})
 	r.Start(context.Background())
 
 	drainCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -96,7 +96,7 @@ func TestDrainStopsAcceptingNewJobs(t *testing.T) {
 }
 
 func TestDrainWaitsForInFlightWork(t *testing.T) {
-	r := NewRunner(RunnerDeps{Runs: &countingRunStore{}, MaxWorkers: 1})
+	r := NewRunner(RunnerDeps{Runs: &countingRunStore{}})
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -122,7 +122,7 @@ func TestDrainWaitsForInFlightWork(t *testing.T) {
 }
 
 func TestDrainDeadlineCancelsInFlightWork(t *testing.T) {
-	r := NewRunner(RunnerDeps{Runs: &countingRunStore{}, MaxWorkers: 1})
+	r := NewRunner(RunnerDeps{Runs: &countingRunStore{}})
 	ctx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
 	r.Start(ctx)

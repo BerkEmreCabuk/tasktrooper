@@ -75,7 +75,6 @@ storeops:
 
 board:
   dispatch_enabled: true
-  max_concurrent_runs: 10
   verification_enabled: true
   verify_max_fix_attempts: 2
   require_criteria_complete: true
@@ -167,14 +166,11 @@ tools:
 # this binary instead of by the HTTP agent loop; an installation where it is not
 # on PATH registers no executor and those agents' runs fail with one clear
 # sentence saying so. max_turns / run_timeout are left unset: the executor owns
-# those defaults (100 turns, 1h per session). max_concurrent is raised above the
-# executor's default of 3 because a local runner is one developer's machine
-# serving one workspace — the ceiling that matters there is the Claude
-# subscription's own rate limit, which the quota park already handles, not a
-# number chosen for a shared cloud pod.
+# those defaults (100 turns, 1h per session). There is no session cap: the
+# ceiling that matters is the Claude subscription's own usage limit, which the
+# quota park already handles.
 claude_code:
   binary: "${CLAUDE_CODE_BIN}"
-  max_concurrent: 10
   # Which of the CLI's settings files a session loads. Unset means
   # "project,local": the operator's own ~/.claude hooks and plugins stay out of
   # a board run. Set "user,project,local" only if this host authenticates the

@@ -21,11 +21,10 @@ import (
 // BillingPlan is the tenant's effective plan. UsdBudget == 0 means unlimited
 // (the safe default, so billing is inert until a real plan is assigned).
 type BillingPlan struct {
-	Name               string    `json:"name"`
-	UsdBudget          float64   `json:"usd_budget"`
-	MaxConcurrentTasks int       `json:"max_concurrent_tasks"`
-	PeriodDays         int       `json:"period_days"`
-	PeriodStart        time.Time `json:"period_start"`
+	Name        string    `json:"name"`
+	UsdBudget   float64   `json:"usd_budget"`
+	PeriodDays  int       `json:"period_days"`
+	PeriodStart time.Time `json:"period_start"`
 	// DisplayTokenRate is USD per single token, used ONLY to render the USD
 	// budget/spend as a token count for the user. Models differ in real price;
 	// this is a stable presentation rate, not a billing rate.
@@ -64,18 +63,17 @@ type ModelPrice struct {
 // BillingStatus is the /v1/billing payload. USD figures are internal detail;
 // the token_* fields are what the UI shows to the user.
 type BillingStatus struct {
-	PlanName           string    `json:"plan_name"`
-	Unlimited          bool      `json:"unlimited"`
-	UsdBudget          float64   `json:"usd_budget"`
-	UsdSpent           float64   `json:"usd_spent"`
-	TokenBudget        int64     `json:"token_budget"`
-	TokenBudgetUsed    int64     `json:"token_budget_used"`
-	TokenRemaining     int64     `json:"token_remaining"`
-	RawTokensUsed      int64     `json:"raw_tokens_used"`
-	Exhausted          bool      `json:"exhausted"`
-	PeriodStart        time.Time `json:"period_start"`
-	ResetAt            time.Time `json:"reset_at"`
-	MaxConcurrentTasks int       `json:"max_concurrent_tasks"`
+	PlanName        string    `json:"plan_name"`
+	Unlimited       bool      `json:"unlimited"`
+	UsdBudget       float64   `json:"usd_budget"`
+	UsdSpent        float64   `json:"usd_spent"`
+	TokenBudget     int64     `json:"token_budget"`
+	TokenBudgetUsed int64     `json:"token_budget_used"`
+	TokenRemaining  int64     `json:"token_remaining"`
+	RawTokensUsed   int64     `json:"raw_tokens_used"`
+	Exhausted       bool      `json:"exhausted"`
+	PeriodStart     time.Time `json:"period_start"`
+	ResetAt         time.Time `json:"reset_at"`
 }
 
 // QuotaPausedTask records a task halted because the budget was exhausted, so the
@@ -87,9 +85,8 @@ type QuotaPausedTask struct {
 }
 
 type UpdateBillingPlanRequest struct {
-	Name               *string  `json:"name,omitempty"`
-	UsdBudget          *float64 `json:"usd_budget,omitempty"`
-	MaxConcurrentTasks *int     `json:"max_concurrent_tasks,omitempty"`
-	PeriodDays         *int     `json:"period_days,omitempty"`
-	DisplayTokenRate   *float64 `json:"display_token_rate,omitempty"`
+	Name             *string  `json:"name,omitempty"`
+	UsdBudget        *float64 `json:"usd_budget,omitempty"`
+	PeriodDays       *int     `json:"period_days,omitempty"`
+	DisplayTokenRate *float64 `json:"display_token_rate,omitempty"`
 }

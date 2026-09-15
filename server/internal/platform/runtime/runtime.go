@@ -1201,30 +1201,12 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	if githubTokens != nil {
 		gitClient.SetTokenSource(githubTokens.GitHubToken)
 	}
-	// Billing: per-tenant USD budget (shown as tokens) + concurrency cap. The
-	// concurrency cap sizes the board runner's worker pool so lower packages run
-	// fewer tasks at once.
+	// Billing: per-tenant USD budget (shown as tokens).
 	var billingSvc *billing.Service
 	if e.pgDB != nil {
 		billingSvc = billing.NewService(pgstore.NewBillingStore(e.pgDB))
 		e.billingSvc = billingSvc
 	}
-	// The worker pool is a PARALLELISM bound for this process, and no longer
-	// pretends to be the tenant's entitlement.
-	//
-	// It used to be sized from billing_plan.max_concurrent_tasks, read here, at
-	// boot, on a context with no tenant — so on a shared server the read raised
-	// tenant.ErrNoTenant and the pool silently fell back to the config default
-	// for everybody; and had it succeeded it would have given every tenant on
-	// the deployment ONE tenant's plan, N times over, once there was more than
-	// one replica. A plan limit sized as a goroutine count cannot survive
-	// horizontal scaling: N pools of C is N×C runs.
-	//
-	// The entitlement is enforced where it can be shared — in the claim each
-	// run must win before it executes (port.RunClaim), counted over the
-	// tenant's live rows. This number now says only how many runs one pod will
-	// drive at once.
-	maxBoardWorkers := cfg.Board.MaxConcurrentRuns
 	// Everything that dispatches board work — the runner's workers, the budget
 	// resume tick, the stale-task reconciler — is collected here and run only
 	// once all wiring below is complete.
@@ -1303,7 +1285,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			MappingCfg:    cfg.Mapping,
 			DefaultPolicy: cfg.Tools.DefaultPolicy,
 			Settings:      settingsStore,
-			MaxWorkers:    maxBoardWorkers,
 			// The Claude Code session cap, handed to the claim so it is a
 			// budget shared by every replica rather than a channel per pod.
 			VerificationEnabled: cfg.Board.VerificationEnabled,
@@ -1377,10 +1358,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}
 		claudeMCP := &claudeCodeMCP{endpoint: e.mcpEndpoint, tokens: mcpserver.NewRunTokenRegistry(), registry: toolReg}
 		if executor, ccErr := claudecode.New(claudecode.Config{
-			Binary:        cfg.ClaudeCode.Binary,
-			MaxTurns:      cfg.ClaudeCode.MaxTurns,
-			MaxConcurrent: cfg.ClaudeCode.MaxConcurrent,
-			RunTimeout:    cfg.ClaudeCode.RunTimeout,
+			Binary:     cfg.ClaudeCode.Binary,
+			MaxTurns:   cfg.ClaudeCode.MaxTurns,
+			RunTimeout: cfg.ClaudeCode.RunTimeout,
 			// Empty resolves to claudecode.DefaultSettingSources, which keeps the
 			// operator's own hooks and plugins out of a board run.
 			SettingSources: cfg.ClaudeCode.SettingSources,
@@ -1400,45 +1380,39 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// this install's board tools. The only legitimate client is a claude
 			// child on this host.
 			e.mcpServer.SetLoopbackOnly(true)
-			log.Info().Int("max_concurrent", cfg.ClaudeCode.MaxConcurrent).
+			log.Info().
 				Str("mcp_endpoint", e.mcpEndpoint.get()).
 				Msg("claude code executor enabled, tasktrooper tools served over mcp")
 		}
 
 		if executor, agErr := antigravity.New(antigravity.Config{
-			Binary:        cfg.Antigravity.Binary,
-			MaxConcurrent: cfg.Antigravity.MaxConcurrent,
-			RunTimeout:    cfg.Antigravity.RunTimeout,
+			Binary:     cfg.Antigravity.Binary,
+			RunTimeout: cfg.Antigravity.RunTimeout,
 		}); agErr != nil {
 			log.Info().Err(agErr).Msg("antigravity executor not registered; agents on the antigravity provider cannot run on this host")
 		} else {
 			antigravityExecutor = executor
-			log.Info().Int("max_concurrent", cfg.Antigravity.MaxConcurrent).
-				Msg("antigravity executor enabled")
+			log.Info().Msg("antigravity executor enabled")
 		}
 
 		if executor, curErr := cursor.New(cursor.Config{
-			Binary:        cfg.CursorAgent.Binary,
-			MaxConcurrent: cfg.CursorAgent.MaxConcurrent,
-			RunTimeout:    cfg.CursorAgent.RunTimeout,
+			Binary:     cfg.CursorAgent.Binary,
+			RunTimeout: cfg.CursorAgent.RunTimeout,
 		}); curErr != nil {
 			log.Info().Err(curErr).Msg("cursor executor not registered; agents on the cursor_agent provider cannot run on this host")
 		} else {
 			cursorExecutor = executor
-			log.Info().Int("max_concurrent", cfg.CursorAgent.MaxConcurrent).
-				Msg("cursor executor enabled")
+			log.Info().Msg("cursor executor enabled")
 		}
 
 		if executor, ocErr := opencode.New(opencode.Config{
-			Binary:        cfg.Opencode.Binary,
-			MaxConcurrent: cfg.Opencode.MaxConcurrent,
-			RunTimeout:    cfg.Opencode.RunTimeout,
+			Binary:     cfg.Opencode.Binary,
+			RunTimeout: cfg.Opencode.RunTimeout,
 		}); ocErr != nil {
 			log.Info().Err(ocErr).Msg("opencode executor not registered; agents on the opencode provider cannot run on this host")
 		} else {
 			opencodeExecutor = executor
-			log.Info().Int("max_concurrent", cfg.Opencode.MaxConcurrent).
-				Msg("opencode executor enabled")
+			log.Info().Msg("opencode executor enabled")
 		}
 
 		// Wire the mux executor to the board runner and router

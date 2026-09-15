@@ -2258,7 +2258,6 @@ export interface BillingStatus {
   exhausted: boolean;
   period_start: string;
   reset_at: string;
-  max_concurrent_tasks: number;
   /** The server declares this plan read-only; the edit controls stay hidden. */
   managed?: boolean;
 }
@@ -2266,7 +2265,6 @@ export interface BillingStatus {
 export interface BillingPlan {
   name: string;
   usd_budget: number;
-  max_concurrent_tasks: number;
   period_days: number;
   period_start: string;
   display_token_rate: number;

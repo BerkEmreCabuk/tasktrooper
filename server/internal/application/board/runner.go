@@ -120,15 +120,6 @@ type AgentCLIConnections interface {
 type BillingGate interface {
 	Allow(ctx context.Context) (bool, string)
 	PauseTask(ctx context.Context, repositoryID, taskID uuid.UUID)
-	// MaxConcurrency is the plan's concurrent-task cap, 0 for unlimited. It is
-	// read PER RUN rather than once at boot, and that is the whole difference
-	// between a cap and a suggestion: it used to size this process's worker
-	// pool, so N replicas each granted the tenant its whole entitlement and the
-	// fleet ran N times the plan. It is now a number handed to the claim, which
-	// counts the tenant's live runs in the database. Reading it per run also
-	// means an upgrade takes effect on the next task instead of the next
-	// restart.
-	MaxConcurrency(ctx context.Context) int
 }
 
 // TaskBlocker parks a task on the clarification chat the agent opened, so the
@@ -231,7 +222,6 @@ type Runner struct {
 	defaultPolicy domain.ToolPolicy
 	defaultLang   string
 	settings      port.SettingsStore
-	maxWorkers    int
 	// heartbeatEvery is runHeartbeat, overridable so a test can drive the
 	// cross-replica stop without waiting ten seconds for a tick. Production
 	// never sets it.
@@ -340,7 +330,6 @@ type RunnerDeps struct {
 	// Settings lets the board path honour a language change made in the UI; the
 	// runner outlives the setting, so DefaultLang is only the startup fallback.
 	Settings            port.SettingsStore
-	MaxWorkers          int
 	VerificationEnabled bool
 	VerifyFixAttempts   int
 	TaskTypeModels      map[string]string
@@ -348,10 +337,6 @@ type RunnerDeps struct {
 }
 
 func NewRunner(deps RunnerDeps) *Runner {
-	maxWorkers := deps.MaxWorkers
-	if maxWorkers <= 0 {
-		maxWorkers = 3
-	}
 	lang := deps.DefaultLang
 	if lang == "" {
 		lang = "en"
@@ -379,7 +364,6 @@ func NewRunner(deps RunnerDeps) *Runner {
 		defaultPolicy:     deps.DefaultPolicy,
 		defaultLang:       lang,
 		settings:          deps.Settings,
-		maxWorkers:        maxWorkers,
 		verifyEnabled:     deps.VerificationEnabled,
 		verifyFixAttempts: deps.VerifyFixAttempts,
 		taskTypeModels:    deps.TaskTypeModels,
@@ -488,17 +472,6 @@ func (r *Runner) detectToolchain(ctx context.Context, job RunJob, workDir string
 	return tc.Env
 }
 
-// tenantConcurrency is the plan's concurrent-task cap, or 0 when there is no
-// billing gate to ask. It is read on the run rather than at boot because the
-// number is now enforced in the database, where it is a budget shared by every
-// replica, instead of being baked into the size of one process's worker pool.
-func (r *Runner) tenantConcurrency(ctx context.Context) int {
-	if r.billing == nil {
-		return 0
-	}
-	return r.billing.MaxConcurrency(ctx)
-}
-
 // SetParkJournal wires the writer that makes a park visible on the board. Late-
 // set like the stores above, and nil-safe: without it the card still parks and
 // still resumes, it just leaves no row in the task's history.
@@ -508,10 +481,8 @@ func (r *Runner) SetParkJournal(j *ParkJournal) {
 
 func (r *Runner) Start(ctx context.Context) {
 	ctx, r.cancel = context.WithCancel(ctx)
-	for i := 0; i < r.maxWorkers; i++ {
-		r.wg.Add(1)
-		go r.worker(ctx)
-	}
+	r.wg.Add(1)
+	go r.dispatch(ctx)
 }
 
 // Stop severs: in-flight runs are cancelled immediately. Shutdown paths should
@@ -786,11 +757,14 @@ func (r *Runner) unmarkQueued(runID uuid.UUID) {
 	r.activeMu.Unlock()
 }
 
-func (r *Runner) worker(ctx context.Context) {
+// dispatch starts every queued job in its own goroutine. There is no worker
+// pool and no cap on how many runs execute at once: a run only ever waits for
+// another run on the SAME task (beginTask), because those share a checkout.
+func (r *Runner) dispatch(ctx context.Context) {
 	defer r.wg.Done()
 	for {
-		// Drain is checked before the queue so a worker that just finished a job
-		// during shutdown stops here instead of starting another one.
+		// Drain is checked before the queue so a job arriving during shutdown
+		// is not started.
 		select {
 		case <-ctx.Done():
 			return
@@ -804,28 +778,35 @@ func (r *Runner) worker(ctx context.Context) {
 		case <-r.drain:
 			return
 		case job := <-r.queue:
-			// Everything below this line talks to a policy-protected table, so
-			// the dispatching tenant is put back on the context first.
-			ctx := job.scope(ctx)
-			// A job can wait here for as long as the task ahead of it takes, and
-			// the stop that arrived meanwhile was recorded on the row, not in
-			// this queue. Read the row before claiming anything: a run stopped
-			// while it waited must not start now that a worker is free.
-			if r.alreadyStopped(ctx, job.Run.ID) {
-				r.unmarkQueued(job.Run.ID)
-				continue
-			}
-			// Parked jobs come back through the queue when the task frees up;
-			// this worker takes the next one instead of blocking on this task.
-			if !r.beginTask(job) {
-				continue
-			}
-			err := r.execute(ctx, job)
-			r.endTask(job.Task.ID)
-			if err != nil {
-				log.Warn().Err(err).Str("run_id", job.Run.ID.String()).Msg("board agent run failed")
-			}
+			r.wg.Add(1)
+			go func() {
+				defer r.wg.Done()
+				r.runJob(ctx, job)
+			}()
 		}
+	}
+}
+
+func (r *Runner) runJob(ctx context.Context, job RunJob) {
+	// Everything below this line talks to a policy-protected table, so the
+	// dispatching scope is put back on the context first.
+	ctx = job.scope(ctx)
+	// A job can sit in the queue for a moment, and a stop that arrived meanwhile
+	// was recorded on the row, not in this queue. Read the row before claiming
+	// anything: a run stopped while it waited must not start now.
+	if r.alreadyStopped(ctx, job.Run.ID) {
+		r.unmarkQueued(job.Run.ID)
+		return
+	}
+	// A job for a task that already has a run is parked and comes back through
+	// the queue when that task frees up.
+	if !r.beginTask(job) {
+		return
+	}
+	err := r.execute(ctx, job)
+	r.endTask(job.Task.ID)
+	if err != nil {
+		log.Warn().Err(err).Str("run_id", job.Run.ID.String()).Msg("board agent run failed")
 	}
 }
 
@@ -864,12 +845,10 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 
 	// The claim, and the only way a run becomes 'running'.
 	//
-	// It replaces an unconditional UPDATE, and it answers three questions that
-	// were each a map in this process's memory until now: is another run
-	// already on this task (Runner.activeTasks), is the tenant at its plan's
-	// concurrency (the SIZE of this worker pool), and is this member's Mac at
-	// its Claude Code session cap (RemoteExecutor.slots). Every one of them was
-	// correct for one process and multiplied by the replica count.
+	// It replaces an unconditional UPDATE and answers the one question that used
+	// to be a map in this process's memory: is another run already on this task
+	// (Runner.activeTasks). There is no concurrency budget; every run whose task
+	// is free starts now.
 	//
 	// A refusal is not an error and leaves the row 'pending', which is exactly
 	// what the reconciler's never-started sweep collects a couple of minutes
@@ -877,10 +856,9 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	// a Go map that died with the pod.
 	if r.runs != nil {
 		claim, err := r.runs.ClaimRun(ctx, port.RunClaim{
-			RunID:         run.ID,
-			TaskID:        job.Task.ID,
-			LiveWithin:    runLiveWithin,
-			MaxTenantRuns: r.tenantConcurrency(ctx),
+			RunID:      run.ID,
+			TaskID:     job.Task.ID,
+			LiveWithin: runLiveWithin,
 		})
 		if err != nil {
 			return err

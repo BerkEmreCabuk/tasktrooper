@@ -26,7 +26,6 @@ export const boardArea: BoardAreaDict = {
     restore: "Bu makineye indir",
     restoreRetry: "Tekrar dene",
     restoring: "Proje indiriliyor…",
-    restoringTo: "{path} konumuna klonlanıyor — birkaç dakika sürebilir",
     restoreDone: "\"{name}\" bu makineye indirildi",
     restoreFailed: "Proje indirilemedi",
   },

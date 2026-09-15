@@ -105,9 +105,7 @@ export function RepositoryGitNotice({ repository, onRestored, className }: Repos
       {running ? (
         <span className="flex items-center gap-2">
           <Spinner size="sm" className="h-3.5 w-3.5" />
-          {restore?.root_path
-            ? t("boardArea.repos.restoringTo", { path: restore.root_path })
-            : t("boardArea.repos.restoring")}
+          {t("boardArea.repos.restoring")}
         </span>
       ) : (
         repository.git_restorable && (

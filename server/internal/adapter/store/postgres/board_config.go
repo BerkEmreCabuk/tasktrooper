@@ -678,49 +678,38 @@ WITH me AS (
     WHERE r.status = 'running' AND r.updated_at > now() - $2::interval
 ), gate AS (
     SELECT me.id,
-        EXISTS (SELECT 1 FROM live WHERE live.task_id = me.task_id) AS task_busy,
-        ($3 > 0 AND (SELECT count(*) FROM live) >= $3) AS tenant_full
+        EXISTS (SELECT 1 FROM live WHERE live.task_id = me.task_id) AS task_busy
     FROM me
 ), claimed AS (
     UPDATE task_agent_runs r
     SET status = 'running', updated_at = now()
     FROM gate
     WHERE r.id = gate.id
-      AND NOT gate.task_busy AND NOT gate.tenant_full
+      AND NOT gate.task_busy
     RETURNING r.id
 )
 SELECT
     EXISTS (SELECT 1 FROM claimed) AS claimed,
     EXISTS (SELECT 1 FROM me) AS pending,
-    COALESCE((SELECT task_busy FROM gate), false),
-    COALESCE((SELECT tenant_full FROM gate), false)
+    COALESCE((SELECT task_busy FROM gate), false)
 `
 
 // claimLockClass namespaces this store's advisory locks so they cannot collide
 // with the migration runner's, which uses the single-argument form.
 const claimLockClass int32 = 521202603
 
-// claimTenantLockSQL serialises the claim per TENANT, for the length of the
-// claiming transaction only.
+// claimTenantLockSQL serialises claims for the length of the claiming
+// transaction only.
 //
-// It is here because the real database found the bug a Go fake could not: the
-// counting the claim does — "how many of this tenant's runs are live" — is not
-// serialised by FOR UPDATE SKIP LOCKED. That locks the ONE row being claimed.
-// Under READ COMMITTED each concurrent claim's count is taken against a
-// snapshot from before its rivals committed, so four replicas asking at once
-// all counted zero live runs and all four passed a cap of two. Every in-memory
-// version of this cap had the same shape, which is presumably why it read as
-// correct.
-//
-// An advisory lock rather than SERIALIZABLE: the isolation level would need a
-// retry loop around every claim for a conflict that is not an error, and it
-// would apply to a transaction that also does the UPDATE. This locks exactly
-// what has to be serial — one tenant's claims — and releases at commit with no
-// cleanup path to get wrong. Claims are a handful per minute per tenant; the
-// contention it introduces is the shared budget, spelled out.
+// FOR UPDATE SKIP LOCKED locks the ONE row being claimed, not the task it
+// belongs to. Under READ COMMITTED two runs of the same task claimed at once
+// would each ask "is another run on this task live?" against a snapshot from
+// before the other committed, and both would start. The advisory lock makes
+// that check and the write serial, and it releases at commit with no cleanup
+// path to get wrong.
 //
 // The key is read from the GUC rather than passed in, so it can only ever name
-// the tenant this transaction is already scoped to.
+// the scope this transaction is already in.
 const claimTenantLockSQL = `SELECT pg_advisory_xact_lock($1, hashtext(current_setting('app.tenant_id')))`
 
 func (s *TaskAgentRunStore) ClaimRun(ctx context.Context, claim port.RunClaim) (port.RunClaimResult, error) {
@@ -728,7 +717,7 @@ func (s *TaskAgentRunStore) ClaimRun(ctx context.Context, claim port.RunClaim) (
 	if live <= 0 {
 		live = time.Minute
 	}
-	var claimed, pending, taskBusy, tenantFull bool
+	var claimed, pending, taskBusy bool
 	err := s.pool.InTx(ctx, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, claimTenantLockSQL, claimLockClass); err != nil {
 			return fmt.Errorf("lock tenant for claim: %w", err)
@@ -736,8 +725,7 @@ func (s *TaskAgentRunStore) ClaimRun(ctx context.Context, claim port.RunClaim) (
 		return tx.QueryRow(ctx, claimRunSQL,
 			claim.RunID,
 			live.String(),
-			claim.MaxTenantRuns,
-		).Scan(&claimed, &pending, &taskBusy, &tenantFull)
+		).Scan(&claimed, &pending, &taskBusy)
 	})
 	if err != nil {
 		return port.RunClaimResult{}, fmt.Errorf("claim task agent run: %w", err)
@@ -749,8 +737,6 @@ func (s *TaskAgentRunStore) ClaimRun(ctx context.Context, claim port.RunClaim) (
 		return port.RunClaimResult{Reason: "not_pending"}, nil
 	case taskBusy:
 		return port.RunClaimResult{Reason: "task_busy"}, nil
-	case tenantFull:
-		return port.RunClaimResult{Reason: "tenant_at_capacity"}, nil
 	default:
 		// The gate passed and the UPDATE still wrote nothing. Not reachable
 		// through the statement above, but a reason the caller can log beats a

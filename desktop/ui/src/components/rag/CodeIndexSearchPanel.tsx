@@ -108,7 +108,6 @@ export function CodeIndexSearchPanel({ repositories, loading = false }: CodeInde
     }
   };
 
-  const selectedRepo = repositories.find((repo) => repo.id === selectedId);
 
   if (loading) {
     return (
@@ -183,10 +182,6 @@ export function CodeIndexSearchPanel({ repositories, loading = false }: CodeInde
           </div>
         </div>
       </div>
-
-      {selectedRepo && (
-        <p className="font-mono text-xs text-muted-foreground">{selectedRepo.root_path}</p>
-      )}
 
       <div className="flex flex-col gap-2 sm:flex-row">
         <Input

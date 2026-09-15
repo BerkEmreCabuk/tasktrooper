@@ -21,9 +21,9 @@ func NewBillingStore(pool *DB) *BillingStore {
 func (s *BillingStore) GetPlan(ctx context.Context) (domain.BillingPlan, error) {
 	var p domain.BillingPlan
 	err := s.pool.QueryRow(ctx, `
-		SELECT name, usd_budget, max_concurrent_tasks, period_days, period_start, display_token_rate, updated_at
+		SELECT name, usd_budget, period_days, period_start, display_token_rate, updated_at
 		FROM billing_plan WHERE id = 1
-	`).Scan(&p.Name, &p.UsdBudget, &p.MaxConcurrentTasks, &p.PeriodDays, &p.PeriodStart, &p.DisplayTokenRate, &p.UpdatedAt)
+	`).Scan(&p.Name, &p.UsdBudget, &p.PeriodDays, &p.PeriodStart, &p.DisplayTokenRate, &p.UpdatedAt)
 	if err != nil {
 		return domain.BillingPlan{}, fmt.Errorf("get billing plan: %w", err)
 	}
@@ -36,14 +36,13 @@ func (s *BillingStore) UpdatePlan(ctx context.Context, req domain.UpdateBillingP
 		UPDATE billing_plan SET
 			name = COALESCE($1, name),
 			usd_budget = COALESCE($2, usd_budget),
-			max_concurrent_tasks = COALESCE($3, max_concurrent_tasks),
-			period_days = COALESCE($4, period_days),
-			display_token_rate = COALESCE($5, display_token_rate),
+			period_days = COALESCE($3, period_days),
+			display_token_rate = COALESCE($4, display_token_rate),
 			updated_at = now()
 		WHERE id = 1
-		RETURNING name, usd_budget, max_concurrent_tasks, period_days, period_start, display_token_rate, updated_at
-	`, req.Name, req.UsdBudget, req.MaxConcurrentTasks, req.PeriodDays, req.DisplayTokenRate).
-		Scan(&p.Name, &p.UsdBudget, &p.MaxConcurrentTasks, &p.PeriodDays, &p.PeriodStart, &p.DisplayTokenRate, &p.UpdatedAt)
+		RETURNING name, usd_budget, period_days, period_start, display_token_rate, updated_at
+	`, req.Name, req.UsdBudget, req.PeriodDays, req.DisplayTokenRate).
+		Scan(&p.Name, &p.UsdBudget, &p.PeriodDays, &p.PeriodStart, &p.DisplayTokenRate, &p.UpdatedAt)
 	if err != nil {
 		return domain.BillingPlan{}, fmt.Errorf("update billing plan: %w", err)
 	}

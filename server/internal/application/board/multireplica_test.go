@@ -59,8 +59,6 @@ func (s *sharedRunStore) ClaimRun(_ context.Context, c port.RunClaim) (port.RunC
 	if !ok || me.Status != domain.TaskAgentRunStatusPending {
 		return port.RunClaimResult{Reason: "not_pending"}, nil
 	}
-	live := 0
-	taskBusy := false
 	for _, row := range s.rows {
 		if row.Status != domain.TaskAgentRunStatusRunning {
 			continue
@@ -68,16 +66,9 @@ func (s *sharedRunStore) ClaimRun(_ context.Context, c port.RunClaim) (port.RunC
 		if time.Since(row.UpdatedAt) > c.LiveWithin {
 			continue
 		}
-		live++
 		if row.TaskID == me.TaskID {
-			taskBusy = true
+			return port.RunClaimResult{Reason: "task_busy"}, nil
 		}
-	}
-	switch {
-	case taskBusy:
-		return port.RunClaimResult{Reason: "task_busy"}, nil
-	case c.MaxTenantRuns > 0 && live >= c.MaxTenantRuns:
-		return port.RunClaimResult{Reason: "tenant_at_capacity"}, nil
 	}
 	me.Status = domain.TaskAgentRunStatusRunning
 	me.UpdatedAt = time.Now()
@@ -233,8 +224,8 @@ func TestTwoReplicasCannotRunTheSameTask(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	a := NewRunner(RunnerDeps{Runs: store, Catalog: catalog, MaxWorkers: 1})
-	b := NewRunner(RunnerDeps{Runs: store, Catalog: catalog, MaxWorkers: 1})
+	a := NewRunner(RunnerDeps{Runs: store, Catalog: catalog})
+	b := NewRunner(RunnerDeps{Runs: store, Catalog: catalog})
 	a.Start(ctx)
 	b.Start(ctx)
 	defer a.Stop()
@@ -271,7 +262,9 @@ func TestTwoReplicasCannotRunTheSameTask(t *testing.T) {
 	}
 }
 
-func TestTenantConcurrencyIsSharedAcrossReplicas(t *testing.T) {
+// Nothing caps how many runs execute at once: every queued run whose task is
+// free is claimed and started, however many there are.
+func TestRunnerStartsEveryRunWithoutACap(t *testing.T) {
 	store := newSharedRunStore()
 	catalog := newCountingCatalog()
 	defer close(catalog.release)
@@ -279,29 +272,19 @@ func TestTenantConcurrencyIsSharedAcrossReplicas(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	plan := &fixedPlan{max: 2}
-	runners := make([]*Runner, 2)
-	for i := range runners {
-		r := NewRunner(RunnerDeps{Runs: store, Catalog: catalog, MaxWorkers: 2})
-		r.SetBilling(plan)
-		r.Start(ctx)
-		defer r.Stop()
-		runners[i] = r
-	}
+	r := NewRunner(RunnerDeps{Runs: store, Catalog: catalog})
+	r.Start(ctx)
+	defer r.Stop()
 
-	for i := 0; i < 4; i++ {
+	const runs = 12
+	for i := 0; i < runs; i++ {
 		taskID := uuid.New()
 		run := store.put(domain.TaskAgentRun{TaskID: taskID})
-		runners[i%2].Enqueue(RunJob{Run: run, Task: domain.BoardTask{ID: taskID}})
+		r.Enqueue(RunJob{Run: run, Task: domain.BoardTask{ID: taskID}})
 	}
 
-	if !waitUntil(func() bool { return store.claimCount() >= 2 }) {
-		t.Fatal("the fleet never reached the plan's concurrency")
-	}
-	time.Sleep(150 * time.Millisecond)
-
-	if got := store.claimCount(); got != 2 {
-		t.Fatalf("%d concurrent runs across the fleet, want the plan's 2", got)
+	if !waitUntil(func() bool { return store.claimCount() == runs }) {
+		t.Fatalf("%d of %d runs started, want all of them at once", store.claimCount(), runs)
 	}
 }
 
@@ -313,12 +296,12 @@ func TestStopOnAnotherReplicaStopsTheRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	executing := NewRunner(RunnerDeps{Runs: store, Catalog: catalog, MaxWorkers: 1})
+	executing := NewRunner(RunnerDeps{Runs: store, Catalog: catalog})
 	executing.heartbeatEvery = 10 * time.Millisecond
 	executing.Start(ctx)
 	defer executing.Stop()
 
-	other := NewRunner(RunnerDeps{Runs: store, Catalog: catalog, MaxWorkers: 1})
+	other := NewRunner(RunnerDeps{Runs: store, Catalog: catalog})
 	other.Start(ctx)
 	defer other.Stop()
 
@@ -349,12 +332,6 @@ func TestStopOnAnotherReplicaStopsTheRun(t *testing.T) {
 		t.Fatalf("row status = %q, want cancelled", got)
 	}
 }
-
-type fixedPlan struct{ max int }
-
-func (p *fixedPlan) Allow(context.Context) (bool, string)            { return true, "" }
-func (p *fixedPlan) PauseTask(context.Context, uuid.UUID, uuid.UUID) {}
-func (p *fixedPlan) MaxConcurrency(context.Context) int              { return p.max }
 
 type countingQA struct {
 	mu    sync.Mutex

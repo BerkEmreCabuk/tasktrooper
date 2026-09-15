@@ -83,17 +83,11 @@ const DefaultBinary = "claude"
 // had rather than spending the subscription on a loop.
 const DefaultMaxTurns = 100
 
-// DefaultMaxConcurrent is how many CLI sessions may run at once. Three matches
-// the Max plan's practical ceiling: past it the sessions do not fail, they
-// share one account's rate window and all of them slow down, which reads on the
-// board as several tasks stuck rather than one queued.
-const DefaultMaxConcurrent = 3
-
 // DefaultRunTimeout bounds ONE session end to end.
 //
 // A subprocess has no equivalent of a provider's HTTP timeout: nothing else in
 // this path ever gives up. A `claude` that wedges — a hung tool, a dead network
-// mid-turn — holds a board worker AND one of the few concurrency slots forever,
+// mid-turn — holds its board run open forever,
 // and the runner's heartbeat keeps stamping the row so the stale-run reconciler
 // never sees an abandoned run either. Every recovery mechanism in the system is
 // blind to it, which is why the bound has to be here.
@@ -101,19 +95,6 @@ const DefaultMaxConcurrent = 3
 // An hour is deliberately far above a real task (minutes) and far below "never".
 // Config key: claude_code.run_timeout.
 const DefaultRunTimeout = time.Hour
-
-// DefaultSlotWait bounds how long a run waits for a concurrency slot before
-// giving up.
-//
-// Unbounded waiting is what turns a busy executor into a stuck board: the
-// waiting run is holding a board worker the whole time, so a queue three deep
-// can idle most of the pool on runs that are doing nothing. Failing fast puts
-// the task back through the reconciler, which re-dispatches it when there is
-// capacity — a late start, rather than a worker held hostage.
-//
-// Ten minutes: long enough to sit behind one long session, short enough that a
-// pile-up drains instead of deadlocking.
-const DefaultSlotWait = 10 * time.Minute
 
 // stderrTailMax is how much of the child's stderr is kept for the failure
 // message. The tail, not the head: a CLI that dies says why on its last lines.
@@ -167,9 +148,8 @@ type Config struct {
 	// construction, so a typo is a boot-time log line rather than a failed run
 	// an hour later.
 	Binary string
-	// MaxTurns / MaxConcurrent: <= 0 means the defaults above.
-	MaxTurns      int
-	MaxConcurrent int
+	// MaxTurns: <= 0 means DefaultMaxTurns.
+	MaxTurns int
 	// RunTimeout bounds one session; <= 0 means DefaultRunTimeout.
 	RunTimeout time.Duration
 	// SettingSources selects the CLI settings files a session loads; empty means
@@ -198,15 +178,6 @@ type Executor struct {
 	settingSources string
 	mcp            MCPConfig
 	mcpProvider    MCPProvider
-	// slots is the concurrency cap. A run that cannot get one WAITS (bounded by
-	// slotWait and by its own context) rather than parking: a queue is not a
-	// quota, and parking on it would move a card to blocked and wake it on a
-	// sweep that has nothing to do with what it is actually waiting for — the
-	// run in front.
-	slots chan struct{}
-	// slotWait is a field rather than the constant so a test can prove the
-	// bounded wait without waiting ten minutes for it.
-	slotWait time.Duration
 	// now is injectable so the quota park's fallback window is testable without
 	// a clock.
 	now func() time.Time
@@ -214,11 +185,8 @@ type Executor struct {
 
 var (
 	_ port.TaskExecutor = (*Executor)(nil)
-	// The same object serves both seams. There is one CLI, one concurrency cap
-	// and one subscription behind it, so a board task and a chat turn must
-	// queue against each other — which they only do if they share this
-	// instance's slots. Two executors would each believe they had the whole
-	// budget.
+	// The same object serves both seams: a board task and a chat turn run
+	// through the same CLI and the same subscription.
 	_ port.ChatExecutor = (*Executor)(nil)
 )
 
@@ -264,10 +232,6 @@ func New(cfg Config) (*Executor, error) {
 	if maxTurns <= 0 {
 		maxTurns = DefaultMaxTurns
 	}
-	maxConcurrent := cfg.MaxConcurrent
-	if maxConcurrent <= 0 {
-		maxConcurrent = DefaultMaxConcurrent
-	}
 	runTimeout := cfg.RunTimeout
 	if runTimeout <= 0 {
 		runTimeout = DefaultRunTimeout
@@ -279,8 +243,6 @@ func New(cfg Config) (*Executor, error) {
 		settingSources: normalizeSettingSources(cfg.SettingSources),
 		mcp:            cfg.MCP,
 		mcpProvider:    cfg.MCPProvider,
-		slots:          make(chan struct{}, maxConcurrent),
-		slotWait:       DefaultSlotWait,
 		now:            time.Now,
 	}, nil
 }
@@ -304,14 +266,7 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 		return domain.AgentResponse{}, errors.New("claude code executor: no task workspace to run in")
 	}
 
-	release, err := e.acquire(ctx)
-	if err != nil {
-		return domain.AgentResponse{}, err
-	}
-	defer release()
-
-	// After the slot, not before: a run queued behind another must not be
-	// holding a live credential while it waits. Both defers run on every exit
+	// Both defers run on every exit
 	// path this function has — a finished session, a failure, and the quota
 	// park, which returns a typed error like any other.
 	// RequiresTools is unconditional — every task needs the board tools — while
@@ -433,9 +388,8 @@ type invocation struct {
 // session itself did — including dying — comes back in the session value, so
 // that finish is the single place that decides what an outcome means.
 func (e *Executor) spawn(ctx context.Context, inv invocation) (session, error) {
-	// The session's own deadline, started AFTER the slot: time spent queueing
-	// behind another run is not time this session was given to work. Nothing
-	// else in this path ever gives up — see DefaultRunTimeout.
+	// The session's own deadline. Nothing else in this path ever gives up —
+	// see DefaultRunTimeout.
 	runCtx, cancelRun := context.WithTimeout(ctx, e.runTimeout)
 	defer cancelRun()
 
@@ -750,38 +704,6 @@ func (f sessionFinisher) finish(ctx context.Context, label string, s session) (d
 
 func maxTurnsNote(maxTurns int) string {
 	return fmt.Sprintf("[The Claude Code session stopped at its %d-turn budget; anything above is what it had finished by then.]", maxTurns)
-}
-
-// acquire takes a concurrency slot, waiting until one frees, until slotWait
-// passes, or until ctx ends — whichever comes first.
-//
-// The wait is bounded because the waiting run is holding a board worker the
-// whole time: an unbounded queue three deep idles most of the pool on runs that
-// are doing nothing. Giving up returns a plain error, never a quota park — the
-// task goes back through the reconciler and starts later, which is a delay, not
-// a blocked card waiting on a subscription that was never the problem.
-func (e *Executor) acquire(ctx context.Context) (func(), error) {
-	select {
-	case e.slots <- struct{}{}:
-		return func() { <-e.slots }, nil
-	default:
-	}
-	wait := e.slotWait
-	if wait <= 0 {
-		wait = DefaultSlotWait
-	}
-	log.Info().Int("limit", cap(e.slots)).Dur("max_wait", wait).
-		Msg("claude code executor at its concurrency cap, run is waiting for a slot")
-	timer := time.NewTimer(wait)
-	defer timer.Stop()
-	select {
-	case e.slots <- struct{}{}:
-		return func() { <-e.slots }, nil
-	case <-timer.C:
-		return nil, fmt.Errorf("claude code executor is busy: no session slot came free within %s (limit %d concurrent sessions)", wait, cap(e.slots))
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	}
 }
 
 func (e *Executor) buildArgs(inv invocation) []string {

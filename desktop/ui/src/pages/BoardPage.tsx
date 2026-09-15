@@ -206,8 +206,8 @@ export function BoardPage() {
       const data = await api.listActivity(100);
       const ids = new Set<string>();
       for (const item of data.items ?? []) {
-        // Only a run that has actually started. A pending run is queued behind
-        // the concurrency limit and nothing is happening on the card yet, so
+        // Only a run that has actually started. A pending run is still waiting
+        // to be claimed and nothing is happening on the card yet, so
         // badging it "agent running" made the board claim work it was not
         // doing — and hid the real reason the task was sitting still.
         if (item.kind === "agent_run" && item.task_id && item.status === "running") {
