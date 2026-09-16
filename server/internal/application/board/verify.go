@@ -52,6 +52,11 @@ func hasNPMScript(dir, script string) bool {
 // reviewer got a red build for a task the system had just judged unfinished.
 // A round that could not be evaluated (a fix round whose agent loop errored)
 // counts as not verified: the last thing anything measured was a failure.
+//
+// The third return value is a usage-limit block from a fix round: neither
+// true nor false describes it, since nothing was actually judged, so the
+// caller must check it before reading the bool at all — a fix round the CLI
+// never finished must park the task, not fail it or report a stale verdict.
 func (r *Runner) verifyAndFix(
 	ctx context.Context,
 	job RunJob,
@@ -61,7 +66,7 @@ func (r *Runner) verifyAndFix(
 	model string,
 	policy domain.ToolPolicy,
 	workspace string,
-) (domain.AgentResponse, bool) {
+) (domain.AgentResponse, bool, *domain.QuotaBlock) {
 	attempts := r.verifyFixAttempts
 	if attempts <= 0 {
 		attempts = 2
@@ -140,7 +145,7 @@ func (r *Runner) verifyAndFix(
 				}
 				resp.Message.Content = strings.TrimSpace(resp.Message.Content + note)
 			}
-			return resp, true
+			return resp, true, nil
 		}
 		if rec != nil {
 			rec.Step("build_verification_failed", map[string]any{
@@ -151,7 +156,7 @@ func (r *Runner) verifyAndFix(
 			r.reportVerificationFailure(ctx, job, failReport)
 			resp.Message.Content = strings.TrimSpace(resp.Message.Content +
 				"\n\n[verification] Build/vet checks still failing after " + fmt.Sprint(attempts) + " fix attempts; task moved back to in_progress.")
-			return resp, false
+			return resp, false, nil
 		}
 		history = append(history, domain.Message{Role: domain.RoleAssistant, Content: resp.Message.Content})
 		// The fix round runs on the PRE-RUN history: everything the finished run
@@ -182,8 +187,11 @@ func (r *Runner) verifyAndFix(
 			agent.WithLightModel(agentRec.Model),
 			agent.WithCLILabel(job.Task.Key+" verify-fix", job.Task.Title))
 		if err != nil {
+			if quotaErr, ok := domain.QuotaBlockOf(err); ok {
+				return resp, false, quotaErr
+			}
 			r.reportVerificationFailure(ctx, job, failReport)
-			return resp, false
+			return resp, false, nil
 		}
 		resp = fixed
 	}

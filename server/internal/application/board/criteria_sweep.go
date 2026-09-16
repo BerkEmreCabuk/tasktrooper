@@ -56,6 +56,11 @@ const criteriaSweepRounds = 3
 // Runner.runTask, which is what turns "settled=false" into
 // domain.TaskAgentRunStatusFailed so the reconciler's retry path picks the task
 // back up instead of it sitting in this column with nothing watching it.
+//
+// The third return value is a usage-limit block hit during a sweep round: the
+// round never got an answer, so settled must not be read either way — the
+// caller parks the task instead of failing or closing the run on a stale
+// criteria list.
 func (r *Runner) sweepOpenCriteria(
 	ctx context.Context,
 	job RunJob,
@@ -64,18 +69,18 @@ func (r *Runner) sweepOpenCriteria(
 	resp domain.AgentResponse,
 	model string,
 	policy domain.ToolPolicy,
-) (domain.AgentResponse, bool) {
+) (domain.AgentResponse, bool, *domain.QuotaBlock) {
 	if isReviewColumn(job.Task.Column) {
-		return resp, true
+		return resp, true, nil
 	}
 	switch job.Task.Column {
 	case domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision:
 	default:
-		return resp, true
+		return resp, true, nil
 	}
 	open := r.openCriteria(ctx, job)
 	if len(open) == 0 {
-		return resp, true
+		return resp, true, nil
 	}
 
 	rec := activity.FromContext(ctx)
@@ -90,12 +95,15 @@ func (r *Runner) sweepOpenCriteria(
 		if _, err := r.agentLoop.RunTask(ctx, history, model, agentRec.ProviderType, policy,
 			agent.WithLightModel(agentRec.Model),
 			agent.WithCLILabel(fmt.Sprintf("%s criteria-sweep %d", job.Task.Key, round), job.Task.Title)); err != nil {
+			if quotaErr, ok := domain.QuotaBlockOf(err); ok {
+				return resp, true, quotaErr
+			}
 			log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Int("round", round).
 				Msg("acceptance criteria sweep failed; leaving the criteria as they stand")
 			// A tool/agent-loop error here is not the round cap running out —
 			// the loop never got to ask three times, so this is not the
 			// "unattended machine" signature the reconciler retry exists for.
-			return resp, true
+			return resp, true, nil
 		}
 
 		still := r.openCriteria(ctx, job)
@@ -103,7 +111,7 @@ func (r *Runner) sweepOpenCriteria(
 			if rec != nil {
 				rec.Step("criteria_sweep_settled", map[string]any{"rounds": round})
 			}
-			return resp, true
+			return resp, true, nil
 		}
 		// Progress is not "fewer open": a round that cancelled one criterion
 		// and ignored two others still moved, and the next round is asked about
@@ -117,7 +125,7 @@ func (r *Runner) sweepOpenCriteria(
 	log.Info().Str("task_id", job.Task.ID.String()).Int("open", len(open)).Int("rounds", criteriaSweepRounds).
 		Msg("acceptance criteria still open after the sweep loop")
 	r.reportUnsettledCriteria(ctx, job, open)
-	return resp, false
+	return resp, false, nil
 }
 
 // criteriaSweepPrompt escalates. The first round assumes bookkeeping was

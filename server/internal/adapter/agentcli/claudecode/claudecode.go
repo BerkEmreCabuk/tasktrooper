@@ -58,6 +58,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -95,6 +97,13 @@ const DefaultMaxTurns = 100
 // An hour is deliberately far above a real task (minutes) and far below "never".
 // Config key: claude_code.run_timeout.
 const DefaultRunTimeout = time.Hour
+
+// DefaultMaxConcurrentSessions bounds how many CLI sessions this executor runs
+// at once. The subscription's usage limit is shared by every session on this
+// account, so N sessions that all hit it mid-work all park at once, and a
+// burst on resume re-hits it; 3 keeps the burn sequential enough that the ones
+// that started actually finish instead of all being cut off together.
+const DefaultMaxConcurrentSessions = 3
 
 // stderrTailMax is how much of the child's stderr is kept for the failure
 // message. The tail, not the head: a CLI that dies says why on its last lines.
@@ -165,6 +174,10 @@ type Config struct {
 	// so it cannot be shared and must not outlive the session. Set, it wins
 	// over MCP.
 	MCPProvider MCPProvider
+	// MaxConcurrentSessions bounds how many CLI sessions run at once. 0 means
+	// DefaultMaxConcurrentSessions; negative means unlimited — see
+	// domain.ClaudeCodeConfig.MaxConcurrentSessions for why the cap exists.
+	MaxConcurrentSessions int
 }
 
 // Executor runs board tasks through the Claude Code CLI. It satisfies
@@ -181,6 +194,23 @@ type Executor struct {
 	// now is injectable so the quota park's fallback window is testable without
 	// a clock.
 	now func() time.Time
+
+	// sem bounds concurrent sessions; nil means unlimited (MaxConcurrentSessions
+	// configured negative). slotCap mirrors its capacity, or -1 when unlimited,
+	// so SlotsInUse has an answer either way without reading cap(nil).
+	sem     chan struct{}
+	slotCap int
+	// active is how many sessions currently hold a slot, tracked separately from
+	// len(sem) so it still means something when sem is nil.
+	active int64
+
+	// gateMu guards the account-wide usage-limit gate: one session's 429 tells
+	// every OTHER session about to start not to bother, rather than each of up
+	// to MaxConcurrentSessions discovering the same spent subscription on its
+	// own spawn.
+	gateMu      sync.Mutex
+	quotaUntil  time.Time
+	quotaDetail string
 }
 
 var (
@@ -236,6 +266,16 @@ func New(cfg Config) (*Executor, error) {
 	if runTimeout <= 0 {
 		runTimeout = DefaultRunTimeout
 	}
+	slotCap := cfg.MaxConcurrentSessions
+	if slotCap == 0 {
+		slotCap = DefaultMaxConcurrentSessions
+	} else if slotCap < 0 {
+		slotCap = -1
+	}
+	var sem chan struct{}
+	if slotCap > 0 {
+		sem = make(chan struct{}, slotCap)
+	}
 	return &Executor{
 		bin:            resolved,
 		maxTurns:       maxTurns,
@@ -244,6 +284,8 @@ func New(cfg Config) (*Executor, error) {
 		mcp:            cfg.MCP,
 		mcpProvider:    cfg.MCPProvider,
 		now:            time.Now,
+		sem:            sem,
+		slotCap:        slotCap,
 	}, nil
 }
 
@@ -251,6 +293,118 @@ func New(cfg Config) (*Executor, error) {
 // runner holding a nil executor asks the same question and gets "no".
 func (e *Executor) Supports(provider domain.LLMProviderType) bool {
 	return e != nil && provider == domain.LLMProviderClaudeCode
+}
+
+// armQuotaGate records that a session on this executor hit the usage limit, so
+// every OTHER session about to spawn learns it from this in-memory check
+// instead of independently paying for a 429 of its own. Only extends the
+// gate, never shortens it: a session that started before the first park can
+// still fail on the same window and must not overwrite an already-later
+// estimate with an earlier one.
+func (e *Executor) armQuotaGate(block *domain.QuotaBlock) {
+	if block == nil {
+		return
+	}
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	if block.ResumeAt.After(e.quotaUntil) {
+		e.quotaUntil = block.ResumeAt
+		e.quotaDetail = block.Detail
+	}
+}
+
+// clearQuotaGate lifts the gate. A session that just succeeded is proof the
+// limit is no longer in force — including when the gate was armed on a false
+// positive, such as an agent's own prose matching the text pattern — and
+// nothing else would ever tell the gate to stop holding other sessions back.
+func (e *Executor) clearQuotaGate() {
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	e.quotaUntil = time.Time{}
+	e.quotaDetail = ""
+}
+
+// QuotaGate reports the gate's current state, for observability.
+func (e *Executor) QuotaGate() (until time.Time, armed bool) {
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	return e.quotaUntil, !e.quotaUntil.IsZero()
+}
+
+// quotaGateState is QuotaGate plus the detail Execute needs to word its own
+// early return; kept unexported and separate so QuotaGate's public signature
+// stays the two values callers outside the package actually want.
+func (e *Executor) quotaGateState() (until time.Time, detail string, armed bool) {
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	return e.quotaUntil, e.quotaDetail, !e.quotaUntil.IsZero()
+}
+
+// gatedQuotaBlock is the park Execute returns while the gate is armed, or nil.
+// req.ResumeSessionID rides along so a re-parked task does not lose the CLI
+// session it would resume.
+func (e *Executor) gatedQuotaBlock(req domain.TaskExecution) *domain.QuotaBlock {
+	until, detail, armed := e.quotaGateState()
+	if !armed || !e.now().Before(until) {
+		return nil
+	}
+	log.Info().
+		Str("task_key", req.TaskKey).
+		Time("resume_at", until).
+		Msg("claude code usage limit gate is armed; parking without spawning")
+	return &domain.QuotaBlock{
+		ResumeAt:     until,
+		CLISessionID: req.ResumeSessionID,
+		Detail:       "another Claude Code session hit the usage limit: " + detail,
+	}
+}
+
+// SlotsInUse reports the concurrency cap's occupancy, for observability. cap
+// is -1 when MaxConcurrentSessions was configured negative (unlimited).
+func (e *Executor) SlotsInUse() (used, cap int) {
+	return int(atomic.LoadInt64(&e.active)), e.slotCap
+}
+
+// acquireSlot blocks until a concurrency slot is free or ctx is cancelled.
+// Skipped entirely when the cap is unlimited (sem is nil). It must run BEFORE
+// resolveMCP: minting a per-run MCP token and then waiting on the semaphore
+// would leave that credential alive and unused for however long the queue
+// takes.
+func (e *Executor) acquireSlot(ctx context.Context, taskKey string) error {
+	if e.sem != nil {
+		start := e.now()
+		select {
+		case e.sem <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		if waited := e.now().Sub(start); waited > time.Second {
+			log.Info().
+				Str("task_key", taskKey).
+				Dur("waited", waited).
+				Int("cap", e.slotCap).
+				Msg("claude code session waited for a concurrency slot")
+			if rec := activity.FromContext(ctx); rec != nil {
+				rec.Step("claude_code_slot_wait", map[string]any{
+					"waited_ms":      waited.Milliseconds(),
+					"max_concurrent": e.slotCap,
+				})
+			}
+		}
+	}
+	atomic.AddInt64(&e.active, 1)
+	return nil
+}
+
+// releaseSlot is acquireSlot's counterpart. Callers defer it only after
+// acquireSlot has returned successfully — releasing a slot that was never
+// acquired would let one extra session through the semaphore and, on an
+// unlimited executor, would drive active negative.
+func (e *Executor) releaseSlot() {
+	atomic.AddInt64(&e.active, -1)
+	if e.sem != nil {
+		<-e.sem
+	}
 }
 
 // Execute runs the task in a CLI session and maps the session's outcome onto
@@ -264,6 +418,27 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 	// shared project root, on whatever branch it happens to be on.
 	if strings.TrimSpace(req.WorkDir) == "" {
 		return domain.AgentResponse{}, errors.New("claude code executor: no task workspace to run in")
+	}
+
+	// The account-wide gate, checked before anything else costs a subprocess or
+	// an MCP token: one session's 429 means every other session on this
+	// executor is spending against the same spent subscription, and there is
+	// nothing a fresh spawn would learn that this session did not already pay
+	// to find out. req.ResumeSessionID rides along so a re-parked task does not
+	// lose the CLI session it would resume.
+	if block := e.gatedQuotaBlock(req); block != nil {
+		return domain.AgentResponse{}, block
+	}
+
+	if err := e.acquireSlot(ctx, req.TaskKey); err != nil {
+		return domain.AgentResponse{}, err
+	}
+	defer e.releaseSlot()
+	// Checked again once the slot is held: a session that queued behind the
+	// cap for minutes may have watched every running session park meanwhile,
+	// and spawning it now would only rediscover the same spent window.
+	if block := e.gatedQuotaBlock(req); block != nil {
+		return domain.AgentResponse{}, block
 	}
 
 	// Both defers run on every exit
@@ -325,7 +500,15 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 		// a NEW instruction on top of half-finished work. What it needs is the
 		// one thing it does not know — that the wait is over.
 		inv.systemPrompt = ""
-		inv.prompt = continuePrompt(req)
+		if followUp := strings.TrimSpace(req.Prompt); followUp != "" {
+			// A caller that already knows what the resumed session should do next
+			// (a criteria sweep, a fix round) sends that instruction verbatim
+			// instead of the generic "the wait is over" — the session does not
+			// need to be told twice that it was parked.
+			inv.prompt = followUp
+		} else {
+			inv.prompt = continuePrompt(req)
+		}
 		inv.resumeSessionID = req.ResumeSessionID
 	}
 
@@ -609,8 +792,23 @@ type sessionFinisher struct {
 	now        func() time.Time
 }
 
+// finish delegates the mapping to sessionFinisher (shared with the remote
+// executor) and then updates the account-wide gate: a QuotaBlock arms it, and
+// a nil error clears it, whichever of Execute or ExecuteChat called in. Chat
+// deliberately shares this clearing half — a successful chat turn is just as
+// good a proof the limit lifted as a board run finishing — while only Execute
+// consults the gate on the way in, since a chat has a person watching who
+// should see the notice immediately rather than being queued behind it.
 func (e *Executor) finish(ctx context.Context, label string, s session) (domain.AgentResponse, error) {
-	return sessionFinisher{runTimeout: e.runTimeout, maxTurns: e.maxTurns, now: e.now}.finish(ctx, label, s)
+	resp, err := sessionFinisher{runTimeout: e.runTimeout, maxTurns: e.maxTurns, now: e.now}.finish(ctx, label, s)
+	if err == nil {
+		e.clearQuotaGate()
+		return resp, nil
+	}
+	if block, ok := domain.QuotaBlockOf(err); ok {
+		e.armQuotaGate(block)
+	}
+	return resp, err
 }
 
 func (f sessionFinisher) finish(ctx context.Context, label string, s session) (domain.AgentResponse, error) {
@@ -647,7 +845,7 @@ func (f sessionFinisher) finish(ctx context.Context, label string, s session) (d
 
 	// Quota detection runs on a FAILED session only. See session.failed.
 	if s.failed() {
-		if block := quotaBlockFrom(strings.Join([]string{out.Text, stderrTail}, "\n"), sessionID, f.now()); block != nil {
+		if block := quotaBlockFrom(out, stderrTail, sessionID, f.now()); block != nil {
 			log.Warn().
 				Str("task_key", label).
 				Str("cli_session_id", sessionID).
@@ -703,6 +901,11 @@ func (f sessionFinisher) finish(ctx context.Context, label string, s session) (d
 	resp := domain.AgentResponse{
 		Message: domain.Message{Role: domain.RoleAssistant, Content: out.Text},
 		Usage:   out.Usage,
+		// The session a follow-up step (a criteria sweep, a fix round) resumes
+		// instead of replaying the whole context. Set here rather than only on
+		// the quota-block error path, because a resumable session is just as
+		// real when the run succeeded outright or stopped on its turn budget.
+		CLISessionID: sessionID,
 	}
 
 	switch {

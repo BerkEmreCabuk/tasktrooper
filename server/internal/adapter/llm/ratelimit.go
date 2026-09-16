@@ -28,10 +28,14 @@ func (e *RateLimitError) Error() string {
 	return fmt.Sprintf("%s returned %d: %s", e.Endpoint, e.StatusCode, e.Body)
 }
 
+// statusOverloaded is Anthropic's 529 "overloaded_error" — net/http has no
+// constant for it because it is not a standard status.
+const statusOverloaded = 529
+
 // newRateLimitError builds a RateLimitError for a rate-limited HTTP response,
 // or returns nil when the status is a plain failure that must not be retried.
 func newRateLimitError(endpoint string, resp *http.Response, body string) *RateLimitError {
-	if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable {
+	if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode != statusOverloaded {
 		return nil
 	}
 	return &RateLimitError{
@@ -136,7 +140,9 @@ func isRateLimited(err error) bool {
 		strings.Contains(msg, "rate limit") ||
 		strings.Contains(msg, "rate_limited") ||
 		strings.Contains(msg, "resource_exhausted") ||
-		strings.Contains(msg, "too many requests")
+		strings.Contains(msg, "too many requests") ||
+		strings.Contains(msg, "529") ||
+		strings.Contains(msg, "overloaded")
 }
 
 // retryAfterOf reports the wait a provider asked for, when it asked for one.

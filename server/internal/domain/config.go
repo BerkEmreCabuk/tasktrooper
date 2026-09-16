@@ -108,6 +108,15 @@ type ClaudeCodeConfig struct {
 	// that needs to is the one whose Claude auth lives in a user-level
 	// apiKeyHelper (a normal subscription login is unaffected).
 	SettingSources string `koanf:"setting_sources"`
+	// MaxConcurrentSessions bounds how many CLI sessions run at once. 0 means
+	// the executor's default (3); negative means unlimited.
+	//
+	// The subscription's usage limit is shared by every session on this
+	// account, so N sessions running in parallel that all hit it mid-work all
+	// park at the same time, and a burst on resume re-hits it immediately. The
+	// cap keeps the burn sequential enough that the sessions that started
+	// actually finish instead of all being cut off together.
+	MaxConcurrentSessions int `koanf:"max_concurrent_sessions"`
 }
 
 // ProdOpsConfig drives production monitoring: the health probe that watches

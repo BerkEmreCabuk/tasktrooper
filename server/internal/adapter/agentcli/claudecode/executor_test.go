@@ -5,7 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -175,6 +177,33 @@ func TestExecuteReturnsATypedQuotaBlock(t *testing.T) {
 	assert.Equal(t, int64(4102444800), block.ResumeAt.Unix(), "the epoch on the CLI's message is the reset time")
 	assert.Equal(t, "sess-limit-9", block.CLISessionID, "without the session the resume is a restart")
 	assert.Contains(t, block.Detail, "usage limit reached")
+}
+
+// The structured rate_limit_event is checked before the text pattern: a
+// "rejected" status with a 429 result event is the CLI's own word for the
+// limit, and its resetsAt is trusted over anything guessed from prose.
+func TestExecuteReturnsAStructuredQuotaBlockFromARateLimitEvent(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "rate_limit_rejected.jsonl")
+
+	_, err := ex.Execute(context.Background(), taskExecution(workDir))
+	require.Error(t, err)
+
+	var block *domain.QuotaBlock
+	require.True(t, errors.As(err, &block), "the runner keys off the type, not the message: %v", err)
+	assert.Equal(t, int64(4102444800), block.ResumeAt.Unix(), "the rejected event's own resetsAt is the reset time")
+	assert.Equal(t, "sess-rate-1", block.CLISessionID, "the init session id travels with the block")
+	assert.Contains(t, block.Detail, "five_hour")
+}
+
+// allowed_warning describes a session still running close to the limit, not
+// one that was refused. A success finishing under that warning must not be
+// parked — the work is real and there is nothing to resume.
+func TestSuccessWithARateLimitWarningIsNotParked(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "success_rate_limit_warning.jsonl")
+
+	resp, err := ex.Execute(context.Background(), taskExecution(workDir))
+	require.NoError(t, err)
+	assert.Contains(t, resp.Message.Content, "Done, close to the limit")
 }
 
 // The limit is also reported on stderr, in builds that give up before writing a
@@ -686,4 +715,128 @@ func TestExecuteOmitsToolsForAnUnrestrictedPolicy(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.NotContains(t, readArgv(t, workDir), "--tools")
+}
+
+// One session hitting the limit must park every OTHER session on this
+// executor too, without paying for a second spawn to find out: the gate is
+// account-wide, not per-task.
+func TestQuotaGateParksSubsequentExecutesWithoutSpawning(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "usage_limit.jsonl")
+
+	_, err := ex.Execute(context.Background(), taskExecution(workDir))
+	var first *domain.QuotaBlock
+	require.True(t, errors.As(err, &first), "the first execute must still report the typed block: %v", err)
+
+	until, armed := ex.QuotaGate()
+	require.True(t, armed)
+	assert.True(t, until.Equal(first.ResumeAt))
+
+	req := taskExecution(workDir)
+	req.ResumeSessionID = "sess-limit-9"
+	_, err = ex.Execute(context.Background(), req)
+	var second *domain.QuotaBlock
+	require.True(t, errors.As(err, &second), "the armed gate must park the next execute too: %v", err)
+	assert.Equal(t, "sess-limit-9", second.CLISessionID,
+		"the gate's own block must carry the caller's resume id through, or a re-parked task loses its session")
+
+	calls := strings.TrimSpace(readFile(t, filepath.Join(workDir, "calls.txt")))
+	assert.Equal(t, "1", calls, "the gated execute must not spawn the CLI at all")
+}
+
+// newWorkspaceWithSleep primes a workspace like newTestExecutor does, plus the
+// fake CLI's sleep_seconds file, for the concurrency-cap tests below where two
+// sessions have to be in flight at once — something one shared workspace's
+// calls.txt counter cannot safely race.
+func newWorkspaceWithSleep(t *testing.T, fixtureFile string, seconds int) string {
+	t.Helper()
+	workDir := t.TempDir()
+	body, err := os.ReadFile(filepath.Join("testdata", fixtureFile))
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "fixture.jsonl"), body, 0o600))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "sleep_seconds"), []byte(strconv.Itoa(seconds)), 0o600))
+	return workDir
+}
+
+func runTwoConcurrently(t *testing.T, ex *Executor, workA, workB string) time.Duration {
+	t.Helper()
+	start := time.Now()
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for _, wd := range []string{workA, workB} {
+		wd := wd
+		go func() {
+			defer wg.Done()
+			_, err := ex.Execute(context.Background(), taskExecution(wd))
+			assert.NoError(t, err)
+		}()
+	}
+	wg.Wait()
+	return time.Since(start)
+}
+
+// A cap of one must serialize two sessions: the second cannot even start the
+// CLI until the first's slot is released, so the two one-second sleeps stack
+// rather than overlap.
+func TestConcurrencyCapOfOneSerializesSessions(t *testing.T) {
+	script, err := filepath.Abs(filepath.Join("testdata", "fake-claude.sh"))
+	require.NoError(t, err)
+	ex, err := New(Config{Binary: script, MaxConcurrentSessions: 1})
+	require.NoError(t, err)
+
+	elapsed := runTwoConcurrently(t, ex,
+		newWorkspaceWithSleep(t, "success.jsonl", 1),
+		newWorkspaceWithSleep(t, "success.jsonl", 1))
+
+	assert.GreaterOrEqual(t, elapsed, 1800*time.Millisecond,
+		"cap 1 must run the two one-second sessions back to back")
+}
+
+// A cap of two must let both run at once: the wall clock is one sleep, not
+// two.
+func TestConcurrencyCapOfTwoLetsSessionsOverlap(t *testing.T) {
+	script, err := filepath.Abs(filepath.Join("testdata", "fake-claude.sh"))
+	require.NoError(t, err)
+	ex, err := New(Config{Binary: script, MaxConcurrentSessions: 2})
+	require.NoError(t, err)
+
+	elapsed := runTwoConcurrently(t, ex,
+		newWorkspaceWithSleep(t, "success.jsonl", 1),
+		newWorkspaceWithSleep(t, "success.jsonl", 1))
+
+	assert.Less(t, elapsed, 1800*time.Millisecond,
+		"cap 2 must run both one-second sessions concurrently")
+}
+
+// A follow-up step (a criteria sweep, a fix round) resuming a session sends
+// its own instruction verbatim instead of the generic "the wait is over"
+// prompt — the session already knows it was parked.
+func TestExecuteSendsTheCallersPromptOnResumeInsteadOfTheGenericOne(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "success.jsonl")
+
+	req := taskExecution(workDir)
+	req.ResumeSessionID = "sess-abc123"
+	req.Prompt = "Tick the acceptance criterion you just finished."
+	_, err := ex.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	argv := readArgv(t, workDir)
+	resumeIdx := indexOf(t, argv, "--resume")
+	assert.Equal(t, "sess-abc123", argv[resumeIdx+1])
+	assert.Equal(t, "Tick the acceptance criterion you just finished.", argv[resumeIdx+2],
+		"the positional prompt argument must be the caller's own text")
+}
+
+// CLISessionID must ride on the response for a successful run and for one that
+// stopped on its turn budget, not only on the quota-block error path: a
+// follow-up step resumes whichever session actually produced the answer.
+func TestSuccessAndMaxTurnsResponsesCarryTheCLISessionID(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "success.jsonl")
+	resp, err := ex.Execute(context.Background(), taskExecution(workDir))
+	require.NoError(t, err)
+	assert.Equal(t, "sess-abc123", resp.CLISessionID)
+
+	ex, workDir = newTestExecutor(t, Config{MaxTurns: 100}, "max_turns.jsonl")
+	resp, err = ex.Execute(context.Background(), taskExecution(workDir))
+	require.NoError(t, err)
+	assert.NotEmpty(t, resp.CLISessionID, "a max-turns run still leaves a resumable session")
 }

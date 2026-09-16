@@ -59,6 +59,7 @@ export const lib: LibDict = {
       claude_code_session: "Claude Code oturumu",
       claude_code_result: "Claude Code oturumu bitti",
       claude_code_quota_park: "Claude Code kullanım limiti — görev beklemede",
+      claude_code_slot_wait: "Boş Claude Code oturum yuvası beklendi",
     },
   },
   toolPolicy: {

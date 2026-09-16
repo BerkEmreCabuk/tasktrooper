@@ -154,6 +154,10 @@ type AgentResponse struct {
 	// held by someone else. Like Clarification it means "this run produced no
 	// deliverable" — no verification, no commit, no hand-off.
 	ResourceBlock *ResourceBlock `json:"resource_block,omitempty"`
+	// CLISessionID is the host-executed session that produced this response,
+	// when a CLI ran it. A follow-up step in the same run (a criteria sweep, a
+	// fix round) resumes it instead of replaying the whole context.
+	CLISessionID string `json:"cli_session_id,omitempty"`
 	// Verification is the orchestration verifier's verdict on the run that
 	// produced this response, when one ran. Nil means nobody judged it — the run
 	// was not orchestrated, verification is off, or the verifier never returned a

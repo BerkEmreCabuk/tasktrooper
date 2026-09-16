@@ -1,6 +1,7 @@
 package claudecode
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -22,7 +23,7 @@ import (
 // cost of a false negative is a run failed for a billing window, which spends
 // one of the task's three consecutive-failure lives and loses the CLI session
 // that had the work in it. The loose match is the cheaper error.
-var usageLimitPattern = regexp.MustCompile(`(?i)usage limit reached|usage limit exceeded|exceeded your (?:usage|rate) limit`)
+var usageLimitPattern = regexp.MustCompile(`(?i)usage limit reached|usage limit exceeded|exceeded your (?:usage|rate) limit|usage credit limit reached|reached your weekly usage limit|hit your (?:usage )?limit|usage limit resets`)
 
 // resetEpochPattern pulls the reset time out of the format the CLI has emitted
 // historically: "Claude AI usage limit reached|1712345678". The number is a
@@ -46,25 +47,64 @@ var resetEpochPattern = regexp.MustCompile(`usage limit reached\s*\|\s*(\d{9,13}
 // the conversation at full context cost, so this one stays narrow.
 var resumeMissingPattern = regexp.MustCompile(`(?i)no conversation found|no session found|session .{0,40}not found`)
 
-// quotaBlockFrom builds the park from whatever the CLI said, or nil when it
-// said nothing about a usage limit.
+// quotaBlockFrom builds the park from whatever the CLI said, or nil when
+// nothing on the session — structured or textual — says the usage limit was
+// hit.
 //
-// text is everything worth searching, joined by the caller: the result event's
-// message, the stderr tail, and the last assistant turn. All three have carried
-// it depending on where the limit was hit.
+// Structured-first: a "rejected" rate_limit_event or a 429 result is the CLI's
+// own word for the limit, not a guess from an error sentence, so both are
+// checked before the text falls back to usageLimitPattern. stderrTail and the
+// session's own text are joined for the text match because the limit has
+// arrived on either depending on where the CLI gave up.
 //
 // now is a parameter rather than time.Now() so the fallback window is testable
 // and so a single run cannot get two different "now"s while it decides.
-func quotaBlockFrom(text, sessionID string, now time.Time) *domain.QuotaBlock {
+func quotaBlockFrom(out outcome, stderrTail, sessionID string, now time.Time) *domain.QuotaBlock {
+	if out.RateLimit != nil && out.RateLimit.Status == "rejected" {
+		resumeAt := out.RateLimit.resetTime(now)
+		if resumeAt.IsZero() {
+			resumeAt = now.Add(domain.DefaultQuotaParkWindow)
+		}
+		return &domain.QuotaBlock{
+			ResumeAt:     resumeAt,
+			CLISessionID: sessionID,
+			Detail:       fmt.Sprintf("Claude subscription limit (%s window) reached", out.RateLimit.RateLimitType),
+		}
+	}
+	if out.APIErrorStatus == 429 {
+		resumeAt := out.RateLimit.resetTime(now)
+		if resumeAt.IsZero() {
+			resumeAt = now.Add(domain.DefaultQuotaParkWindow)
+		}
+		detail := "Claude subscription limit reached"
+		if out.RateLimit != nil {
+			detail = fmt.Sprintf("Claude subscription limit (%s window) reached", out.RateLimit.RateLimitType)
+		}
+		return &domain.QuotaBlock{
+			ResumeAt:     resumeAt,
+			CLISessionID: sessionID,
+			Detail:       detail,
+		}
+	}
+
+	text := strings.Join([]string{out.Text, stderrTail}, "\n")
 	if !usageLimitPattern.MatchString(text) {
 		return nil
 	}
 	resumeAt, ok := parseResetEpoch(text)
 	if !ok || !resumeAt.After(now) {
-		// No epoch, or one already in the past — a stale epoch would make the
-		// sweeper resume immediately, hit the same limit, and park again in a
-		// tight loop. The default window is the floor either way.
-		resumeAt = now.Add(domain.DefaultQuotaParkWindow)
+		// No epoch in the text, or one already in the past. A structured window
+		// is consulted before giving up to the default: the CLI can emit a
+		// rate_limit_event with a real reset alongside a text message that
+		// carries none.
+		if structured := out.RateLimit.resetTime(now); !structured.IsZero() {
+			resumeAt = structured
+		} else {
+			// A stale epoch would make the sweeper resume immediately, hit the
+			// same limit, and park again in a tight loop. The default window is
+			// the floor either way.
+			resumeAt = now.Add(domain.DefaultQuotaParkWindow)
+		}
 	}
 	return &domain.QuotaBlock{
 		ResumeAt:     resumeAt,

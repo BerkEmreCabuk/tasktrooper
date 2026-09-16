@@ -1,0 +1,169 @@
+package board
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+)
+
+// The whole point of WP2: a follow-up step in the same run must not replay the
+// entire flattened history on a fresh CLI process. It resumes the session the
+// main executor call opened, sending only the new instruction.
+func TestCriteriaSweepFollowUpResumesTheMainRunsCLISession(t *testing.T) {
+	runs := &recordingRunStore{}
+	ex := &fakeExecutor{
+		supports: domain.LLMProviderClaudeCode,
+		resp: domain.AgentResponse{
+			Message:      domain.Message{Content: "implemented"},
+			CLISessionID: "sess-main",
+		},
+	}
+	criteria := []domain.AcceptanceCriterion{{ID: uuid.New(), Text: "the gate refuses a red build"}}
+	// settleAfter is 2, not 1: criteriaForRun reads the open list once already
+	// while building the trigger message, before the sweep's own pre-loop read —
+	// so the sweep only sees the criterion settle after its first round if the
+	// updater waits one extra read.
+	updater := &settlingCriteriaUpdater{criteria: criteria, settleAfter: 2}
+	r, job := criteriaSweepRunner(t, runs, ex, updater)
+
+	require.NoError(t, r.execute(context.Background(), job))
+
+	reqs := ex.requests()
+	require.Len(t, reqs, 2, "one main call plus exactly one settling sweep round")
+	main, followUp := reqs[0], reqs[1]
+
+	require.Empty(t, main.ResumeSessionID, "the main run has no prior session to resume")
+
+	require.Equal(t, "sess-main", followUp.ResumeSessionID,
+		"the sweep round must resume the session the main executor call returned")
+	require.Equal(t, criteriaSweepPrompt(criteria, 1), followUp.Prompt,
+		"only the sweep's new instruction is sent on a resume, not the whole conversation")
+	require.Equal(t, followUp.Prompt, followUp.History[len(followUp.History)-1].Content,
+		"the full history still travels on the request even though the executor only reads the tail")
+	require.Len(t, followUp.History, len(main.History)+2,
+		"the sweep appends exactly the assistant close-out and its own prompt onto the main run's history")
+}
+
+// A usage-limit block hit in a follow-up step (a criteria sweep here) is the
+// same outcome as one hit in the main call: the task is parked, not failed —
+// otherwise a billing window spends one of the task's three failure lives.
+func TestQuotaBlockInACriteriaSweepParksTheTaskInsteadOfFailingIt(t *testing.T) {
+	runs := &recordingRunStore{}
+	resumeAt := time.Now().Add(90 * time.Minute).Round(time.Second)
+	ex := &criteriaSweepQuotaExecutor{
+		mainResp: domain.AgentResponse{Message: domain.Message{Content: "implemented"}, CLISessionID: "sess-main"},
+		sweepErr: &domain.QuotaBlock{ResumeAt: resumeAt, Detail: "Claude AI usage limit reached|4102444800"},
+	}
+	updater := &criteriaUpdater{criteria: []domain.AcceptanceCriterion{
+		{ID: uuid.New(), Text: "the gate refuses a red build"},
+	}}
+	r, job := criteriaSweepRunner(t, runs, ex, updater)
+	blocker := &blockRecorder{}
+	r.SetTaskBlocker(blocker)
+
+	require.NoError(t, r.execute(context.Background(), job), "a quota park is not a run failure")
+
+	row := runs.row()
+	require.NotEqual(t, domain.TaskAgentRunStatusFailed, row.Status, "parking must not spend a consecutive-failure life")
+	require.True(t, resumeAt.Equal(*row.QuotaResumeAt))
+	// The sweep's own QuotaBlock carried no session id (the gate case: the CLI
+	// hit the limit before announcing one for that call), so the run's own
+	// holder — set from the main call's response — must fill it in.
+	require.Equal(t, "sess-main", row.CLISessionID,
+		"a follow-up's quota block with no session of its own must resume the run the main call opened")
+
+	resource, _ := blocker.parked()
+	require.Equal(t, domain.ResourceClaudeCodeQuota, resource)
+}
+
+// criteriaSweepQuotaExecutor plays the main call clean and the first follow-up
+// call (the criteria sweep) into a usage-limit block, the way a subscription
+// spent mid-run behaves: the work up to that point succeeded, the next CLI
+// turn did not.
+type criteriaSweepQuotaExecutor struct {
+	mainResp domain.AgentResponse
+	sweepErr error
+
+	calls int
+}
+
+func (e *criteriaSweepQuotaExecutor) Supports(provider domain.LLMProviderType) bool {
+	return provider == domain.LLMProviderClaudeCode
+}
+
+func (e *criteriaSweepQuotaExecutor) Execute(_ context.Context, _ domain.TaskExecution) (domain.AgentResponse, error) {
+	e.calls++
+	if e.calls == 1 {
+		return e.mainResp, nil
+	}
+	return domain.AgentResponse{}, e.sweepErr
+}
+
+// An unknown or stale reset time gets an escalating fallback rather than the
+// flat 30-minute default: a task on its Nth consecutive park is more likely
+// sitting out a long billing window, and re-waking it every 30 minutes into
+// the same wall wastes one CLI start per wake.
+func TestParkOnQuotaEscalatesTheWindowOnRepeatedParksWithNoUsableResetTime(t *testing.T) {
+	agentRec := claudeCodeAgent()
+	currentID := uuid.New()
+	priorPark := time.Now().Add(-3 * time.Hour)
+
+	// Two consecutive parks behind this run, current run excluded.
+	history := []domain.TaskAgentRun{
+		{ID: currentID, AgentID: agentRec.ID},
+		{ID: uuid.New(), AgentID: agentRec.ID, CLISessionID: "sess-loop", QuotaResumeAt: &priorPark},
+		{ID: uuid.New(), AgentID: agentRec.ID, CLISessionID: "sess-loop", QuotaResumeAt: &priorPark},
+	}
+	runs := &recordingRunStore{prev: history}
+	ex := &fakeExecutor{
+		supports: domain.LLMProviderClaudeCode,
+		// No ResumeAt: the CLI never announced a reset time for this block.
+		err: &domain.QuotaBlock{CLISessionID: "sess-loop"},
+	}
+	r, job := executorRunner(t, agentRec, runs, ex)
+	job.Run.ID = currentID
+	r.SetTaskBlocker(&blockRecorder{})
+
+	before := time.Now()
+	require.NoError(t, r.execute(context.Background(), job))
+
+	row := runs.row()
+	require.NotNil(t, row.QuotaResumeAt)
+	// streak == 2 → domain.QuotaParkWindow(2) == 2h (see quota_park_window_test.go)
+	require.WithinDuration(t, before.Add(2*time.Hour), *row.QuotaResumeAt, 10*time.Second)
+}
+
+// An agent's own effort and turn cap reach a host-executed run already
+// (TaskExecution.Effort/MaxTurns); an HTTP-loop board run used to ignore both
+// and run on the loop's generic defaults instead.
+func TestHTTPLoopRunRespectsTheAgentRecordsSessionLimits(t *testing.T) {
+	runs := &recordingRunStore{}
+	llm := &recordingLLM{}
+	agentRec := domain.Agent{
+		ID: uuid.New(), Name: "gpt", ProviderType: domain.LLMProviderOpenAI, Model: "gpt-4o",
+		Effort: "high", MaxTurns: 7,
+	}
+	r := NewRunner(RunnerDeps{
+		AgentLoop:    agent.NewLoop(llm, toollessRegistry{}, 3, 3, 16000),
+		Runs:         runs,
+		Catalog:      &agentCatalog{agent: agentRec},
+		Repositories: oneRepoResolver{root: t.TempDir()},
+	})
+	taskID := uuid.New()
+	job := RunJob{
+		Run:  domain.TaskAgentRun{ID: uuid.New(), TaskID: taskID, AgentID: agentRec.ID},
+		Task: domain.BoardTask{ID: taskID, RepositoryID: uuid.New(), Key: "tt-50", Title: "loop run", Column: domain.TaskColumnInProgress},
+	}
+
+	require.NoError(t, r.execute(context.Background(), job))
+
+	require.NotEmpty(t, llm.requests)
+	require.Equal(t, "high", llm.requests[0].Effort,
+		"the agent record's effort must reach an HTTP-loop run the same way it already reaches a CLI one")
+}

@@ -202,11 +202,13 @@ func AllLLMProviderDefinitions() []LLMProviderDefinition {
 			Available:             true,
 		},
 		{
-			Type:                  LLMProviderAnthropic,
-			Label:                 "Anthropic (Claude)",
-			Description:           "Anthropic Claude models (native API)",
-			DefaultBaseURL:        "https://api.anthropic.com/v1",
-			DefaultModel:          "claude-sonnet-4-6",
+			Type:           LLMProviderAnthropic,
+			Label:          "Anthropic (Claude)",
+			Description:    "Anthropic Claude models (native API)",
+			DefaultBaseURL: "https://api.anthropic.com/v1",
+			// Same tier as the previous default, newer, cheaper per token, and
+			// thinking is adaptive by default (no explicit config needed).
+			DefaultModel:          "claude-sonnet-5",
 			DefaultTimeoutSeconds: 120,
 			RequiresAPIKey:        true,
 			BaseURLRequired:       true,

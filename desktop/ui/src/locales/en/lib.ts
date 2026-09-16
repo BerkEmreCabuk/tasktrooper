@@ -57,10 +57,11 @@ export const lib = {
       clarification_requested: "Clarification requested from user",
       llm_request: "LLM request",
       // A run worked by the Claude Code CLI rather than the in-process loop.
-      // Same trace, same renderer — these three are the only step types it adds.
+      // Same trace, same renderer — these four are the only step types it adds.
       claude_code_session: "Claude Code session",
       claude_code_result: "Claude Code session finished",
       claude_code_quota_park: "Claude Code usage limit — task parked",
+      claude_code_slot_wait: "Waited for a free Claude Code session slot",
     },
   },
   toolPolicy: {

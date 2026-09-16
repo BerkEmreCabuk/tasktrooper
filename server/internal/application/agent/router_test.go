@@ -194,6 +194,73 @@ func TestRouterPassesExecutorErrorsThrough(t *testing.T) {
 	require.ErrorIs(t, err, sentinel)
 }
 
+func TestRouterResumesTheCLISessionOnAFollowUpStep(t *testing.T) {
+	ex := &cliExecutor{
+		supports: domain.LLMProviderClaudeCode,
+		resp:     domain.AgentResponse{Message: domain.Message{Content: "ticked"}, CLISessionID: "sess-main"},
+	}
+	router, _, _ := newRouter(t, ex)
+	ctx := agent.ContextWithCLISession(
+		registry.ContextWithWorkspaceDir(context.Background(), t.TempDir()),
+		&agent.CLISession{},
+	)
+	policy := domain.ToolPolicy{}
+
+	// The main run: no session yet, so it goes in full.
+	main := []domain.Message{{Role: domain.RoleUser, Content: "implement the gate"}}
+	_, err := router.RunTask(ctx, main, "opus", domain.LLMProviderClaudeCode, policy,
+		agent.WithCLILabel("tt-42", "wire the gate"))
+	require.NoError(t, err)
+
+	_, firstReq := ex.snapshot()
+	require.Empty(t, firstReq.ResumeSessionID, "the main run has no session to resume")
+	require.Equal(t, main, firstReq.History)
+
+	// A follow-up on the same run: the assistant's close-out plus one new user
+	// prompt, exactly the shape sweepOpenCriteria builds.
+	followUp := []domain.Message{
+		{Role: domain.RoleUser, Content: "implement the gate"},
+		{Role: domain.RoleAssistant, Content: "done, the gate is wired"},
+		{Role: domain.RoleUser, Content: "these criteria are still open: the gate refuses a red build"},
+	}
+	_, err = router.RunTask(ctx, followUp, "opus", domain.LLMProviderClaudeCode, policy,
+		agent.WithCLILabel("tt-42 criteria-sweep 1", "wire the gate"))
+	require.NoError(t, err)
+
+	calls, secondReq := ex.snapshot()
+	require.Equal(t, 2, calls)
+	require.Equal(t, "sess-main", secondReq.ResumeSessionID,
+		"the follow-up must resume the session the main run's executor returned")
+	require.Equal(t, "these criteria are still open: the gate refuses a red build", secondReq.Prompt,
+		"only the new instruction is sent, not the whole conversation")
+	require.Equal(t, followUp, secondReq.History, "History travels unchanged even though the executor ignores it on a resume")
+}
+
+func TestRouterFallsBackToFullHistoryWhenThereIsNoTrailingUserInstruction(t *testing.T) {
+	ex := &cliExecutor{
+		supports: domain.LLMProviderClaudeCode,
+		resp:     domain.AgentResponse{Message: domain.Message{Content: "ok"}, CLISessionID: "sess-1"},
+	}
+	router, _, _ := newRouter(t, ex)
+	session := &agent.CLISession{}
+	session.Set("sess-1")
+	ctx := agent.ContextWithCLISession(registry.ContextWithWorkspaceDir(context.Background(), t.TempDir()), session)
+
+	// A history whose last message is not from the user (e.g. the run ended on
+	// its own assistant turn) has nothing new to resume with.
+	messages := []domain.Message{
+		{Role: domain.RoleUser, Content: "implement the gate"},
+		{Role: domain.RoleAssistant, Content: "done"},
+	}
+	_, err := router.RunTask(ctx, messages, "opus", domain.LLMProviderClaudeCode, domain.ToolPolicy{})
+	require.NoError(t, err)
+
+	_, req := ex.snapshot()
+	require.Empty(t, req.ResumeSessionID, "no trailing user instruction means no resume")
+	require.Empty(t, req.Prompt)
+	require.Equal(t, messages, req.History)
+}
+
 func TestRouterDoesNotFakeAStreamForHostExecutedProviders(t *testing.T) {
 	ex := &cliExecutor{supports: domain.LLMProviderClaudeCode}
 	router, _, _ := newRouter(t, ex)

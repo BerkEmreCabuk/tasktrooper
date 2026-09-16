@@ -1324,6 +1324,14 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	)
 
 	var resp domain.AgentResponse
+	// Shared with every follow-up step dispatched on runCtx below (verify-fix,
+	// the criteria sweep, the review sweep) so each one resumes the CLI
+	// session the main call opens instead of replaying the whole history.
+	// Only the host-executed branch ever fills it in, so a loop or
+	// orchestrator run leaves it empty and every follow-up takes the
+	// fresh-history path exactly as before.
+	cliSession := &agent.CLISession{}
+	runCtx = agent.ContextWithCLISession(runCtx, cliSession)
 	switch {
 	case domain.RequiresHostExecutor(agentRec.ProviderType):
 		// This agent's provider is a process on this host, not an endpoint. The
@@ -1384,13 +1392,18 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 			// condition is how they would drift.
 			SkillsOnDisk: skillDelivery == prompt.SkillsOnDisk,
 		})
+		cliSession.Set(resp.CLISessionID)
 	case r.orchSvc != nil:
 		resp, err = r.orchSvc.RunSolo(runCtx, triggerMsg, history, model, upliftedPolicy, r.language(runCtx), job.Run.AgentID)
 	default:
+		// The agent record's own effort/turn cap, so an HTTP-loop board run
+		// respects them the same way a host-executed one already does instead
+		// of running on the loop's generic defaults.
 		// model may be a task_type_models override; this run's own utility
 		// calls (history summarization, the wrap-up on a spent budget) stay on
 		// the agent's plain configured model. See agent.WithLightModel.
-		resp, err = r.agentLoop.RunTask(runCtx, history, model, agentRec.ProviderType, upliftedPolicy, agent.WithLightModel(agentRec.Model))
+		resp, err = r.agentLoop.RunTask(runCtx, history, model, agentRec.ProviderType, upliftedPolicy,
+			agent.WithLightModel(agentRec.Model), agent.WithSessionLimits(agentRec.MaxTurns, agentRec.Effort))
 	}
 	// Stamp what the tools did before any of the terminal paths write the row.
 	// Every one of them — success, failure, out of budget — persists from here,
@@ -1415,24 +1428,7 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 		// task's three consecutive-failure lives on a billing window.
 		var quotaErr *domain.QuotaBlock
 		if errors.As(err, &quotaErr) {
-			// …unless this task has done nothing BUT park. A park costs the task
-			// nothing, which is exactly why an endlessly repeating one has to be
-			// caught here: the sweeper would resume it, the same thing would park
-			// it again, and the card would cycle forever while every individual
-			// step looked right. Past the cap it becomes an ordinary failure, so
-			// the run is counted, the card stops moving on its own, and a human
-			// sees a task that says why.
-			if streak := quotaParkStreak(prevRuns, run.ID); streak >= maxConsecutiveQuotaParks {
-				log.Warn().Str("task_id", job.Task.ID.String()).Int("consecutive_parks", streak).
-					Msg("claude code quota park cap reached, failing the run instead of parking it again")
-				err = fmt.Errorf(
-					"this task has parked on the Claude Code usage limit %d times in a row without completing a run (last: %v). "+
-						"Failing it instead of parking again: either the subscription has been exhausted for a long stretch, "+
-						"or the run keeps reporting a limit it is not actually hitting",
-					streak, quotaErr)
-				return fail(err)
-			}
-			return r.parkOnQuota(ctx, job, run, agentRec, quotaErr)
+			return r.quotaOrPark(ctx, job, run, agentRec, prevRuns, cliSession, quotaErr, fail)
 		}
 		var budgetErr *agent.BudgetExhaustedError
 		if errors.As(err, &budgetErr) {
@@ -1466,7 +1462,13 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	buildVerified := true
 	if r.verifyEnabled && taskWorkspace != "" && resp.Clarification == nil && resp.ResourceBlock == nil &&
 		job.Task.TaskType != domain.TaskTypeAnaliz && producesADiff(job.Task.Column) {
-		resp, buildVerified = r.verifyAndFix(runCtx, job, agentRec, history, resp, model, upliftedPolicy, taskWorkspace)
+		var quotaBlock *domain.QuotaBlock
+		resp, buildVerified, quotaBlock = r.verifyAndFix(runCtx, job, agentRec, history, resp, model, upliftedPolicy, taskWorkspace)
+		if quotaBlock != nil {
+			stampToolStats(&run, toolUsage)
+			stampTokenUsage(&run, tokenUsage)
+			return r.quotaOrPark(ctx, job, run, agentRec, prevRuns, cliSession, quotaBlock, fail)
+		}
 	}
 	// The orchestration verifier's verdict counts for as much as the build gate's.
 	// It used to count for nothing here: the plan row was stamped incomplete while
@@ -1514,11 +1516,19 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	// still in context rather than from a cold start on the next event.
 	criteriaSettled := true
 	if resp.Clarification == nil && resp.ResourceBlock == nil {
-		resp, criteriaSettled = r.sweepOpenCriteria(runCtx, job, agentRec, history, resp, model, upliftedPolicy)
-		// The same call for a review run: an implementation run has
-		// advanceToCodeReview behind it, a reviewer's only exit is its own
-		// move_task and a forgotten one parks the card under a completed run.
-		r.sweepReviewVerdict(runCtx, job, agentRec, history, resp, model, upliftedPolicy)
+		var quotaBlock *domain.QuotaBlock
+		resp, criteriaSettled, quotaBlock = r.sweepOpenCriteria(runCtx, job, agentRec, history, resp, model, upliftedPolicy)
+		if quotaBlock == nil {
+			// The same call for a review run: an implementation run has
+			// advanceToCodeReview behind it, a reviewer's only exit is its own
+			// move_task and a forgotten one parks the card under a completed run.
+			quotaBlock = r.sweepReviewVerdict(runCtx, job, agentRec, history, resp, model, upliftedPolicy)
+		}
+		if quotaBlock != nil {
+			stampToolStats(&run, toolUsage)
+			stampTokenUsage(&run, tokenUsage)
+			return r.quotaOrPark(ctx, job, run, agentRec, prevRuns, cliSession, quotaBlock, fail)
+		}
 	}
 
 	if !criteriaSettled {
@@ -1641,13 +1651,15 @@ func (r *Runner) parkOnResource(ctx context.Context, job RunJob, agentRec domain
 // The run is recorded as completed rather than failed for the same reason the
 // resource block is: nothing failed. The summary says what it is waiting for,
 // which is what the task detail shows.
-func (r *Runner) parkOnQuota(ctx context.Context, job RunJob, run domain.TaskAgentRun, agentRec domain.Agent, block *domain.QuotaBlock) error {
+func (r *Runner) parkOnQuota(ctx context.Context, job RunJob, run domain.TaskAgentRun, agentRec domain.Agent, block *domain.QuotaBlock, streak int) error {
 	resumeAt := block.ResumeAt
-	if resumeAt.IsZero() {
-		// Defensive: a zero time would read as "resume immediately" to the
-		// sweeper, which would restart the run into the same limit on its next
-		// pass, forever.
-		resumeAt = time.Now().Add(domain.DefaultQuotaParkWindow)
+	if resumeAt.IsZero() || !resumeAt.After(time.Now().Add(time.Minute)) {
+		// An unknown or a stale reset time (already past, or about to be) gets
+		// an escalating fallback rather than the flat default: a task on its
+		// Nth consecutive park in a row is more likely sitting on a long
+		// billing window than freshly hitting a short one, and re-waking it
+		// every 30 minutes into the same wall wastes one CLI start per wake.
+		resumeAt = time.Now().Add(domain.QuotaParkWindow(streak))
 	}
 	run.Status = domain.TaskAgentRunStatusCompleted
 	run.CLISessionID = block.CLISessionID
@@ -1687,6 +1699,54 @@ func (r *Runner) parkOnQuota(ctx context.Context, job RunJob, run domain.TaskAge
 		Time("resume_at", resumeAt).
 		Msg("task parked on the claude code usage limit")
 	return nil
+}
+
+// quotaOrPark is the one answer this run gives a *domain.QuotaBlock, wherever
+// in the run it surfaces — the main executor call or a follow-up step
+// (verify-fix, the criteria sweep, the review sweep) sharing its session.
+// Shared so the streak cap and the park itself cannot drift into two
+// different answers for the same condition.
+//
+// block.CLISessionID is defaulted to the run's own holder when the block
+// carries none — a follow-up step can hit the limit before the executor ever
+// announces a session for that particular call — so the resume still
+// continues the session the main call opened rather than starting over.
+//
+// fail is the run's own failure path (the closure in execute that respects a
+// human stop and writes the failed row); it is threaded through rather than
+// duplicated so the streak-cap outcome is recorded exactly like any other
+// run failure.
+func (r *Runner) quotaOrPark(
+	ctx context.Context,
+	job RunJob,
+	run domain.TaskAgentRun,
+	agentRec domain.Agent,
+	prevRuns []domain.TaskAgentRun,
+	cliSession *agent.CLISession,
+	block *domain.QuotaBlock,
+	fail func(error) error,
+) error {
+	if block.CLISessionID == "" {
+		block.CLISessionID = cliSession.ID()
+	}
+	// …unless this task has done nothing BUT park. A park costs the task
+	// nothing, which is exactly why an endlessly repeating one has to be
+	// caught here: the sweeper would resume it, the same thing would park it
+	// again, and the card would cycle forever while every individual step
+	// looked right. Past the cap it becomes an ordinary failure, so the run is
+	// counted, the card stops moving on its own, and a human sees a task that
+	// says why.
+	streak := quotaParkStreak(prevRuns, run.ID)
+	if streak >= maxConsecutiveQuotaParks {
+		log.Warn().Str("task_id", job.Task.ID.String()).Int("consecutive_parks", streak).
+			Msg("claude code quota park cap reached, failing the run instead of parking it again")
+		return fail(fmt.Errorf(
+			"this task has parked on the Claude Code usage limit %d times in a row without completing a run (last: %v). "+
+				"Failing it instead of parking again: either the subscription has been exhausted for a long stretch, "+
+				"or the run keeps reporting a limit it is not actually hitting",
+			streak, block))
+	}
+	return r.parkOnQuota(ctx, job, run, agentRec, block, streak)
 }
 
 // maxConsecutiveQuotaParks is how many times in a row one task may park on the

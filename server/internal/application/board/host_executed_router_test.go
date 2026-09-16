@@ -12,9 +12,10 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-func hostRouter(ex *fakeExecutor) (*agent.Router, *recordingLLM) {
+func hostRouter(ex port.TaskExecutor) (*agent.Router, *recordingLLM) {
 	llm := &recordingLLM{}
 	router := agent.NewRouter(agent.NewLoop(llm, toollessRegistry{}, 3, 3, 16000))
 	router.SetTaskExecutor(ex)
@@ -88,7 +89,7 @@ func TestCriteriaSweepRunsOnTheHostExecutor(t *testing.T) {
 	}
 	resp := domain.AgentResponse{Message: domain.Message{Content: "implemented"}}
 
-	out, _ := r.sweepOpenCriteria(ctx, job, claudeCodeAgent(),
+	out, _, _ := r.sweepOpenCriteria(ctx, job, claudeCodeAgent(),
 		[]domain.Message{{Role: domain.RoleUser, Content: "do the work"}}, resp, "opus", domain.ToolPolicy{})
 
 	// criteriaUpdater never settles the criterion, so the completion loop asks
@@ -121,7 +122,7 @@ func TestReviewVerdictFinalizeRunsOnTheHostExecutor(t *testing.T) {
 		RepositoryID: uuid.New(),
 	}
 
-	moved := r.finalizeReviewVerdict(ctx, job, claudeCodeAgent(),
+	moved, _ := r.finalizeReviewVerdict(ctx, job, claudeCodeAgent(),
 		[]domain.Message{{Role: domain.RoleUser, Content: "review the diff"}},
 		"opus", domain.ToolPolicy{}, domain.TaskColumnReadyForQA)
 
@@ -147,7 +148,7 @@ func TestHostExecutedSweepFailsHonestlyWithNoRunner(t *testing.T) {
 	job := RunJob{Task: domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress}, RepositoryID: uuid.New()}
 	resp := domain.AgentResponse{Message: domain.Message{Content: "implemented"}}
 
-	out, _ := r.sweepOpenCriteria(registry.ContextWithWorkspaceDir(context.Background(), t.TempDir()),
+	out, _, _ := r.sweepOpenCriteria(registry.ContextWithWorkspaceDir(context.Background(), t.TempDir()),
 		job, claudeCodeAgent(), nil, resp, "opus", domain.ToolPolicy{})
 
 	require.Empty(t, llm.requests, "a claude_code run must never become an HTTP request")

@@ -184,7 +184,7 @@ func (s *VerifyFindingsSuite) TestVerdictIsFalseWhenChecksStayRed() {
 		VerifyFixAttempts: 1,
 	})
 
-	_, verified := r.verifyAndFix(context.Background(), RunJob{Task: domain.BoardTask{ID: uuid.New()}}, domain.Agent{},
+	_, verified, _ := r.verifyAndFix(context.Background(), RunJob{Task: domain.BoardTask{ID: uuid.New()}}, domain.Agent{},
 		[]domain.Message{{Role: domain.RoleUser, Content: "fix the board"}},
 		domain.AgentResponse{Message: domain.Message{Content: "done"}}, "m", domain.ToolPolicy{}, dir)
 
@@ -201,7 +201,7 @@ func (s *VerifyFindingsSuite) TestVerdictIsTrueWhenThereIsNothingToCheck() {
 		VerifyFixAttempts: 1,
 	})
 
-	_, verified := r.verifyAndFix(context.Background(), RunJob{Task: domain.BoardTask{ID: uuid.New()}}, domain.Agent{},
+	_, verified, _ := r.verifyAndFix(context.Background(), RunJob{Task: domain.BoardTask{ID: uuid.New()}}, domain.Agent{},
 		[]domain.Message{{Role: domain.RoleUser, Content: "fix the board"}},
 		domain.AgentResponse{Message: domain.Message{Content: "done"}}, "m", domain.ToolPolicy{}, s.T().TempDir())
 

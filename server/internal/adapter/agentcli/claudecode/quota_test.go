@@ -50,7 +50,7 @@ func TestQuotaBlockFrom(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			block := quotaBlockFrom(tc.text, "sess-1", now)
+			block := quotaBlockFrom(outcome{Text: tc.text}, "", "sess-1", now)
 			if tc.wantNone {
 				assert.Nil(t, block, "only a usage limit may park a task")
 				return

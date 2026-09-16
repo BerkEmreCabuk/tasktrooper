@@ -37,6 +37,9 @@ func TestIsRateLimited(t *testing.T) {
 	// The proxy in front of the embedding model reports the limit only in the body.
 	require.True(t, isRateLimited(fmt.Errorf(`embeddings returned 429: {"type":"rate_limited"}`)))
 	require.True(t, isRateLimited(fmt.Errorf("wrapped: %w", errors.New("RESOURCE_EXHAUSTED"))))
+	// Anthropic's overload signal must pace the account like any other rate limit.
+	require.True(t, isRateLimited(&domain.LLMHTTPError{StatusCode: 529}))
+	require.True(t, isRateLimited(fmt.Errorf("llm returned 529: %s", `{"error":{"type":"overloaded_error"}}`)))
 }
 
 func TestEmbedLimiterRetriesRateLimitedCall(t *testing.T) {
@@ -146,6 +149,24 @@ func TestNewRateLimitErrorOnlyForRetryableStatuses(t *testing.T) {
 	require.Equal(t, "embeddings returned 429: slow down", rle.Error())
 
 	require.Nil(t, newRateLimitError("embeddings", &http.Response{StatusCode: http.StatusBadRequest, Header: http.Header{}}, "bad"))
+}
+
+// Anthropic's 529 (the API overloaded, not this account throttled) must pace
+// the account exactly like a 429: with the provider's own Retry-After when it
+// sends one, and falling back to the account limiter's own backoff — the same
+// fallback a Retry-After-less 503 already gets — when it does not.
+func TestNewRateLimitErrorForOverloaded(t *testing.T) {
+	withRetryAfter := &http.Response{StatusCode: statusOverloaded, Header: http.Header{"Retry-After": []string{"3"}}}
+	rle := newRateLimitError("chat", withRetryAfter, `{"type":"error","error":{"type":"overloaded_error"}}`)
+	require.NotNil(t, rle)
+	require.Equal(t, statusOverloaded, rle.StatusCode)
+	require.Equal(t, 3*time.Second, rle.RetryAfter)
+
+	withoutRetryAfter := &http.Response{StatusCode: statusOverloaded, Header: http.Header{}}
+	rle = newRateLimitError("chat", withoutRetryAfter, "overloaded")
+	require.NotNil(t, rle)
+	require.Equal(t, time.Duration(0), rle.RetryAfter,
+		"no hint from the provider: the caller falls back to its own backoff, same as a hintless 503")
 }
 
 // The bug this limiter exists to prevent: chat and embedding spend the same

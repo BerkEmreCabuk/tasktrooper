@@ -28,6 +28,14 @@ import (
 //
 // Everything else — the per-turn MCP credential, the deadline, the quota
 // mapping — is the board path's, unchanged and shared.
+//
+// Two things Execute does are deliberately absent here: the account-wide quota
+// gate and the concurrency slot. A chat turn has a person watching who typed
+// it a second ago; queuing them behind board runs, or bouncing them off a gate
+// a board task armed, would make an interactive reply wait on work nobody at
+// the keyboard asked for. The person sees the usage-limit notice as soon as
+// this turn's own session reports it, same as always — and a turn that
+// succeeds still clears the gate for everyone else, in finish.
 func (e *Executor) ExecuteChat(ctx context.Context, req domain.ChatExecution, out port.ChatStream) (domain.ChatResult, error) {
 	if e == nil {
 		return domain.ChatResult{}, errors.New("claude code executor is not configured")

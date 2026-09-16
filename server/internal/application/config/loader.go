@@ -197,7 +197,8 @@ func applyDefaults(cfg *domain.Config) {
 	if strings.TrimSpace(cfg.ClaudeCode.Binary) == "" {
 		cfg.ClaudeCode.Binary = "claude"
 	}
-	// MaxTurns is left at 0 on purpose: the executor owns those
-	// defaults (claudecode.DefaultMaxTurns) and a second
-	// copy here is a second number to keep in step.
+	// MaxTurns and MaxConcurrentSessions are left at 0 on purpose: the executor
+	// owns those defaults (claudecode.DefaultMaxTurns,
+	// claudecode.DefaultMaxConcurrentSessions) and a second copy here is a
+	// second number to keep in step.
 }

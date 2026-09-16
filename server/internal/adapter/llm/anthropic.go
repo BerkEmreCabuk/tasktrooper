@@ -47,16 +47,13 @@ func resolveAnthropicMaxTokens(model string, override int) int {
 
 // knownAnthropicModels is returned as fallback when the API models endpoint is unavailable.
 var knownAnthropicModels = []string{
-	"claude-opus-4-8",
-	"claude-sonnet-4-6",
-	"claude-haiku-4-5-20251001",
-	"claude-opus-4-5",
-	"claude-sonnet-4-5",
+	"claude-opus-5",
+	"claude-sonnet-5",
 	"claude-haiku-4-5",
-	"claude-3-5-sonnet-20241022",
-	"claude-3-5-haiku-20241022",
-	"claude-3-opus-20240229",
-	"claude-3-haiku-20240307",
+	"claude-opus-4-8",
+	"claude-opus-4-7",
+	"claude-opus-4-6",
+	"claude-sonnet-4-6",
 }
 
 type anthropicClient struct {

@@ -61,6 +61,12 @@ type TaskExecution struct {
 	SkillsOnDisk bool
 	// ResumeSessionID continues a parked executor session. Empty starts fresh.
 	ResumeSessionID string
+	// Prompt is the new instruction for a RESUMED session, on its own. Set with
+	// ResumeSessionID by a follow-up step (criteria sweep, fix round, review
+	// verdict) whose History the session already holds: the executor sends
+	// this text and nothing else. Empty means the generic "carry on" prompt a
+	// quota-parked run is woken with. Ignored when ResumeSessionID is empty.
+	Prompt string
 	// TaskKey is the human-readable key (tt-123 style) used in logs and in the
 	// short continue prompt a resumed session is given.
 	TaskKey string

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/rs/zerolog/log"
@@ -115,7 +116,7 @@ func (r *Router) execute(
 		Str("work_dir", workDir).
 		Msg("routing an agentic run to the host executor")
 
-	return ex.Execute(ctx, domain.TaskExecution{
+	req := domain.TaskExecution{
 		History:   messages,
 		Model:     model,
 		Provider:  provider,
@@ -125,5 +126,57 @@ func (r *Router) execute(
 		WorkDir:   workDir,
 		TaskKey:   cfg.cliLabel,
 		TaskTitle: cfg.cliTitle,
-	})
+	}
+
+	// A follow-up step in the same run (verify-fix, a criteria sweep, a review
+	// verdict) shares the CLI session the main run opened, so it resumes that
+	// session with only the new instruction instead of replaying the whole
+	// flattened history — up to 6 times per task otherwise, on the person's own
+	// subscription quota.
+	session := CLISessionFromContext(ctx)
+	if id := session.ID(); id != "" {
+		if tail := resumeTail(messages); tail != "" {
+			req.ResumeSessionID = id
+			req.Prompt = tail
+		} else {
+			log.Debug().Str("provider", string(provider)).
+				Msg("cli session available but the run has no trailing user instruction to resume with; sending the full history")
+		}
+	}
+
+	resp, err := ex.Execute(ctx, req)
+	if resp.CLISessionID != "" {
+		session.Set(resp.CLISessionID)
+	}
+	return resp, err
+}
+
+// resumeTail is the new instruction a resumed CLI session needs: the trailing
+// user-role messages after the run's last assistant turn, joined so a
+// follow-up step's history (assistant close-out, then one user prompt) sends
+// just that prompt rather than the whole conversation the session already
+// holds. Empty when the last message is not from the user, or the history has
+// no assistant turn at all — either way there is nothing to isolate, and the
+// caller falls back to a fresh full-history run.
+func resumeTail(messages []domain.Message) string {
+	if len(messages) == 0 || messages[len(messages)-1].Role != domain.RoleUser {
+		return ""
+	}
+	lastAssistant := -1
+	for i, m := range messages {
+		if m.Role == domain.RoleAssistant {
+			lastAssistant = i
+		}
+	}
+	if lastAssistant == -1 {
+		return ""
+	}
+	var parts []string
+	for _, m := range messages[lastAssistant+1:] {
+		if m.Role != domain.RoleUser {
+			continue
+		}
+		parts = append(parts, m.Content)
+	}
+	return strings.Join(parts, "\n\n")
 }

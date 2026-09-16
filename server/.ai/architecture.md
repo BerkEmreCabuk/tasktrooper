@@ -568,7 +568,8 @@ default                                          →  agentLoop.Run / RunStream 
 `port.ChatExecutor` is a second interface beside `TaskExecutor` (the board has no use for
 streaming, the session service none for `Execute`); `*claudecode.Executor` satisfies both and
 `platform/runtime` hands **the same instance** to both callers, so a chat turn and a board
-task queue against one concurrency cap.
+task share one usage-limit gate (a chat that succeeds clears it for the board; see the quota
+park below). Chat never queues on the board's concurrency cap.
 
 Three things make a chat different, all in `domain.ChatExecution`:
 
@@ -705,6 +706,23 @@ never touch the USD budget. The HTTP steps above are metered API calls and DO bi
 through the recording client. A `claude_code` run row can legitimately mix billed and unbilled
 tokens: the work was free, the JSON-shaped bookkeeping was not.
 
+**Follow-up steps resume the run's own session, not a fresh one.** The build-gate fix round,
+the criteria sweep and the review verdict sweep/finalize can all run several times inside one
+`Runner.execute`, and each used to open a brand-new `claude -p` with the ENTIRE flattened
+history replayed — persona, project profile, memories, diff, the prior assistant turn — up to
+six times on one task, on the person's own subscription quota. `Runner.execute` now shares a
+`*agent.CLISession` holder across that whole call (`agent.ContextWithCLISession`); the router's
+`execute` reads it, and when the holder already has an id AND the step's own history ends on a
+fresh user instruction, it sends `claude -p --resume <id> "<prompt>"` with just that instruction
+as `TaskExecution.Prompt` instead of the full history — the session already holds everything
+before it, and Claude Code caches that prefix for an hour on a subscription, so a resume minutes
+later is nearly free. A step with nothing new to say (its history does not end on a user
+message) falls back to the ordinary fresh-history call. A `*domain.QuotaBlock` raised by one of
+these follow-ups gets the same treatment as one from the main executor call: the run stamps its
+usage so far and parks the task on the limit (see below) rather than failing it or handing on a
+stale verdict, borrowing the run's own session id when that particular call's block carried none
+of its own.
+
 ### The quota park
 
 A CLI session stopped by the subscription's usage limit is a fact about a billing window, not
@@ -744,10 +762,53 @@ as a competing instruction. The id is only handed to the SAME agent whose park r
 Two brakes, because a park costs the task nothing and a *repeating* park is therefore
 invisible:
 
-- the limit is only recognised on a session that FAILED (`session.failed`) — it is detected
-  from text, and a successful run's answer can legitimately quote the phrase;
+- the limit is only recognised on a session that FAILED (`session.failed`);
 - five consecutive parks on one task (`maxConsecutiveQuotaParks`) turn the sixth into an
   ordinary failure, so a false positive surfaces within a day instead of cycling forever.
+  `domain.QuotaParkWindow(consecutiveParks)` gives a caller that counts them an escalating
+  fallback (30m → 1h → 2h → 4h → capped at 5h) for the case below with no reset time, so a
+  string of guesses backs off toward the subscription's own window instead of re-hitting it
+  every half hour.
+
+**Detection is structured-first.** Claude Code 2.1.273 emits a `rate_limit_event` on the same
+stream whenever the picture changes — `{status, resetsAt, rateLimitType, unifiedWindows:
+{five_hour, seven_day}}` — and `quotaBlockFrom` (claudecode/quota.go) checks it before anything
+else: a `status: "rejected"` event, or a result event's own `api_error_status: 429`, is the
+CLI's own word for the limit, with `resetsAt` (falling back through the unified windows, then
+to the default/escalated window) trusted over a guess from prose. The historical text match
+(`usage limit reached` and the handful of other spellings the CLI has actually used) is still
+the fallback for a build that reports neither — a successful run's answer can legitimately
+quote the same phrase, which is why it is still gated on `session.failed` regardless of which
+path found it.
+
+**The account-wide gate.** One session hitting the limit means every *other* session on this
+process's executor is spending against the same spent subscription, not a different fact worth
+rediscovering by spawning anyway. `*claudecode.Executor` keeps an in-memory `quotaUntil` /
+`quotaDetail`, armed (only ever extended, never shortened) whenever `finish` maps a session to
+a `*domain.QuotaBlock`, and cleared the moment any session on the executor finishes without
+error — a success is proof the limit lifted, and it is also what heals a gate armed on a false
+positive. `Execute` checks the gate FIRST, before minting an MCP token or touching the
+concurrency cap below, and returns a `QuotaBlock` synthesised on the spot (carrying the
+caller's own `ResumeSessionID` through, so a re-parked task does not lose the session it would
+resume) rather than spawning a CLI that would just report the same 429 again. The gate is
+per-process, in memory, and lost on a restart — it is a fast-path short-circuit, not the
+durable park; migration 101's board-row park above is what actually survives one.
+
+**The concurrency cap.** With no cap, every board task whose column is free spawns its own
+`claude` session at once, and a burst that all hit the shared usage limit mid-work all park
+together — the opposite of a gate meant to slow the burn down. `Config.MaxConcurrentSessions`
+(0 → `DefaultMaxConcurrentSessions` = 3, negative → unlimited) backs a buffered-channel
+semaphore on the executor; `Execute` acquires a slot after the quota-gate check and before
+`resolveMCP` (so a queued run never mints and holds a per-run token while it waits), honouring
+context cancellation, and logs plus records a `claude_code_slot_wait` activity step when the
+wait passes one second.
+
+**Chat is exempt from both.** `ExecuteChat` never consults the gate and never takes a
+concurrency slot: a chat turn has a person who just pressed enter, and making them wait behind
+board runs — or bouncing them off a gate a board task armed — would turn an interactive reply
+into a queue nobody asked to join. A chat turn's own session still reports the limit as
+usual (see `QuotaNotice` above), and a chat turn that *succeeds* still clears the gate for
+every other session on the executor, through the same `finish` wrapper the board path uses.
 
 ### The tool endpoint (MCP)
 

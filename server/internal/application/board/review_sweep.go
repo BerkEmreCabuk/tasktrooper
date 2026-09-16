@@ -112,6 +112,10 @@ func (r *Runner) stuckVerdictNote(ctx context.Context, job RunJob) string {
 // A verdict that is not one of the two words is not a verdict: the task stays
 // put and the stuck-column comment is written, because a reviewer that will not
 // say yes or no has not finished reviewing.
+//
+// The second return value is a usage-limit block from the verdict turn: the
+// caller must park the task on it rather than read the bool, which would
+// otherwise read as an ordinary "no verdict given".
 func (r *Runner) finalizeReviewVerdict(
 	ctx context.Context,
 	job RunJob,
@@ -120,9 +124,9 @@ func (r *Runner) finalizeReviewVerdict(
 	model string,
 	policy domain.ToolPolicy,
 	exit domain.TaskColumn,
-) bool {
+) (bool, *domain.QuotaBlock) {
 	if r.taskUpdater == nil {
-		return false
+		return false, nil
 	}
 	// Criteria this column's reviewer never ruled on are what the forward gate
 	// refuses the move over. The sweep already asked for them; still missing
@@ -130,7 +134,7 @@ func (r *Runner) finalizeReviewVerdict(
 	// would only cost a model call.
 	if role, ok := criterionReviewRole(job.Task.Column); ok {
 		if missing := r.missingVerdicts(ctx, job, role); len(missing) > 0 {
-			return false
+			return false, nil
 		}
 	}
 
@@ -147,14 +151,17 @@ func (r *Runner) finalizeReviewVerdict(
 		agent.WithLightModel(agentRec.Model),
 		agent.WithCLILabel(job.Task.Key+" review-verdict", job.Task.Title))
 	if err != nil {
+		if quotaErr, ok := domain.QuotaBlockOf(err); ok {
+			return false, quotaErr
+		}
 		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("review verdict finalize failed; task stays in its review column")
-		return false
+		return false, nil
 	}
 
 	target, ok := verdictColumn(resp.Message.Content, exit)
 	if !ok {
 		log.Info().Str("task_id", job.Task.ID.String()).Msg("review verdict finalize: no verdict in the answer, leaving the column alone")
-		return false
+		return false, nil
 	}
 
 	// Attributed to the reviewing agent, like every other hand-off move: the
@@ -169,7 +176,7 @@ func (r *Runner) finalizeReviewVerdict(
 	}); err != nil {
 		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Str("target", string(target)).
 			Msg("review verdict finalize: move refused")
-		return false
+		return false, nil
 	}
 
 	held := false
@@ -185,11 +192,11 @@ func (r *Runner) finalizeReviewVerdict(
 		// "move it by hand" comment about.
 		log.Info().Str("task_id", job.Task.ID.String()).
 			Msg("review verdict finalize: approval recorded, task held for human review")
-		return true
+		return true, nil
 	}
 	log.Info().Str("task_id", job.Task.ID.String()).Str("column", string(target)).
 		Msg("review verdict finalize: verdict recorded, task moved")
-	return true
+	return true, nil
 }
 
 // verdictColumn reads the one-word answer. Deliberately strict about which word
@@ -223,6 +230,10 @@ func verdictColumn(answer string, exit domain.TaskColumn) (domain.TaskColumn, bo
 // task itself: a verdict the reviewer will not state is not a verdict, and
 // promoting work to ready_for_qa from the runner is exactly the unreviewed
 // green the column exists to prevent.
+//
+// The return value is a usage-limit block hit anywhere in the sweep — its own
+// turn or the finalize turn it falls back to — so the caller parks the task
+// on it instead of leaving the column to a run that never actually answered.
 func (r *Runner) sweepReviewVerdict(
 	ctx context.Context,
 	job RunJob,
@@ -231,30 +242,30 @@ func (r *Runner) sweepReviewVerdict(
 	resp domain.AgentResponse,
 	model string,
 	policy domain.ToolPolicy,
-) {
+) *domain.QuotaBlock {
 	if resp.Clarification != nil || resp.ResourceBlock != nil {
-		return
+		return nil
 	}
 	if job.Task.TaskType == domain.TaskTypeAnaliz {
-		return
+		return nil
 	}
 	exit, ok := reviewExitColumn(job.Task.Column)
 	if !ok {
-		return
+		return nil
 	}
 	// The agent may well have moved the task during its run; sweeping then would
 	// ask a finished reviewer to re-decide a decision already on the board.
 	reader, ok := r.taskUpdater.(taskColumnReader)
 	if !ok {
-		return
+		return nil
 	}
 	fresh, err := reader.GetTask(ctx, job.RepositoryID, job.Task.ID)
 	if err != nil {
 		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("review sweep: task re-read failed, leaving the column to the agent")
-		return
+		return nil
 	}
 	if fresh.Column != job.Task.Column {
-		return
+		return nil
 	}
 
 	var sb strings.Builder
@@ -298,8 +309,11 @@ func (r *Runner) sweepReviewVerdict(
 	if _, err := r.agentLoop.RunTask(ctx, history, model, agentRec.ProviderType, policy,
 		agent.WithLightModel(agentRec.Model),
 		agent.WithCLILabel(job.Task.Key+" review-sweep", job.Task.Title)); err != nil {
+		if quotaErr, ok := domain.QuotaBlockOf(err); ok {
+			return quotaErr
+		}
 		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("review verdict sweep failed; task stays in its review column")
-		return
+		return nil
 	}
 	if after, err := reader.GetTask(ctx, job.RepositoryID, job.Task.ID); err == nil && after.Column == job.Task.Column {
 		log.Info().Str("task_id", job.Task.ID.String()).Str("column", string(job.Task.Column)).
@@ -308,8 +322,12 @@ func (r *Runner) sweepReviewVerdict(
 		// alone — one word, no tool call — and make the move from here. See
 		// finalizeReviewVerdict for why that is not the unreviewed promotion this
 		// column exists to prevent.
-		if r.finalizeReviewVerdict(ctx, job, agentRec, history, model, policy, exit) {
-			return
+		moved, quotaErr := r.finalizeReviewVerdict(ctx, job, agentRec, history, model, policy, exit)
+		if quotaErr != nil {
+			return quotaErr
+		}
+		if moved {
+			return nil
 		}
 		if r.taskUpdater != nil {
 			if _, cErr := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
@@ -322,4 +340,5 @@ func (r *Runner) sweepReviewVerdict(
 			}
 		}
 	}
+	return nil
 }

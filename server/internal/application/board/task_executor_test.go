@@ -87,6 +87,9 @@ type fakeExecutor struct {
 	mu      sync.Mutex
 	calls   int
 	lastReq domain.TaskExecution
+	// reqs keeps every request in order, for a test that needs to compare a
+	// follow-up call against the main one (lastReq only keeps the latest).
+	reqs []domain.TaskExecution
 }
 
 func (f *fakeExecutor) Supports(provider domain.LLMProviderType) bool {
@@ -97,6 +100,7 @@ func (f *fakeExecutor) Execute(_ context.Context, req domain.TaskExecution) (dom
 	f.mu.Lock()
 	f.calls++
 	f.lastReq = req
+	f.reqs = append(f.reqs, req)
 	f.mu.Unlock()
 	return f.resp, f.err
 }
@@ -111,6 +115,14 @@ func (f *fakeExecutor) request() domain.TaskExecution {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.lastReq
+}
+
+func (f *fakeExecutor) requests() []domain.TaskExecution {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]domain.TaskExecution, len(f.reqs))
+	copy(out, f.reqs)
+	return out
 }
 
 // blockRecorder captures the park. previous is what the store hands back as the
@@ -196,7 +208,7 @@ func TestClaudeCodeAgentIsRunByTheExecutor(t *testing.T) {
 // criteria-sweep rounds both go through the same fake executor — the sweep
 // dials r.agentLoop.RunTask, a different seam from the initial r.taskExecutor
 // call, and both have to be wired or the sweep panics on a nil agentLoop.
-func criteriaSweepRunner(t *testing.T, runs *recordingRunStore, ex *fakeExecutor, updater TaskUpdater) (*Runner, RunJob) {
+func criteriaSweepRunner(t *testing.T, runs *recordingRunStore, ex port.TaskExecutor, updater TaskUpdater) (*Runner, RunJob) {
 	t.Helper()
 	agentRec := claudeCodeAgent()
 	router, _ := hostRouter(ex)

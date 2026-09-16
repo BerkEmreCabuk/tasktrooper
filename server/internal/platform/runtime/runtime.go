@@ -1330,7 +1330,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			SettingSources: cfg.ClaudeCode.SettingSources,
 			// Per-run endpoint and credential, minted at the start of each
 			// session and revoked at its end. See claudecode_mcp.go.
-			MCPProvider: claudeMCP,
+			MCPProvider:           claudeMCP,
+			MaxConcurrentSessions: cfg.ClaudeCode.MaxConcurrentSessions,
 		}); ccErr != nil {
 			log.Info().Err(ccErr).Msg("claude code executor not registered; agents on the claude_code provider cannot run on this host")
 		} else {

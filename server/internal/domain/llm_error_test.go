@@ -58,6 +58,23 @@ func TestLLMHTTPErrorContextOverflow(t *testing.T) {
 	}
 }
 
+// Anthropic's 529 means the API is overloaded, not that this account is being
+// throttled or has spent anything — it must pace the account (RateLimited)
+// without ever being reported as a spent quota (QuotaExhausted).
+func TestLLMHTTPErrorOverloadedIsRateLimitedNotQuotaExhausted(t *testing.T) {
+	cases := []*domain.LLMHTTPError{
+		{StatusCode: 529, Body: ""},
+		{StatusCode: 529, Body: `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`},
+		{StatusCode: 503, Body: "the upstream is overloaded"},
+	}
+	for _, err := range cases {
+		assert.True(t, err.RateLimited(), "status %d body %q must be treated as rate limited", err.StatusCode, err.Body)
+		assert.False(t, err.QuotaExhausted(), "status %d body %q must not be reported as quota exhausted", err.StatusCode, err.Body)
+	}
+
+	assert.True(t, (&domain.LLMHTTPError{StatusCode: 529}).Retryable(), "529 must stay retryable")
+}
+
 // The wording predates the type; run summaries and task comments quote it.
 func TestLLMHTTPErrorKeepsTheOriginalWording(t *testing.T) {
 	err := domain.NewLLMHTTPError(429, []byte("slow down"))

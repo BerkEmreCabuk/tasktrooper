@@ -18,6 +18,25 @@ import (
 // the system would notice.
 const DefaultQuotaParkWindow = 30 * time.Minute
 
+// QuotaParkWindow escalates the fallback window with consecutive parks that
+// found no reset time. A repeated 30m guess on a 5h window re-hits the same
+// limit every half hour and burns a CLI start each time; doubling backs off
+// toward the window's own length instead of hammering it, and the 5h cap is
+// the longest a Claude subscription window actually runs.
+func QuotaParkWindow(consecutiveParks int) time.Duration {
+	if consecutiveParks < 0 {
+		consecutiveParks = 0
+	}
+	window := DefaultQuotaParkWindow
+	for i := 0; i < consecutiveParks; i++ {
+		window *= 2
+		if window >= 5*time.Hour {
+			return 5 * time.Hour
+		}
+	}
+	return window
+}
+
 // QuotaBlock is the CLI saying "this account has nothing left to spend until
 // T". It is an ERROR type, unlike ResourceBlock, because it comes back from an
 // executor rather than from a tool: the run did not finish and has no response

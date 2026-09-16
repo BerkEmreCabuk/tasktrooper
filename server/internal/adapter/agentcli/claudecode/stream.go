@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -59,6 +60,75 @@ type event struct {
 	Usage        *cliUsage `json:"usage"`
 	// Error is what some builds put the failure text in instead of result.
 	Error string `json:"error"`
+	// APIErrorStatus is the result event's own field when the terminal failure
+	// was an HTTP-shaped provider error rather than a CLI-side one — 429 on a
+	// spent usage limit above all.
+	APIErrorStatus int `json:"api_error_status"`
+	// RateLimit is a rate_limit_event's payload. The CLI emits one whenever the
+	// picture changes, not just on the terminal event, which is why parseStream
+	// keeps the LAST one rather than reading it off the result.
+	RateLimit *rateLimitInfo `json:"rate_limit_info"`
+}
+
+// rateLimitInfo is the structured shape a rate_limit_event carries, verified
+// live against Claude Code 2.1.273. It supersedes the text-matched detection
+// in quota.go where it is present, because "rejected" is the CLI's own word
+// for the limit rather than a guess from an error sentence.
+type rateLimitInfo struct {
+	// Status is "allowed", "allowed_warning" or "rejected". Only "rejected" is
+	// a hard block; the other two describe a session that is still running.
+	Status         string  `json:"status"`
+	ResetsAt       int64   `json:"resetsAt"`
+	RateLimitType  string  `json:"rateLimitType"`
+	Utilization    float64 `json:"utilization"`
+	UnifiedWindows struct {
+		FiveHour *rateLimitWindow `json:"five_hour"`
+		SevenDay *rateLimitWindow `json:"seven_day"`
+	} `json:"unifiedWindows"`
+}
+
+// rateLimitWindow is one entry of unifiedWindows: the account can be limited
+// on more than one rolling window at once, and each has its own reset.
+type rateLimitWindow struct {
+	Utilization float64 `json:"utilization"`
+	ResetsAt    int64   `json:"resetsAt"`
+}
+
+// resetTime picks the reset this info actually promises: the window that
+// triggered the event first, falling back to the unified five-hour and then
+// seven-day windows when that one is absent or already past — a rejected
+// event with a stale top-level epoch still carries a live window worth
+// waking up for. Zero time means none of the three is in the future, which
+// leaves the caller's own fallback window as the only honest answer.
+func (r *rateLimitInfo) resetTime(now time.Time) time.Time {
+	if r == nil {
+		return time.Time{}
+	}
+	if t := epochIfFuture(r.ResetsAt, now); !t.IsZero() {
+		return t
+	}
+	if r.UnifiedWindows.FiveHour != nil {
+		if t := epochIfFuture(r.UnifiedWindows.FiveHour.ResetsAt, now); !t.IsZero() {
+			return t
+		}
+	}
+	if r.UnifiedWindows.SevenDay != nil {
+		if t := epochIfFuture(r.UnifiedWindows.SevenDay.ResetsAt, now); !t.IsZero() {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
+func epochIfFuture(epoch int64, now time.Time) time.Time {
+	if epoch <= 0 {
+		return time.Time{}
+	}
+	t := time.Unix(epoch, 0)
+	if !t.After(now) {
+		return time.Time{}
+	}
+	return t
 }
 
 // mcpServerState is one entry of the init event's server list: every MCP server
@@ -296,6 +366,13 @@ type outcome struct {
 	// ends without one is a killed process, not a finished run, and must not be
 	// reported as one.
 	SawResult bool
+	// RateLimit is the last rate_limit_event seen anywhere on the stream, kept
+	// because the CLI emits one whenever the picture changes and only the
+	// final one describes the state the session ended in.
+	RateLimit *rateLimitInfo
+	// APIErrorStatus is the terminal result event's own field, set when the
+	// failure was an HTTP-shaped provider error (429 above all).
+	APIErrorStatus int
 }
 
 // parseStream reads the CLI's stream-json output to the end, reporting events
@@ -388,6 +465,11 @@ func parseStream(r io.Reader, s sink) (outcome, error) {
 			out.CostUSD = ev.TotalCostUSD
 			out.Usage = ev.Usage.toDomain()
 			out.Text = firstNonEmpty(ev.Result, ev.Error, lastAssistantText)
+			out.APIErrorStatus = ev.APIErrorStatus
+		case "rate_limit_event":
+			if ev.RateLimit != nil {
+				out.RateLimit = ev.RateLimit
+			}
 		}
 	}
 	if err := scanner.Err(); err != nil {

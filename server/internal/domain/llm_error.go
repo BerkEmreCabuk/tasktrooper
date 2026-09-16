@@ -80,17 +80,21 @@ var quotaExhaustedMarkers = []string{
 	"monthly limit",
 }
 
+// statusOverloaded is Anthropic's 529 "overloaded_error" — net/http has no
+// constant for it because it is not a standard status.
+const statusOverloaded = 529
+
 // RateLimited reports whether the provider refused this call for pacing or
 // quota reasons rather than for anything about the request itself.
 func (e *LLMHTTPError) RateLimited() bool {
-	if e.StatusCode == http.StatusTooManyRequests || e.StatusCode == http.StatusPaymentRequired {
+	if e.StatusCode == http.StatusTooManyRequests || e.StatusCode == http.StatusPaymentRequired || e.StatusCode == statusOverloaded {
 		return true
 	}
 	if e.StatusCode != http.StatusServiceUnavailable && e.StatusCode != http.StatusForbidden {
 		return false
 	}
 	body := strings.ToLower(e.Body)
-	for _, marker := range []string{"rate limit", "rate_limit", "rate_limited", "resource_exhausted", "too many requests", "quota"} {
+	for _, marker := range []string{"rate limit", "rate_limit", "rate_limited", "resource_exhausted", "too many requests", "quota", "overloaded_error", "overloaded"} {
 		if strings.Contains(body, marker) {
 			return true
 		}
@@ -103,7 +107,9 @@ func (e *LLMHTTPError) RateLimited() bool {
 // common case; callers must treat it as "not known to be exhausted", never as
 // "known to be temporary".
 func (e *LLMHTTPError) QuotaExhausted() bool {
-	if !e.RateLimited() {
+	// 529 means the API is overloaded, not that this account has spent
+	// anything — it must never be reported as exhausted.
+	if !e.RateLimited() || e.StatusCode == statusOverloaded {
 		return false
 	}
 	if e.StatusCode == http.StatusPaymentRequired {
