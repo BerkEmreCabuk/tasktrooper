@@ -104,6 +104,18 @@ func (g *CriteriaLoopGuard) Hold(ctx context.Context, repositoryID uuid.UUID, ta
 			Msg("criteria loop guard: reading board history failed, leaving the retry in place")
 		return false
 	}
+	// BoardEventStore.ListByTask is `ORDER BY created_at ASC LIMIT n`, so on a
+	// task with more than reviewLoopHistoryDepth events a full window is the
+	// OLD end of history, not the recent one — the same truncation
+	// PipelineBounceGuard.humanTouchWindow guards against. A window that does
+	// not reach `oldest` proves nothing about a human touch since then, so the
+	// guard must fail open rather than treat "not found in this window" as
+	// "never touched".
+	if len(history) >= reviewLoopHistoryDepth && !historyReaches(history, oldest) {
+		log.Warn().Str("task_id", task.ID.String()).Int("events", len(history)).
+			Msg("criteria loop guard: board history window does not reach the streak, leaving the retry in place")
+		return false
+	}
 	if at, ok := lastHumanEventAt(history); ok && !at.Before(oldest) {
 		// A person has touched this card since (or during) the streak the
 		// caller is judging — see the guard-wide reset rule in
