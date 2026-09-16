@@ -29,6 +29,7 @@ import { ActivityPanel } from "@/components/chat/ActivityPanel";
 import { AttachmentDropzone } from "@/components/attachments/AttachmentDropzone";
 import { AttachmentList } from "@/components/attachments/AttachmentList";
 import { PlanView } from "@/components/chat/PlanView";
+import { HumanUatDecision } from "@/components/board/HumanUatDecision";
 import { PipelineSection } from "@/components/board/PipelineSection";
 import { TaskAssigneeFields } from "@/components/board/TaskAssigneeFields";
 import { TaskDocumentList } from "@/components/board/TaskDocumentList";
@@ -651,6 +652,7 @@ export function TaskDetailDrawer({
                     )}
                   </section>
                 )}
+                <HumanUatDecision task={task} repositoryId={repositoryId} onUpdated={onUpdated} />
                 {/* A schema change cannot reach production until a stage deploy
                     has actually applied it, so the gate's state belongs next to
                     the task, not only in the release error. */}
