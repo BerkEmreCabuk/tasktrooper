@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api, type BoardTask } from "@/api";
 import { Button } from "@/components/ui/button";
@@ -28,6 +28,15 @@ export function HumanUatDecision({ task, repositoryId, onUpdated }: HumanUatDeci
   const [saving, setSaving] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [reason, setReason] = useState("");
+
+  // The drawer swaps `task` in place without unmounting this component (it
+  // never closes the drawer between cards), so a decline draft typed for one
+  // task would otherwise still be here — and still submittable — once the
+  // drawer shows a different one.
+  useEffect(() => {
+    setDeclining(false);
+    setReason("");
+  }, [task.id]);
 
   if (task.column !== "human_uat") return null;
 
