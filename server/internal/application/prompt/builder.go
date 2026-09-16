@@ -396,7 +396,18 @@ func BuildSystemPromptFor(agent domain.Agent, skills []domain.Skill, stacks []do
 	}
 	parts = append(parts, ToolSelectionGuidance())
 	parts = append(parts, RepeatCallGuidance())
-	parts = append(parts, ClarificationGuidance())
+	// Which clarification contract the run can actually honour follows the same
+	// split, for the same reason the skill index does: SkillsOnDisk is set for
+	// CLI providers only, and a CLI run reaches TaskTrooper's tools over MCP,
+	// where ask_user is refused before any policy filtering (see
+	// adapter/mcpserver.exposed — it returns a request to park on, and a live
+	// session has no pause to park in). Handing such a run clarificationGuidance
+	// names a tool it does not hold AND forbids the one channel it does have.
+	if delivery == SkillsOnDisk {
+		parts = append(parts, CLIClarificationGuidance())
+	} else {
+		parts = append(parts, ClarificationGuidance())
+	}
 	if domain.ToolAllowedByPolicy("commit_task_changes", agent.ToolPolicy) {
 		parts = append(parts, CommitLanguageGuidance())
 	}
