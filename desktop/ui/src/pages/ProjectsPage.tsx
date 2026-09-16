@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { api, type InitiativeProject, type Repository } from "@/api";
 import { PageHeader } from "@/components/admin/PageHeader";
+import { ProjectArchitectureSection } from "@/components/projects/ProjectArchitectureSection";
 import { ProjectFormDialog } from "@/components/projects/ProjectFormDialog";
 import { ProjectRepositoriesSection } from "@/components/projects/ProjectRepositoriesSection";
 import { RepositoryRow } from "@/components/projects/RepositoryRow";
@@ -163,18 +164,20 @@ export function ProjectsPage() {
           )}
 
           {projects.map((project) => (
-            <ProjectRepositoriesSection
-              key={project.id}
-              project={project}
-              repositories={byProject.get(project.id) ?? []}
-              projectNameById={projectNameById}
-              onEditProject={() => openEditProject(project)}
-              onDeleteProject={() => setDeleteProjectTarget(project)}
-              onDeleteRepository={setDeleteRepoTarget}
-              onRestored={load}
-              onAddRepository={(method) => repoImport.start(project.id, method)}
-              addDisabled={repoImport.pendingSetup}
-            />
+            <div key={project.id} className="space-y-4">
+              <ProjectRepositoriesSection
+                project={project}
+                repositories={byProject.get(project.id) ?? []}
+                projectNameById={projectNameById}
+                onEditProject={() => openEditProject(project)}
+                onDeleteProject={() => setDeleteProjectTarget(project)}
+                onDeleteRepository={setDeleteRepoTarget}
+                onRestored={load}
+                onAddRepository={(method) => repoImport.start(project.id, method)}
+                addDisabled={repoImport.pendingSetup}
+              />
+              <ProjectArchitectureSection project={project} repositories={repositories} projects={projects} />
+            </div>
           ))}
 
           {unassigned.length > 0 && (

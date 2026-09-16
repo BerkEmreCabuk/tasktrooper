@@ -14,6 +14,7 @@ import {
   type RepoSubProject,
 } from "@/api";
 import { MultiSelectPicker } from "@/components/admin/MultiSelectPicker";
+import { DependenciesPanel } from "@/components/projects/DependenciesPanel";
 import { MobileStorePanel } from "@/components/projects/MobileStorePanel";
 import { VercelProjectPanel } from "@/components/projects/VercelProjectPanel";
 import { DirectoryPickerDialog } from "@/components/projects/DirectoryPickerDialog";
@@ -756,6 +757,8 @@ export function ProjectSettingsPage() {
               )}
             </div>
           )}
+
+          {repoId && <DependenciesPanel repositoryId={repoId} />}
 
           {repoId && (
             <DirectoryPickerDialog
