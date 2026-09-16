@@ -48,12 +48,12 @@ type stubResourceParker struct {
 	err   error
 }
 
-func (s *stubResourceParker) BlockOnResource(_ context.Context, _, taskID uuid.UUID, resource, detail string) (domain.TaskColumn, error) {
+func (s *stubResourceParker) MarkWorkOrderWaiting(_ context.Context, _, taskID uuid.UUID, detail string) error {
 	if s.err != nil {
-		return "", s.err
+		return s.err
 	}
-	s.parks = append(s.parks, parkCall{taskID: taskID, resource: resource, detail: detail})
-	return domain.TaskColumnInProgress, nil
+	s.parks = append(s.parks, parkCall{taskID: taskID, resource: domain.ResourceWorkOrder, detail: detail})
+	return nil
 }
 
 type stubWorkOrderCommenter struct {
@@ -108,6 +108,27 @@ func TestWorkOrderParkNamesEveryBlockerOnTheCard(t *testing.T) {
 	assert.Contains(t, parker.parks[0].detail, "in_progress")
 	require.Len(t, comments.contents, 1)
 	assert.Contains(t, comments.contents[0], "T-1 (API migration)")
+}
+
+// The park comment re-enters Dispatch for the same task.commented event
+// (Service.AddComment calls s.emit synchronously), and since the column
+// never moves out of {todo, in_progress} the gate is true again on that
+// re-entrant call. Without this guard, Park would fire again from inside its
+// own comment and recurse until the stack overflows. A task whose
+// BlockedResource is already work_order is a re-entrant call, not a fresh
+// park, so it must be a no-op.
+func TestWorkOrderParkOnAnAlreadyParkedTaskIsANoOp(t *testing.T) {
+	task := workOrderTask(domain.TaskColumnTodo)
+	task.BlockedResource = domain.ResourceWorkOrder
+	parker := &stubResourceParker{}
+	comments := &stubWorkOrderCommenter{}
+	w := NewWorkOrder(&stubBlockerReader{}, parker)
+	w.SetCommenter(comments)
+
+	require.NoError(t, w.Park(context.Background(), task.RepositoryID, task, []domain.BoardTask{openBlocker()}))
+
+	assert.Empty(t, parker.parks, "already parked — no re-write of the same fields")
+	assert.Empty(t, comments.contents, "already parked — no re-entrant comment, that is the recursion trigger")
 }
 
 // A missing comment store costs the card a line of history and nothing else.
@@ -182,7 +203,7 @@ func (s *stubWorkOrderParkStore) ListBlockedByResource(_ context.Context, resour
 	return s.parked, nil
 }
 
-func (s *stubWorkOrderParkStore) TakeBlockedResourceTask(_ context.Context, _ string, taskID uuid.UUID) (domain.BoardTask, bool, error) {
+func (s *stubWorkOrderParkStore) ClearWorkOrderWaiting(_ context.Context, taskID uuid.UUID) (domain.BoardTask, bool, error) {
 	if s.takeMisses[taskID] {
 		return domain.BoardTask{}, false, nil
 	}
