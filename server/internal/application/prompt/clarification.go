@@ -20,6 +20,27 @@ func ClarificationGuidance() string {
 	return clarificationGuidance
 }
 
+// cliClarificationGuidance is the clarification contract for a run whose tools
+// arrive over MCP — every claude_code CLI run. ask_user is not among them: it is
+// refused in adapter/mcpserver.exposed before any policy filtering, because it
+// returns a ClarificationRequest for the agent loop to park a task on and a live
+// CLI session has no such pause to offer.
+//
+// It therefore says the opposite of clarificationGuidance on the one point that
+// matters. That block tells the agent to call ask_user and to keep questions out
+// of its message body; a CLI run given it hunts for a tool it does not hold and
+// is forbidden the only channel it has — the closing message, which the runner
+// already surfaces on the card.
+const cliClarificationGuidance = `## Missing information
+- Never assume missing requirements, scope, preferences, or constraints.
+- Read the repository before you call something unknown: file layout, where a section or component lives, routing and existing config are yours to find, not the human's to describe.
+- You cannot reach the human mid-run — this session has no way to wait for an answer. Where the choice is reversible, decide with what you have and say what you assumed. Where it is not, stop and state in your closing message what is missing and what you would need; that message is shown on the task card.
+- Read the task's comments first. A question already answered there is decided, not open.`
+
+func CLIClarificationGuidance() string {
+	return cliClarificationGuidance
+}
+
 func FormatClarificationMessage(req domain.ClarificationRequest) string {
 	var sb strings.Builder
 	sb.WriteString("I need a few details before I can continue:\n\n")
@@ -115,8 +136,24 @@ func IsClarificationComment(content string) bool {
 	return strings.HasPrefix(strings.TrimSpace(content), ClarificationCommentPrefix)
 }
 
-// AnsweredClarificationsMessage replays every question this task already had
-// answered into a new run's context. Empty when the task has none.
+// maxAnsweredClarifications and maxAnsweredClarificationChars bound what one
+// run is handed, newest first.
+//
+// The bound is the point: this block goes into EVERY run of the task (see
+// board.Runner), and nothing behind it is capped — TaskCommentStore.ListByTask
+// carries no LIMIT, unlike its BoardEvent and TaskAgentRun siblings, so a
+// long-lived card would replay its entire clarification history on every
+// dispatch and charge each run for every answer it ever received. The newest
+// answers are the ones still being acted on; the rest stay on the card, where
+// list_comments can fetch them.
+const (
+	maxAnsweredClarifications     = 10
+	maxAnsweredClarificationChars = 2000
+)
+
+// AnsweredClarificationsMessage replays the questions this task already had
+// answered into a new run's context, newest last. Empty when the task has none,
+// and bounded by maxAnsweredClarifications.
 func AnsweredClarificationsMessage(comments []domain.TaskComment) string {
 	answered := make([]string, 0, len(comments))
 	for _, c := range comments {
@@ -131,13 +168,28 @@ func AnsweredClarificationsMessage(comments []domain.TaskComment) string {
 	if len(answered) == 0 {
 		return ""
 	}
+	omitted := 0
+	if len(answered) > maxAnsweredClarifications {
+		omitted = len(answered) - maxAnsweredClarifications
+		answered = answered[omitted:]
+	}
 	var sb strings.Builder
 	sb.WriteString("## Clarifications already answered on this task\n")
 	sb.WriteString("The human has already answered the questions below. Treat these answers as decided requirements, ")
 	sb.WriteString("act on them, and never ask them again — only ask about something genuinely still unknown.\n")
+	if omitted > 0 {
+		// Said out loud, so a run that finds a gap looks it up instead of
+		// deciding the question was never answered and acting on its own guess.
+		fmt.Fprintf(&sb, "The %d most recent are shown; %d older answer(s) are on this task's comments — read them with list_comments before treating anything as unanswered.\n",
+			len(answered), omitted)
+	}
 	for _, a := range answered {
+		body := domain.TruncateHead(a, maxAnsweredClarificationChars)
+		if len(body) < len(a) {
+			body += "…"
+		}
 		sb.WriteString("\n")
-		sb.WriteString(a)
+		sb.WriteString(body)
 		sb.WriteString("\n")
 	}
 	return strings.TrimSpace(sb.String())

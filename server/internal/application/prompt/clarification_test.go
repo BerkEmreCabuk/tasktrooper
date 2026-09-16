@@ -1,6 +1,8 @@
 package prompt_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
@@ -60,6 +62,36 @@ func TestAnsweredClarificationsMessage_ReplaysAnsweredExchanges(t *testing.T) {
 func TestAnsweredClarificationsMessage_EmptyWithoutClarifications(t *testing.T) {
 	assert.Empty(t, prompt.AnsweredClarificationsMessage(nil))
 	assert.Empty(t, prompt.AnsweredClarificationsMessage([]domain.TaskComment{{Content: "plain comment"}}))
+}
+
+// The block rides into every run of the task and the comments behind it are
+// unbounded, so it cannot grow with the card's whole clarification history.
+func TestAnsweredClarificationsMessage_KeepsNewestAndSaysWhatItDropped(t *testing.T) {
+	comments := make([]domain.TaskComment, 0, 14)
+	for i := range 14 {
+		comments = append(comments, domain.TaskComment{
+			Content: prompt.ClarificationAnswerComment(fmt.Sprintf("question %d", i), fmt.Sprintf("answer %d", i)),
+		})
+	}
+
+	msg := prompt.AnsweredClarificationsMessage(comments)
+
+	assert.Contains(t, msg, "answer 13", "the newest answer is the one still being acted on")
+	assert.Contains(t, msg, "answer 4")
+	assert.NotContains(t, msg, "answer 3", "answers past the cap are dropped oldest first")
+	// A gap the run cannot see is worse than a gap it is told about.
+	assert.Contains(t, msg, "4 older")
+	assert.Contains(t, msg, "list_comments")
+}
+
+// One pathological answer must not undo the cap.
+func TestAnsweredClarificationsMessage_TruncatesALongAnswer(t *testing.T) {
+	msg := prompt.AnsweredClarificationsMessage([]domain.TaskComment{
+		{Content: prompt.ClarificationAnswerComment("q", strings.Repeat("z", 6000))},
+	})
+
+	assert.Less(t, len(msg), 3000)
+	assert.Contains(t, msg, "…")
 }
 
 func TestUserFacingLanguageRule_TurkishLocale(t *testing.T) {

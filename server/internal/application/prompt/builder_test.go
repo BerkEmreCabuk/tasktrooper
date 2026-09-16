@@ -169,6 +169,23 @@ func TestRepeatCallGuidance(t *testing.T) {
 	assert.Contains(t, g, "never quote")
 }
 
+// A CLI run reaches TaskTrooper's tools over MCP, where ask_user is refused
+// outright. Telling it to call ask_user names a tool it does not hold; telling
+// it to keep questions out of its message body forbids the only channel it has.
+func TestBuildSystemPromptFor_CLIRunGetsNoAskUserProtocol(t *testing.T) {
+	agent := domain.Agent{SystemPrompt: "You are a backend engineer."}
+
+	cli := prompt.BuildSystemPromptFor(agent, nil, nil, nil, "", prompt.SkillsOnDisk)
+	assert.NotContains(t, cli, "ask_user")
+	assert.NotContains(t, cli, "Do not write clarification questions in your message body")
+	assert.Contains(t, cli, "closing message")
+	assert.Contains(t, cli, "Never assume missing requirements")
+
+	// The loop providers do hold ask_user, and keep the protocol.
+	loop := prompt.BuildSystemPromptFor(agent, nil, nil, nil, "", prompt.SkillsInPrompt)
+	assert.Contains(t, loop, "ask_user")
+}
+
 func TestLanguageInstruction(t *testing.T) {
 	assert.Contains(t, prompt.LanguageInstruction("tr"), "Turkish")
 	assert.Contains(t, prompt.LanguageInstruction("en"), "English")
