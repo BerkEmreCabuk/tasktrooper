@@ -34,6 +34,14 @@ type RevisionNotifier interface {
 	NotifyRevision(ctx context.Context, task domain.BoardTask)
 }
 
+// AnalizAssignmentSource is the narrow slice of settings.Service CreateTask
+// needs: read the backend/frontend/mobile analiz-assignment settings to
+// override an analiz task's assignee. Wired late by runtime, same setter
+// style as SetEvolution, so this package stays decoupled from settings.
+type AnalizAssignmentSource interface {
+	Get(ctx context.Context) (domain.AppSettings, error)
+}
+
 // ProfileRefresher is implemented by the repoprofile service; it rebuilds the
 // agent-maintained project profile in the background. Wired late by runtime
 // (same setter style as SetEvolution) so this package stays decoupled from it.
@@ -95,6 +103,9 @@ type Service struct {
 	restores  map[uuid.UUID]*domain.RepositoryRestore
 	// restoreRun is a test seam (same shape as pushRunFn); nil = `go fn()`.
 	restoreRun func(fn func())
+	// prAsyncRun is a test seam for ensurePullRequestAsync's background half;
+	// nil = `go fn()`.
+	prAsyncRun func(fn func())
 
 	// syncMu guards the clone-freshness ledger: the last pull failure per
 	// repository (reported on the index status so a stale clone stops looking
@@ -103,10 +114,11 @@ type Service struct {
 	syncWarnings  map[uuid.UUID]string
 	syncCheckedAt map[uuid.UUID]time.Time
 
-	pipelineJobs port.RepositoryPipelineJobStore
-	githubToken  func(ctx context.Context) (string, error)
-	agentLister  func(ctx context.Context) ([]domain.Agent, error)
-	profiles     ProfileRefresher
+	pipelineJobs     port.RepositoryPipelineJobStore
+	githubToken      func(ctx context.Context) (string, error)
+	agentLister      func(ctx context.Context) ([]domain.Agent, error)
+	analizAssignment AnalizAssignmentSource
+	profiles         ProfileRefresher
 
 	// GitHub push-webhook state (see webhook.go). publicBaseURL is where
 	// GitHub must deliver; the maps are the per-repo debounce ledger and the
@@ -498,6 +510,14 @@ func (s *Service) SetAgentLister(fn func(ctx context.Context) ([]domain.Agent, e
 	s.agentLister = fn
 }
 
+// SetAnalizAssignmentSource wires the backend/frontend/mobile analiz-assignment
+// settings CreateTask consults to override an analiz task's assignee. Nil (the
+// pre-wiring behaviour) leaves CreateTask's existing behaviour untouched: the
+// PM's requested assignee is used as-is.
+func (s *Service) SetAnalizAssignmentSource(src AnalizAssignmentSource) {
+	s.analizAssignment = src
+}
+
 // CreateWorkflowSetupTask opens a board task (assigned by repo kind) to author
 // the repo's GitHub Actions CI/CD workflows, for repos that have none yet.
 func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid.UUID) (domain.BoardTask, error) {
@@ -540,6 +560,36 @@ Once each workflow exists, save the job/workflow mapping under Repository Settin
 		CreatedBy:       "system",
 		AssigneeAgentID: assignee,
 	})
+}
+
+// resolveAnalizAssignee overrides an analiz task's assignee with the agent
+// named by the backend/frontend/mobile analiz-assignment settings, regardless
+// of what the caller (typically the PM agent) requested — the setting exists
+// precisely to correct a PM that keeps assigning analiz to a developer whose
+// tool policy cannot carry the task (see domain.RequiredAnalizTools). Returns
+// nil (leave the caller's assignee alone) when the setting source or agent
+// roster is not wired, or the resolved agent name has no matching row.
+func (s *Service) resolveAnalizAssignee(ctx context.Context, repo domain.Repository) *uuid.UUID {
+	if s.analizAssignment == nil || s.agentLister == nil {
+		return nil
+	}
+	settings, err := s.analizAssignment.Get(ctx)
+	if err != nil {
+		return nil
+	}
+	area := domain.ResolveAnalizArea(repo.Kind, repo.SubProjects)
+	name := domain.AnalizAssigneeForArea(settings, area)
+	agents, err := s.agentLister(ctx)
+	if err != nil {
+		return nil
+	}
+	for i := range agents {
+		if agents[i].Name == name {
+			id := agents[i].ID
+			return &id
+		}
+	}
+	return nil
 }
 
 func buildHintForKind(kind string) string {
@@ -1692,6 +1742,12 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 	if err != nil {
 		return domain.BoardTask{}, err
 	}
+	assignee := req.AssigneeAgentID
+	if taskType == domain.TaskTypeAnaliz {
+		if resolved := s.resolveAnalizAssignee(ctx, repo); resolved != nil {
+			assignee = resolved
+		}
+	}
 	task, err := s.tasks.Create(ctx, domain.BoardTask{
 		RepositoryID:         repositoryID,
 		TaskNumber:           taskNumber,
@@ -1704,7 +1760,7 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 		Position:             position,
 		Priority:             priority,
 		CreatedBy:            createdBy,
-		AssigneeAgentID:      req.AssigneeAgentID,
+		AssigneeAgentID:      assignee,
 		BeforeDeploy:         req.BeforeDeploy,
 		AfterDeploy:          req.AfterDeploy,
 		RollbackPlan:         req.RollbackPlan,
@@ -2093,17 +2149,29 @@ func (s *Service) ReplaceDeployDependencies(ctx context.Context, taskID uuid.UUI
 // request path. It was createDraftPRAsync and opened a draft; task PRs are
 // opened ready for review now — see git.EnsurePullRequest for why a draft made
 // every task PR unmergeable.
-// ctx is taken via context.WithoutCancel: it resolves the GitHub token, writes
-// the PR back onto the task row and comments on the card.
+//
+// It only records the PR on the task row — it no longer also announces it with
+// a system comment. The card already shows the link (get_task_pull_request,
+// the task detail drawer), and this runs on every column that re-ensures the
+// PR (code_review, PM UAT, done), so a comment here repeated the same link up
+// to three times per task for no new information.
+//
+// ctx is taken via context.WithoutCancel: it resolves the GitHub token and
+// writes the PR back onto the task row after the request that triggered it has
+// already returned.
 func (s *Service) ensurePullRequestAsync(ctx context.Context, task domain.BoardTask) {
-	if s.git == nil || s.workspaceRoot == "" || s.comments == nil {
+	if s.git == nil || s.workspaceRoot == "" {
 		return
 	}
 	workspacePath := s.taskWorkspacePath(task.ID)
 	if workspacePath == "" || !s.git.HasGit(workspacePath) {
 		return
 	}
-	go func() {
+	run := s.prAsyncRun
+	if run == nil {
+		run = func(fn func()) { go fn() }
+	}
+	run(func() {
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer cancel()
 		url, err := s.git.EnsurePullRequest(ctx, workspacePath)
@@ -2111,22 +2179,11 @@ func (s *Service) ensurePullRequestAsync(ctx context.Context, task domain.BoardT
 			log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("task pull request create failed")
 			return
 		}
-		// Record the PR on the task, not only as a comment. The comment is for a
-		// human reading the card; the columns are what let the board, the task
-		// chat and the PR tools name the PR without a working copy and a GitHub
-		// round-trip. Best-effort: the PR exists either way.
 		number, _ := domain.ParsePullRequestNumber(url)
 		if setErr := s.tasks.SetTaskPullRequest(ctx, task.ID, url, number); setErr != nil {
 			log.Warn().Err(setErr).Str("task_id", task.ID.String()).Msg("recording the task's pull request failed")
 		}
-		if _, err := s.comments.Create(ctx, domain.TaskComment{
-			TaskID:     task.ID,
-			AuthorType: "system",
-			Content:    "Pull request: " + url,
-		}); err != nil {
-			log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("PR comment create failed")
-		}
-	}()
+	})
 }
 
 // validateAgentSelfMove rejects an assignee agent pushing its OWN task into a
@@ -2158,7 +2215,11 @@ func (s *Service) validateMoveAllowed(ctx context.Context, taskID uuid.UUID, tar
 	if taskID == uuid.Nil {
 		return nil
 	}
-	if target != domain.TaskColumnInProgress && target != domain.TaskColumnTodo {
+	// todo is joining the queue, not starting the work; the real gate at
+	// dispatch time is board.WorkOrder, which already covers todo too. Only
+	// the transition into in_progress — work actually starting — is refused
+	// here.
+	if target != domain.TaskColumnInProgress {
 		return nil
 	}
 	if s.relations == nil {

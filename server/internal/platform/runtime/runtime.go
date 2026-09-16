@@ -85,6 +85,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prodops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/rag"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/repodependency"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/repodocs"
 	repoprofileapp "github.com/makifbaysal/tasktrooper/server/internal/application/repoprofile"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/repository"
@@ -230,24 +231,25 @@ type engine struct {
 	// agentLoop stays beside it because the loop's own setters (history budget,
 	// summarizer, run token cap, screenshot archiver) are the loop's, not the
 	// router's: the router forwards runs, it does not configure them.
-	agentRouter    *agent.Router
-	jobSvc         *job.Service
-	boardRunner    *boardapp.Runner
-	billingSvc     *billing.Service
-	pipelineRunner *boardapp.PipelineRunner
-	deploySvc      *deploy.Service
-	repoDocsSvc    *repodocs.Service
-	hostingSvc     *hostingapp.Service
-	vercelOpsSvc   *vercelops.Service
-	gcloudOpsSvc   *gcloudops.Service
-	prodOpsSvc     *prodops.Service
-	healthMonitor  *prodops.Monitor
-	storeOpsSvc    *storeops.Service
-	storeMonitor   *storeops.Monitor
-	deployOpsSvc   *deployops.Service
-	deployWatchSvc *deploywatch.Service
-	deployMonitor  *deployops.Monitor
-	evolutionSvc   *evolution.Service
+	agentRouter       *agent.Router
+	jobSvc            *job.Service
+	boardRunner       *boardapp.Runner
+	billingSvc        *billing.Service
+	pipelineRunner    *boardapp.PipelineRunner
+	deploySvc         *deploy.Service
+	repoDocsSvc       *repodocs.Service
+	hostingSvc        *hostingapp.Service
+	repoDependencySvc *repodependency.Service
+	vercelOpsSvc      *vercelops.Service
+	gcloudOpsSvc      *gcloudops.Service
+	prodOpsSvc        *prodops.Service
+	healthMonitor     *prodops.Monitor
+	storeOpsSvc       *storeops.Service
+	storeMonitor      *storeops.Monitor
+	deployOpsSvc      *deployops.Service
+	deployWatchSvc    *deploywatch.Service
+	deployMonitor     *deployops.Monitor
+	evolutionSvc      *evolution.Service
 	// pgPool is kept beside pgDB for the two jobs that are not row data:
 	// closing the pool, and the pgvector bootstrap (CREATE EXTENSION plus the
 	// index DDL below), which is schema work.
@@ -1220,6 +1222,12 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		})
 	}
 
+	// Hoisted above the block that creates it: the criteria-loop guard is
+	// wired onto it later, once repositorySvc exists (it is both the task
+	// commenter and the acceptance-criteria reader), and that wiring lives
+	// next to ReviewLoopGuard/PipelineBounceGuard's in a sibling block below.
+	var reconciler *boardapp.Reconciler
+
 	if boardConfigStore != nil && boardEventStore != nil && taskAgentRunStore != nil && catalogStore != nil {
 		// A typed-nil *indexer.Service must not become a non-nil interface.
 		var branchIndexer boardapp.BranchIndexer
@@ -1465,7 +1473,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}
 
 		if boardTaskStore != nil && cfg.Board.DispatchEnabled {
-			reconciler := boardapp.NewReconciler(taskAgentRunStore, boardTaskStore, boardDispatcher, cfg.Board.ReconcileStaleAfter)
+			reconciler = boardapp.NewReconciler(taskAgentRunStore, boardTaskStore, boardDispatcher, cfg.Board.ReconcileStaleAfter)
 			// No live-run checker any more. It asked THIS process whether a run
 			// was executing, which on a shared deployment reports every other
 			// replica's live run as abandoned; the run row's own heartbeat is
@@ -1560,6 +1568,19 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// need_revision column span never closes.
 			reviewLoop.SetParkJournal(boardapp.NewParkJournal(boardEventStore, taskSpanStore))
 			boardDispatcher.SetReviewLoopGuard(reviewLoop)
+		}
+
+		// Criteria-loop cap: the third machine-talking-to-itself shape,
+		// closed the same way as the two above — a task whose runs keep
+		// exhausting the criteria sweep with the SAME criteria left open,
+		// unattended, stops being retried and waits for a person. Unlike the
+		// other two this is not detected on an incoming board event, so it
+		// hangs off the reconciler rather than the dispatcher.
+		if reconciler != nil && boardEventStore != nil && boardTaskStore != nil {
+			criteriaLoop := boardapp.NewCriteriaLoopGuard(boardEventStore, boardTaskStore, repositorySvc)
+			criteriaLoop.SetCommenter(repositorySvc)
+			criteriaLoop.SetParkJournal(boardapp.NewParkJournal(boardEventStore, taskSpanStore))
+			reconciler.SetCriteriaLoopGuard(criteriaLoop)
 		}
 
 		// Project profile: agent-maintained per-repository brief. Built by the
@@ -1825,6 +1846,14 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			hostingSvc := hostingapp.NewService(pgstore.NewHostingLinkStore(e.pgDB), repositoryStore, vercelCreds, vercelapi.New())
 			hostingSvc.SetDeployTargets(deployTargetStore)
 			e.hostingSvc = hostingSvc
+
+			// Repo/database dependency edges feed the project overview's
+			// architecture view. SetCipher before MCP_SECRETS_KEY is
+			// scrubbed, same reason as the repository and mobile-device
+			// stores above.
+			repoDependencyStore := pgstore.NewRepoDependencyStore(e.pgDB)
+			repoDependencyStore.SetCipher(e.secretsCipher, e.secretsCipherErr)
+			e.repoDependencySvc = repodependency.NewService(repoDependencyStore, repositoryStore)
 
 			// One *vercel.Client for both roles. hostingSvc reads the account to
 			// fill a deploy target; vercelOpsSvc binds one scope of a repository
@@ -2348,6 +2377,12 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var settingsSvc *settings.Service
 	if settingsStore != nil {
 		settingsSvc = settings.NewService(settingsStore)
+		if catalogSvc != nil {
+			settingsSvc.SetAgentCatalog(catalogSvc)
+		}
+		if repositorySvc != nil {
+			repositorySvc.SetAnalizAssignmentSource(settingsSvc)
+		}
 	}
 
 	var llmProviderSvc *llmprovider.Service
@@ -2519,6 +2554,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		StoreOpsSvc:       e.storeOpsSvc,
 		DeployOpsSvc:      e.deployOpsSvc,
 		HostingSvc:        e.hostingSvc,
+		RepoDependencySvc: e.repoDependencySvc,
 		VercelOpsSvc:      e.vercelOpsSvc,
 		GCloudOpsSvc:      e.gcloudOpsSvc,
 		InitiativeSvc:     initiativeSvc,

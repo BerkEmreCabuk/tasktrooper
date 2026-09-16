@@ -79,8 +79,18 @@ const (
 	// MoveReasonVerificationFailed: post-run build/vet checks still failed after
 	// the fix attempts, task bounced back to in_progress.
 	MoveReasonVerificationFailed = "verification_failed"
-	// MoveReasonDeployReleased: a successful prod/preprod deploy released the task.
+	// MoveReasonDeployReleased: a prod/preprod deploy pipeline opened the gate,
+	// releasing the task — either a real deploy succeeded, or no workflow is
+	// mapped for the repo and the pipeline was skipped. Which one happened is
+	// on the pipeline's status/provider, not on this reason code.
 	MoveReasonDeployReleased = "deploy_released"
+	// MoveReasonMergeReleasedNoDeployTarget: the repository has zero
+	// deploy_target rows in any environment, so merging the task's pull
+	// request already was the whole release — no deploy pipeline runs.
+	// Distinct from MoveReasonDeployReleased, which means a real
+	// prod/preprod deploy pipeline succeeded; this one means no deploy
+	// exists to run in the first place.
+	MoveReasonMergeReleasedNoDeployTarget = "merge_released_no_deploy_target"
 	// MoveReasonReconciled: the reconciler revived a task whose run died.
 	MoveReasonReconciled = "reconciled"
 	// MoveReasonQuestionAnswered: a human answered the clarification a parked
@@ -121,6 +131,15 @@ const (
 	// for a person to decide. The agent-only half of the board has demonstrably
 	// run out of ways to finish this task on its own.
 	MoveReasonReviewLoopParked = "review_loop_parked"
+	// MoveReasonCriteriaLoopParked: the reconciler retried a task's
+	// unsettled-criteria failure (see board.isUnsettledCriteriaRun) up to
+	// board.maxConsecutiveFailedRuns times, every attempt left the same
+	// acceptance criteria open, and no human touched the card in between —
+	// so the card was parked instead of retried a fourth time. Its own reason
+	// rather than reusing MoveReasonReviewLoopParked because the loop it
+	// names is a different one: no need_revision entries are involved at all,
+	// just a run-status streak the criteria sweep left behind.
+	MoveReasonCriteriaLoopParked = "criteria_loop_parked"
 	// MoveReasonRunnerOffline: the assignee's Mac is not connected, so the run
 	// that would have happened on it was parked instead. Its own reason rather
 	// than MoveReasonResourceBlocked because this is the one park a person can

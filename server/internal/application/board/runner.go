@@ -1512,21 +1512,33 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	// Last call before the work is committed and handed off: the criteria the run
 	// did not tick. Runs on the same history, so the agent answers with the work
 	// still in context rather than from a cold start on the next event.
+	criteriaSettled := true
 	if resp.Clarification == nil && resp.ResourceBlock == nil {
-		resp = r.sweepOpenCriteria(runCtx, job, agentRec, history, resp, model, upliftedPolicy)
+		resp, criteriaSettled = r.sweepOpenCriteria(runCtx, job, agentRec, history, resp, model, upliftedPolicy)
 		// The same call for a review run: an implementation run has
 		// advanceToCodeReview behind it, a reviewer's only exit is its own
 		// move_task and a forgotten one parks the card under a completed run.
 		r.sweepReviewVerdict(runCtx, job, agentRec, history, resp, model, upliftedPolicy)
 	}
 
-	run.Status = domain.TaskAgentRunStatusCompleted
-	run.Summary = strings.TrimSpace(resp.Message.Content)
-	if resp.Clarification != nil {
-		run.Summary = "Waiting for an answer: " + resp.Clarification.Context
-	}
-	if resp.ResourceBlock != nil {
-		run.Summary = "Waiting for a shared resource: " + resp.ResourceBlock.Detail
+	if !criteriaSettled {
+		// The sweep ran every round and gave up with a criterion still open —
+		// this run did not honestly finish, whatever the agent's own closing
+		// message says. Failed, not Completed, is what makes the reconciler's
+		// existing retry_failed_run path pick the task back up on its own
+		// instead of it sitting quietly in this column (see
+		// Reconciler.dispatchNeverStarted).
+		run.Status = domain.TaskAgentRunStatusFailed
+		run.Summary = unsettledCriteriaSummary(len(r.openCriteria(runCtx, job)))
+	} else {
+		run.Status = domain.TaskAgentRunStatusCompleted
+		run.Summary = strings.TrimSpace(resp.Message.Content)
+		if resp.Clarification != nil {
+			run.Summary = "Waiting for an answer: " + resp.Clarification.Context
+		}
+		if resp.ResourceBlock != nil {
+			run.Summary = "Waiting for a shared resource: " + resp.ResourceBlock.Detail
+		}
 	}
 	run.Summary = truncateHead(run.Summary, 500)
 	// A run that finished its work behind a green build writes NOTHING on the
@@ -1570,6 +1582,7 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 		// same second.
 		if buildVerified {
 			r.advanceToCodeReview(ctx, job, taskWorkspace, toolUsage)
+			r.advanceToAnalizReview(ctx, job, toolUsage)
 		} else {
 			log.Info().Str("task_id", job.Task.ID.String()).
 				Msg("hand-off: build verification failed after every fix round, task stays in the working column")
@@ -2099,6 +2112,73 @@ func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, taskWorksp
 	}
 	log.Info().Str("task_id", job.Task.ID.String()).Str("agent_id", agentID.String()).
 		Msg("hand-off: implementation run finished with a diff, task moved to code_review")
+}
+
+// advanceToAnalizReview hands a finished analiz run's task to the human review
+// gate, the same way advanceToCodeReview hands an implementation run's task to
+// its reviewer.
+//
+// An analiz task has no automatic hand-off of its own: advanceToCodeReview
+// explicitly skips it (its exit is analiz_review, not code_review), so the
+// column change from in_progress to analiz_review depended entirely on the
+// agent remembering to call move_board_task after writing its spec and plan.
+// That is exactly the gap advanceToCodeReview itself was written to close for
+// implementation runs — a board whose truth depends on the model remembering a
+// tool call is not a board — and analiz work sat in in_progress with a
+// finished analysis behind it for the same reason a finished implementation
+// used to.
+//
+// The evidence is add_task_document instead of a diff: an analiz task's
+// deliverable is the spec/plan documents attached to the card, not a change to
+// the branch, so AnalizDocumentTools is this column's equivalent of
+// ImplementationVerificationTools.
+func (r *Runner) advanceToAnalizReview(ctx context.Context, job RunJob, usage *registry.ToolUsage) {
+	if r.taskUpdater == nil {
+		return
+	}
+	if job.Task.TaskType != domain.TaskTypeAnaliz {
+		return
+	}
+	switch job.Task.Column {
+	case domain.TaskColumnInProgress, domain.TaskColumnNeedRevision:
+	default:
+		return
+	}
+
+	if usage != nil && !usage.UsedAny(domain.AnalizDocumentTools...) {
+		log.Info().Str("task_id", job.Task.ID.String()).
+			Msg("hand-off: analiz run attached no document, task stays in the working column")
+		return
+	}
+
+	if reader, ok := r.taskUpdater.(taskColumnReader); ok {
+		if fresh, err := reader.GetTask(ctx, job.RepositoryID, job.Task.ID); err != nil {
+			log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("hand-off: task re-read failed, using the run's snapshot")
+		} else if fresh.Column != job.Task.Column {
+			log.Info().Str("task_id", job.Task.ID.String()).Str("column", string(fresh.Column)).
+				Msg("hand-off: task already left the column during the run")
+			return
+		}
+	}
+
+	column := domain.TaskColumnAnalizReview
+	agentID := job.Run.AgentID
+	if _, err := r.taskUpdater.UpdateTask(ctx, job.RepositoryID, job.Task.ID, domain.UpdateBoardTaskRequest{
+		Column:       &column,
+		Actor:        domain.TaskActorAgent,
+		ActorAgentID: &agentID,
+	}); err != nil {
+		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("hand-off: automatic move to analiz_review failed")
+		if _, cErr := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
+			AuthorType: "system",
+			Content:    "Otomatik analiz_review geçişi reddedildi: " + err.Error(),
+		}); cErr != nil {
+			log.Warn().Err(cErr).Str("task_id", job.Task.ID.String()).Msg("hand-off: refusal comment failed")
+		}
+		return
+	}
+	log.Info().Str("task_id", job.Task.ID.String()).Str("agent_id", agentID.String()).
+		Msg("hand-off: analiz run finished with a document, task moved to analiz_review")
 }
 
 // stampToolStats copies the run's tool counters onto the row about to be
@@ -2890,7 +2970,8 @@ const analizProducesDocuments = "Your deliverable is a SPEC and an IMPLEMENTATIO
 	"If this task already carries a spec or a plan — a revision pass, a need_revision bounce, a change the human asked for — rewrite THAT document with update_task_document instead of attaching another one: the card must end with one current spec and one current plan. " +
 	"Never write, edit, move or delete a file in the repository and never commit: an analysis produces documents, not a diff, " +
 	"and there is no automatic hand-off to code_review for this task type — a run that ends with file edits has done the implementer's job on the wrong task. " +
-	"Finish by moving the task to `analiz_review` with a summary comment (approach, the document titles, the task split you intend), then STOP: " +
+	"Finish with a summary comment (approach, the document titles, the task split you intend), then STOP: " +
+	"when this run ends with a document attached, the system moves the task to `analiz_review` for you — do NOT move it yourself and never plan a step for the move — " +
 	"the human approves there, and no implementation task is created before they do."
 
 // taskTypeInstruction states what the run must produce when the task type — not
