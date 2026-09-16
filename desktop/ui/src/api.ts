@@ -1461,6 +1461,55 @@ export interface HostingDetection {
   warnings?: string[] | null;
 }
 
+/** What a repository's dependency record points at: another repo's
+ * sub-project, a whole other repo, or a manually-recorded database. See
+ * domain.RepoDependency on the server. */
+export type DependencyTargetKind = "sub_repo" | "repo" | "database";
+export type DatabaseEngine = "postgres" | "mysql" | "mongodb" | "redis" | "other";
+
+export interface RepoDependency {
+  id: string;
+  repository_id: string;
+  target_kind: DependencyTargetKind;
+  target_repository_id?: string;
+  target_sub_project_path?: string;
+  database_label?: string;
+  database_engine?: DatabaseEngine | "";
+  /** "stage" | "prod" only — see domain.ValidateRepoDependencyRequest. */
+  database_env?: DeployEnv | "";
+  database_host?: string;
+  database_port?: number;
+  database_name?: string;
+  database_username?: string;
+  /** Masked ("***") whenever a secret is stored, "" when none was ever set.
+   * The real value never round-trips. */
+  database_secret?: string;
+  note?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SaveRepoDependencyRequest {
+  target_kind: DependencyTargetKind;
+  target_repository_id?: string;
+  target_sub_project_path?: string;
+  database_label?: string;
+  database_engine?: DatabaseEngine | "";
+  database_env?: DeployEnv | "";
+  database_host?: string;
+  database_port?: number;
+  database_name?: string;
+  database_username?: string;
+  /** "" or the masked placeholder leaves the stored secret untouched. */
+  database_secret?: string;
+  note?: string;
+}
+
+export interface ProjectDependencyView {
+  outgoing: RepoDependency[];
+  incoming: RepoDependency[];
+}
+
 export interface GitHubOwner {
   login: string;
   type: "user" | "org";
@@ -2429,6 +2478,29 @@ export const api = {
     request<void>(`/v1/repositories/${repositoryId}/hosting/links/${area || "root"}`, {
       method: "DELETE",
     }),
+
+  listRepoDependencies: (repositoryId: string) =>
+    request<{ dependencies: RepoDependency[] }>(`/v1/repositories/${repositoryId}/dependencies`),
+
+  createRepoDependency: (repositoryId: string, data: SaveRepoDependencyRequest) =>
+    request<RepoDependency>(`/v1/repositories/${repositoryId}/dependencies`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateRepoDependency: (repositoryId: string, depId: string, data: SaveRepoDependencyRequest) =>
+    request<RepoDependency>(`/v1/repositories/${repositoryId}/dependencies/${depId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteRepoDependency: (repositoryId: string, depId: string) =>
+    request<void>(`/v1/repositories/${repositoryId}/dependencies/${depId}`, {
+      method: "DELETE",
+    }),
+
+  listProjectDependencies: (projectId: string) =>
+    request<ProjectDependencyView>(`/v1/projects/${projectId}/dependencies`),
 
   githubOwners: () => request<{ owners: GitHubOwner[] }>("/v1/settings/github/owners"),
 
