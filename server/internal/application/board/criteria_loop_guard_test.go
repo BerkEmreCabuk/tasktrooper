@@ -205,3 +205,41 @@ func (s *ReconcilerSuite) TestHumanTouchResetsTheCriteriaLoopStreak() {
 	s.Empty(parker.resources)
 	s.Empty(commenter.contents)
 }
+
+// BoardEventStore.ListByTask is `ORDER BY created_at ASC LIMIT n`, so on a task
+// with more history than reviewLoopHistoryDepth the returned window is the OLD
+// end of history, not the recent one. A full window whose newest event still
+// predates the oldest run in the streak proves nothing about a human touch that
+// may have happened since — reading "no human event in this window" as "no
+// human touched the task" would park a task someone looked at more recently
+// than the window reaches, exactly the bug PipelineBounceGuard's own
+// TestAHistoryWindowThatDoesNotReachThePresentLetsTheBounceThrough guards
+// against for its loop.
+func (s *ReconcilerSuite) TestATruncatedHistoryWindowLetsTheCriteriaRetryContinue() {
+	assignee := uuid.New()
+	taskID := uuid.New()
+	repositoryID := uuid.New()
+	parker, commenter, _ := s.installCriteriaLoopGuard(nil)
+	task := domain.BoardTask{ID: taskID, RepositoryID: repositoryID, Column: domain.TaskColumnInProgress, AssigneeAgentID: &assignee}
+	s.tasks.tasks = []domain.BoardTask{task}
+	base := time.Now().Add(-3 * time.Hour)
+	runs := []domain.TaskAgentRun{
+		unsettledCriteriaRun(taskID, assignee, 1, base.Add(2*time.Hour)),
+		unsettledCriteriaRun(taskID, assignee, 1, base.Add(time.Hour)),
+		unsettledCriteriaRun(taskID, assignee, 1, base),
+	}
+	for i := 0; i < 500; i++ {
+		s.events.events = append(s.events.events, domain.BoardEvent{
+			ID: uuid.New(), TaskID: taskID, EventType: domain.BoardEventTaskMoved,
+			CreatedAt: base.Add(-4 * time.Hour),
+		})
+	}
+
+	guard := board.NewCriteriaLoopGuard(s.events, parker, &criteriaListStore{})
+	guard.SetCommenter(commenter)
+	held := guard.Hold(context.Background(), repositoryID, task, runs)
+
+	s.False(held, "a window that stops four hours short of the streak proves nothing about a human touch after it")
+	s.Empty(parker.resources)
+	s.Empty(commenter.contents)
+}
