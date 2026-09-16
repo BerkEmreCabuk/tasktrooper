@@ -595,6 +595,8 @@ export const projectAdmin: ProjectAdminDict = {
     notePlaceholder: "İsteğe bağlı açıklama...",
     architectureTitle: "Mimari",
     architectureEmpty: "Bu projedeki repolar için henüz bağımlılık kaydı yok.",
+    architectureOutgoing: "Giden bağımlılıklar",
+    architectureIncoming: "Gelen bağımlılıklar",
   },
   vercelProject: {
     title: "Vercel projesi",

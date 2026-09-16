@@ -599,6 +599,8 @@ export const projectAdmin = {
     notePlaceholder: "Optional context...",
     architectureTitle: "Architecture",
     architectureEmpty: "No dependencies recorded for this project's repositories yet.",
+    architectureOutgoing: "Outgoing dependencies",
+    architectureIncoming: "Incoming dependencies",
   },
   vercelProject: {
     title: "Vercel project",
