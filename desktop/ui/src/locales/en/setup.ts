@@ -15,7 +15,7 @@ export const setup = {
   unknownHint: "This couldn't be checked just now, so nothing here is claiming it isn't done.",
   desktopOnly: {
     title: "This step happens in the TaskTrooper Mac app",
-    body: "It acts on your own Mac — checking what's installed and starting a headless Claude Code session there — and a browser tab can't reach any of that. Download the app, sign in with this same account, and this sequence carries on there.",
+    body: "It acts on your own Mac, checking what's installed and starting a headless Claude Code session there, and a browser tab can't reach any of that. Download the app, sign in with this same account, and this sequence carries on there.",
   },
   environment: {
     title: "Check this Mac",
@@ -30,12 +30,12 @@ export const setup = {
   agent: {
     title: "Connect an agent runtime",
     description:
-      "Agents do their work through a coding CLI on this Mac. Connect any of the ones you use — one is enough, and you can add more later.",
+      "Agents do their work through a coding CLI on this Mac. Connect any of the ones you use: one is enough, and you can add more later.",
     connect: "Connect",
     connecting: "Connecting…",
     disconnect: "Disconnect",
     connected: "Connected",
-    connectedBody: "{binary}{version} — {agents} agents and {skills} skills installed.",
+    connectedBody: "{binary}{version}: {agents} agents and {skills} skills installed.",
     notInstalled: "Not installed",
     installWith: "Install it with: {command}",
     notInstalledBody: "Not found on this Mac.",
@@ -60,7 +60,7 @@ export const setup = {
   project: {
     title: "Your first project",
     description:
-      "A project groups the repositories that ship together. Create one, then import your first repository into it — you'll be asked what kind it is, how it deploys, and how it's built and tested.",
+      "A project groups the repositories that ship together. Create one, then import your first repository into it. You'll be asked what kind it is, how it deploys, and how it's built and tested.",
     createProject: "Create a project",
     needsRepositoryTitle: "Now import a repository",
     needsRepositoryBody: "Use one of the buttons on the project below. You can import more later.",

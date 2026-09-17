@@ -1,4 +1,4 @@
-// projectAdmin namespace — English source of truth.
+// projectAdmin namespace: English source of truth.
 // Covers AdminPage, ProjectSettingsPage, ProjectsPage and components/projects/*.
 // Interpolation uses {name} placeholders.
 export const projectAdmin = {
@@ -44,19 +44,19 @@ export const projectAdmin = {
     indexStopFailed: "Could not stop indexing",
     requireHumanReview: "Require human review",
     requireHumanReviewHelp:
-      "When on, an agent approval in code review no longer advances the task: the agent still reviews and its verdict is recorded, the build/test pipeline still runs, but a human moves it forward. A rejection back to need revision is not held. PM UAT is deliberately excluded — its exit is Human UAT, which is already the human gate.",
+      "When on, an agent approval in code review no longer advances the task: the agent still reviews and its verdict is recorded, the build/test pipeline still runs, but a human moves it forward. A rejection back to need revision is not held. PM UAT is deliberately excluded: its exit is Human UAT, which is already the human gate.",
     codeIndexing: "Code Indexing",
     reindex: "Re-index",
     indexedCommit: "Indexed commit: {sha}",
-    // The server writes one line for two different failures — a pull that
-    // failed, and a push nobody's Mac could embed — and carries no code to
+    // The server writes one line for two different failures (a pull that
+    // failed, and a push nobody's Mac could embed) and carries no code to
     // tell them apart. So the reason is rendered and the lead-in says only
     // what is true of both. It named the clone before, which sent people to
     // check a git remote that was fine.
     syncWarning: "This index is behind the code it describes: {reason}",
     profileTitle: "Project profile",
     profileDesc:
-      "What this codebase actually is: stack, commands, CI, how it ships and how it is worked on — read off the tree by the platform — plus the conventions, invariants and danger zones an agent found, each backed by the files it was read from. Injected into every agent run on this repository, and refreshed per section when a push touches its sources.",
+      "What this codebase actually is: stack, commands, CI, how it ships and how it is worked on (read off the tree by the platform), plus the conventions, invariants and danger zones an agent found, each backed by the files it was read from. Injected into every agent run on this repository, and refreshed per section when a push touches its sources.",
     profileStale: "stale",
     profileStaleCount: "{count} stale section(s)",
     profileEvidence: "Sources:",
@@ -98,7 +98,7 @@ export const projectAdmin = {
     profileRefreshStarted: "Profile analysis started",
     profileRefreshAlreadyRunning: "A profile analysis is already running",
     profileRefreshFailed: "Failed to start the profile analysis",
-    profileRefreshTimeout: "The analysis is still running — check back in a bit.",
+    profileRefreshTimeout: "The analysis is still running. Check back in a bit.",
     profileUpdated: "Project profile updated",
     profileUpdatedAt: "Last updated: {date}",
     profileEmptyTitle: "No profile yet",
@@ -110,7 +110,7 @@ export const projectAdmin = {
     noIndexYet: "No index status yet.",
     pipelineTitle: "Pipeline (GitHub Actions)",
     pipelineDesc:
-      "QA gate and release steps run through GitHub Actions. Each category maps to an Actions job (validate/build/test/mutation test) or a workflow file (open PR, deploys) in the repo. Categories left empty are skipped. Mutation test never fails the gate, and the open-PR workflow is listed for reference only — agent task branches open their own PR.",
+      "QA gate and release steps run through GitHub Actions. Each category maps to an Actions job (validate/build/test/mutation test) or a workflow file (open PR, deploys) in the repo. Categories left empty are skipped. Mutation test never fails the gate, and the open-PR workflow is listed for reference only: agent task branches open their own PR.",
     noWorkflowsWarning:
       "No GitHub Actions workflow was found in this repo; the pipeline gate is disabled. You can open an automatic task for the relevant role to create the workflows.",
     openSetupTask: "Open setup task",
@@ -125,7 +125,7 @@ export const projectAdmin = {
     noWorkflowsTitle: "No workflow found",
     noSubReposTitle: "No sub-repos yet",
     noSubReposDesc:
-      "Add the folders that are their own repo — each one gets its own docs, pipeline and deploy targets.",
+      "Add the folders that are their own repo. Each one gets its own docs, pipeline and deploy targets.",
     subRepoMeta: "Sub-repo",
     subRepoPath: "Path",
     subRepoKind: "Type",
@@ -140,7 +140,7 @@ export const projectAdmin = {
     docsQueued: "Queued",
     docsQueuedCount: "{count} queued",
     docsGenerateBundle: "Generate",
-    docsBundleCreated: "Docs task created — the queued docs arrive in one PR.",
+    docsBundleCreated: "Docs task created. The queued docs arrive in one PR.",
     docsTaskRunningTitle: "Docs task running",
     docsTaskRunning: "An agent is writing the queued docs. Status: {status}",
     docsPrReadyTitle: "PR ready",
@@ -151,7 +151,7 @@ export const projectAdmin = {
     docsMergeFailed: "The PR could not be merged",
     selectSubProjectFirst: "Select at least one sub-repo first.",
     selectBadge: "select",
-    skipOption: "— (skip)",
+    skipOption: "- (skip)",
     savePipeline: "Save Pipeline",
     dangerZone: "Danger Zone",
     deleteRepoWarning:
@@ -170,7 +170,7 @@ export const projectAdmin = {
     deleted: "Project deleted",
     deleteFailed: "Failed to delete",
     title: "Projects",
-    subtitle: "Product and business projects — attached to code repositories as tags.",
+    subtitle: "Product and business projects, attached to code repositories as tags.",
     addProject: "Add Project",
     emptyTitle: "No projects yet",
     emptyDesc: "Create projects to group tasks and tag them on code repositories.",
@@ -187,8 +187,8 @@ export const projectAdmin = {
     delete: "Delete",
     deleteTitle: "Delete project?",
     deleteConfirm:
-      "Delete the \"{name}\" project? Its repositories are not deleted — they just lose this project's link.",
-    noRepositories: "No repositories yet — add one below.",
+      "Delete the \"{name}\" project? Its repositories are not deleted; they just lose this project's link.",
+    noRepositories: "No repositories yet. Add one below.",
     addRepoBlocked: "Finish the setup questions for the repository you just added before importing another.",
     unassignedTitle: "Not linked to a project",
     unassignedDescription: "These repositories aren't linked to any project yet.",
@@ -230,7 +230,7 @@ export const projectAdmin = {
     createRepoTitle: "Create Code Repository",
     repoName: "Repository name",
     githubRequired:
-      "GitHub connection required: {error}. Add a token in Settings — a repository can't be created without git.",
+      "GitHub connection required: {error}. Add a token in Settings; a repository can't be created without git.",
     parentDir: "Parent folder",
     create: "Create",
     indexNone: "No index",
@@ -245,7 +245,7 @@ export const projectAdmin = {
     description:
       "{name} was added. Tell us how it ships, so agents and QA know where to find it.",
     kindLabel: "Repository type",
-    kindHint: "Detected from the repository contents — change it if it's wrong.",
+    kindHint: "Detected from the repository contents. Change it if it's wrong.",
     stepRepo: "Repository",
     stepRepoDesc: "What this repository is, and which sub-repos it holds.",
     stepSettings: "Settings",
@@ -262,7 +262,7 @@ export const projectAdmin = {
     docsTestStandards: "Test standards",
     docsArchitecture: "Architecture",
     docsLocalRun: "Local run script",
-    docsLocalRunHint: "A script that stands the project up locally — not a document.",
+    docsLocalRunHint: "A script that stands the project up locally, not a document.",
     docsGenerate: "Generate",
     docsQueued: "Queued",
     docsQueuedCount: "{count} queued",
@@ -280,7 +280,7 @@ export const projectAdmin = {
     healthPathHint: "Appended to each base URL above to build the URL the production monitor polls.",
     mobileNoteTitle: "Store-managed",
     mobileNote:
-      "This app ships by connecting a store account and picking an app in the Mobile Apps console, not by filling in fields here — set that up after saving.",
+      "This app ships by connecting a store account and picking an app in the Mobile Apps console, not by filling in fields here. Set that up after saving.",
     footerNote:
       "These settings can be changed later under Deploy settings; left empty, agents fill them in after the first deploy.",
     saved: "Deployment settings saved",
@@ -296,7 +296,7 @@ export const projectAdmin = {
     subProjectRemove: "Remove sub-repo",
     subProjectConfigure: "Configure",
     subProjectAdd: "Add sub-repo",
-    subProjectSetupTitle: "Deploy setup — {path}",
+    subProjectSetupTitle: "Deploy setup: {path}",
     subProjectPickerTitle: "Choose a folder",
     subProjectPickerUp: "Up",
     subProjectPickerSelect: "Select this folder",
@@ -309,7 +309,7 @@ export const projectAdmin = {
     platformHint: "Which stores this app ships to.",
     workerNoteTitle: "Worker",
     workerNote:
-      "Workers have no stage/prod URL. Deploy settings for workers aren't implemented yet — configure this repository later from its Settings page.",
+      "Workers have no stage/prod URL. Deploy settings for workers aren't implemented yet; configure this repository later from its Settings page.",
     monorepoNoteTitle: "Monorepo",
     monorepoNote:
       "Pipeline and deploy settings are configured separately for each sub-repo, from this repository's Settings page after saving.",
@@ -356,7 +356,7 @@ export const projectAdmin = {
     workerUrlsNotImplementedTitle: "Not implemented for workers yet",
     workerUrlsNotImplemented:
       "A worker doesn't answer at a URL, so base/health/logs addresses don't apply here. Worker-specific fields (e.g. a queue or topic) aren't implemented yet.",
-    localNoteTitle: "No address here — a run guide instead",
+    localNoteTitle: "No address here: a run guide instead",
     localNote:
       "Local isn't a real address, so there's nothing to point a monitor at. Instead, generate {doc} and {script} in this repository so anyone can run it on their own machine.",
     localSetupTask: "Generate local run guide",
@@ -378,7 +378,7 @@ export const projectAdmin = {
     instructions: "Show recipe",
     deployLoadFailed: "Failed to load deploy targets",
     openDeploySettings: "Deploy settings",
-    templateNone: "No template — addresses only",
+    templateNone: "No template: addresses only",
     templateNoneHint: "This environment ships by a workflow described elsewhere; only its addresses are recorded here.",
     providerFromTemplate: "Set by the template.",
     providers: {
@@ -399,7 +399,7 @@ export const projectAdmin = {
       prod: "Production",
     },
     envHints: {
-      local: "Runs on a developer's own machine — never a real address anyone else hits.",
+      local: "Runs on a developer's own machine, never a real address anyone else hits.",
       stage: "First stop after a merge; QA runs against this one.",
       preprod: "The last rehearsal before production, on production-shaped data.",
       prod: "Live. Real users are on the other end of these addresses.",
@@ -413,7 +413,7 @@ export const projectAdmin = {
       prod: "Prod",
     },
     envHintsMobile: {
-      stage: "Team/QA track — internal testers only, nothing public yet.",
+      stage: "Team/QA track: internal testers only, nothing public yet.",
       preprod: "TestFlight public beta or the Play open testing track.",
       prod: "The store release. Real users are on the other end of this build.",
     },
@@ -421,7 +421,7 @@ export const projectAdmin = {
     logsUrlHint: "An endpoint this app serves that returns its recent logs. Read on demand after a deploy, never polled.",
     logsUrlUnsupportedTitle: "Logs URL needs a newer server",
     logsUrlUnsupported: "This server does not store a logs URL yet. The field stays read-only until it is upgraded.",
-    logsUrlDropped: "Target saved, but this server ignored the logs URL — it needs an upgrade first.",
+    logsUrlDropped: "Target saved, but this server ignored the logs URL; it needs an upgrade first.",
     appPackage: "App package",
     appPackageHint: "The only package the device tools may open on a real phone. Set here by a person, never by an agent.",
     appUrl: "Build URL",
@@ -435,31 +435,31 @@ export const projectAdmin = {
     invalidUrlToast: "Fix the highlighted URL before saving",
     clearUrlTitle: "Clear a recorded address?",
     clearUrlDesc:
-      "This save empties {fields} for {env}. The production monitor stops probing a health URL it no longer has, and QA loses the address it hits — nothing will report the gap.",
+      "This save empties {fields} for {env}. The production monitor stops probing a health URL it no longer has, and QA loses the address it hits. Nothing will report the gap.",
     clearUrlConfirm: "Clear and save",
     removeTargetTitle: "Remove this deploy target?",
     removeTargetDesc:
-      "The {env} target — its addresses, variables and rollback setting — is deleted. Deploys and health probing for that environment stop until it is defined again.",
+      "The {env} target (its addresses, variables and rollback setting) is deleted. Deploys and health probing for that environment stop until it is defined again.",
     policyTitle: "Incident policy",
-    policyOff: "Off — record only",
-    policySuggest: "Suggest — diagnose and propose",
-    policyAutoFix: "Auto fix — let the board fix it",
+    policyOff: "Off: record only",
+    policySuggest: "Suggest: diagnose and propose",
+    policyAutoFix: "Auto fix: let the board fix it",
     policySaved: "Incident policy saved",
     baseUrl: "Base URL (DNS)",
-    baseUrlHint: "Where this environment answers — QA and API consumers use it.",
+    baseUrlHint: "Where this environment answers. QA and API consumers use it.",
     testStrategyTitle: "Test strategy",
-    testStrategyLocal: "Local — workspace tests only",
-    testStrategyStage: "Stage — deploy to staging before QA",
-    testStrategyPerStep: "Per step — deploy at every reviewed step",
+    testStrategyLocal: "Local: workspace tests only",
+    testStrategyStage: "Stage: deploy to staging before QA",
+    testStrategyPerStep: "Per step: deploy at every reviewed step",
     testStrategySaved: "Test strategy saved",
     envInventory: "Environment variables",
     envInventoryEmpty: "No .env.example style file found in this repository.",
     envKeysCount: "{count} variables",
     migrationBadge: "Schema change",
     migrationGateOpen: "Stage verified",
-    migrationGateBlocked: "Stage not verified — release blocked",
+    migrationGateBlocked: "Stage not verified: release blocked",
     storeCredentialsTitle: "App store credentials",
-    storeCredentialsSubtitle: "Saved once for the whole system — every App Store / Google Play deploy target uses these to sign and upload.",
+    storeCredentialsSubtitle: "Saved once for the whole system. Every App Store / Google Play deploy target uses these to sign and upload.",
     storeCredentialASC: "App Store Connect",
     storeCredentialPlay: "Google Play",
     storeCredentialConfigured: "Configured",
@@ -469,7 +469,7 @@ export const projectAdmin = {
     storeCredentialIssuerId: "Issuer ID",
     storeCredentialP8: "Private key (.p8)",
     storeCredentialServiceAccountJson: "Service account JSON",
-    storeCredentialReplaceHint: "The stored value is never shown back — enter it here to replace it. Saving validates it against the store console before it's kept.",
+    storeCredentialReplaceHint: "The stored value is never shown back. Enter it here to replace it. Saving validates it against the store console before it's kept.",
     storeCredentialSave: "Save credential",
     storeCredentialSaved: "Credential saved",
     storeCredentialDelete: "Delete",
@@ -527,9 +527,9 @@ export const projectAdmin = {
       local: "Paired Mac",
     },
     engineHints: {
-      auto: "GitHub Actions first; if it cannot run, the paired Mac. If neither can, the release is blocked — it never quietly falls back to anything else.",
-      github_actions: "GitHub Actions only. If it cannot run, the release is blocked — the paired Mac is not used as a fallback.",
-      local: "The paired Mac only. If no Mac is attached, the release is blocked — GitHub Actions is not used as a fallback.",
+      auto: "GitHub Actions first; if it cannot run, the paired Mac. If neither can, the release is blocked. It never quietly falls back to anything else.",
+      github_actions: "GitHub Actions only. If it cannot run, the release is blocked; the paired Mac is not used as a fallback.",
+      local: "The paired Mac only. If no Mac is attached, the release is blocked; GitHub Actions is not used as a fallback.",
     },
     engineSaved: "Release engine saved",
     lastRunEngine: "Last build ran on {engine} ({store}).",
@@ -537,10 +537,10 @@ export const projectAdmin = {
     promoteTo: "Promote to {channel}",
     promoteConfirm: "Promote",
     promoteTitle: "Promote to {channel}?",
-    promoteDescription: "This moves {identifier}'s {from} release to {to}. Only one step forward is allowed — channels cannot be skipped.",
+    promoteDescription: "This moves {identifier}'s {from} release to {to}. Only one step forward is allowed; channels cannot be skipped.",
     promoteSucceeded: "Promoted to {channel}",
-    promoteDisabledEmpty: "Nothing to promote — this channel has no release.",
-    promoteDisabledNotLive: "Only a live app can go to production — finish onboarding first.",
+    promoteDisabledEmpty: "Nothing to promote: this channel has no release.",
+    promoteDisabledNotLive: "Only a live app can go to production. Finish onboarding first.",
     refreshChannels: "Refresh channels",
     loadFailed: "Failed to load the store connection",
     tracksFailed: "Failed to load channels",
@@ -576,7 +576,7 @@ export const projectAdmin = {
     databaseLabelLabel: "Label",
     databaseLabelPlaceholder: "e.g. Prod Postgres",
     databaseEngineLabel: "Engine",
-    databaseEngineNone: "— (unspecified)",
+    databaseEngineNone: "- (unspecified)",
     engines: {
       postgres: "PostgreSQL",
       mysql: "MySQL",

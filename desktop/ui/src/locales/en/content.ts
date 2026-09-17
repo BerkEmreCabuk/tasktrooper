@@ -1,4 +1,4 @@
-// English dictionary for the `content` namespace — source of truth.
+// English dictionary for the `content` namespace: source of truth.
 // Covers FilesPage, RulesPage, MCPServersPage, SkillsPage.
 // No `as const`: strings widen so tr/content.ts (typed ContentDict) must mirror keys, not literals.
 export const content = {
@@ -187,7 +187,7 @@ export const content = {
     techStackSaveFailed: "Failed to save tech stack",
     deleteTechStackTitle: "Delete tech stack",
     deleteTechStackDescription:
-      "\"{name}\" will be deleted. Its skills will move to General skills — they will not be deleted.",
+      "\"{name}\" will be deleted. Its skills will move to General skills; they will not be deleted.",
     deleteTechStackConfirm: "Delete",
     techStackDeletedToast: "Tech stack deleted",
     techStackDeleteFailed: "Failed to delete tech stack",

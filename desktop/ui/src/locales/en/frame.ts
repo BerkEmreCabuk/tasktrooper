@@ -1,4 +1,4 @@
-// English dictionary for the `frame` namespace — app frame/chrome UI.
+// English dictionary for the `frame` namespace: app frame/chrome UI.
 // Covers components under components/layout, components/admin and
 // components/ui. Source of truth for FrameDict.
 export const frame = {
@@ -69,7 +69,7 @@ export const frame = {
       empty: "No fields yet",
       keyPlaceholder: "Key",
       valuePlaceholder: "Value",
-      storedSecret: "Saved — enter to change",
+      storedSecret: "Saved. Enter a new value to change it.",
       addField: "Add Field",
     },
     toolPolicy: {
@@ -82,7 +82,7 @@ export const frame = {
     mcpPicker: {
       defaultLabel: "MCP servers",
       connected: "Connected",
-      disabled: "Disabled — enable it in MCP settings",
+      disabled: "Disabled. Enable it in MCP settings.",
       notFound: "No MCP servers found",
     },
     mcpForm: {

@@ -13,19 +13,19 @@ export const lib = {
     pipelineTrigger: { ready_for_qa: "QA trigger", manual: "manual", retry: "retry" },
     // Why the code-review gate opened with no green build behind it.
     pipelineGateReason: {
-      timeout: "CI did not report in time — review started without a build",
-      ci_unavailable: "CI unavailable — review started without a build",
-      no_ci_configured: "No CI configured — nothing was built or tested",
+      timeout: "CI did not report in time: review started without a build",
+      ci_unavailable: "CI unavailable: review started without a build",
+      no_ci_configured: "No CI configured: nothing was built or tested",
       gate_disabled: "CI gate disabled for this repository",
     },
-    // board_tasks.blocked_resource — what a parked task is waiting on.
+    // board_tasks.blocked_resource: what a parked task is waiting on.
     blockedResource: {
       claude_code_quota: "Claude usage limit reached",
       mobile_device: "Waiting for a test device",
       deploy_watch: "Waiting for the deploy",
       work_order: "Waiting for blocking tasks",
       human_decision:
-        "Needs a human decision — CI stayed red for the same commit, or the review loop repeated without human input",
+        "Needs a human decision: CI stayed red for the same commit, or the review loop repeated without human input",
     },
     blockedResourceFallback: "Waiting for a shared resource",
   },
@@ -57,10 +57,10 @@ export const lib = {
       clarification_requested: "Clarification requested from user",
       llm_request: "LLM request",
       // A run worked by the Claude Code CLI rather than the in-process loop.
-      // Same trace, same renderer — these four are the only step types it adds.
+      // Same trace, same renderer; these four are the only step types it adds.
       claude_code_session: "Claude Code session",
       claude_code_result: "Claude Code session finished",
-      claude_code_quota_park: "Claude Code usage limit — task parked",
+      claude_code_quota_park: "Claude Code usage limit: task parked",
       claude_code_slot_wait: "Waited for a free Claude Code session slot",
     },
   },

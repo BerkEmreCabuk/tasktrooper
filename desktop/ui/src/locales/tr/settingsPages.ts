@@ -1,6 +1,6 @@
 import type { SettingsPagesDict } from "@/locales/en/settingsPages";
 
-// Turkish dictionary for the settings sub-pages. Typed as SettingsPagesDict —
+// Turkish dictionary for the settings sub-pages. Typed as SettingsPagesDict;
 // must mirror en/settingsPages.ts keys exactly. Text moved verbatim from the
 // original page sources.
 export const settingsPages: SettingsPagesDict = {
@@ -39,7 +39,7 @@ export const settingsPages: SettingsPagesDict = {
       emptyBody: "Kimlik bilgisi çalışıyor ama hesapta seçilecek bir uygulama yok.",
       unavailableTitle: "Bu hesap listelenemiyor",
       unavailableBody:
-        "Play Developer API'de uygulamaları listeleyen bir uç yok — o liste yalnızca ayrı Reporting API'den gelir ve bu servis hesabının oraya erişimi olmayabilir. Geri kalan her şey çalışır; uygulama bunun yerine elle yazılır.",
+        "Play Developer API'de uygulamaları listeleyen bir uç yok. O liste yalnızca ayrı Reporting API'den gelir ve bu servis hesabının oraya erişimi olmayabilir. Geri kalan her şey çalışır; uygulama bunun yerine elle yazılır.",
     },
 
     picker: {
@@ -48,7 +48,7 @@ export const settingsPages: SettingsPagesDict = {
       appsLabel: "Bu hesaptaki uygulamalar",
       manualLabel: "Uygulama tanımlayıcısı",
       manualPlaceholder: "com.example.app",
-      manualHint: "Bundle ID ya da paket adı — mağaza konsolunda göründüğü gibi.",
+      manualHint: "Bundle ID ya da paket adı, mağaza konsolunda göründüğü gibi.",
       link: "Uygulamayı bağla",
       linking: "Bağlanıyor…",
       linked: "Uygulama bağlandı",
@@ -105,13 +105,13 @@ export const settingsPages: SettingsPagesDict = {
       familyEmpty: "Bu projede yok.",
       familyUnavailableTitle: "Bu anahtarla listelenemiyor",
       cloudRunUnavailableBody:
-        "Bu servis hesabının Cloud Run servislerini listeleme yetkisi yok. Projede roles/run.viewer vermek yeterli — GKE için gösterilenler bundan etkilenmez.",
+        "Bu servis hesabının Cloud Run servislerini listeleme yetkisi yok. Projede roles/run.viewer vermek yeterli; GKE için gösterilenler bundan etkilenmez.",
       gkeUnavailableBody:
-        "Bu servis hesabının GKE kümelerini listeleme yetkisi yok. Projede roles/container.viewer vermek yeterli — yukarıdaki Cloud Run servisleri bundan etkilenmez.",
+        "Bu servis hesabının GKE kümelerini listeleme yetkisi yok. Projede roles/container.viewer vermek yeterli; yukarıdaki Cloud Run servisleri bundan etkilenmez.",
       unreachableLocations: "Bazı bölgeler yanıt vermedi: {locations}",
       workloadsTitle: "Workload listesi bu bağlantı üzerinden alınamıyor",
       workloadsBody:
-        "Küme adları, sürümleri ve node havuzları Google Cloud API'sinden gelir ve yukarıda görünür. Kümenin içinde ne çalıştığı gelmez: onu okumak kümenin kendi control plane'iyle konuşmayı gerektirir ve private bir control plane yalnızca kendi VPC'nizin içinden yanıt verir — paylaşımlı TaskTrooper sunucusu orada değil. Bu bağlantının bir sınırı, bir arızası değil.",
+        "Küme adları, sürümleri ve node havuzları Google Cloud API'sinden gelir ve yukarıda görünür. Kümenin içinde ne çalıştığı gelmez: onu okumak kümenin kendi control plane'iyle konuşmayı gerektirir ve private bir control plane yalnızca kendi VPC'nizin içinden yanıt verir; paylaşımlı TaskTrooper sunucusu orada değil. Bu bağlantının bir sınırı, bir arızası değil.",
     },
 
     gcloudPicker: {
@@ -122,7 +122,7 @@ export const settingsPages: SettingsPagesDict = {
       typeGke: "GKE kümesi",
       manualLabel: "Kaynak adı",
       manualPlaceholder: "projects/my-project/locations/europe-west1/services/api",
-      manualHint: "Google Cloud'da göründüğü haliyle tam kaynak adı — proje ve konum dahil.",
+      manualHint: "Google Cloud'da göründüğü haliyle tam kaynak adı, proje ve konum dahil.",
       bind: "Kaynağı bağla",
       binding: "Bağlanıyor…",
       bound: "Kaynak bağlandı",
@@ -197,7 +197,7 @@ export const settingsPages: SettingsPagesDict = {
     cliCatalogLabel: "Katalog:",
     cliCatalogHint:
       "Bu klasör incelemeniz için tutulan bir kopyadır. Her görev, kendi ajanının kurallarını ve skill'lerini veritabanından kendi çalışma klasörüne yazar; bu yüzden buradaki kopya eskise bile koşuları etkilemez.",
-    cliSwapHint: "Aynı anda yalnızca bir yerel CLI bağlı olabilir — bunu bağlarsanız diğerinin bağlantısı kalkar.",
+    cliSwapHint: "Aynı anda yalnızca bir yerel CLI bağlı olabilir; bunu bağlarsanız diğerinin bağlantısı kalkar.",
 
     claudeCode: {
       stepInstalling: "claude doğrulanıyor ve ajan kataloğu kuruluyor…",

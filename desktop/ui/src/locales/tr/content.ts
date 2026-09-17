@@ -1,6 +1,6 @@
 import type { ContentDict } from "@/locales/en/content";
 
-// Turkish dictionary for the `content` namespace. Typed as ContentDict —
+// Turkish dictionary for the `content` namespace. Typed as ContentDict;
 // must mirror en/content.ts keys exactly. Text moved verbatim from the pages.
 export const content: ContentDict = {
   files: {

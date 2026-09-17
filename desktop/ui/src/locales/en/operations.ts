@@ -1,4 +1,4 @@
-// English dictionary for the `operations` namespace — the cross-repository
+// English dictionary for the `operations` namespace: the cross-repository
 // /operations console: Deployments, Mobile Apps and Incidents tabs.
 // No `as const`: strings widen so tr/operations.ts (typed OperationsDict) must
 // mirror keys, not literals.
@@ -10,7 +10,7 @@ export const operations = {
     incidents: "Incidents",
   },
   title: "Operations",
-  description: "What is deployed where, every mobile app's store state, and live incidents — across every repository.",
+  description: "What is deployed where, every mobile app's store state, and live incidents, across every repository.",
   deployments: {
     title: "Deployments",
     description: "What is live in every environment, across every repository.",
@@ -26,7 +26,7 @@ export const operations = {
     rollbackDescription: "This rolls {repo} back to {sha} in {env}.",
     rollbackSucceeded: "Rollback dispatched",
     gitRef: "Git ref",
-    gitRefHint: "The backend has no persisted default branch — type it here if this repository deploys from something other than main.",
+    gitRefHint: "The backend has no persisted default branch. Type it here if this repository deploys from something other than main.",
     history: "Run history",
     noHistory: "No runs yet.",
     localRun: "Local",
@@ -83,7 +83,7 @@ export const operations = {
     resumeDisabled: "Available once the app is live.",
     resumeSucceeded: "Rollout resumed",
     // The channel and status vocabulary, shared with the project-settings
-    // store panel — both screens read their labels from here.
+    // store panel; both screens read their labels from here.
     channels: {
       internal: "Internal",
       external: "External",
@@ -97,7 +97,7 @@ export const operations = {
       halted: "Halted",
       live: "Live",
       // The store answered with a status this build does not know. There IS a
-      // release — saying "No release" here would be the wrong answer, not a
+      // release; saying "No release" here would be the wrong answer, not a
       // vaguer one.
       unknown: "Unknown",
     },
@@ -108,7 +108,7 @@ export const operations = {
     // store listing, onboarding just has not reached a build yet.
     channelsOnboardingTitle: "Onboarding in progress",
     channelsOnboarding:
-      "This app is linked, but onboarding is not finished, so it has no channels yet. Work through the checklist above and press Verify — channels appear once the first build reaches the store.",
+      "This app is linked, but onboarding is not finished, so it has no channels yet. Work through the checklist above and press Verify. Channels appear once the first build reaches the store.",
     channelsFailed: "Failed to load channels",
     channelEmpty: "No release on this channel",
     channelAudience: "Audience",

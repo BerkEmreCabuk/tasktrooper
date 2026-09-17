@@ -15,7 +15,7 @@ export const setup = {
   unknownHint: "Bu az önce kontrol edilemedi; yani burada hiçbir şey 'yapılmadı' demiyor.",
   desktopOnly: {
     title: "Bu adım TaskTrooper Mac uygulamasında yapılır",
-    body: "Bu adım doğrudan kendi Mac'inizde çalışır — neyin kurulu olduğunu kontrol eder ve orada başsız bir Claude Code oturumu başlatır — ve bir tarayıcı sekmesi bunların hiçbirine erişemez. Uygulamayı indirin, aynı hesapla giriş yapın; bu akış orada devam eder.",
+    body: "Bu adım doğrudan kendi Mac'inizde çalışır, neyin kurulu olduğunu kontrol eder ve orada başsız bir Claude Code oturumu başlatır; bir tarayıcı sekmesi bunların hiçbirine erişemez. Uygulamayı indirin, aynı hesapla giriş yapın; bu akış orada devam eder.",
   },
   environment: {
     title: "Bu Mac'i kontrol et",
@@ -31,12 +31,12 @@ export const setup = {
   agent: {
     title: "Bir ajan çalışma ortamı bağlayın",
     description:
-      "Ajanlar işlerini bu Mac'teki bir kodlama CLI'ı üzerinden yapar. Kullandıklarınızdan istediğinizi bağlayın — biri yeterli, sonradan başkalarını da ekleyebilirsiniz.",
+      "Ajanlar işlerini bu Mac'teki bir kodlama CLI'ı üzerinden yapar. Kullandıklarınızdan istediğinizi bağlayın, biri yeterli; sonradan başkalarını da ekleyebilirsiniz.",
     connect: "Bağla",
     connecting: "Bağlanıyor…",
     disconnect: "Bağlantıyı kes",
     connected: "Bağlı",
-    connectedBody: "{binary}{version} — {agents} ajan ve {skills} beceri kuruldu.",
+    connectedBody: "{binary}{version}: {agents} ajan ve {skills} beceri kuruldu.",
     notInstalled: "Kurulu değil",
     installWith: "Kurmak için: {command}",
     notInstalledBody: "Bu Mac'te bulunamadı.",
@@ -61,7 +61,7 @@ export const setup = {
   project: {
     title: "İlk projen",
     description:
-      "Bir proje, birlikte yayınlanan depoları gruplar. Bir tane oluşturun, sonra ilk deponuzu içine aktarın — türünün ne olduğu, nasıl deploy edildiği, nasıl derlenip test edildiği sorulacak.",
+      "Bir proje, birlikte yayınlanan depoları gruplar. Bir tane oluşturun, sonra ilk deponuzu içine aktarın; türünün ne olduğu, nasıl deploy edildiği, nasıl derlenip test edildiği sorulacak.",
     createProject: "Proje oluştur",
     needsRepositoryTitle: "Şimdi bir depo içe aktarın",
     needsRepositoryBody: "Aşağıdaki projedeki düğmelerden birini kullanın. Diğerlerini sonra ekleyebilirsiniz.",

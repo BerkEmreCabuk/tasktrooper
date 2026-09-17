@@ -1,6 +1,6 @@
 import type { ChatAreaDict } from "@/locales/en/chatArea";
 
-// Turkish dictionary for the chat area. Typed as ChatAreaDict — mirrors en/chatArea.ts keys exactly.
+// Turkish dictionary for the chat area. Typed as ChatAreaDict; mirrors en/chatArea.ts keys exactly.
 export const chatArea: ChatAreaDict = {
   chat: {
     sidebar: {
@@ -25,7 +25,7 @@ export const chatArea: ChatAreaDict = {
       noRuns: "Henüz çalıştırma yok",
       selectRun: "Çalıştırma seçin",
       runLoadFailed: "Çalıştırma yüklenemedi",
-      subtaskInterrupted: "Yarıda kaldı — bu alt görev bitmeden çalıştırma sona erdi",
+      subtaskInterrupted: "Yarıda kaldı: bu alt görev bitmeden çalıştırma sona erdi",
     },
     clarification: {
       title: "Netleştirme gerekiyor",
@@ -97,12 +97,12 @@ export const chatArea: ChatAreaDict = {
       result: "Sonuç",
       screenshots: "Ekran görüntüleri",
       error: "Hata",
-      llmRequest: "LLM isteği — {model}",
+      llmRequest: "LLM isteği: {model}",
       messagesToolsCount: "{messages} mesaj · {tools} araç",
       empty: "boş",
       waitingForLlmContext:
         "LLM yanıt bekleniyor ({count} mesajlık bağlam: sistem + görev + geçmiş)",
-      contextNoOutput: "Bağlam: {count} mesaj — kayıtlı çıktı yok",
+      contextNoOutput: "Bağlam: {count} mesaj, kayıtlı çıktı yok",
       messages: "Mesajlar",
       user: "Kullanıcı",
       assistant: "Asistan",
@@ -122,7 +122,7 @@ export const chatArea: ChatAreaDict = {
       tasksCount: "{count} görev",
       sessionActivityStarting: "Oturum etkinliği başlatılıyor…",
       noSteps: "Henüz adım kaydı yok.",
-      liveWaiting: "Canlı — yeni adımlar bekleniyor…",
+      liveWaiting: "Canlı: yeni adımlar bekleniyor…",
       cliTurns: "{count} tur",
       cliFailures: "{count} başarısız",
       cliResumesAt: "{at} tarihinde devam edecek",

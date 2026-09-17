@@ -37,7 +37,7 @@ export const settingsPages = {
       emptyBody: "This credential works, but the account holds no apps to pick from.",
       unavailableTitle: "This account cannot be listed",
       unavailableBody:
-        "The Play Developer API has no endpoint that lists apps — that list comes only from the separate Reporting API, which this service account may not be allowed to reach. Everything else still works; the app is named by hand instead.",
+        "The Play Developer API has no endpoint that lists apps. That list comes only from the separate Reporting API, which this service account may not be allowed to reach. Everything else still works; the app is named by hand instead.",
     },
 
     picker: {
@@ -105,13 +105,13 @@ export const settingsPages = {
       familyEmpty: "None in this project.",
       familyUnavailableTitle: "Not listed with this key",
       cloudRunUnavailableBody:
-        "This service account is not allowed to list Cloud Run services. Granting it roles/run.viewer on the project is enough — whatever is shown for GKE is unaffected.",
+        "This service account is not allowed to list Cloud Run services. Granting it roles/run.viewer on the project is enough; whatever is shown for GKE is unaffected.",
       gkeUnavailableBody:
-        "This service account is not allowed to list GKE clusters. Granting it roles/container.viewer on the project is enough — the Cloud Run services above are unaffected.",
+        "This service account is not allowed to list GKE clusters. Granting it roles/container.viewer on the project is enough; the Cloud Run services above are unaffected.",
       unreachableLocations: "Some locations did not answer: {locations}",
       workloadsTitle: "Workloads are not listed over this connection",
       workloadsBody:
-        "Cluster names, versions and node pools come from the Google Cloud API and are shown above. What runs inside a cluster does not: reading that means talking to the cluster's own control plane, and a private control plane only answers from inside your VPC — which the shared TaskTrooper server is not. This is a boundary of the connection, not a fault in it.",
+        "Cluster names, versions and node pools come from the Google Cloud API and are shown above. What runs inside a cluster does not: reading that means talking to the cluster's own control plane, and a private control plane only answers from inside your VPC, which the shared TaskTrooper server is not. This is a boundary of the connection, not a fault in it.",
     },
 
     gcloudPicker: {
@@ -201,7 +201,7 @@ export const settingsPages = {
     cliCatalogLabel: "Catalog:",
     cliCatalogHint:
       "A snapshot for you to inspect. Each run writes its own agent's rules and skills into its task workspace from the database, so nothing here goes stale on a board run.",
-    cliSwapHint: "Only one local CLI can be connected at a time — connecting this one disconnects the other.",
+    cliSwapHint: "Only one local CLI can be connected at a time. Connecting this one disconnects the other.",
 
     // The Claude Code card absorbed the old Settings → Local Runner page.
     // Everything here is about the machine behind the CLI: which one is
@@ -211,7 +211,7 @@ export const settingsPages = {
       stepInstalling: "Verifying claude and installing the agent catalog…",
       stepDisconnectingCli: "Disconnecting the CLI…",
       // The environment preflight checklist (EnvironmentPreflight), reported
-      // over IPC by the desktop shell — the bundled server, Postgres, git, the
+      // over IPC by the desktop shell: the bundled server, Postgres, git, the
       // Claude binary and its account.
       preflight: {
         title: "Environment",
