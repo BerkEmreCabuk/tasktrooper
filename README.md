@@ -15,8 +15,6 @@
 <p align="center">
   <img src="docs/assets/demo.gif" alt="A card dragged from Todo to In Progress; the backend-developer agent starts a Claude Code session, reads the repo, writes the rate limiter and runs the tests." width="100%">
 </p>
-<p align="center"><sub>Real recording: drag <b>Add rate limiter endpoint</b> into In Progress, and the backend agent takes it from there. No cuts, sped up.</sub></p>
-
 # TaskTrooper
 
 **Website:** [tasktrooper.ai](https://tasktrooper.ai) · **Docs:** [tasktrooper.ai/docs](https://tasktrooper.ai/docs) · **Download:** [Releases](https://github.com/makifbaysal/tasktrooper/releases)
