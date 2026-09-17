@@ -110,6 +110,50 @@ export function blockedResourceLabel(resource: string): string {
 }
 
 /**
+ * Visible label for a work_order park: the blocker task keys themselves
+ * (blocked_question reads "waiting for T-12 (API migration) [in_progress] to
+ * finish"), not the generic resource wording — a human reading the board
+ * needs to know WHICH task it is waiting for without hovering the tooltip.
+ *
+ * Parsed structurally, not by splitting on ", ": a blocker's TITLE is free
+ * text and can itself contain "T-9"-looking tokens or a literal ", " (both
+ * happen in this repo's real task titles), so neither a blanket key regex nor
+ * a bare comma split is safe. Each blocker segment is "KEY (TITLE) [COLUMN]"
+ * (blockerLabels, server work_order.go), and COLUMN is drawn from the fixed
+ * set of board column slugs — its closing "]" is the one boundary TITLE can't
+ * fake, so segments are found by scanning for "[column_slug]" and the key is
+ * read off the front of each segment, up to its first " (".
+ */
+export function workOrderBlockerLabel(blockedQuestion: string): string {
+  const trimmed = blockedQuestion.trim();
+  if (!trimmed) {
+    return blockedResourceLabel("work_order");
+  }
+  const prefix = "waiting for ";
+  const suffix = " to finish";
+  const start = trimmed.startsWith(prefix) ? prefix.length : 0;
+  const end = trimmed.endsWith(suffix) ? trimmed.length - suffix.length : trimmed.length;
+  const body = trimmed.slice(start, end);
+
+  const segmentEnd = /\[[a-z0-9_]+\]/gi;
+  const keys: string[] = [];
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = segmentEnd.exec(body)) !== null) {
+    const segment = body.slice(cursor, match.index + match[0].length);
+    const keyMatch = /^\s*,?\s*([^\s(]+)\s*\(/.exec(segment);
+    if (keyMatch) keys.push(keyMatch[1]);
+    cursor = match.index + match[0].length;
+  }
+
+  if (keys.length === 0) {
+    return blockedResourceLabel("work_order");
+  }
+  const [first, ...rest] = keys;
+  return rest.length > 0 ? `${first} +${rest.length}` : first;
+}
+
+/**
  * Coarse countdown to blocked_resume_at, the mirror image of BoardPage's
  * formatColumnAge and deliberately as coarse: the badge answers "roughly when
  * does this move again?", and a card that re-renders on every poll must not
