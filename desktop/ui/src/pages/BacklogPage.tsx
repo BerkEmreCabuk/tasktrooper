@@ -320,7 +320,7 @@ export function BacklogPage() {
                       setDropActive(false);
                     }}
                     className={cn(
-                      "cursor-grab p-4 transition-all hover:border-primary/30 hover:shadow-sm active:cursor-grabbing",
+                      "cursor-grab p-4 transition-all hover:border-primary/30 hover:shadow-[var(--shadow-overlay)] active:cursor-grabbing",
                       selectedId === task.id && "border-primary ring-2 ring-primary/20",
                       dragTaskId === task.id && "opacity-50 ring-2 ring-primary/30",
                     )}
@@ -328,13 +328,13 @@ export function BacklogPage() {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex flex-wrap gap-1">
-                        <Badge variant="outline" className="font-mono text-[10px]">
+                        <Badge variant="outline" className="font-mono text-micro">
                           {task.key}
                         </Badge>
-                        <Badge variant="secondary" className="text-[10px]">
+                        <Badge variant="secondary" className="text-micro">
                           {taskTypeLabel(task.task_type)}
                         </Badge>
-                        <Badge variant="outline" className="text-[10px]">
+                        <Badge variant="outline" className="text-micro">
                           {taskPriorityLabel(task.priority)}
                         </Badge>
                       </div>
@@ -354,10 +354,10 @@ export function BacklogPage() {
                     {task.description && (
                       <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{task.description}</p>
                     )}
-                    <Badge variant="outline" className="mt-2 text-[10px]">
+                    <Badge variant="outline" className="mt-2 text-micro">
                       {repositoryName(task.repository_id)}
                     </Badge>
-                    <p className="mt-3 text-[11px] text-muted-foreground">
+                    <p className="mt-3 text-micro text-muted-foreground">
                       {formatRelativeDate(task.updated_at)}
                     </p>
                   </Card>
@@ -404,10 +404,10 @@ export function BacklogPage() {
             <>
               <div className="border-b border-border p-4">
                 <div className="flex flex-wrap gap-1">
-                  <Badge variant="outline" className="font-mono text-[10px]">
+                  <Badge variant="outline" className="font-mono text-micro">
                     {selectedTask.key}
                   </Badge>
-                  <Badge variant="secondary" className="text-[10px]">
+                  <Badge variant="secondary" className="text-micro">
                     {taskTypeLabel(selectedTask.task_type)}
                   </Badge>
                 </div>

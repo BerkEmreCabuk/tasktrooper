@@ -202,7 +202,7 @@ export function TaskHistory({ repositoryId, taskId, columns, agentNameMap }: Tas
             )}
 
             {actor && (
-              <p className="mt-1 text-[11px] text-muted-foreground">
+              <p className="mt-1 text-micro text-muted-foreground">
                 {t("boardArea.components.taskHistory.by", { name: actor })}
               </p>
             )}

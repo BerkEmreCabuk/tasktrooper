@@ -179,7 +179,7 @@ export function BoardSettingsPage() {
           <div className="flex items-center gap-3 bg-muted/30 px-4 py-3">
             <span className="flex-1 text-sm font-medium text-muted-foreground">{t("settingsPages.board.backlogLabel")}</span>
             <code className="text-xs text-muted-foreground">backlog</code>
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground">{t("settingsPages.board.fixedTag")}</span>
+            <span className="text-micro uppercase tracking-wide text-muted-foreground">{t("settingsPages.board.fixedTag")}</span>
           </div>
           {workflowCols.map((col) => (
             <div key={col.slug} className="flex items-center gap-3 px-4 py-3">

@@ -102,7 +102,7 @@ function TechStackSection({
                   <td className="px-4 py-3">
                     <div className="flex flex-wrap gap-1">
                       {(skill.tags ?? []).map((tag) => (
-                        <Badge key={tag} variant="secondary" className="text-[10px]">
+                        <Badge key={tag} variant="secondary" className="text-micro">
                           {tag}
                         </Badge>
                       ))}

@@ -115,7 +115,7 @@ export function MultiSelectPicker({
               {selected.map((value) => {
                 const displayLabel = labelByValue.get(value) ?? value;
                 return (
-                <Badge key={value} variant="secondary" className="max-w-full gap-1 pr-1 text-[11px]">
+                <Badge key={value} variant="secondary" className="max-w-full gap-1 pr-1 text-micro">
                   <span className="truncate">{displayLabel}</span>
                   <button
                     type="button"
@@ -190,7 +190,7 @@ export function MultiSelectPicker({
                   )}
                 </div>
               </ScrollArea>
-              <p className="text-right text-[11px] text-muted-foreground">
+              <p className="text-right text-micro text-muted-foreground">
                 {t("frame.admin.multiSelect.summary", {
                   selected: selected.length,
                   shown: filteredOptions.length,

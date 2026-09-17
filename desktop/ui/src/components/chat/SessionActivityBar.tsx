@@ -34,7 +34,7 @@ export function SessionActivityBar({ steps, isLive, onOpenDetails, className }: 
         <Activity className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <p className="truncate text-xs text-foreground">{summary ?? t("chatArea.chat.activityBar.sessionActivity")}</p>
         {steps.length > 0 && (
-          <span className="shrink-0 text-[10px] text-muted-foreground">{t("chatArea.chat.activityBar.stepsCount", { count: steps.length })}</span>
+          <span className="shrink-0 text-micro text-muted-foreground">{t("chatArea.chat.activityBar.stepsCount", { count: steps.length })}</span>
         )}
       </div>
       {onOpenDetails && (

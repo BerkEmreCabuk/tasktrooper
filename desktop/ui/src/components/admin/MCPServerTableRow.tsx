@@ -113,7 +113,7 @@ export function MCPServerTableRow({
             </div>
             <div className="mt-2 flex flex-wrap gap-2">
               {tools.map((tool) => (
-                <Badge key={tool} variant="secondary" className="font-mono text-[11px] font-normal" title={tool}>
+                <Badge key={tool} variant="secondary" className="font-mono text-micro font-normal" title={tool}>
                   {formatToolName(tool, server.id)}
                 </Badge>
               ))}

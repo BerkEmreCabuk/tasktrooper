@@ -70,9 +70,9 @@ export function PipelineStages({ pipeline }: PipelineStagesProps) {
                 )}
               >
                 <Icon className={cn("h-5 w-5", className)} />
-                <span className="w-full truncate px-1 text-[11px] text-muted-foreground">{job.name}</span>
+                <span className="w-full truncate px-1 text-micro text-muted-foreground">{job.name}</span>
                 {job.coverage_pct != null && (
-                  <span className="w-full truncate px-1 text-[10px] text-muted-foreground/70">
+                  <span className="w-full truncate px-1 text-micro text-muted-foreground/70">
                     {job.coverage_pct.toFixed(1)}%
                   </span>
                 )}

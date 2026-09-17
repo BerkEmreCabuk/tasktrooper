@@ -138,7 +138,7 @@ function AreaCard({
     <div className="space-y-3 rounded-md border border-border/60 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-medium">{t(`settings.vercel.apps.area.${area.area || "root"}`)}</h3>
-        <Badge variant="outline" className="font-mono text-[11px]">
+        <Badge variant="outline" className="font-mono text-micro">
           {area.kind}
         </Badge>
         {area.directory && (

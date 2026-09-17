@@ -37,7 +37,7 @@ export function AttachmentImage({
     return (
       <div
         className={cn(
-          "flex h-24 w-full items-center justify-center gap-1.5 rounded border border-border bg-muted text-[10px] text-muted-foreground",
+          "flex h-24 w-full items-center justify-center gap-1.5 rounded border border-border bg-muted text-micro text-muted-foreground",
           className,
         )}
       >

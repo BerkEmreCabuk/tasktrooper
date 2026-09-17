@@ -56,10 +56,10 @@ export function TaskRunSteps({ runId }: TaskRunStepsProps) {
             index === steps.length - 1 ? "bg-primary/5" : "bg-muted/30",
           )}
         >
-          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium">
+          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-micro font-medium">
             {index + 1}
           </span>
-          <Badge variant="outline" className="font-mono text-[10px]">
+          <Badge variant="outline" className="font-mono text-micro">
             {s.step_type}
           </Badge>
         </div>

@@ -338,19 +338,19 @@ export function BoardPage() {
           <GripVertical className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground/60" />
           <div className="min-w-0 flex-1">
             <div className="mb-2 flex flex-wrap items-center gap-1">
-              <Badge variant="outline" className="font-mono text-[10px]">
+              <Badge variant="outline" className="font-mono text-micro">
                 {task.key}
               </Badge>
               {agentRunning && (
-                <Badge variant="info" className="gap-1 text-[10px]">
+                <Badge variant="info" className="gap-1 text-micro">
                   <Loader2 className="h-3 w-3 animate-spin" />
                   {t("boardArea.board.agentRunning")}
                 </Badge>
               )}
-              <Badge variant="secondary" className="text-[10px]">
+              <Badge variant="secondary" className="text-micro">
                 {taskTypeLabel(task.task_type)}
               </Badge>
-              <Badge variant="outline" className="text-[10px]">
+              <Badge variant="outline" className="text-micro">
                 {taskPriorityLabel(task.priority)}
               </Badge>
             </div>
@@ -359,11 +359,11 @@ export function BoardPage() {
               <p className="mt-1 line-clamp-2 break-words text-xs text-muted-foreground">{task.description}</p>
             )}
             <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-              <Badge variant="outline" className="max-w-[9rem] truncate text-[10px]">
+              <Badge variant="outline" className="max-w-[9rem] truncate text-micro">
                 {repositoryName(task.repository_id)}
               </Badge>
               {initiative && (
-                <Badge variant="outline" className="max-w-[9rem] truncate text-[10px]">
+                <Badge variant="outline" className="max-w-[9rem] truncate text-micro">
                   {initiative}
                 </Badge>
               )}
@@ -377,7 +377,7 @@ export function BoardPage() {
               {task.blocked_resource && (
                 <Badge
                   variant="outline"
-                  className="gap-1 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-600 dark:text-amber-400"
+                  className="gap-1 border-amber-500/40 bg-amber-500/10 text-micro text-amber-600 dark:text-amber-400"
                   title={
                     // Unlike every other resource, no sweeper ever releases a
                     // human_decision park — say so instead of promising a
@@ -415,7 +415,7 @@ export function BoardPage() {
                   >
                     <Badge
                       variant="outline"
-                      className="gap-1 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
+                      className="gap-1 border-amber-500/40 bg-amber-500/10 text-micro text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
                     >
                       <HelpCircle className="h-3 w-3" />
                       {t("boardArea.board.answerQuestion")}
@@ -424,7 +424,7 @@ export function BoardPage() {
                 ) : (
                   <Badge
                     variant="outline"
-                    className="gap-1 border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-600 dark:text-amber-400"
+                    className="gap-1 border-amber-500/40 bg-amber-500/10 text-micro text-amber-600 dark:text-amber-400"
                     title={task.blocked_question || undefined}
                   >
                     <HelpCircle className="h-3 w-3" />
@@ -434,7 +434,7 @@ export function BoardPage() {
               {task.column_entered_at && (
                 <Badge
                   variant="outline"
-                  className="text-[10px]"
+                  className="text-micro"
                   title={t("boardArea.board.columnAge", {
                     value: formatColumnAge(task.column_entered_at),
                   })}
@@ -446,13 +446,13 @@ export function BoardPage() {
             <div className="mt-2 flex items-center justify-between gap-2">
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 {assignee && (
-                  <Badge variant="outline" className="gap-1 text-[10px]">
+                  <Badge variant="outline" className="gap-1 text-micro">
                     <Bot className="h-3 w-3" />
                     <span className="max-w-[6rem] truncate">{assignee}</span>
                   </Badge>
                 )}
                 {!assignee && (
-                  <span className="text-[10px] text-muted-foreground">{task.created_by}</span>
+                  <span className="text-micro text-muted-foreground">{task.created_by}</span>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-1">
@@ -510,7 +510,7 @@ export function BoardPage() {
                 <Activity className="h-4 w-4" />
                 {t("boardArea.board.activity")}
                 {activeAgentTaskIds.size > 0 && (
-                  <Badge variant="warning" className="h-5 min-w-5 justify-center px-1.5 text-[10px]">
+                  <Badge variant="warning" className="h-5 min-w-5 justify-center px-1.5 text-micro">
                     {activeAgentTaskIds.size}
                   </Badge>
                 )}
