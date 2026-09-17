@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -38,6 +39,28 @@ func criteriaInputs(texts []string) ([]domain.AcceptanceCriterionInput, []droppe
 		items = append(items, domain.AcceptanceCriterionInput{Text: trimmed, Position: len(items) + 1})
 	}
 	return items, dropped
+}
+
+// invalidCriterionIDResult reports a criterion_id that failed uuid.Parse,
+// echoing the value the agent actually sent — the raw "invalid criterion_id"
+// gave it nothing to compare against its own tool call.
+func invalidCriterionIDResult(toolName, rawID string) domain.ToolResult {
+	return toolError(toolName, fmt.Sprintf("invalid criterion_id %q: expected a UUID from list_acceptance_criteria", rawID))
+}
+
+// criterionErrorResult turns a criteria-store error into tool output. A
+// domain.ErrCriterionNotFound means the id it was given no longer resolves —
+// almost always because acceptance_criteria were replaced since the agent
+// last listed them — so the message says that and names the fix instead of
+// surfacing the driver's bare "no rows in result set".
+func criterionErrorResult(toolName, rawID string, err error) domain.ToolResult {
+	if errors.Is(err, domain.ErrCriterionNotFound) {
+		return toolError(toolName, fmt.Sprintf(
+			"criterion %s was not found — acceptance criteria were replaced since you last listed them (their ids changed); call list_acceptance_criteria to get the current ids and retry",
+			rawID,
+		))
+	}
+	return toolError(toolName, err.Error())
 }
 
 type listCriteriaTool struct {
@@ -125,11 +148,11 @@ func (t *setCriterionTool) Execute(ctx context.Context, arguments string) domain
 	}
 	criterionID, err := uuid.Parse(args.CriterionID)
 	if err != nil {
-		return toolError(setCriterionToolName, "invalid criterion_id")
+		return invalidCriterionIDResult(setCriterionToolName, args.CriterionID)
 	}
 	item, err := t.kit.Tasks.SetTaskCriterionCompleted(ctx, criterionID, args.Completed)
 	if err != nil {
-		return toolError(setCriterionToolName, err.Error())
+		return criterionErrorResult(setCriterionToolName, args.CriterionID, err)
 	}
 	return toolJSON(setCriterionToolName, map[string]any{"criterion": item})
 }
@@ -181,7 +204,7 @@ func (t *cancelCriterionTool) Execute(ctx context.Context, arguments string) dom
 	}
 	criterionID, err := uuid.Parse(args.CriterionID)
 	if err != nil {
-		return toolError(cancelCriterionToolName, "invalid criterion_id")
+		return invalidCriterionIDResult(cancelCriterionToolName, args.CriterionID)
 	}
 	canceled := true
 	if args.Canceled != nil {
@@ -195,7 +218,7 @@ func (t *cancelCriterionTool) Execute(ctx context.Context, arguments string) dom
 	}
 	item, err := t.kit.Tasks.SetTaskCriterionCanceled(ctx, criterionID, canceled, args.Reason, "agent", authorID)
 	if err != nil {
-		return toolError(cancelCriterionToolName, err.Error())
+		return criterionErrorResult(cancelCriterionToolName, args.CriterionID, err)
 	}
 	return toolJSON(cancelCriterionToolName, map[string]any{"criterion": item})
 }
@@ -246,7 +269,7 @@ func (t *reviewCriterionTool) Execute(ctx context.Context, arguments string) dom
 	}
 	criterionID, err := uuid.Parse(args.CriterionID)
 	if err != nil {
-		return toolError(reviewCriterionToolName, "invalid criterion_id")
+		return invalidCriterionIDResult(reviewCriterionToolName, args.CriterionID)
 	}
 	agentID, err := resolveAgentID(ctx)
 	if err != nil {
@@ -254,7 +277,7 @@ func (t *reviewCriterionTool) Execute(ctx context.Context, arguments string) dom
 	}
 	check, err := t.kit.Tasks.ReviewTaskCriterion(ctx, criterionID, agentID, args.Approved, args.Note)
 	if err != nil {
-		return toolError(reviewCriterionToolName, err.Error())
+		return criterionErrorResult(reviewCriterionToolName, args.CriterionID, err)
 	}
 	return toolJSON(reviewCriterionToolName, map[string]any{"check": check})
 }

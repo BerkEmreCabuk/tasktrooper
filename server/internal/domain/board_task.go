@@ -184,6 +184,14 @@ func ValidTaskRelationType(t TaskRelationType) bool {
 	}
 }
 
+// ErrCriterionNotFound is returned when a criterion id no longer resolves to
+// a row — almost always because a full acceptance-criteria replace ran since
+// the agent last listed them and reassigned ids are not the ones it is
+// holding. A bare "no rows in result set" gave the agent nothing to act on;
+// this sentinel lets the tool layer name the id and point back at
+// list_acceptance_criteria instead.
+var ErrCriterionNotFound = errors.New("acceptance criterion not found")
+
 type AcceptanceCriterion struct {
 	ID        uuid.UUID `json:"id"`
 	TaskID    uuid.UUID `json:"task_id"`

@@ -28,6 +28,10 @@ type fakeTaskManager struct {
 	// result note is the only record a human gets of what landed.
 	comments  []domain.CreateTaskCommentRequest
 	testCases []domain.TaskTestCase
+	// criterionErr is returned by the three criterion-mutating methods below,
+	// separate from err (LatestTaskPipeline's) so a test can fail one path
+	// without also breaking pipeline-status coverage that shares this fake.
+	criterionErr error
 }
 
 func (f *fakeTaskManager) ListTasks(ctx context.Context, repositoryID uuid.UUID) ([]domain.BoardTask, error) {
@@ -83,12 +87,21 @@ func (f *fakeTaskManager) ReplaceAcceptanceCriteria(ctx context.Context, reposit
 	return nil, nil
 }
 func (f *fakeTaskManager) SetTaskCriterionCompleted(ctx context.Context, criterionID uuid.UUID, completed bool) (domain.AcceptanceCriterion, error) {
+	if f.criterionErr != nil {
+		return domain.AcceptanceCriterion{}, f.criterionErr
+	}
 	return domain.AcceptanceCriterion{}, nil
 }
 func (f *fakeTaskManager) SetTaskCriterionCanceled(ctx context.Context, criterionID uuid.UUID, canceled bool, reason, authorType, authorID string) (domain.AcceptanceCriterion, error) {
+	if f.criterionErr != nil {
+		return domain.AcceptanceCriterion{}, f.criterionErr
+	}
 	return domain.AcceptanceCriterion{ID: criterionID, Canceled: canceled, CancelReason: reason}, nil
 }
 func (f *fakeTaskManager) ReviewTaskCriterion(ctx context.Context, criterionID, agentID uuid.UUID, approved bool, note string) (domain.CriterionCheck, error) {
+	if f.criterionErr != nil {
+		return domain.CriterionCheck{}, f.criterionErr
+	}
 	return domain.CriterionCheck{}, nil
 }
 func (f *fakeTaskManager) ListTestCases(ctx context.Context, taskID uuid.UUID) ([]domain.TaskTestCase, error) {
