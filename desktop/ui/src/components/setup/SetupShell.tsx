@@ -14,7 +14,7 @@ export function SetupShell({ title, description, children }: SetupShellProps) {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-3xl space-y-6">
         <div className="flex items-center justify-center gap-2">
-          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-brand-mark text-primary-foreground">
             <Logo className="h-4 w-4" />
           </div>
           <p className="text-body font-semibold text-foreground">TaskTrooper</p>

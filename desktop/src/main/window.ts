@@ -97,7 +97,14 @@ export class Shell {
       minHeight: 600,
       show: false,
       title: "TaskTrooper",
-      ...(process.platform === "darwin" ? { titleBarStyle: "hiddenInset" as const } : {}),
+      // y:22 centers the traffic lights' own ~12px cluster on the header's
+      // 56px (h-14) row — the same vertical center the brand mark and title
+      // sit on via that row's own items-center — instead of leaving it to
+      // macOS's default inset, which sits a few px higher than this bar's
+      // center and reads as misaligned against the logo next to it.
+      ...(process.platform === "darwin"
+        ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 20, y: 22 } }
+        : {}),
       backgroundColor: "#0b0d13",
       webPreferences: {
         preload: path.join(app.getAppPath(), "dist", "preload", "index.cjs"),

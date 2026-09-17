@@ -374,34 +374,47 @@ export function BoardPage() {
                   place — showing "Awaiting answer" on a task waiting out the
                   Claude usage limit sent people hunting for a chat that does
                   not exist. */}
-              {task.blocked_resource && (
+              {task.blocked_resource === "work_order" ? (
+                // A dependency on another task is a normal, expected state —
+                // not an alert — so it reads like the other plain info chips
+                // (key, repo, initiative) instead of standing out in amber.
                 <Badge
                   variant="outline"
-                  className="gap-1 border-amber-500/40 bg-amber-500/10 text-micro text-amber-600 dark:text-amber-400"
-                  title={
-                    // Unlike every other resource, no sweeper ever releases a
-                    // human_decision park — say so instead of promising a
-                    // pickup that will never come.
-                    task.blocked_resource === "human_decision"
-                      ? t("boardArea.board.blockedHumanDecisionTitle", {
-                          reason: task.blocked_question || blockedResourceLabel(task.blocked_resource),
-                        })
-                      : task.blocked_resume_at
-                      ? t("boardArea.board.blockedResumeTitle", {
-                          reason: task.blocked_question || blockedResourceLabel(task.blocked_resource),
-                          value: formatDate(task.blocked_resume_at),
-                        })
-                      : t("boardArea.board.blockedResourceTitle", {
-                          reason: task.blocked_question || blockedResourceLabel(task.blocked_resource),
-                        })
-                  }
+                  className="max-w-[9rem] truncate text-micro"
+                  title={t("boardArea.board.blockedResourceTitle", {
+                    reason: task.blocked_question || blockedResourceLabel(task.blocked_resource),
+                  })}
                 >
-                  <Clock className="h-3 w-3" />
-                  {task.blocked_resource === "work_order"
-                    ? workOrderBlockerLabel(task.blocked_question || "")
-                    : blockedResourceLabel(task.blocked_resource)}
-                  {task.blocked_resume_at ? ` · ~${formatResumeIn(task.blocked_resume_at)}` : ""}
+                  {workOrderBlockerLabel(task.blocked_question || "")}
                 </Badge>
+              ) : (
+                task.blocked_resource && (
+                  <Badge
+                    variant="outline"
+                    className="gap-1 border-amber-500/40 bg-amber-500/10 text-micro text-amber-600 dark:text-amber-400"
+                    title={
+                      // Unlike every other resource, no sweeper ever releases a
+                      // human_decision park — say so instead of promising a
+                      // pickup that will never come.
+                      task.blocked_resource === "human_decision"
+                        ? t("boardArea.board.blockedHumanDecisionTitle", {
+                            reason: task.blocked_question || blockedResourceLabel(task.blocked_resource),
+                          })
+                        : task.blocked_resume_at
+                        ? t("boardArea.board.blockedResumeTitle", {
+                            reason: task.blocked_question || blockedResourceLabel(task.blocked_resource),
+                            value: formatDate(task.blocked_resume_at),
+                          })
+                        : t("boardArea.board.blockedResourceTitle", {
+                            reason: task.blocked_question || blockedResourceLabel(task.blocked_resource),
+                          })
+                    }
+                  >
+                    <Clock className="h-3 w-3" />
+                    {blockedResourceLabel(task.blocked_resource)}
+                    {task.blocked_resume_at ? ` · ~${formatResumeIn(task.blocked_resume_at)}` : ""}
+                  </Badge>
+                )
               )}
               {task.blocked_at &&
                 !task.blocked_resource &&
