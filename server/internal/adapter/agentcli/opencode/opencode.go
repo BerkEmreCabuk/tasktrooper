@@ -199,6 +199,11 @@ func (e *Executor) finish(ctx context.Context, label string, s session) (domain.
 			return domain.AgentResponse{}, ctxErr
 		}
 		if s.waitErr != nil || strings.TrimSpace(out.Text) == "" {
+			if sig, ok := domain.ExitSignal(s.waitErr); ok {
+				return domain.AgentResponse{}, fmt.Errorf(
+					"opencode was killed by signal %s from outside this run: %s",
+					sig, domain.TruncateHead(strings.TrimSpace(s.stderrTail), 500))
+			}
 			return domain.AgentResponse{}, fmt.Errorf("opencode ended without a result (%v): %s",
 				s.waitErr, domain.TruncateHead(strings.TrimSpace(s.stderrTail), 500))
 		}

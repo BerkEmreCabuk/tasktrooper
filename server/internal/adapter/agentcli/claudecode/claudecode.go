@@ -871,6 +871,16 @@ func (f sessionFinisher) finish(ctx context.Context, label string, s session) (d
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return domain.AgentResponse{}, ctxErr
 		}
+		if sig, ok := domain.ExitSignal(s.waitErr); ok {
+			log.Warn().
+				Str("task_key", label).
+				Str("cli_session_id", sessionID).
+				Str("signal", sig.String()).
+				Msg("claude code session was killed by an external signal")
+			return domain.AgentResponse{}, fmt.Errorf(
+				"claude code was killed by signal %s from outside this run (cli session %s): %s",
+				sig, sessionID, domain.TruncateHead(strings.TrimSpace(stderrTail), 500))
+		}
 		return domain.AgentResponse{}, fmt.Errorf("claude code ended without a result (%v): %s",
 			s.waitErr, domain.TruncateHead(strings.TrimSpace(stderrTail), 500))
 	}

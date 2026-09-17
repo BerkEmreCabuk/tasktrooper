@@ -221,6 +221,11 @@ func (e *Executor) finish(ctx context.Context, label string, s session) (domain.
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return domain.AgentResponse{}, ctxErr
 		}
+		if sig, ok := domain.ExitSignal(s.waitErr); ok {
+			return domain.AgentResponse{}, fmt.Errorf(
+				"antigravity was killed by signal %s from outside this run: %s",
+				sig, domain.TruncateHead(strings.TrimSpace(s.stderrTail), 500))
+		}
 		return domain.AgentResponse{}, fmt.Errorf("antigravity ended without a result (%v): %s",
 			s.waitErr, domain.TruncateHead(strings.TrimSpace(s.stderrTail), 500))
 	}
