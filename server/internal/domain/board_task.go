@@ -155,6 +155,21 @@ const (
 	// task.Relations: the SOURCE is the implementation task, the TARGET is the
 	// analiz task it came from.
 	TaskRelationDerivedFrom TaskRelationType = "derived_from"
+	// TaskRelationDiscoveredFrom is a weaker provenance statement than
+	// derived_from: "found while working on", not "specified by". It is written
+	// automatically — never by an explicit tool argument — when
+	// create_board_task runs inside a task run, naming the task the run was
+	// working when it opened this one.
+	//
+	// It has to be its own type rather than reusing derived_from because
+	// derived_from is the spec route: repository.Service.AnalysisReferences
+	// reads ONLY derived_from and feeds the target task's documents into the
+	// new task's run context. A task an agent merely stumbled onto while
+	// working something else has no specification on that task — treating the
+	// discovery as derived_from would hand the new run documents that were
+	// never written for it. discovered_from carries none of that read path: it
+	// orders nothing and injects nothing, it is provenance only.
+	TaskRelationDiscoveredFrom TaskRelationType = "discovered_from"
 )
 
 // ValidTaskRelationType reports whether a relation type is one the schema's
@@ -162,7 +177,7 @@ const (
 // database into an actionable error naming the field.
 func ValidTaskRelationType(t TaskRelationType) bool {
 	switch t {
-	case TaskRelationBlocks, TaskRelationDeployDependsOn, TaskRelationDerivedFrom:
+	case TaskRelationBlocks, TaskRelationDeployDependsOn, TaskRelationDerivedFrom, TaskRelationDiscoveredFrom:
 		return true
 	default:
 		return false
@@ -446,7 +461,8 @@ type CreateBoardTaskRequest struct {
 	AssigneeAgentID      *uuid.UUID                 `json:"assignee_agent_id,omitempty"`
 	AcceptanceCriteria   []AcceptanceCriterionInput `json:"acceptance_criteria,omitempty"`
 	// Relations are written with the NEW task as their source: deploy_depends_on
-	// (this ships after those) and derived_from (this came out of that analysis).
+	// (this ships after those), derived_from (this came out of that analysis),
+	// and discovered_from (this was found while working that task).
 	Relations []TaskRelationInput `json:"relations,omitempty"`
 	// BlockedBy is written with the new task as the TARGET and each entry as the
 	// source, because that is the direction TaskRelationBlocks is stored in. It

@@ -315,6 +315,12 @@ type TaskRelationStore interface {
 	// Additive and idempotent: an edge that already exists is left alone rather
 	// than duplicated or reported as an error.
 	AddBlockers(ctx context.Context, targetTaskID uuid.UUID, sourceTaskIDs []uuid.UUID) ([]domain.TaskRelation, error)
+	// ListUnfinishedBlockers returns every `blocks` edge in the board whose
+	// SOURCE has not reached done or released, in one query. It is the bulk
+	// twin of ListBlockingSources: the ready-tasks query runs this once over
+	// the whole board on every call, and asking ListBlockingSources per task
+	// would turn that into N+1 queries.
+	ListUnfinishedBlockers(ctx context.Context) ([]domain.TaskRelation, error)
 }
 
 // DeployPackageStore persists release trains and their membership. Kept

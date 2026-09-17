@@ -229,6 +229,10 @@ func (f *fakeRelationStore) ListBlockingSources(context.Context, uuid.UUID) ([]d
 	return nil, nil
 }
 
+func (f *fakeRelationStore) ListUnfinishedBlockers(context.Context) ([]domain.TaskRelation, error) {
+	return nil, nil
+}
+
 func (f *fakeRelationStore) ListBlockedBy(context.Context, uuid.UUID) ([]domain.TaskRelation, error) {
 	return nil, nil
 }

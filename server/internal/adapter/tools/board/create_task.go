@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -86,7 +87,7 @@ func (t *createTaskTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name:        createBoardTaskToolName,
-			Description: "Create a new task on the board. Always set repository (which codebase the work touches) and project (which initiative it belongs to) when you can tell — call list_repositories / list_projects to find them rather than asking the user. Leaving repository unset falls back to the active repository context, or to the default repository, which may well be the wrong one. When you are splitting work that has an order, put it in the ARGUMENTS and not only in prose — blocked_by (nobody starts this task until those are done) and deploy_depends_on (this task ships AFTER those) are both enforced, a sentence in the description is not. When you open this task out of an analysis, set derived_from to that analiz task: the agent that picks this up is then handed that analysis's documents to work from. Anything that has to happen around the deploy belongs in before_deploy / after_deploy / rollback_plan, not in a comment: those fields are posted automatically when the release is dispatched and when it lands.",
+			Description: "Create a new task on the board. Always set repository (which codebase the work touches) and project (which initiative it belongs to) when you can tell — call list_repositories / list_projects to find them rather than asking the user. Leaving repository unset falls back to the active repository context, or to the default repository, which may well be the wrong one. When you are splitting work that has an order, put it in the ARGUMENTS and not only in prose — blocked_by (nobody starts this task until those are done) and deploy_depends_on (this task ships AFTER those) are both enforced, a sentence in the description is not. When you open this task out of an analysis, set derived_from to that analiz task: the agent that picks this up is then handed that analysis's documents to work from. Inside a task run, the task you create here is linked back to the task you are working on as discovered_from automatically — there is no argument for it, and you do not need to (or need to try to) set it yourself. Anything that has to happen around the deploy belongs in before_deploy / after_deploy / rollback_plan, not in a comment: those fields are posted automatically when the release is dispatched and when it lands.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -268,6 +269,25 @@ func (t *createTaskTool) Execute(ctx context.Context, arguments string) domain.T
 			return toolError(createBoardTaskToolName, refErr.Error())
 		}
 		req.Relations = append(req.Relations, refs...)
+	}
+	if origin := registry.TaskIDFromContext(ctx); origin != uuid.Nil {
+		// Provenance the agent cannot forget: derived_from already says origin
+		// is this task's specification, so writing discovered_from too would
+		// assert two different relationships to the same task — the stronger
+		// claim wins.
+		derivedFromOrigin := false
+		for _, rel := range req.Relations {
+			if rel.RelationType == domain.TaskRelationDerivedFrom && rel.TargetTaskID == origin {
+				derivedFromOrigin = true
+				break
+			}
+		}
+		if !derivedFromOrigin {
+			req.Relations = append(req.Relations, domain.TaskRelationInput{
+				TargetTaskID: origin,
+				RelationType: domain.TaskRelationDiscoveredFrom,
+			})
+		}
 	}
 	if len(args.BlockedBy) > 0 {
 		// Not appended to req.Relations: a blocks row is stored with the BLOCKER

@@ -14,6 +14,10 @@ import (
 type TaskManager interface {
 	ListTasks(ctx context.Context, repositoryID uuid.UUID) ([]domain.BoardTask, error)
 	ListAllTasks(ctx context.Context) ([]domain.BoardTask, error)
+	// ListReadyTasks is the unblocked queue — backlog/todo tasks with no
+	// unfinished blocker — an agent reads instead of guessing from ListTasks
+	// which of its columns is actually startable.
+	ListReadyTasks(ctx context.Context, repositoryID uuid.UUID) ([]domain.BoardTask, error)
 	// GetTask reads one task scoped by repository — the cheap membership
 	// question resolveTaskRepositoryID asks on every task-scoped call. A task
 	// id from another repository comes back missing rather than readable.
@@ -86,6 +90,7 @@ func NewExecutors(kit *ToolKit) []port.ToolExecutor {
 	}
 	execs := []port.ToolExecutor{
 		newListTasksTool(kit),
+		newListReadyTasksTool(kit),
 		newCreateTaskTool(kit),
 		newMoveTaskTool(kit),
 		newUpdateTaskTool(kit),
@@ -240,6 +245,10 @@ func (kit *ToolKit) listBoardTasks(ctx context.Context) ([]domain.BoardTask, err
 		return kit.Tasks.ListTasks(ctx, id)
 	}
 	return kit.Tasks.ListAllTasks(ctx)
+}
+
+func (kit *ToolKit) listReadyTasks(ctx context.Context) ([]domain.BoardTask, error) {
+	return kit.Tasks.ListReadyTasks(ctx, registry.RepositoryIDFromContext(ctx))
 }
 
 func toolError(name, message string) domain.ToolResult {

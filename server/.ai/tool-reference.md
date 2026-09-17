@@ -91,6 +91,12 @@ Which repo it searches is the admin-editable `boilerplate_catalog_repo` setting 
 
 Board tools (`internal/adapter/tools/board`) are registered when the board/repository services are wired; they operate on tasks, criteria, projects, and pipelines rather than the shell/web.
 
+### `list_ready_tasks`
+
+The unblocked queue — the `bd ready` of Beads: `backlog` and `todo` tasks with no unfinished `blocks` blocker, sorted critical → high → medium → low, then by `task_number` (oldest first). Optional `column` (`backlog`|`todo`) and `assigned_to_me` (the run's agent from `registry.AgentIDFromContext`; an error outside a run). Repository-scoped like `list_board_tasks`; no `repository_id` argument. Returns `{tasks: [...], count}` with `tasks` never null.
+
+It exists because `list_board_tasks` shows the whole board and leaves the model to work out for itself which cards are actually startable — a job it does by reading every card's `blocked_by` and guessing at columns. The service (`repository.Service.ListReadyTasks`) reads every unfinished `blocks` edge in ONE query (`TaskRelationStore.ListUnfinishedBlockers`) and filters in memory, so the answer costs two queries regardless of board size. Tasks parked in `blocked` never appear: the column filter excludes them before the blocker check runs.
+
 ### `get_pipeline_status`
 
 Returns the most recent QA-gate pipeline run for a task (jobs attached). Agents call this after landing in `need_revision` to see exactly what failed — the same report is also proactively injected into the run's system prompt in that case (see `internal/application/board/runner.go`).
@@ -155,6 +161,7 @@ Three arguments on the task-writing tools, all pointing the same way — **this 
 | `blocked_by: ["T-1"]` | `blocks`, with the BLOCKER as `source_task_id` | `board.WorkOrder` in the dispatcher parks the card on `domain.ResourceWorkOrder`; `board.WorkOrderSweeper` (1 min) releases it when every blocker reaches done/released or disappears. `repository.Service.validateMoveAllowed` additionally refuses a move into `todo`/`in_progress`. |
 | `deploy_depends_on: ["T-1"]` | `deploy_depends_on`, source = this task | `repository.Service.deployDependencyGate` refuses the release and comments why. |
 | `derived_from: ["A-12"]` | `derived_from`, source = this task | Nothing — it is provenance, not order. It is what feeds the analysis's documents into the run. |
+| *(no argument)* | `discovered_from`, source = this task, target = the task the run was working on | Nothing — provenance only. Written automatically by `create_board_task` inside a task run (migration 136) so an agent cannot forget where a task came from; skipped when `derived_from` already names that same task. It never feeds documents: only `derived_from` is read by `AnalysisReferences`. |
 
 `blocked_by` ADDS (a blocker one planner learned must not be dropped by another); `deploy_depends_on` REPLACES (the release path reads the set as a whole). Both refuse a cycle at the point the edge is written, naming the chain that closes it. The ordering is also regenerated into the task's `before_deploy` runbook inside a fenced block — see `.ai/api-spec.md` → "The generated ordering block in `before_deploy`".
 

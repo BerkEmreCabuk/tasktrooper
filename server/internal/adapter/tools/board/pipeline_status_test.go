@@ -36,6 +36,9 @@ func (f *fakeTaskManager) ListTasks(ctx context.Context, repositoryID uuid.UUID)
 func (f *fakeTaskManager) ListAllTasks(ctx context.Context) ([]domain.BoardTask, error) {
 	return nil, nil
 }
+func (f *fakeTaskManager) ListReadyTasks(ctx context.Context, repositoryID uuid.UUID) ([]domain.BoardTask, error) {
+	return nil, nil
+}
 func (f *fakeTaskManager) FindTaskRepositoryID(ctx context.Context, taskID uuid.UUID) (uuid.UUID, error) {
 	return f.taskRepoID, nil
 }

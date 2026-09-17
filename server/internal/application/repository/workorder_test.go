@@ -97,6 +97,10 @@ func (g *graphRelationStore) ListBlockingSources(context.Context, uuid.UUID) ([]
 	return nil, nil
 }
 
+func (g *graphRelationStore) ListUnfinishedBlockers(context.Context) ([]domain.TaskRelation, error) {
+	return nil, nil
+}
+
 func (g *graphRelationStore) AddBlockers(_ context.Context, targetTaskID uuid.UUID, sourceTaskIDs []uuid.UUID) ([]domain.TaskRelation, error) {
 	var out []domain.TaskRelation
 	for _, sourceID := range sourceTaskIDs {

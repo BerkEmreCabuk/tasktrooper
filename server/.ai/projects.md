@@ -72,6 +72,7 @@ Detection never links on its own: only one decisive candidate is reported `exact
 ## Agent Board Tools
 
 - `list_project_tasks`
+- `list_ready_tasks` (the unblocked `backlog`/`todo` queue, priority-sorted)
 - `create_project_task`
 - `move_project_task`
 - `update_project_task`

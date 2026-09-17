@@ -276,13 +276,14 @@ clears it). `before_deploy` + `rollback_plan` are posted as ONE system comment w
 `TriggerRelease` dispatches the deploy; `after_deploy` when the prod deploy finalizes
 successfully. Empty fields post nothing.
 
-**Relations.** Three types, all reachable from the task API:
+**Relations.** Four types, all reachable from the task API:
 
 | Field | Direction | Write semantics | Enforcement |
 |---|---|---|---|
 | `deploy_depends_on: [{target_task_id \| target_key}]` | source = this task | PATCH **replaces** (`[]` clears, omitting changes nothing); POST via `relations` | `TriggerRelease` 400s with `domain.ErrDeployDependencyNotReleased` and comments the blocking keys while any target lacks production evidence |
 | `blocked_by: [{target_task_id \| target_key}]` | stored as `blocks` with the BLOCKER as `source_task_id` (migration 022) | **ADDS** — a blocker one planner learned must not be silently dropped by another | Work-order park; a move into `todo`/`in_progress` is refused |
 | `derived_from` | source = implementation task, target = the analiz task | via `relations` or `create_board_task` | None — provenance, not order |
+| `discovered_from` | source = the new task, target = the task the run was working on | written automatically by `create_board_task` inside a task run (migration 136); no tool argument | None — provenance, not order |
 
 - A task may not depend on itself (400). A **cycle is refused where the edge is
   written**, not at release, naming the chain that closes it (`deploy-order cycle

@@ -2021,6 +2021,35 @@ func (s *TaskRelationStore) ListBlockingSources(ctx context.Context, targetTaskI
 	return scanBoardTasks(rows)
 }
 
+// ListUnfinishedBlockers is ListBlockingSources without the $1 — every unfinished
+// `blocks` edge on the board in one query, keyed by SourceTaskID/TargetTaskID
+// rather than by board task, which is what lets a caller answer "is task X ready"
+// for the whole board with a single pass over the result instead of one query
+// per candidate task.
+func (s *TaskRelationStore) ListUnfinishedBlockers(ctx context.Context) ([]domain.TaskRelation, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT tr.id, tr.source_task_id, tr.target_task_id, tr.relation_type, tr.created_at,
+			`+taskKeySQL+`, bt.title
+		FROM task_relations tr
+		JOIN board_tasks bt ON bt.id = tr.source_task_id
+		WHERE tr.relation_type = 'blocks' AND bt.board_column NOT IN ('done', 'released')
+		ORDER BY tr.created_at
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var rels []domain.TaskRelation
+	for rows.Next() {
+		var r domain.TaskRelation
+		if err := rows.Scan(&r.ID, &r.SourceTaskID, &r.TargetTaskID, &r.RelationType, &r.CreatedAt, &r.SourceKey, &r.SourceTitle); err != nil {
+			return nil, err
+		}
+		rels = append(rels, r)
+	}
+	return rels, rows.Err()
+}
+
 type TaskDocumentStore struct {
 	pool *DB
 }

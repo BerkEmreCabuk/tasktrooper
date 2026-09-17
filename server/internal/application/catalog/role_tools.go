@@ -70,6 +70,10 @@ var (
 	}
 	roleBoardReadTools = []string{
 		"list_board_tasks",
+		// The unblocked queue: which of list_board_tasks' backlog/todo rows is
+		// actually startable right now, so a role choosing its next task does
+		// not have to re-derive that from BlockedBy itself.
+		"list_ready_tasks",
 		"move_board_task",
 		"update_board_task",
 		"add_task_comment",
@@ -245,7 +249,7 @@ func qaToolPolicy() domain.ToolPolicy {
 	tools = append(tools, roleQALookupTools...)
 	tools = append(tools, roleBrowserTools...)
 	tools = append(tools, roleMobileTools...)
-	tools = append(tools, "list_board_tasks", "move_board_task", "add_task_comment", "list_task_comments", "list_task_documents", "list_acceptance_criteria", "review_criterion", "list_repositories")
+	tools = append(tools, "list_board_tasks", "list_ready_tasks", "move_board_task", "add_task_comment", "list_task_comments", "list_task_documents", "list_acceptance_criteria", "review_criterion", "list_repositories")
 	// The round itself, written on the card: every case QA derived from the
 	// request (not only from the criteria), its verdict and its evidence —
 	// including the cases considered and rejected as invalid. QA is the only
