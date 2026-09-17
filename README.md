@@ -12,6 +12,11 @@
   <a href="#install"><img src="https://img.shields.io/badge/brew-makifbaysal%2Ftasktrooper-fbb040?logo=homebrew&logoColor=white" alt="Homebrew"></a>
 </p>
 
+<p align="center">
+  <img src="docs/assets/demo.gif" alt="A card dragged from Todo to In Progress; the backend-developer agent starts a Claude Code session, reads the repo, writes the rate limiter and runs the tests." width="100%">
+</p>
+<p align="center"><sub>Real recording: drag <b>Add rate limiter endpoint</b> into In Progress, and the backend agent takes it from there. No cuts, sped up.</sub></p>
+
 # TaskTrooper
 
 **Website:** [tasktrooper.ai](https://tasktrooper.ai) · **Docs:** [tasktrooper.ai/docs](https://tasktrooper.ai/docs) · **Download:** [Releases](https://github.com/makifbaysal/tasktrooper/releases)
@@ -211,6 +216,66 @@ docs/         user docs (rendered at tasktrooper.ai/docs) — start with docs/RE
 ```
 
 Each directory has its own `README.md` and `CLAUDE.md`.
+
+## Architecture
+
+One machine, three processes, one window. Nothing is hosted.
+
+```mermaid
+flowchart LR
+  subgraph app["TaskTrooper.app (Electron)"]
+    ui["React UI<br/>app://tasktrooper"]
+    sup["Supervisor<br/>spawns + watches children"]
+  end
+
+  subgraph server["agent-server (Go, hexagonal)"]
+    api["HTTP API<br/>127.0.0.1:&lt;port&gt; · one bearer token"]
+    board["Board + dispatcher<br/>columns → owners, gates, sweepers"]
+    runtime["Agent runtime<br/>headless CLI sessions, tool registry"]
+    mcp["/mcp<br/>board tools served back to sessions"]
+    ctx["Code understanding<br/>tree-sitter parse · local embeddings · dependency graph"]
+  end
+
+  pg[("Embedded Postgres 17<br/>tasks, runs, memories, vectors")]
+  emb["Embedder<br/>nomic-embed-text-v1.5, local"]
+  ws[("Workspaces<br/>one git checkout per task")]
+
+  subgraph agents["Agent sessions (local processes)"]
+    cc["claude -p"]
+    cur["cursor agent"]
+    oc["opencode run"]
+    ag["antigravity"]
+  end
+
+  ext["Outside the machine, only when you connect it:<br/>model APIs · GitHub · Vercel · App Store / Play · your MCP servers"]
+
+  ui -- fetch --> api
+  sup -- PORT=0, LISTENING --> api
+  sup --> emb
+  api --> board --> runtime
+  runtime --> cc & cur & oc & ag
+  cc & cur & oc & ag -- per-run token --> mcp
+  mcp --> board
+  runtime --> ws
+  ctx --> emb
+  board & runtime & ctx --> pg
+  runtime -.-> ext
+```
+
+- **Local only.** The desktop generates one bearer token, passes it to the
+  server as `SERVER_API_KEY` and to the page; the listener binds `127.0.0.1`.
+- **The desktop is the backend's supervisor.** It spawns `agent-server` with
+  `PORT=0`, reads the `LISTENING` line, polls `/health`, then opens the window.
+- **The server owns its database.** Empty `DATABASE_URL` means it starts its
+  own Postgres from the bundled binaries under the data directory.
+- **Agents are child processes, not a service.** Each task run is one headless
+  CLI session with a per-run MCP token; the repo's `.mcp.json` and your
+  personal CLI settings are never loaded.
+- **Code understanding stays on the machine.** Repositories are parsed with
+  tree-sitter and embedded with the bundled model; the vectors live in the same
+  Postgres.
+
+The long version: [docs/architecture.md](docs/architecture.md).
 
 ## How a task runs
 
