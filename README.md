@@ -1,4 +1,20 @@
+<p align="center">
+  <a href="https://tasktrooper.ai"><img src="docs/assets/banner.png" alt="TaskTrooper — Put it on the board. The agents ship it." width="100%"></a>
+</p>
+
+<p align="center">
+  <a href="https://tasktrooper.ai"><img src="https://img.shields.io/badge/web-tasktrooper.ai-f0b86e" alt="tasktrooper.ai"></a>
+  <a href="https://github.com/makifbaysal/tasktrooper/releases"><img src="https://img.shields.io/github/v/release/makifbaysal/tasktrooper?label=release&color=6a2d68" alt="release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="license"></a>
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="platform">
+  <img src="https://img.shields.io/badge/backend-Go-00ADD8?logo=go&logoColor=white" alt="Go">
+  <img src="https://img.shields.io/badge/desktop-Electron-47848F?logo=electron&logoColor=white" alt="Electron">
+  <a href="#install"><img src="https://img.shields.io/badge/brew-makifbaysal%2Ftasktrooper-fbb040?logo=homebrew&logoColor=white" alt="Homebrew"></a>
+</p>
+
 # TaskTrooper
+
+**Website:** [tasktrooper.ai](https://tasktrooper.ai) · **Download:** [Releases](https://github.com/makifbaysal/tasktrooper/releases)
 
 A local-first agent platform for software teams of one. A board of tasks, a set
 of role agents (product manager, architect, backend, frontend, QA), and a
@@ -204,6 +220,37 @@ Each directory has its own `README.md` and `CLAUDE.md`.
 
 The desktop app needs none. For `make dev`, `scripts/dev.sh` writes
 `server/.env.local` on first run; see `server/README.md` for every variable.
+
+## How it compares
+
+TaskTrooper sits next to a few projects that also put coding agents to work.
+The short version: the others give you a tracker, a queue or a session manager
+that *you* drive; TaskTrooper is the whole loop in one desktop app, and the
+board drives it.
+
+| | TaskTrooper | [Beads](https://github.com/steveyegge/beads) | [Beadhive](https://beadhive.ai) / [Gas City](https://gascity.com) | [Vibe Kanban](https://github.com/BloopAI/vibe-kanban) | [Claude Squad](https://github.com/smtg-ai/claude-squad) |
+|---|---|---|---|---|---|
+| What it is | Desktop app: board, role agents and the runtime that runs them | Git-embedded issue tracker and memory for agents (`bd` CLI) | Software factory on top of Beads (`bh` CLI; Gas City orchestrates it) | Kanban and per-task workspaces for coding agents (announced as sunsetting) | TUI that runs many agent sessions side by side |
+| Who starts the work | The board: a card entering a column is dispatched to that column's agent | You, or an agent you are already running | Its planner/dispatcher agents, behind human gates | You, per task | You, per session |
+| Roles | Six seeded agents (PM, architect, backend, frontend, mobile, QA) with skills and rules that rewrite themselves from results | None, it tracks work for any agent | Planner, dispatcher, developer, reviewer, merger, warden | None | None |
+| Lifecycle | Thirteen columns out of the box: analysis review, code review, QA, PM UAT, human UAT, Done merges, Released watches the deploy | Open/closed with typed dependencies | Plan, review, merge with human gates | Todo, in progress, review | Branch, diff, commit |
+| QA | A QA agent that cannot pass a task without running something: real requests, headless browser, iOS/Android simulators | None | Reviewer agents | None | None |
+| After merge | Deploy recipes, health checks, incidents from Alertmanager/Sentry/webhooks, rollback, App Store and Play releases | None | Release automation | None | None |
+| Work ordering | `blocked_by`, `deploy_depends_on`, `derived_from`, `discovered_from`; a ready queue for agents | `blocks`, `parent-child`, `discovered-from`, `related`; `bd ready` | Beads' graph | None | None |
+| Storage | Embedded Postgres in the app's data directory | Dolt under `.beads/`, synced through git | Beads | Local database, or a self-hosted server | tmux sessions and git worktrees |
+| Agent runtimes | Claude Code, Cursor, Antigravity, OpenCode as local processes; OpenAI, Anthropic, Gemini, Groq or any OpenAI-compatible API | Any agent that can call a CLI | Any, through its CLI | Claude Code, Codex, Gemini CLI, Copilot, Amp, Cursor, OpenCode and more | Claude Code, Codex, Gemini, Aider |
+| Interface | Desktop app (macOS, Windows, Linux) | CLI, plus community UIs | CLI | Web UI | Terminal UI |
+| License | Apache-2.0 | MIT | See their repositories | Apache-2.0 | AGPL-3.0 |
+
+Two ideas here come straight from Beads: agents ask for the unblocked queue
+(`list_ready_tasks`) instead of scanning the board, and a task an agent opens
+while working another one is linked back to it (`discovered_from`) without the
+agent having to remember. Where TaskTrooper differs is everything around the
+tracker: the board dispatches on its own, each column has an owner, QA has to
+execute, a pull request is opened and merged per task, and the deploy is
+watched after that. If what you want is a tracker your agents call from any
+tool, Beads is that. If you want the loop closed on one machine with nothing to
+host, that is what TaskTrooper is for.
 
 ## License
 

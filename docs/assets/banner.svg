@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="400" viewBox="0 0 1280 400">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#1b1a3c"/>
+      <stop offset="0.55" stop-color="#3a2457"/>
+      <stop offset="1" stop-color="#6a2d68"/>
+    </linearGradient>
+    <pattern id="chev" width="96" height="56" patternUnits="userSpaceOnUse" patternTransform="translate(0 0)">
+      <path d="M0 40 L48 12 L96 40" fill="none" stroke="#fff3e0" stroke-opacity="0.045" stroke-width="10" stroke-linejoin="round"/>
+    </pattern>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect width="1280" height="400" fill="url(#bg)"/>
+  <rect width="1280" height="400" fill="url(#chev)"/>
+  <g transform="translate(150 78) scale(1.9)" filter="url(#glow)" fill="#fff3e0" stroke="#fff3e0" stroke-width="5" stroke-linejoin="round">
+    <path d="M6 30 L50 2 L94 30 V56 L50 30 L6 56 Z"/>
+    <path d="M6 66 L50 40 L94 66 V92 L50 66 L6 92 Z"/>
+    <path d="M6 102 L50 76 L94 102 V128 H6 Z"/>
+  </g>
+  <g font-family="Helvetica Neue, Helvetica, Arial, sans-serif">
+    <text x="420" y="205" font-size="104" font-weight="700" fill="#fff3e0" letter-spacing="-2">Task<tspan fill="#f0b86e">Trooper</tspan></text>
+    <text x="424" y="262" font-size="30" fill="#cfc4d8">Put it on the board. The agents ship it.</text>
+    <text x="424" y="306" font-size="20" fill="#9a8fa8" letter-spacing="1">LOCAL-FIRST  ·  ROLE AGENTS  ·  CLAUDE CODE  ·  ONE MAC, NO CLOUD</text>
+  </g>
+</svg>
