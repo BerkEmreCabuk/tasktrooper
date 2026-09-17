@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 
 	embedded "github.com/fergusstrange/embedded-postgres"
@@ -24,7 +26,9 @@ type Embedded struct {
 	postgres *embedded.EmbeddedPostgres
 	port     uint32
 	dataDir  string
+	database string
 	owned    bool
+	clones   *atomic.Uint64
 }
 
 type EmbeddedConfig struct {
@@ -44,9 +48,11 @@ func StartEmbedded(ctx context.Context, cfg EmbeddedConfig) (*Embedded, error) {
 
 	if port, ok := existingPort(ctx, cfg.DataDir); ok {
 		e := &Embedded{
-			port:    port,
-			dataDir: cfg.DataDir,
-			owned:   false,
+			port:     port,
+			dataDir:  cfg.DataDir,
+			database: dbName,
+			owned:    false,
+			clones:   &atomic.Uint64{},
 		}
 		pool, err := pgxpool.New(ctx, e.DSN())
 		if err != nil {
@@ -86,11 +92,15 @@ func StartEmbedded(ctx context.Context, cfg EmbeddedConfig) (*Embedded, error) {
 		return nil, fmt.Errorf("start embedded postgres: %w", err)
 	}
 
+	stopWhenOrphaned(cfg.DataDir)
+
 	e := &Embedded{
 		postgres: pg,
 		port:     port,
 		dataDir:  cfg.DataDir,
+		database: dbName,
 		owned:    true,
+		clones:   &atomic.Uint64{},
 	}
 
 	pool, err := pgxpool.New(ctx, e.DSN())
@@ -106,6 +116,53 @@ func StartEmbedded(ctx context.Context, cfg EmbeddedConfig) (*Embedded, error) {
 	}
 
 	return e, nil
+}
+
+// stopWhenOrphaned leaves a detached watcher behind that shuts the cluster down
+// once this process is gone. pg_ctl daemonises postgres, so a test binary that
+// is SIGKILLed — a caller's command timeout, `go test -timeout` — never reaches
+// Stop, and the cluster it started lives on for days holding its port and
+// memory. Setsid keeps the watcher out of the process group such a kill takes
+// down. After a clean Stop postgres has removed postmaster.pid and the watcher
+// has nothing to signal.
+func stopWhenOrphaned(dataDir string) {
+	const script = `while kill -0 "$1" 2>/dev/null; do sleep 1; done
+pid=$(head -n 1 "$2/postmaster.pid" 2>/dev/null) && kill -INT "$pid" 2>/dev/null`
+	cmd := exec.Command("/bin/sh", "-c", script, "sh", strconv.Itoa(os.Getpid()), dataDir)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		return
+	}
+	_ = cmd.Process.Release()
+}
+
+// NewDatabase returns a fresh, fully migrated database on the same cluster,
+// copied from the one StartEmbedded migrated. A suite gets the isolation of its
+// own instance for the price of a file copy instead of an initdb, a server
+// start and every migration again.
+func (e *Embedded) NewDatabase(ctx context.Context) (*Embedded, error) {
+	admin, err := pgxpool.New(ctx, e.dsnFor("postgres"))
+	if err != nil {
+		return nil, fmt.Errorf("connect embedded postgres: %w", err)
+	}
+	defer admin.Close()
+
+	// CREATE DATABASE refuses a template that has sessions, after waiting five
+	// seconds for them. The embedded-postgres library leaves its health-check
+	// connection open until the garbage collector gets to it, which held the
+	// first clone up for minutes. Nothing uses the template directly, so
+	// whatever is connected to it is a leftover.
+	if _, err := admin.Exec(ctx,
+		`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`,
+		dbName); err != nil {
+		return nil, fmt.Errorf("clear template sessions: %w", err)
+	}
+
+	name := fmt.Sprintf("%s_%d", dbName, e.clones.Add(1))
+	if _, err := admin.Exec(ctx, fmt.Sprintf(`CREATE DATABASE %q TEMPLATE %q`, name, dbName)); err != nil {
+		return nil, fmt.Errorf("create database %s: %w", name, err)
+	}
+	return &Embedded{port: e.port, dataDir: e.dataDir, database: name, clones: e.clones}, nil
 }
 
 func reconcileDataDir(dataDir string) error {
@@ -199,12 +256,16 @@ func portReachable(port uint32) bool {
 }
 
 func (e *Embedded) DSN() string {
+	return e.dsnFor(e.database)
+}
+
+func (e *Embedded) dsnFor(database string) string {
 	return fmt.Sprintf(
 		"postgres://%s:%s@127.0.0.1:%d/%s?sslmode=disable",
 		dbUser,
 		dbPassword,
 		e.port,
-		dbName,
+		database,
 	)
 }
 

@@ -2,7 +2,6 @@ package postgres_test
 
 import (
 	"context"
-	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -54,10 +53,7 @@ func newReplicaFixture(t *testing.T) *replicaFixture {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
-	pg, err := database.StartEmbedded(ctx, database.EmbeddedConfig{
-		DataDir:     filepath.Join(t.TempDir(), "pg"),
-		RuntimePath: sharedPGRuntimeDir,
-	})
+	pg, err := newTestDatabase(ctx)
 	if err != nil {
 		t.Fatalf("start embedded postgres: %v", err)
 	}

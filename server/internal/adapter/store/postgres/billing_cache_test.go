@@ -3,7 +3,6 @@ package postgres_test
 import (
 	"context"
 	"math"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -44,11 +43,7 @@ func TestBillingCacheSuite(t *testing.T) {
 
 func (s *BillingCacheSuite) SetupSuite() {
 	s.ctx, s.cancel = context.WithTimeout(context.Background(), 3*time.Minute)
-	tmp := s.T().TempDir()
-	pg, err := database.StartEmbedded(s.ctx, database.EmbeddedConfig{
-		DataDir:     filepath.Join(tmp, "postgres"),
-		RuntimePath: sharedPGRuntimeDir,
-	})
+	pg, err := newTestDatabase(s.ctx)
 	s.Require().NoError(err)
 	s.pg = pg
 	pool, err := pgxpool.New(s.ctx, pg.DSN())

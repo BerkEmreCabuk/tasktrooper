@@ -62,10 +62,7 @@ func (s *SessionPathSuite) SetupSuite() {
 	defer cancelStartup()
 
 	tmp := s.T().TempDir()
-	pg, err := database.StartEmbedded(startupCtx, database.EmbeddedConfig{
-		DataDir:     filepath.Join(tmp, "postgres"),
-		RuntimePath: sharedPGRuntimeDir,
-	})
+	pg, err := newTestDatabase(startupCtx)
 	s.Require().NoError(err)
 	s.pg = pg
 	pool, err := pgxpool.New(s.ctx, pg.DSN())
