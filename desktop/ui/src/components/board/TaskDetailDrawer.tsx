@@ -67,6 +67,7 @@ import {
   blockedResourceLabel,
   columnLabel,
   formatResumeIn,
+  runStatusVariant,
   TASK_PRIORITY_OPTIONS,
   TASK_TYPE_OPTIONS,
   taskPriorityLabel,
@@ -86,24 +87,6 @@ interface TaskDetailDrawerProps {
   initiativeProjects: InitiativeProject[];
   repositories: Repository[];
   onUpdated: () => void;
-}
-
-function runStatusVariant(status: string): "success" | "warning" | "destructive" | "secondary" {
-  switch (status) {
-    case "completed":
-      return "success";
-    case "running":
-    case "pending":
-      return "warning";
-    case "failed":
-      return "destructive";
-    // Somebody stopped this run on purpose; it is history, not an incident, so
-    // it must never borrow the failure colour.
-    case "cancelled":
-      return "secondary";
-    default:
-      return "secondary";
-  }
 }
 
 // The server only accepts a stop while the run is still open, and a rerun only
@@ -1100,7 +1083,7 @@ export function TaskDetailDrawer({
                   {selectedRunId && (
                     <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-3">
                       {runIsLive && liveSummary && (
-                        <Badge variant="warning" className="gap-1">
+                        <Badge variant="info" className="gap-1">
                           <Loader2 className="h-3 w-3 animate-spin" />
                           {liveSummary}
                         </Badge>

@@ -261,17 +261,43 @@ export function indexProgressPercent(filesProcessed: number, filesTotal: number,
 
 export function pipelineStatusVariant(
   status: TaskPipeline["status"],
-): "success" | "warning" | "destructive" | "secondary" {
+): "success" | "info" | "destructive" | "secondary" {
   switch (status) {
     case "success":
       return "success";
     case "failed":
       return "destructive";
+    // running/waiting states use "info", not "warning": nothing is wrong yet,
+    // and info is the color that reads as distinct from the primary action
+    // hue rather than as an in-progress warning.
     case "running":
     case "pending":
-      return "warning";
+      return "info";
     // "skipped" (nothing ran) falls through to the neutral variant on purpose:
     // painting it green implied a build that never happened.
+    default:
+      return "secondary";
+  }
+}
+
+// Shared by TaskDetailDrawer's run list and ActivityFeedItem's feed rows so a
+// running/pending item never shows "info" in one place and "warning" in the
+// other, a few pixels apart on the same board page.
+export function runStatusVariant(status: string): "success" | "info" | "destructive" | "secondary" {
+  switch (status) {
+    case "completed":
+      return "success";
+    // running/waiting reads as "info", not "warning" — kept distinct from the
+    // primary action color without implying something has gone wrong.
+    case "running":
+    case "pending":
+      return "info";
+    case "failed":
+      return "destructive";
+    // Somebody stopped this run on purpose; it is history, not an incident, so
+    // it must never borrow the failure colour.
+    case "cancelled":
+      return "secondary";
     default:
       return "secondary";
   }
@@ -313,7 +339,7 @@ export function taskPipelineCardIcon(
       return { Icon: XCircle, className: "text-destructive" };
     case "pending":
     case "running":
-      return { Icon: Loader2, className: "text-warning animate-spin" };
+      return { Icon: Loader2, className: "text-info animate-spin" };
     // Nothing ran — a muted dash, never the green check the card used to show.
     case "skipped":
       return { Icon: MinusCircle, className: "text-muted-foreground" };
