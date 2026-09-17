@@ -34,6 +34,9 @@ func TestBoardActionReason(t *testing.T) {
 		"Board columns render in position order on the board page",
 		"Given an agent without move permission, When it calls the API, Then it gets 403",
 		"The migration is done in a single transaction",
+		"Given the criteria loop guard fires three times, When no human has commented, Then the task is put into blocked with a park reason",
+		"Given a task with an unanswered question, When the agent cannot proceed, Then the task ends up in blocked with the question as the park reason",
+		"Given the pipeline fails three times in a row, When no one intervenes, Then the task is moved into blocked with a stated park reason",
 	}
 	for _, text := range kept {
 		if reason := boardActionReason(text); reason != "" {

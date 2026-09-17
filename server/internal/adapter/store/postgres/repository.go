@@ -1659,20 +1659,60 @@ func NewAcceptanceCriterionStore(pool *DB) *AcceptanceCriterionStore {
 
 const criterionColumns = `id, task_id, text, position, completed, canceled, cancel_reason, created_at`
 
+// ReplaceForTask diffs the incoming texts against the task's current
+// criteria instead of deleting and reinserting every row: a criterion whose
+// text is unchanged keeps its id, its completed/canceled state and any
+// review verdict recorded on it (task_criterion_checks cascades on delete,
+// so reinserting it would silently wipe QA/PM sign-off for no reason). Only
+// a criterion genuinely absent from the incoming list is deleted, and only a
+// genuinely new text gets a fresh row — that is what lets an agent resend
+// "the full list" after an unrelated edit without invalidating ids it is
+// still holding.
 func (s *AcceptanceCriterionStore) ReplaceForTask(ctx context.Context, taskID uuid.UUID, items []domain.AcceptanceCriterionInput) ([]domain.AcceptanceCriterion, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err := tx.Exec(ctx, `DELETE FROM task_acceptance_criteria WHERE task_id = $1`, taskID); err != nil {
+
+	rows, err := tx.Query(ctx, `
+		SELECT `+criterionColumns+`
+		FROM task_acceptance_criteria WHERE task_id = $1
+	`, taskID)
+	if err != nil {
 		return nil, err
 	}
-	var out []domain.AcceptanceCriterion
+	existingByText := make(map[string]domain.AcceptanceCriterion)
+	for rows.Next() {
+		var c domain.AcceptanceCriterion
+		if err := rows.Scan(&c.ID, &c.TaskID, &c.Text, &c.Position, &c.Completed, &c.Canceled, &c.CancelReason, &c.CreatedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		existingByText[c.Text] = c
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+
+	matched := make(map[string]bool, len(items))
+	out := make([]domain.AcceptanceCriterion, 0, len(items))
 	for i, item := range items {
 		pos := item.Position
 		if pos == 0 {
 			pos = i
+		}
+		if current, ok := existingByText[item.Text]; ok {
+			matched[item.Text] = true
+			if current.Position != pos {
+				if _, err := tx.Exec(ctx, `UPDATE task_acceptance_criteria SET position = $2 WHERE id = $1`, current.ID, pos); err != nil {
+					return nil, fmt.Errorf("update acceptance criterion position: %w", err)
+				}
+				current.Position = pos
+			}
+			out = append(out, current)
+			continue
 		}
 		var c domain.AcceptanceCriterion
 		err := tx.QueryRow(ctx, `
@@ -1686,6 +1726,16 @@ func (s *AcceptanceCriterionStore) ReplaceForTask(ctx context.Context, taskID uu
 		}
 		out = append(out, c)
 	}
+
+	for text, c := range existingByText {
+		if matched[text] {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM task_acceptance_criteria WHERE id = $1`, c.ID); err != nil {
+			return nil, fmt.Errorf("delete acceptance criterion: %w", err)
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -1759,6 +1809,9 @@ func (s *AcceptanceCriterionStore) GetCriterion(ctx context.Context, criterionID
 		FROM task_acceptance_criteria WHERE id = $1
 	`, criterionID).Scan(&c.ID, &c.TaskID, &c.Text, &c.Position, &c.Completed, &c.Canceled, &c.CancelReason, &c.CreatedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AcceptanceCriterion{}, domain.ErrCriterionNotFound
+		}
 		return domain.AcceptanceCriterion{}, err
 	}
 	return c, nil
@@ -1804,6 +1857,9 @@ func (s *AcceptanceCriterionStore) UpdateCompleted(ctx context.Context, criterio
 		RETURNING `+criterionColumns, criterionID, completed).
 		Scan(&c.ID, &c.TaskID, &c.Text, &c.Position, &c.Completed, &c.Canceled, &c.CancelReason, &c.CreatedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AcceptanceCriterion{}, domain.ErrCriterionNotFound
+		}
 		return domain.AcceptanceCriterion{}, err
 	}
 	return c, nil
@@ -1820,6 +1876,9 @@ func (s *AcceptanceCriterionStore) UpdateCanceled(ctx context.Context, criterion
 		RETURNING `+criterionColumns, criterionID, canceled, reason).
 		Scan(&c.ID, &c.TaskID, &c.Text, &c.Position, &c.Completed, &c.Canceled, &c.CancelReason, &c.CreatedAt)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AcceptanceCriterion{}, domain.ErrCriterionNotFound
+		}
 		return domain.AcceptanceCriterion{}, err
 	}
 	return c, nil

@@ -78,11 +78,23 @@ var criterionRules = []criterionRule{
 	},
 }
 
+// parkStateDescription exempts a legitimate product-behaviour criterion —
+// this app's own park feature leaves the underlying task blocked WITH A
+// REASON — from the column-move rule above. "put into blocked" alone reads
+// exactly like a literal move instruction, but paired with "reason" nearby it
+// is describing what the deliverable does to some other task, not moving
+// THIS one. Go's RE2 has no lookaround, so this has to be a second pattern
+// checked ahead of criterionRules rather than a negative lookahead inline.
+var parkStateDescription = regexp.MustCompile(`(?i)\bblocked\b[^.;]{0,40}?\breason\b|\breason\b[^.;]{0,40}?\bblocked\b`)
+
 // boardActionReason reports why a criterion is board workflow rather than an
 // observable property of the work, or "" when it is a legitimate criterion.
 func boardActionReason(text string) string {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
+		return ""
+	}
+	if parkStateDescription.MatchString(trimmed) {
 		return ""
 	}
 	for _, rule := range criterionRules {
