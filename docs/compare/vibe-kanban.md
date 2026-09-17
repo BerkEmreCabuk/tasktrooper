@@ -10,7 +10,7 @@ Vibe Kanban gives coding agents a board and an isolated workspace per task, and 
 |---|---|---|
 | **Where it runs** | Local via npx, or a self-hosted server. | On your Mac: the desktop app starts an embedded Postgres, the Go backend and the agent sessions. Nothing hosted. |
 | **Who starts the work** | You, per task. | The board. A card entering a column is dispatched to that column's agent; nobody presses run. |
-| **Roles** | None; pick an agent per task. | Six role agents (PM, architect, backend, frontend, mobile, QA) with seeded skills, rules, tool policies and memory. |
+| **Roles** | None; pick an agent per task. | Six role agents (PM, architect, backend, frontend, mobile, QA) with seeded skills, rules, tool policies and memory. Add your own from a template or from scratch, and give each agent its own runtime: one board can mix Claude Code, Cursor, OpenCode, Antigravity and API models. |
 | **Parallel agents and tools** | One agent per task in its own workspace, all with the same capabilities. | Several tasks run at once (three sessions by default), each in its own workspace, branch and CLI session. Each role has its own tool policy, so the backend agent runs the test suite while QA drives a browser against another build and the architect reads a third task's pull request. QA has no code tools; the architect reviews and does not implement. |
 | **Lifecycle** | Todo, in progress, review. | Thirteen columns out of the box: analysis review, code review, QA, PM UAT, human UAT, Done merges, Released watches the deploy. |
 | **QA** | None. | A QA agent that cannot pass a task without executing: real requests, headless browser, iOS/Android simulators. |
