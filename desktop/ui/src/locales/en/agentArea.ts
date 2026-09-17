@@ -68,7 +68,7 @@ export const agentArea = {
     },
     kpiCard: {
       noMeasurement: "no measurement",
-      noMeasurementHint: "Not scored this period — a time KPI needs at least 3 tasks completed without a revision.",
+      noMeasurementHint: "Not scored this period. A time KPI needs at least 3 tasks completed without a revision.",
       measured: "Measured:",
       targets: "· full {full} / half {half}",
     },
@@ -96,7 +96,7 @@ export const agentArea = {
     impact: {
       effective: "✓ effective",
       regressed: "▼ regressed",
-      neutral: "— neutral",
+      neutral: "- neutral",
       pending: "… measuring",
       insufficient_data: "insufficient data",
     },
@@ -140,10 +140,10 @@ export const agentArea = {
       label: "Model",
       claudeCode: {
         cliDefault: "CLI default (no --model)",
-        help: 'Optional. "CLI default" runs {provider} on the model your subscription defaults to; anything else is passed straight to the CLI. This model runs ordinary turns — pick a separate model for hard work below.',
+        help: 'Optional. "CLI default" runs {provider} on the model your subscription defaults to; anything else is passed straight to the CLI. This model runs ordinary turns; pick a separate model for hard work below.',
         placeholder: "Leave empty for the {provider} default",
         fallbackHelp:
-          "This server sent no model list for {provider}, so type the name yourself — it goes straight to the CLI. Leave it empty and the CLI runs on the model your subscription defaults to. Update the agent server to pick from a list.",
+          "This server sent no model list for {provider}, so type the name yourself; it goes straight to the CLI. Leave it empty and the CLI runs on the model your subscription defaults to. Update the agent server to pick from a list.",
         unlisted:
           "\"{model}\" is not in the list this server reports for the local CLI. It is still sent to the CLI, so keep it only if you know it accepts that name.",
       },
@@ -159,20 +159,20 @@ export const agentArea = {
         code: "code",
       },
       visionRequired:
-        "This agent takes screenshots (browser/mobile tools), so pick a model that can SEE images. A text-only model never receives the picture and still writes a verdict about it — that is how a broken image passes a review.",
+        "This agent takes screenshots (browser/mobile tools), so pick a model that can SEE images. A text-only model never receives the picture and still writes a verdict about it: that is how a broken image passes a review.",
       foreign:
-        '"{model}" is not served by the selected provider — it is left over from another one. Pick a model from this provider, otherwise runs fail with "invalid model".',
+        '"{model}" is not served by the selected provider; it is left over from another one. Pick a model from this provider, otherwise runs fail with "invalid model".',
     },
     modelHeavy: {
       label: "Model for hard tasks (optional)",
       placeholder: "Use default model",
-      clear: "— (use default)",
+      clear: "- (use default)",
       help: 'If the planner marks a subtask as "hard", that subtask runs with this model instead of the one above. If empty, the model above is always used.',
       claudeCode: {
-        help: 'Optional. Runs hard subtasks on a different {provider} model than ordinary turns. Left on the default row (or empty), hard subtasks use whatever the model above resolves to — including its own CLI default when that is empty too.',
+        help: 'Optional. Runs hard subtasks on a different {provider} model than ordinary turns. Left on the default row (or empty), hard subtasks use whatever the model above resolves to, including its own CLI default when that is empty too.',
         placeholder: "Leave empty to use the model above for hard subtasks",
         fallbackHelp:
-          "This server sent no model list for {provider}, so type the name yourself — it is saved for hard subtasks the same way the model above is passed to the CLI. Leave it empty and hard subtasks use the model above. Update the agent server to pick from a list.",
+          "This server sent no model list for {provider}, so type the name yourself; it is saved for hard subtasks the same way the model above is passed to the CLI. Leave it empty and hard subtasks use the model above. Update the agent server to pick from a list.",
         unlisted:
           '"{model}" is not in the list this server reports for the local CLI. It is still saved for hard subtasks, so keep it only if you know the runner\'s CLI accepts that name.',
       },
@@ -261,7 +261,7 @@ export const agentArea = {
         added: "Memory added",
         deleted: "Memory deleted",
         deleteFailed: "Delete failed",
-        promoteNone: "Nothing to promote — every entry belongs in memory.",
+        promoteNone: "Nothing to promote. Every entry belongs in memory.",
         promoteDone: "{count} memories became skills: {skills}",
         promoteFailed: "Promotion failed",
       },
@@ -275,7 +275,7 @@ export const agentArea = {
       scopeAll: "All scopes",
       scopeGlobal: "Global",
       scopeProject: "Project",
-      scopeGlobalOption: "Global — valid in every repository",
+      scopeGlobalOption: "Global: valid in every repository",
       scopeHint: "Pick a repository for anything that is only true inside it.",
       scopeLocked: "Scope cannot be changed after the memory is created.",
       add: "Add",
@@ -284,7 +284,7 @@ export const agentArea = {
       planning: "Reviewing…",
       promotePlanTitle: "Promote memories to skills",
       promotePlanDescription: "{count} of {scanned} team memories read as reusable know-how. Each one becomes a skill on the agents listed and is removed from memory. Uncheck anything that should stay a memory.",
-      promotePlanEmpty: "Nothing to promote — all {scanned} team memories are facts or preferences, which belong in memory.",
+      promotePlanEmpty: "Nothing to promote. All {scanned} team memories are facts or preferences, which belong in memory.",
       promotePlanConfirm: "Promote {count} selected",
       promotePlanCancel: "Cancel",
       promotePlanFrom: "From memory",

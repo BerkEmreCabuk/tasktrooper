@@ -1,6 +1,6 @@
 import type { FrameDict } from "@/locales/en/frame";
 
-// Turkish dictionary for the `frame` namespace. Typed as FrameDict —
+// Turkish dictionary for the `frame` namespace. Typed as FrameDict;
 // keys must mirror en/frame.ts exactly. Strings are the original UI text.
 export const frame: FrameDict = {
   layout: {
@@ -70,7 +70,7 @@ export const frame: FrameDict = {
       empty: "Henüz alan yok",
       keyPlaceholder: "Anahtar",
       valuePlaceholder: "Değer",
-      storedSecret: "Kayıtlı — değiştirmek için girin",
+      storedSecret: "Kayıtlı. Değiştirmek için yeni bir değer girin.",
       addField: "Alan Ekle",
     },
     toolPolicy: {
@@ -83,7 +83,7 @@ export const frame: FrameDict = {
     mcpPicker: {
       defaultLabel: "MCP sunucuları",
       connected: "Bağlı",
-      disabled: "Devre dışı — MCP ayarlarından etkinleştirin",
+      disabled: "Devre dışı. MCP ayarlarından etkinleştirin.",
       notFound: "MCP sunucusu bulunamadı",
     },
     mcpForm: {

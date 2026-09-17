@@ -1,6 +1,6 @@
 import type { AgentAreaDict } from "@/locales/en/agentArea";
 
-// Turkish dictionary for the Agent area. Typed as AgentAreaDict — mirrors en/agentArea.ts keys exactly.
+// Turkish dictionary for the Agent area. Typed as AgentAreaDict; mirrors en/agentArea.ts keys exactly.
 export const agentArea: AgentAreaDict = {
   perf: {
     header: {
@@ -68,7 +68,7 @@ export const agentArea: AgentAreaDict = {
     },
     kpiCard: {
       noMeasurement: "ölçüm yok",
-      noMeasurementHint: "Bu dönem puanlanmadı — süre KPI'sı için revizyon almadan biten en az 3 task gerekir.",
+      noMeasurementHint: "Bu dönem puanlanmadı. Süre KPI'sı için revizyon almadan biten en az 3 task gerekir.",
       measured: "Ölçülen:",
       targets: "· tam {full} / yarım {half}",
     },
@@ -96,7 +96,7 @@ export const agentArea: AgentAreaDict = {
     impact: {
       effective: "✓ etkili",
       regressed: "▼ geriletti",
-      neutral: "— nötr",
+      neutral: "- nötr",
       pending: "… ölçülüyor",
       insufficient_data: "veri yetersiz",
     },
@@ -140,7 +140,7 @@ export const agentArea: AgentAreaDict = {
       label: "Model",
       claudeCode: {
         cliDefault: "CLI varsayılanı (--model gönderilmez)",
-        help: 'Opsiyonel. "CLI varsayılanı" seçilirse {provider}, aboneliğinizin varsayılan modeliyle çalışır; diğer seçimler doğrudan CLI\'ye geçilir. Bu model olağan turları çalıştırır — zor işler için aşağıdan ayrı bir model seçin.',
+        help: 'Opsiyonel. "CLI varsayılanı" seçilirse {provider}, aboneliğinizin varsayılan modeliyle çalışır; diğer seçimler doğrudan CLI\'ye geçilir. Bu model olağan turları çalıştırır; zor işler için aşağıdan ayrı bir model seçin.',
         placeholder: "Boş bırakın; {provider} varsayılanı kullanılır",
         fallbackHelp:
           "Bu sunucu {provider} için model listesi göndermedi; adı kendiniz yazın, doğrudan CLI'ye geçilir. Boş bırakılırsa CLI, aboneliğinizin varsayılan modeliyle çalışır. Listeden seçebilmek için agent sunucusunu güncelleyin.",
@@ -159,20 +159,20 @@ export const agentArea: AgentAreaDict = {
         code: "kod",
       },
       visionRequired:
-        "Bu ajan ekran görüntüsü alıyor (browser/mobil araçları), o yüzden görsel işleyebilen bir model seçin. Yalnızca metin işleyen model görseli hiç almaz ama yine de onun hakkında hüküm yazar — bozuk bir görselin incelemeden geçmesi tam olarak böyle olur.",
+        "Bu ajan ekran görüntüsü alıyor (browser/mobil araçları), o yüzden görsel işleyebilen bir model seçin. Yalnızca metin işleyen model görseli hiç almaz ama yine de onun hakkında hüküm yazar; bozuk bir görselin incelemeden geçmesi tam olarak böyle olur.",
       foreign:
-        '"{model}" seçili sağlayıcıda yok — başka bir sağlayıcıdan kalmış. Bu sağlayıcının modellerinden birini seçin, yoksa çalıştırmalar "geçersiz model" hatasıyla düşer.',
+        '"{model}" seçili sağlayıcıda yok; başka bir sağlayıcıdan kalmış. Bu sağlayıcının modellerinden birini seçin, yoksa çalıştırmalar "geçersiz model" hatasıyla düşer.',
     },
     modelHeavy: {
       label: "Zor işler için model (opsiyonel)",
       placeholder: "Varsayılan modeli kullan",
-      clear: "— (varsayılanı kullan)",
+      clear: "- (varsayılanı kullan)",
       help: 'Planlayıcı bir alt görevi "zor" olarak işaretlerse o alt görev, yukarıdaki model yerine bu modelle çalışır. Boşsa her zaman yukarıdaki model kullanılır.',
       claudeCode: {
-        help: 'Opsiyonel. Zor alt görevleri, olağan turlardan farklı bir {provider} modeliyle çalıştırır. Varsayılan satırda bırakılırsa (veya boşsa) zor alt görevler, yukarıdaki modelin çözümlendiği neyse onu kullanır — o da boşsa kendi CLI varsayılanı dahil.',
+        help: 'Opsiyonel. Zor alt görevleri, olağan turlardan farklı bir {provider} modeliyle çalıştırır. Varsayılan satırda bırakılırsa (veya boşsa) zor alt görevler, yukarıdaki modelin çözümlendiği neyse onu kullanır; o da boşsa kendi CLI varsayılanı dahil.',
         placeholder: "Zor alt görevler için yukarıdaki modeli kullanmak üzere boş bırakın",
         fallbackHelp:
-          "Bu sunucu {provider} için model listesi göndermedi; adı kendiniz yazın — yukarıdaki modelin CLI'ye geçilmesiyle aynı şekilde zor alt görevler için kaydedilir. Boş bırakılırsa zor alt görevler yukarıdaki modeli kullanır. Listeden seçebilmek için agent sunucusunu güncelleyin.",
+          "Bu sunucu {provider} için model listesi göndermedi; adı kendiniz yazın. Yukarıdaki modelin CLI'ye geçilmesiyle aynı şekilde zor alt görevler için kaydedilir. Boş bırakılırsa zor alt görevler yukarıdaki modeli kullanır. Listeden seçebilmek için agent sunucusunu güncelleyin.",
         unlisted:
           '"{model}" bu sunucunun lokal CLI için bildirdiği listede yok. Yine de zor alt görevler için kaydedilir; runner üzerindeki CLI\'nin bu adı kabul ettiğinden eminseniz bırakın.',
       },
@@ -261,7 +261,7 @@ export const agentArea: AgentAreaDict = {
         added: "Hafıza eklendi",
         deleted: "Hafıza silindi",
         deleteFailed: "Silme başarısız",
-        promoteNone: "Taşınacak bir şey yok — her kayıt hafızada kalmalı.",
+        promoteNone: "Taşınacak bir şey yok. Her kayıt hafızada kalmalı.",
         promoteDone: "{count} hafıza skill oldu: {skills}",
         promoteFailed: "Skill'e taşıma başarısız",
       },
@@ -275,7 +275,7 @@ export const agentArea: AgentAreaDict = {
       scopeAll: "Tüm kapsamlar",
       scopeGlobal: "Global",
       scopeProject: "Proje",
-      scopeGlobalOption: "Global — tüm repolarda geçerli",
+      scopeGlobalOption: "Global: tüm repolarda geçerli",
       scopeHint: "Sadece tek bir repoda doğru olan bilgiler için o repoyu seçin.",
       scopeLocked: "Kapsam kayıt oluşturulduktan sonra değiştirilemez.",
       add: "Ekle",
@@ -284,7 +284,7 @@ export const agentArea: AgentAreaDict = {
       planning: "İnceleniyor…",
       promotePlanTitle: "Hafızayı skill'e taşı",
       promotePlanDescription: "{scanned} takım hafızasından {count} tanesi tekrar kullanılabilir bilgi görünüyor. Her biri listelenen ajanlarda skill olur ve hafızadan silinir. Hafızada kalması gerekenlerin işaretini kaldır.",
-      promotePlanEmpty: "Taşınacak bir şey yok — {scanned} kaydın hepsi hafızada kalması gereken bilgi ya da tercih.",
+      promotePlanEmpty: "Taşınacak bir şey yok. {scanned} kaydın hepsi hafızada kalması gereken bilgi ya da tercih.",
       promotePlanConfirm: "Seçili {count} kaydı taşı",
       promotePlanCancel: "Vazgeç",
       promotePlanFrom: "Hafızadan",

@@ -1,5 +1,5 @@
 // English dictionary for the chat area (chat, workspace, rag, markdown).
-// Source of truth — tr/chatArea.ts must mirror these keys exactly.
+// Source of truth; tr/chatArea.ts must mirror these keys exactly.
 // Interpolation uses {name} placeholders.
 export const chatArea = {
   chat: {
@@ -25,7 +25,7 @@ export const chatArea = {
       noRuns: "No runs yet",
       selectRun: "Select a run",
       runLoadFailed: "Failed to load run",
-      subtaskInterrupted: "Interrupted — the run ended before this subtask finished",
+      subtaskInterrupted: "Interrupted: the run ended before this subtask finished",
     },
     clarification: {
       title: "Clarification needed",
@@ -97,12 +97,12 @@ export const chatArea = {
       result: "Result",
       screenshots: "Screenshots",
       error: "Error",
-      llmRequest: "LLM request — {model}",
+      llmRequest: "LLM request: {model}",
       messagesToolsCount: "{messages} messages · {tools} tools",
       empty: "empty",
       waitingForLlmContext:
         "Waiting for LLM response ({count}-message context: system + task + history)",
-      contextNoOutput: "Context: {count} messages — no saved output",
+      contextNoOutput: "Context: {count} messages, no saved output",
       messages: "Messages",
       user: "User",
       assistant: "Assistant",
@@ -122,7 +122,7 @@ export const chatArea = {
       tasksCount: "{count} tasks",
       sessionActivityStarting: "Starting session activity…",
       noSteps: "No steps recorded yet.",
-      liveWaiting: "Live — waiting for new steps…",
+      liveWaiting: "Live: waiting for new steps…",
       cliTurns: "{count} turns",
       cliFailures: "{count} failed",
       cliResumesAt: "Resumes at {at}",

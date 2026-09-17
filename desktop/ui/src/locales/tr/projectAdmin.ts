@@ -1,6 +1,6 @@
 import type { ProjectAdminDict } from "@/locales/en/projectAdmin";
 
-// projectAdmin namespace — Turkish. Typed as ProjectAdminDict; mirrors en keys exactly.
+// projectAdmin namespace: Turkish. Typed as ProjectAdminDict; mirrors en keys exactly.
 export const projectAdmin: ProjectAdminDict = {
   projectSettings: {
     repoKinds: {
@@ -44,14 +44,14 @@ export const projectAdmin: ProjectAdminDict = {
     indexStopFailed: "İndeksleme durdurulamadı",
     requireHumanReview: "İnsan onayı zorunlu (review)",
     requireHumanReviewHelp:
-      "Açıkken code review adımında ajanın onayı task'ı ileri taşımaz: ajan yine inceler ve verdict'i kaydedilir, build/test pipeline yine çalışır, ama ileri geçiş için bir insan onayı gerekir. Ajan işi geri gönderiyorsa (need revision) beklemez. PM UAT bilinçli olarak kapsam dışı — onun çıkışı zaten Human UAT.",
+      "Açıkken code review adımında ajanın onayı task'ı ileri taşımaz: ajan yine inceler ve verdict'i kaydedilir, build/test pipeline yine çalışır, ama ileri geçiş için bir insan onayı gerekir. Ajan işi geri gönderiyorsa (need revision) beklemez. PM UAT bilinçli olarak kapsam dışı bırakıldı; çünkü onun çıkışı zaten Human UAT.",
     codeIndexing: "Kod Indexleme",
     reindex: "Yeniden indexle",
     indexedCommit: "Indexlenen commit: {sha}",
     syncWarning: "Bu index, anlattığı koddan geride: {reason}",
     profileTitle: "Proje profili",
     profileDesc:
-      "Bu kod tabanının gerçekte ne olduğu: stack, komutlar, CI, nasıl yayına çıktığı ve nasıl çalışıldığı — platform bunları doğrudan depodan okur — artı bir ajanın bulduğu konvansiyonlar, değişmezler ve tehlikeli bölgeler; her biri okunduğu dosyalarla birlikte. Bu depodaki her ajan koşusuna enjekte edilir; bir push bir bölümün kaynağına dokunduğunda sadece o bölüm yenilenir.",
+      "Bu kod tabanının gerçekte ne olduğu: stack, komutlar, CI, nasıl yayına çıktığı ve nasıl çalışıldığı; bunlar platform tarafından doğrudan depodan okunur. Buna ek olarak bir ajanın bulduğu konvansiyonlar, değişmezler ve tehlikeli bölgeler; her biri okunduğu dosyalarla birlikte. Bu depodaki her ajan koşusuna enjekte edilir; bir push bir bölümün kaynağına dokunduğunda sadece o bölüm yenilenir.",
     profileStale: "bayat",
     profileStaleCount: "{count} bölüm bayat",
     profileEvidence: "Kaynaklar:",
@@ -93,7 +93,7 @@ export const projectAdmin: ProjectAdminDict = {
     profileRefreshStarted: "Profil analizi başlatıldı",
     profileRefreshAlreadyRunning: "Bir profil analizi zaten çalışıyor",
     profileRefreshFailed: "Profil analizi başlatılamadı",
-    profileRefreshTimeout: "Analiz hâlâ sürüyor — birazdan tekrar bakın.",
+    profileRefreshTimeout: "Analiz hâlâ sürüyor. Birazdan tekrar bakın.",
     profileUpdated: "Proje profili güncellendi",
     profileUpdatedAt: "Son güncelleme: {date}",
     profileEmptyTitle: "Henüz profil yok",
@@ -105,7 +105,7 @@ export const projectAdmin: ProjectAdminDict = {
     noIndexYet: "Index durumu henüz yok.",
     pipelineTitle: "Pipeline (GitHub Actions)",
     pipelineDesc:
-      "QA gate ve release adımları GitHub Actions üzerinden çalışır. Her kategori, deponun bir Actions işine (validate/build/test/mutasyon testi) veya bir workflow dosyasına (PR aç, deploy'lar) eşlenir. Boş bırakılan kategori atlanır. Mutasyon testi gate'i asla kırmaz; PR açan workflow ise yalnızca bilgi amaçlı listelenir — ajan görev dalları kendi PR'ını kendisi açar.",
+      "QA gate ve release adımları GitHub Actions üzerinden çalışır. Her kategori, deponun bir Actions işine (validate/build/test/mutasyon testi) veya bir workflow dosyasına (PR aç, deploy'lar) eşlenir. Boş bırakılan kategori atlanır. Mutasyon testi gate'i asla kırmaz; PR açan workflow ise yalnızca bilgi amaçlı listelenir, çünkü ajan görev dalları kendi PR'ını kendisi açar.",
     noWorkflowsWarning:
       "Bu depoda GitHub Actions workflow'u bulunamadı; pipeline gate devre dışı. Workflow'ları oluşturmak için ilgili role otomatik bir iş açabilirsiniz.",
     openSetupTask: "Kurulum işi aç",
@@ -120,7 +120,7 @@ export const projectAdmin: ProjectAdminDict = {
     noWorkflowsTitle: "Workflow bulunamadı",
     noSubReposTitle: "Henüz alt repo yok",
     noSubReposDesc:
-      "Kendi başına birer repo olan klasörleri ekle — her biri kendi dokümanlarını, pipeline'ını ve deploy hedeflerini alır.",
+      "Kendi başına birer repo olan klasörleri ekle. Her biri kendi dokümanlarını, pipeline'ını ve deploy hedeflerini alır.",
     subRepoMeta: "Alt repo",
     subRepoPath: "Yol",
     subRepoKind: "Tür",
@@ -135,7 +135,7 @@ export const projectAdmin: ProjectAdminDict = {
     docsQueued: "Kuyrukta",
     docsQueuedCount: "{count} doküman kuyrukta",
     docsGenerateBundle: "Oluştur",
-    docsBundleCreated: "Doküman görevi açıldı — kuyruktakiler tek PR'da gelir.",
+    docsBundleCreated: "Doküman görevi açıldı. Kuyruktakiler tek PR'da gelir.",
     docsTaskRunningTitle: "Doküman görevi çalışıyor",
     docsTaskRunning: "Bir ajan kuyruktaki dokümanları yazıyor. Durum: {status}",
     docsPrReadyTitle: "PR hazır",
@@ -146,7 +146,7 @@ export const projectAdmin: ProjectAdminDict = {
     docsMergeFailed: "PR merge edilemedi",
     selectSubProjectFirst: "Önce en az bir alt repo seçin.",
     selectBadge: "seç",
-    skipOption: "— (atla)",
+    skipOption: "- (atla)",
     savePipeline: "Pipeline'ı Kaydet",
     dangerZone: "Tehlikeli Alan",
     deleteRepoWarning:
@@ -165,7 +165,7 @@ export const projectAdmin: ProjectAdminDict = {
     deleted: "Proje silindi",
     deleteFailed: "Silinemedi",
     title: "Projeler",
-    subtitle: "Ürün ve iş projeleri — kod depolarına etiket olarak bağlanır.",
+    subtitle: "Ürün ve iş projeleri; kod depolarına etiket olarak bağlanır.",
     addProject: "Proje Ekle",
     emptyTitle: "Henüz proje yok",
     emptyDesc: "Görevleri gruplamak ve kod depolarına etiketlemek için projeler oluşturun.",
@@ -182,8 +182,8 @@ export const projectAdmin: ProjectAdminDict = {
     delete: "Sil",
     deleteTitle: "Proje silinsin mi?",
     deleteConfirm:
-      "\"{name}\" projesi silinsin mi? Bağlı depolar silinmez — sadece bu projeyle bağlantıları kalkar.",
-    noRepositories: "Henüz depo yok — aşağıdan bir tane ekle.",
+      "\"{name}\" projesi silinsin mi? Bağlı depolar silinmez, sadece bu projeyle bağlantıları kalkar.",
+    noRepositories: "Henüz depo yok. Aşağıdan bir tane ekle.",
     addRepoBlocked: "Yeni bir depo eklemeden önce az önce eklediğin deponun kurulum sorularını tamamla.",
     unassignedTitle: "Bir projeye bağlı değil",
     unassignedDescription: "Bu depolar henüz hiçbir projeye bağlı değil.",
@@ -225,7 +225,7 @@ export const projectAdmin: ProjectAdminDict = {
     createRepoTitle: "Kod Deposu Oluştur",
     repoName: "Depo adı",
     githubRequired:
-      "GitHub bağlantısı gerekli: {error}. Ayarlar'dan token ekleyin — git'siz depo oluşturulamaz.",
+      "GitHub bağlantısı gerekli: {error}. Ayarlar'dan token ekleyin; git olmadan depo oluşturulamaz.",
     parentDir: "Üst klasör",
     create: "Oluştur",
     indexNone: "Index yok",
@@ -240,7 +240,7 @@ export const projectAdmin: ProjectAdminDict = {
     description:
       "{name} eklendi. Nereye deploy edildiğini söyle ki agentlar ve QA adresi bulabilsin.",
     kindLabel: "Depo tipi",
-    kindHint: "Depo içeriğinden otomatik bulundu — yanlışsa değiştir.",
+    kindHint: "Depo içeriğinden otomatik bulundu. Yanlışsa değiştir.",
     stepRepo: "Depo",
     stepRepoDesc: "Bu depo ne ve içinde hangi alt repolar var.",
     stepSettings: "Ayarlar",
@@ -257,7 +257,7 @@ export const projectAdmin: ProjectAdminDict = {
     docsTestStandards: "Test standartları",
     docsArchitecture: "Mimari",
     docsLocalRun: "Local çalıştırma scripti",
-    docsLocalRunHint: "Projeyi local'de ayağa kaldıran script — doküman değil.",
+    docsLocalRunHint: "Projeyi local'de ayağa kaldıran script; doküman değil.",
     docsGenerate: "Oluştur",
     docsQueued: "Kuyrukta",
     docsQueuedCount: "{count} tane kuyrukta",
@@ -276,7 +276,7 @@ export const projectAdmin: ProjectAdminDict = {
       "Yukarıdaki adreslerin sonuna eklenir; prod monitörünün yoklayacağı URL böyle oluşur.",
     mobileNoteTitle: "Mağaza üzerinden yönetilir",
     mobileNote:
-      "Bu uygulama, buradaki alanları doldurarak değil, bir mağaza hesabı bağlayıp Mobil Uygulamalar konsolunda bir uygulama seçerek yayınlanır — kaydettikten sonra oradan kur.",
+      "Bu uygulama, buradaki alanları doldurarak değil, bir mağaza hesabı bağlayıp Mobil Uygulamalar konsolunda bir uygulama seçerek yayınlanır. Kaydettikten sonra oradan kur.",
     footerNote:
       "Bu ayarlar sonradan Deploy ayarlarından değiştirilebilir; boş bırakılırsa ilk deploy'dan sonra agentlar doldurur.",
     saved: "Deploy ayarları kaydedildi",
@@ -292,7 +292,7 @@ export const projectAdmin: ProjectAdminDict = {
     subProjectRemove: "Alt repoyu kaldır",
     subProjectConfigure: "Ayarla",
     subProjectAdd: "Alt repo ekle",
-    subProjectSetupTitle: "Deploy ayarları — {path}",
+    subProjectSetupTitle: "Deploy ayarları: {path}",
     subProjectPickerTitle: "Klasör seç",
     subProjectPickerUp: "Yukarı",
     subProjectPickerSelect: "Bu klasörü seç",
@@ -305,7 +305,7 @@ export const projectAdmin: ProjectAdminDict = {
     platformHint: "Bu uygulama hangi store'lara çıkıyor.",
     workerNoteTitle: "Worker",
     workerNote:
-      "Worker'ların stage/prod URL'i olmaz. Worker'lar için deploy ayarları henüz yapılmıyor — bu depoyu daha sonra Ayarlar sayfasından yapılandır.",
+      "Worker'ların stage/prod URL'i olmaz. Worker'lar için deploy ayarları henüz yapılmıyor; bu depoyu daha sonra Ayarlar sayfasından yapılandır.",
     monorepoNoteTitle: "Monorepo",
     monorepoNote:
       "Pipeline ve deploy ayarları, kaydettikten sonra bu deponun Ayarlar sayfasından her alt repo için ayrı ayrı yapılandırılır.",
@@ -352,7 +352,7 @@ export const projectAdmin: ProjectAdminDict = {
     workerUrlsNotImplementedTitle: "Worker'lar için henüz uygulanmadı",
     workerUrlsNotImplemented:
       "Bir worker bir URL'de cevap vermez, bu yüzden base/health/logs adresleri burada geçerli değil. Worker'a özel alanlar (ör. bir queue veya topic) henüz uygulanmadı.",
-    localNoteTitle: "Burada adres yok — onun yerine bir çalıştırma kılavuzu",
+    localNoteTitle: "Burada adres yok: onun yerine bir çalıştırma kılavuzu",
     localNote:
       "Local gerçek bir adres değil, bu yüzden bir monitörün yoklayacağı bir şey yok. Bunun yerine bu depoda {doc} ve {script} üretilir ki herkes kendi makinesinde çalıştırabilsin.",
     localSetupTask: "Yerel çalıştırma kılavuzu oluştur",
@@ -374,7 +374,7 @@ export const projectAdmin: ProjectAdminDict = {
     instructions: "Tarifi göster",
     deployLoadFailed: "Deploy hedefleri yüklenemedi",
     openDeploySettings: "Deploy ayarları",
-    templateNone: "Şablon yok — sadece adresler",
+    templateNone: "Şablon yok: sadece adresler",
     templateNoneHint: "Bu ortam başka bir yerde tanımlı bir workflow ile çıkıyor; burada yalnızca adresleri tutuluyor.",
     providerFromTemplate: "Şablon tarafından belirlenir.",
     providers: {
@@ -395,12 +395,12 @@ export const projectAdmin: ProjectAdminDict = {
       prod: "Prod",
     },
     envHints: {
-      local: "Bir geliştiricinin kendi makinesinde çalışır — başkasının erişebileceği gerçek bir adres değil.",
+      local: "Bir geliştiricinin kendi makinesinde çalışır; başkasının erişebileceği gerçek bir adres değil.",
       stage: "Merge sonrası ilk durak; QA burada koşar.",
       preprod: "Prod'a benzeyen veriyle son prova.",
       prod: "Canlı. Bu adreslerin ucunda gerçek kullanıcılar var.",
     },
-    // Mobil, bir stage adresine değil test track'lerine çıkar — bu kartlar
+    // Mobil, bir stage adresine değil test track'lerine çıkar; bu kartlar
     // yukarıdaki backend ortam adları yerine App Store / Play Console
     // terimlerini kullanır. API'ye giden env anahtarı değişmez (stage/preprod/prod).
     envNamesMobile: {
@@ -409,7 +409,7 @@ export const projectAdmin: ProjectAdminDict = {
       prod: "Prod",
     },
     envHintsMobile: {
-      stage: "Ekip/QA track'i — sadece iç test kullanıcıları, henüz herkese açık değil.",
+      stage: "Ekip/QA track'i: sadece iç test kullanıcıları, henüz herkese açık değil.",
       preprod: "TestFlight genel beta ya da Play açık test track'i.",
       prod: "Mağaza sürümü. Bu build'in ucunda gerçek kullanıcılar var.",
     },
@@ -417,7 +417,7 @@ export const projectAdmin: ProjectAdminDict = {
     logsUrlHint: "Uygulamanın kendi servis ettiği, son loglarını dönen adres. Deploy sonrası istendiğinde okunur, sürekli yoklanmaz.",
     logsUrlUnsupportedTitle: "Logs URL için daha yeni bir sunucu gerekiyor",
     logsUrlUnsupported: "Bu sunucu henüz logs URL saklamıyor. Sunucu güncellenene kadar alan salt okunur kalır.",
-    logsUrlDropped: "Hedef kaydedildi ama bu sunucu logs URL'i yok saydı — önce güncellenmesi gerekiyor.",
+    logsUrlDropped: "Hedef kaydedildi ama bu sunucu logs URL'i yok saydı; önce güncellenmesi gerekiyor.",
     appPackage: "Uygulama paketi",
     appPackageHint: "Cihaz araçlarının gerçek telefonda açmasına izin verilen tek paket. Buraya insan yazar, ajan asla yazamaz.",
     appUrl: "Build URL",
@@ -431,31 +431,31 @@ export const projectAdmin: ProjectAdminDict = {
     invalidUrlToast: "Kaydetmeden önce işaretli URL'i düzelt",
     clearUrlTitle: "Kayıtlı adres silinsin mi?",
     clearUrlDesc:
-      "Bu kayıt {env} ortamının {fields} alanını boşaltır. Health URL'i olmayan bir ortamı prod monitörü yoklamayı bırakır, QA da vurduğu adresi kaybeder — bunu kimse haber vermez.",
+      "Bu kayıt {env} ortamının {fields} alanını boşaltır. Health URL'i olmayan bir ortamı prod monitörü yoklamayı bırakır, QA da vurduğu adresi kaybeder. Bunu kimse haber vermez.",
     clearUrlConfirm: "Boşalt ve kaydet",
     removeTargetTitle: "Bu deploy hedefi kaldırılsın mı?",
     removeTargetDesc:
-      "{env} hedefi — adresleri, değişkenleri ve geri alma ayarı — silinir. O ortam için deploy ve health yoklaması, hedef yeniden tanımlanana kadar durur.",
+      "{env} hedefi (adresleri, değişkenleri ve geri alma ayarı) silinir. O ortam için deploy ve health yoklaması, hedef yeniden tanımlanana kadar durur.",
     policyTitle: "Olay politikası",
-    policyOff: "Kapalı — sadece kaydet",
-    policySuggest: "Öner — analiz et ve öneri yaz",
-    policyAutoFix: "Otomatik düzelt — board düzeltsin",
+    policyOff: "Kapalı: sadece kaydet",
+    policySuggest: "Öner: analiz et ve öneri yaz",
+    policyAutoFix: "Otomatik düzelt: board düzeltsin",
     policySaved: "Olay politikası kaydedildi",
     baseUrl: "Base URL (DNS)",
-    baseUrlHint: "Bu ortam nerede cevap veriyor — QA ve API tüketicileri burayı kullanır.",
+    baseUrlHint: "Bu ortam nerede cevap veriyor; QA ve API tüketicileri burayı kullanır.",
     testStrategyTitle: "Test stratejisi",
-    testStrategyLocal: "Local — sadece workspace testleri",
-    testStrategyStage: "Stage — QA öncesi stage'e deploy",
-    testStrategyPerStep: "Her adım — her review adımında deploy",
+    testStrategyLocal: "Local: sadece workspace testleri",
+    testStrategyStage: "Stage: QA öncesi stage'e deploy",
+    testStrategyPerStep: "Her adım: her review adımında deploy",
     testStrategySaved: "Test stratejisi kaydedildi",
     envInventory: "Ortam değişkenleri",
     envInventoryEmpty: "Bu repoda .env.example benzeri dosya yok.",
     envKeysCount: "{count} değişken",
     migrationBadge: "Şema değişikliği",
     migrationGateOpen: "Stage doğrulandı",
-    migrationGateBlocked: "Stage doğrulanmadı — release bloke",
+    migrationGateBlocked: "Stage doğrulanmadı: release bloke",
     storeCredentialsTitle: "Mağaza kimlik bilgileri",
-    storeCredentialsSubtitle: "Sistem genelinde bir kez kaydedilir — her App Store / Google Play deploy hedefi imzalama ve yükleme için bunları kullanır.",
+    storeCredentialsSubtitle: "Sistem genelinde bir kez kaydedilir; her App Store / Google Play deploy hedefi imzalama ve yükleme için bunları kullanır.",
     storeCredentialASC: "App Store Connect",
     storeCredentialPlay: "Google Play",
     storeCredentialConfigured: "Tanımlı",
@@ -465,7 +465,7 @@ export const projectAdmin: ProjectAdminDict = {
     storeCredentialIssuerId: "Issuer ID",
     storeCredentialP8: "Özel anahtar (.p8)",
     storeCredentialServiceAccountJson: "Servis hesabı JSON",
-    storeCredentialReplaceHint: "Kayıtlı değer geri gösterilmez — değiştirmek için buraya yeni değeri gir. Kaydetme, mağaza konsoluna karşı doğrulandıktan sonra tutulur.",
+    storeCredentialReplaceHint: "Kayıtlı değer geri gösterilmez. Değiştirmek için buraya yeni değeri gir. Kaydetme, mağaza konsoluna karşı doğrulandıktan sonra tutulur.",
     storeCredentialSave: "Kimlik bilgisini kaydet",
     storeCredentialSaved: "Kimlik bilgisi kaydedildi",
     storeCredentialDelete: "Sil",
@@ -523,9 +523,9 @@ export const projectAdmin: ProjectAdminDict = {
       local: "Eşleşmiş Mac",
     },
     engineHints: {
-      auto: "Önce GitHub Actions; koşamıyorsa eşleşmiş Mac. İkisi de koşamıyorsa yayın bloke olur — sessizce başka bir yola düşmez.",
-      github_actions: "Yalnız GitHub Actions. Koşamıyorsa yayın bloke olur — eşleşmiş Mac yedek olarak kullanılmaz.",
-      local: "Yalnız eşleşmiş Mac. Bağlı Mac yoksa yayın bloke olur — GitHub Actions yedek olarak kullanılmaz.",
+      auto: "Önce GitHub Actions; koşamıyorsa eşleşmiş Mac. İkisi de koşamıyorsa yayın bloke olur; sessizce başka bir yola düşmez.",
+      github_actions: "Yalnız GitHub Actions. Koşamıyorsa yayın bloke olur; eşleşmiş Mac yedek olarak kullanılmaz.",
+      local: "Yalnız eşleşmiş Mac. Bağlı Mac yoksa yayın bloke olur; GitHub Actions yedek olarak kullanılmaz.",
     },
     engineSaved: "Yayın motoru kaydedildi",
     lastRunEngine: "Son derleme {engine} üzerinde koştu ({store}).",
@@ -533,10 +533,10 @@ export const projectAdmin: ProjectAdminDict = {
     promoteTo: "{channel} kanalına terfi et",
     promoteConfirm: "Terfi et",
     promoteTitle: "{channel} kanalına terfi edilsin mi?",
-    promoteDescription: "Bu, {identifier} uygulamasının {from} sürümünü {to} kanalına taşır. Yalnız tek adım ileri gidilir — kanal atlanamaz.",
+    promoteDescription: "Bu, {identifier} uygulamasının {from} sürümünü {to} kanalına taşır. Yalnız tek adım ileri gidilir; kanal atlanamaz.",
     promoteSucceeded: "{channel} kanalına terfi edildi",
-    promoteDisabledEmpty: "Terfi edilecek bir şey yok — bu kanalda sürüm yok.",
-    promoteDisabledNotLive: "Production'a yalnız yayındaki bir uygulama çıkabilir — önce kuruluşu tamamlayın.",
+    promoteDisabledEmpty: "Terfi edilecek bir şey yok: bu kanalda sürüm yok.",
+    promoteDisabledNotLive: "Production'a yalnız yayındaki bir uygulama çıkabilir. Önce kuruluşu tamamlayın.",
     refreshChannels: "Kanalları yenile",
     loadFailed: "Mağaza bağlantısı yüklenemedi",
     tracksFailed: "Kanallar yüklenemedi",
@@ -572,7 +572,7 @@ export const projectAdmin: ProjectAdminDict = {
     databaseLabelLabel: "Etiket",
     databaseLabelPlaceholder: "örn. Prod Postgres",
     databaseEngineLabel: "Motor",
-    databaseEngineNone: "— (belirtilmedi)",
+    databaseEngineNone: "- (belirtilmedi)",
     engines: {
       postgres: "PostgreSQL",
       mysql: "MySQL",

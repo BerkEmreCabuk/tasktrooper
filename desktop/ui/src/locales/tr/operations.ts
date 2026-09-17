@@ -1,6 +1,6 @@
 import type { OperationsDict } from "@/locales/en/operations";
 
-// Turkish dictionary for the `operations` namespace. Typed as OperationsDict —
+// Turkish dictionary for the `operations` namespace. Typed as OperationsDict;
 // must mirror en/operations.ts keys exactly.
 export const operations: OperationsDict = {
   nav: "Operasyonlar",
@@ -26,7 +26,7 @@ export const operations: OperationsDict = {
     rollbackDescription: "Bu, {repo} uygulamasını {env} ortamında {sha} sürümüne geri alır.",
     rollbackSucceeded: "Geri alma başlatıldı",
     gitRef: "Git referansı",
-    gitRefHint: "Backend'de kalıcı bir varsayılan dal yok — repo main dışında bir daldan deploy ediliyorsa buraya yazın.",
+    gitRefHint: "Backend'de kalıcı bir varsayılan dal yok. Repo main dışında bir daldan deploy ediliyorsa buraya yazın.",
     history: "Çalıştırma geçmişi",
     noHistory: "Henüz çalıştırma yok.",
     localRun: "Yerel",
@@ -101,7 +101,7 @@ export const operations: OperationsDict = {
     channelsNeedApp: "Bu uygulama henüz bir mağaza uygulamasına bağlı değil, bu yüzden kanalı yok.",
     channelsOnboardingTitle: "Kuruluş sürüyor",
     channelsOnboarding:
-      "Uygulama bağlı ama kuruluşu tamamlanmadı, bu yüzden henüz kanalı yok. Yukarıdaki kontrol listesini tamamlayıp Doğrula'ya basın — ilk derleme mağazaya ulaşınca kanallar görünür.",
+      "Uygulama bağlı ama kuruluşu tamamlanmadı, bu yüzden henüz kanalı yok. Yukarıdaki kontrol listesini tamamlayıp Doğrula'ya basın. İlk derleme mağazaya ulaşınca kanallar görünür.",
     channelsFailed: "Kanallar yüklenemedi",
     channelEmpty: "Bu kanalda sürüm yok",
     channelAudience: "Kitle",

@@ -14,9 +14,9 @@ export const lib: LibDict = {
     pipelineTrigger: { ready_for_qa: "QA tetiklemesi", manual: "manuel", retry: "tekrar" },
     // Code review kapısının arkasında yeşil bir build olmadan neden açıldığı.
     pipelineGateReason: {
-      timeout: "CI zamanında sonuç vermedi — review build olmadan başladı",
-      ci_unavailable: "CI kullanılamıyor — review build olmadan başladı",
-      no_ci_configured: "CI tanımlı değil — hiçbir şey derlenmedi veya test edilmedi",
+      timeout: "CI zamanında sonuç vermedi: review build olmadan başladı",
+      ci_unavailable: "CI kullanılamıyor: review build olmadan başladı",
+      no_ci_configured: "CI tanımlı değil: hiçbir şey derlenmedi veya test edilmedi",
       gate_disabled: "Bu depoda CI kapısı kapalı",
     },
     blockedResource: {
@@ -25,7 +25,7 @@ export const lib: LibDict = {
       deploy_watch: "Deploy bekleniyor",
       work_order: "Bloke eden görevler bekleniyor",
       human_decision:
-        "İnsan kararı gerekiyor — aynı commit için CI kırmızı kaldı ya da review döngüsü insan müdahalesi olmadan tekrarladı",
+        "İnsan kararı gerekiyor: aynı commit için CI kırmızı kaldı ya da review döngüsü insan müdahalesi olmadan tekrarladı",
     },
     blockedResourceFallback: "Paylaşılan kaynak bekleniyor",
   },
@@ -58,7 +58,7 @@ export const lib: LibDict = {
       llm_request: "LLM isteği",
       claude_code_session: "Claude Code oturumu",
       claude_code_result: "Claude Code oturumu bitti",
-      claude_code_quota_park: "Claude Code kullanım limiti — görev beklemede",
+      claude_code_quota_park: "Claude Code kullanım limiti: görev beklemede",
       claude_code_slot_wait: "Boş Claude Code oturum yuvası beklendi",
     },
   },
