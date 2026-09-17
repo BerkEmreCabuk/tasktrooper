@@ -154,7 +154,7 @@ export function EnvironmentPreflight({ host, onBlockingChange, onReport }: Envir
                   <p className="mt-0.5 text-xs text-destructive">{item.remediation}</p>
                 )}
                 {item.status !== "ok" && item.command && (
-                  <code className="mt-1 block break-all rounded bg-muted/60 px-1.5 py-1 font-mono text-[11px]">
+                  <code className="mt-1 block break-all rounded bg-muted/60 px-1.5 py-1 font-mono text-micro">
                     {item.command}
                   </code>
                 )}

@@ -56,7 +56,7 @@ export function SetupWizardStepper({
             >
               <span
                 className={cn(
-                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px] leading-none",
+                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-micro leading-none",
                   active
                     ? "bg-primary text-primary-foreground"
                     : done

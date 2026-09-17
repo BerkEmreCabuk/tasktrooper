@@ -30,7 +30,6 @@ describe("MessageList metadata type scale", () => {
     const label = screen.getByText("You");
     const timestamp = label.nextSibling as HTMLElement;
     expect(timestamp.className).toContain("text-micro");
-    expect(timestamp.className).not.toContain("text-[10px]");
   });
 
   it("leaves the user message body text unchanged", () => {

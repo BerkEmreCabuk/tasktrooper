@@ -52,7 +52,7 @@ function EventDetail({
             </Badge>
           </div>
           {actorID && (
-            <p className="text-[11px] text-muted-foreground">
+            <p className="text-micro text-muted-foreground">
               {t("chatArea.workspace.activityFeed.detail.by", { name: agentLabel(actorID) })}
             </p>
           )}
@@ -171,7 +171,7 @@ export function ActivityFeedItem({
                 : eventLabels[item.event_type ?? ""] ?? item.event_type}
             </span>
             {item.status && (
-              <Badge variant={runStatusVariant(item.status)} className="text-[10px]">
+              <Badge variant={runStatusVariant(item.status)} className="text-micro">
                 {item.status}
               </Badge>
             )}
@@ -183,7 +183,7 @@ export function ActivityFeedItem({
           {item.summary && (
             <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{item.summary}</p>
           )}
-          <p className="mt-1.5 text-[11px] text-muted-foreground">{formatRelativeDate(item.created_at)}</p>
+          <p className="mt-1.5 text-micro text-muted-foreground">{formatRelativeDate(item.created_at)}</p>
         </div>
       </div>
     </div>

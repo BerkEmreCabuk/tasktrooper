@@ -85,13 +85,13 @@ export function NewAgentDialog({ open, onOpenChange, onCreated }: NewAgentDialog
                   <div className="flex items-center gap-2">
                     <span className="truncate text-sm font-medium">{tpl.name}</span>
                     {tpl.built_in && (
-                      <Badge variant="secondary" className="text-[10px]">
+                      <Badge variant="secondary" className="text-micro">
                         {t("chatArea.workspace.newAgent.builtIn")}
                       </Badge>
                     )}
                   </div>
                   <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{tpl.description}</p>
-                  <p className="mt-0.5 text-[10px] text-muted-foreground">
+                  <p className="mt-0.5 text-micro text-muted-foreground">
                     {t("chatArea.workspace.newAgent.skillsRules", { skills: tpl.skills.length, rules: tpl.rules.length })}
                   </p>
                 </div>

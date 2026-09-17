@@ -130,7 +130,7 @@ const TabsTrigger = forwardRef<HTMLButtonElement, TabsTriggerProps>(
           variant === "pill"
             ? cn(
                 "rounded-md px-3 py-1.5",
-                isActive ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+                isActive ? "bg-background text-foreground shadow-[var(--shadow-raised)]" : "text-muted-foreground hover:text-foreground",
               )
             : cn(
                 "-mb-px border-b-2 px-4 py-2.5",

@@ -355,11 +355,11 @@ export function EmbeddingMapPanel() {
       return (
         <div className="space-y-1">
           <p className="break-all font-mono text-xs font-medium">{point.group_label}</p>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             {t("content.embeddingMap.tooltipChunk", { index: point.chunk_index })}
             {meta ? ` · ${meta}` : ""}
           </p>
-          <pre className="whitespace-pre-wrap break-words font-mono text-[10px] leading-snug text-foreground/80">
+          <pre className="whitespace-pre-wrap break-words font-mono text-micro leading-snug text-foreground/80">
             {truncateSnippet(point.snippet)}
           </pre>
         </div>

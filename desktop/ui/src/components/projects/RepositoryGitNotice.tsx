@@ -101,7 +101,7 @@ export function RepositoryGitNotice({ repository, onRestored, className }: Repos
       title={title}
       className={className ?? "mb-4 rounded-lg px-3 py-2 text-xs shadow-none"}
     >
-      {failed && restore?.error && <p className="mb-2 font-mono text-[11px] break-all">{restore.error}</p>}
+      {failed && restore?.error && <p className="mb-2 font-mono text-micro break-all">{restore.error}</p>}
       {running ? (
         <span className="flex items-center gap-2">
           <Spinner size="sm" className="h-3.5 w-3.5" />

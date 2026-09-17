@@ -67,7 +67,7 @@ function LegendRow({
       <span className="min-w-0 flex-1 truncate font-mono" title={label}>
         {label}
       </span>
-      <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
+      <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-micro">
         {count}
       </Badge>
     </Button>

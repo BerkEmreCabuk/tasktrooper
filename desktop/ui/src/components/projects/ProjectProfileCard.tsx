@@ -139,7 +139,7 @@ function ProfileSectionBlock({ section }: { section: ProfileSection }) {
     <div className="rounded-md border border-border/60 p-4">
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <h3 className="text-sm font-medium">{title}</h3>
-        <Badge variant="outline" className="text-[10px] uppercase">
+        <Badge variant="outline" className="text-micro uppercase">
           {t(`projectAdmin.projectSettings.profileOrigin.${section.origin}`)}
         </Badge>
         {section.stale && (

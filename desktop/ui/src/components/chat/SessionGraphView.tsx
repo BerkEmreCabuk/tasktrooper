@@ -42,7 +42,7 @@ function MessageNode({ message, compact }: { message: GraphMessage; compact?: bo
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold">{label}</p>
             {!expanded && preview && (
-              <p className="mt-0.5 line-clamp-2 text-[10px] text-muted-foreground">{preview}</p>
+              <p className="mt-0.5 line-clamp-2 text-micro text-muted-foreground">{preview}</p>
             )}
           </div>
           <ExpandChevron expanded={expanded} />
@@ -74,13 +74,13 @@ function EventNode({ entry }: { entry: Extract<TimelineEntry, { kind: "event" }>
           <Bot className="h-3 w-3 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <span className="text-xs">{entry.label}</span>
-            {entry.detail && <p className="break-words text-[10px] text-muted-foreground">{entry.detail}</p>}
+            {entry.detail && <p className="break-words text-micro text-muted-foreground">{entry.detail}</p>}
           </div>
           {hasPayload && <ExpandChevron expanded={expanded} />}
         </button>
         {expanded && hasPayload && (
           <div className="min-w-0 max-w-full border-t border-border/60 px-2 py-1.5">
-            <pre className="max-h-32 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded bg-muted p-1.5 text-[10px] [overflow-wrap:anywhere]">
+            <pre className="max-h-32 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded bg-muted p-1.5 text-micro [overflow-wrap:anywhere]">
               {JSON.stringify(entry.payload, null, 2)}
             </pre>
           </div>
@@ -118,27 +118,27 @@ function SubtaskNode({ entry, compact }: { entry: Extract<TimelineEntry, { kind:
           <div className="min-w-0 flex-1">
             <p className="text-xs font-medium">{entry.title ?? entry.taskKey}</p>
             {entry.agentName && (
-              <p className="mt-0.5 text-[10px] text-muted-foreground">
+              <p className="mt-0.5 text-micro text-muted-foreground">
                 <span className="font-medium text-foreground">{t("chatArea.chat.graph.agentLabel")}</span> {entry.agentName}
               </p>
             )}
             {entry.workingDir && (
               <p
-                className="mt-0.5 break-all text-[10px] text-muted-foreground [overflow-wrap:anywhere]"
+                className="mt-0.5 break-all text-micro text-muted-foreground [overflow-wrap:anywhere]"
                 title={entry.workingDir}
               >
                 <span className="font-medium text-foreground">{t("chatArea.chat.graph.directoryLabel")}</span> {entry.workingDir}
               </p>
             )}
             {entry.status === "running" && hasIterations && (
-              <p className="mt-1 text-[10px] font-medium text-warning">
+              <p className="mt-1 text-micro font-medium text-warning">
                 {entry.iterations[entry.iterations.length - 1]?.status === "running"
                   ? t("chatArea.chat.graph.agentWorking")
                   : t("chatArea.chat.graph.iterationsCount", { count: entry.iterations.length })}
               </p>
             )}
             {entry.error && !expanded && (
-              <p className="mt-1 line-clamp-2 text-[10px] text-destructive">{entry.error}</p>
+              <p className="mt-1 line-clamp-2 text-micro text-destructive">{entry.error}</p>
             )}
           </div>
           <ExpandChevron expanded={expanded} />
@@ -147,7 +147,7 @@ function SubtaskNode({ entry, compact }: { entry: Extract<TimelineEntry, { kind:
           <div className="min-w-0 max-w-full space-y-2 border-t border-border/60 px-2 py-1.5">
             {hasIterations && (
               <div className="min-w-0 max-w-full space-y-1.5">
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t("chatArea.chat.graph.agentSteps")}</p>
+                <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">{t("chatArea.chat.graph.agentSteps")}</p>
                 {entry.iterations.map((iteration) => (
                   <IterationNode key={iteration.id} entry={iteration} compact={compact} nested />
                 ))}
@@ -155,18 +155,18 @@ function SubtaskNode({ entry, compact }: { entry: Extract<TimelineEntry, { kind:
             )}
             {entry.error && (
               <div>
-                <p className="mb-0.5 text-[10px] font-medium text-destructive">{t("chatArea.chat.graph.error")}</p>
+                <p className="mb-0.5 text-micro font-medium text-destructive">{t("chatArea.chat.graph.error")}</p>
                 <ContentPreview content={entry.error} />
               </div>
             )}
             {entry.result && (
               <div>
-                <p className="mb-0.5 text-[10px] font-medium text-foreground">{t("chatArea.chat.graph.result")}</p>
+                <p className="mb-0.5 text-micro font-medium text-foreground">{t("chatArea.chat.graph.result")}</p>
                 <ContentPreview content={entry.result} />
               </div>
             )}
             {!hasIterations && !hasOutcome && entry.status === "running" && (
-              <p className="text-[10px] text-muted-foreground">{t("chatArea.chat.graph.taskStarting")}</p>
+              <p className="text-micro text-muted-foreground">{t("chatArea.chat.graph.taskStarting")}</p>
             )}
           </div>
         )}
@@ -218,8 +218,8 @@ function TimelineNode({
             <StatusDot status={entry.status} />
             <div className="min-w-0 flex-1">
               <p className="text-xs font-semibold">{t("chatArea.chat.graph.orchestrationPlan")}</p>
-              <p className="mt-0.5 break-words text-[11px] text-muted-foreground">{entry.summary}</p>
-              <p className="mt-1 text-[10px] text-muted-foreground">{t("chatArea.chat.graph.tasksCount", { count: entry.taskCount })}</p>
+              <p className="mt-0.5 break-words text-micro text-muted-foreground">{entry.summary}</p>
+              <p className="mt-1 text-micro text-muted-foreground">{t("chatArea.chat.graph.tasksCount", { count: entry.taskCount })}</p>
             </div>
             <ExpandChevron expanded={showPlan} />
           </button>
@@ -272,7 +272,7 @@ export function SessionGraphView({ steps, plan, isLive, compact = false }: Sessi
         {isLive && (
           <div className={graphRow}>
             <span className="absolute left-0 top-1.5 h-2.5 w-2.5 -translate-x-1/2 animate-pulse rounded-full bg-warning" />
-            <p className="break-words text-[11px] text-muted-foreground">{t("chatArea.chat.graph.liveWaiting")}</p>
+            <p className="break-words text-micro text-muted-foreground">{t("chatArea.chat.graph.liveWaiting")}</p>
           </div>
         )}
       </div>

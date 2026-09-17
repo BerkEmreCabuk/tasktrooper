@@ -75,7 +75,7 @@ export function WorkspaceAgentLayout() {
               <Spinner size="sm" />
             ) : (
               <>
-                <h1 className="text-lg font-semibold">
+                <h1 className="text-display font-semibold">
                   {isNew ? t("frame.layout.agentLayout.newAgent") : agent?.name ?? t("frame.layout.agentLayout.agent")}
                 </h1>
                 {agent && (

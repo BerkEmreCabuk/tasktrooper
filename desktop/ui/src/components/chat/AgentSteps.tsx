@@ -13,7 +13,7 @@ import type { GraphIteration, GraphLLMRequest, GraphNodeStatus, GraphToolCall } 
 // showed a title and a status left the run unexplainable.
 
 export const graphPre =
-  "max-h-40 max-w-full overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted p-1.5 text-[10px] text-foreground [overflow-wrap:anywhere]";
+  "max-h-40 max-w-full overflow-x-auto overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted p-1.5 text-micro text-foreground [overflow-wrap:anywhere]";
 
 export function StatusDot({ status }: { status: GraphNodeStatus }) {
   if (status === "running") return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-warning" />;
@@ -35,7 +35,7 @@ export function ExpandChevron({ expanded }: { expanded: boolean }) {
 
 export function ContentPreview({ content }: { content: string }) {
   const { t } = useI18n();
-  if (!content) return <p className="text-[10px] italic text-muted-foreground">{t("chatArea.chat.graph.emptyContent")}</p>;
+  if (!content) return <p className="text-micro italic text-muted-foreground">{t("chatArea.chat.graph.emptyContent")}</p>;
   return <pre className={graphPre}>{content}</pre>;
 }
 
@@ -59,16 +59,16 @@ export function ToolCallNode({ tool, compact }: { tool: GraphToolCall; compact?:
       >
         <StatusDot status={tool.status} />
         <Wrench className="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate font-medium text-[11px]">{tool.name}</span>
+        <span className="min-w-0 flex-1 truncate font-medium text-micro">{tool.name}</span>
         {!compact && (
-          <Badge variant="secondary" className="shrink-0 text-[10px]">
+          <Badge variant="secondary" className="shrink-0 text-micro">
             {tool.status}
           </Badge>
         )}
         <ExpandChevron expanded={expanded} />
       </button>
       {expanded && (
-        <div className="min-w-0 max-w-full space-y-1 border-t border-border/60 px-2 py-1.5 text-[10px] text-muted-foreground">
+        <div className="min-w-0 max-w-full space-y-1 border-t border-border/60 px-2 py-1.5 text-micro text-muted-foreground">
           {tool.arguments && (
             <div className="min-w-0 max-w-full">
               <p className="mb-0.5 font-medium text-foreground">{t("chatArea.chat.graph.arguments")}</p>
@@ -120,10 +120,10 @@ export function LLMRequestView({ req }: { req: GraphLLMRequest }) {
         className="flex w-full min-w-0 items-center gap-2 px-2 py-1.5 text-left"
       >
         <Bot className="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-[11px] font-medium">
+        <span className="min-w-0 flex-1 truncate text-micro font-medium">
           {t("chatArea.chat.graph.llmRequest", { model: req.model })}
         </span>
-        <span className="shrink-0 text-[10px] text-muted-foreground">
+        <span className="shrink-0 text-micro text-muted-foreground">
           {t("chatArea.chat.graph.messagesToolsCount", { messages: req.messageCount, tools: req.toolCount })}
         </span>
         <ExpandChevron expanded={expanded} />
@@ -132,15 +132,15 @@ export function LLMRequestView({ req }: { req: GraphLLMRequest }) {
         <div className="min-w-0 max-w-full space-y-1 border-t border-border/60 px-2 py-1.5">
           {req.messages.map((msg, i) => (
             <div key={i} className="min-w-0 max-w-full">
-              <span className="text-[10px] font-medium text-muted-foreground">{msg.role}: </span>
-              <pre className="inline whitespace-pre-wrap break-words text-[10px] text-foreground [overflow-wrap:anywhere]">
+              <span className="text-micro font-medium text-muted-foreground">{msg.role}: </span>
+              <pre className="inline whitespace-pre-wrap break-words text-micro text-foreground [overflow-wrap:anywhere]">
                 {msg.content || <span className="italic text-muted-foreground">{t("chatArea.chat.graph.empty")}</span>}
               </pre>
               {/* The calls this turn made, not just the results that came back. */}
               {msg.tool_calls?.map((call, j) => (
                 <div key={j} className="mt-0.5 flex min-w-0 max-w-full items-start gap-1 pl-3">
                   <Wrench className="mt-[3px] h-2.5 w-2.5 shrink-0 text-muted-foreground" />
-                  <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[10px] text-muted-foreground [overflow-wrap:anywhere]">
+                  <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words text-micro text-muted-foreground [overflow-wrap:anywhere]">
                     <span className="font-medium text-foreground">{call.name}</span>
                     {call.arguments ? ` ${call.arguments}` : ""}
                   </pre>
@@ -160,7 +160,7 @@ export function IterationBody({ entry, compact }: { entry: GraphIteration; compa
     <div className="min-w-0 max-w-full space-y-2">
       {entry.llmRequest && <LLMRequestView req={entry.llmRequest} />}
       {entry.messages.length === 0 && entry.toolCalls.length === 0 && (
-        <p className="break-words text-[10px] text-muted-foreground [overflow-wrap:anywhere]">
+        <p className="break-words text-micro text-muted-foreground [overflow-wrap:anywhere]">
           {entry.status === "running"
             ? t("chatArea.chat.graph.waitingForLlmContext", { count: entry.contextMessageCount })
             : t("chatArea.chat.graph.contextNoOutput", { count: entry.contextMessageCount })}
@@ -168,7 +168,7 @@ export function IterationBody({ entry, compact }: { entry: GraphIteration; compa
       )}
       {entry.messages.length > 0 && (
         <div className="min-w-0 max-w-full space-y-1.5">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t("chatArea.chat.graph.messages")}</p>
+          <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">{t("chatArea.chat.graph.messages")}</p>
           {entry.messages.map((msg) => (
             <div key={msg.id} className="min-w-0 max-w-full rounded-md border border-border/60 bg-background/60 p-1.5">
               <div className="mb-1 flex items-center gap-1.5">
@@ -177,7 +177,7 @@ export function IterationBody({ entry, compact }: { entry: GraphIteration; compa
                 ) : (
                   <Bot className="h-3 w-3 text-muted-foreground" />
                 )}
-                <span className="text-[10px] font-medium">
+                <span className="text-micro font-medium">
                   {msg.role === "user" ? t("chatArea.chat.graph.user") : t("chatArea.chat.graph.assistant")}
                 </span>
               </div>
@@ -188,7 +188,7 @@ export function IterationBody({ entry, compact }: { entry: GraphIteration; compa
       )}
       {entry.toolCalls.length > 0 && (
         <div className="min-w-0 max-w-full space-y-1.5 border-l-2 border-dashed border-border/80 pl-3">
-          <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t("chatArea.chat.graph.toolCalls")}</p>
+          <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">{t("chatArea.chat.graph.toolCalls")}</p>
           {entry.toolCalls.map((tool) => (
             <ToolCallNode key={tool.id} tool={tool} compact={compact} />
           ))}
@@ -225,7 +225,7 @@ export function IterationNode({ entry, compact, nested }: { entry: GraphIteratio
         <StatusDot status={entry.status} />
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold">{t("chatArea.chat.graph.iteration", { number: entry.iteration })}</p>
-          <p className="break-words text-[10px] text-muted-foreground [overflow-wrap:anywhere]">{summary}</p>
+          <p className="break-words text-micro text-muted-foreground [overflow-wrap:anywhere]">{summary}</p>
         </div>
         <ExpandChevron expanded={expanded} />
       </button>
@@ -276,10 +276,10 @@ export function AgentStepList({
         className="flex w-full min-w-0 items-center gap-2 rounded-md border border-border/60 bg-background/60 px-2 py-1.5 text-left"
       >
         <Wrench className="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate text-micro font-medium uppercase tracking-wide text-muted-foreground">
           {t("chatArea.chat.graph.agentSteps")}
         </span>
-        <span className="shrink-0 text-[10px] text-muted-foreground">
+        <span className="shrink-0 text-micro text-muted-foreground">
           {t("chatArea.chat.graph.iterationsCount", { count: iterations.length })}
           {toolCount > 0 ? ` · ${t("chatArea.chat.graph.toolsCount", { count: toolCount })}` : ""}
         </span>

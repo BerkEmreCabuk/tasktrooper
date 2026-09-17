@@ -74,20 +74,20 @@ export function HealthStatus() {
     >
       <div className="flex cursor-default items-center gap-1.5">
         {!ready ? (
-          <Badge variant="secondary" className="text-[10px]">...</Badge>
+          <Badge variant="secondary" className="text-micro">...</Badge>
         ) : configuredProviders.length > 0 ? (
           configuredProviders.map((item) => (
             <Badge
               key={item.provider_type}
               variant={item.status === "ok" ? "secondary" : "destructive"}
-              className="gap-1 text-[10px] px-1.5 py-0"
+              className="gap-1 text-micro px-1.5 py-0"
             >
               <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", providerDotClass(item))} />
               {providerShortLabel[item.provider_type] ?? item.label}
             </Badge>
           ))
         ) : (
-          <Badge variant={isOk ? "secondary" : "destructive"} className="gap-1 text-[10px]">
+          <Badge variant={isOk ? "secondary" : "destructive"} className="gap-1 text-micro">
             <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotClass)} />
             {isOk ? "LLM" : t("frame.layout.health.badgeProblem")}
           </Badge>
@@ -108,15 +108,15 @@ export function HealthStatus() {
                       <span className={cn("h-2 w-2 shrink-0 rounded-full", providerDotClass(item))} />
                       <span className="truncate text-xs font-medium">{item.label}</span>
                     </div>
-                    <span className="shrink-0 text-[10px] text-muted-foreground">
+                    <span className="shrink-0 text-micro text-muted-foreground">
                       {providerStatusLabel(item)}
                     </span>
                   </div>
                   {item.active && item.configured && (
-                    <p className="mt-1 text-[10px] text-muted-foreground">{t("frame.layout.health.defaultProvider")}</p>
+                    <p className="mt-1 text-micro text-muted-foreground">{t("frame.layout.health.defaultProvider")}</p>
                   )}
                   {item.message && (
-                    <p className="mt-1 line-clamp-2 text-[10px] text-destructive">{item.message}</p>
+                    <p className="mt-1 line-clamp-2 text-micro text-destructive">{item.message}</p>
                   )}
                 </li>
               ))}
@@ -129,7 +129,7 @@ export function HealthStatus() {
             </p>
           )}
           {health && health.status !== "ok" && (
-            <p className="mt-2 text-[10px] text-muted-foreground">
+            <p className="mt-2 text-micro text-muted-foreground">
               {t("frame.layout.health.configureHint")}
             </p>
           )}

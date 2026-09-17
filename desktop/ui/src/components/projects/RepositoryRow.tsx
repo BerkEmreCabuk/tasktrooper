@@ -64,13 +64,13 @@ export function RepositoryRow({ repository, projectNameById, onDeleteRequest, on
           {linkedProjectIds.length > 1 && (
             <div className="mt-2 flex flex-wrap gap-1">
               {linkedProjectIds.map((pid) => (
-                <Badge key={pid} variant="outline" className="text-[10px]">
+                <Badge key={pid} variant="outline" className="text-micro">
                   {projectNameById[pid] ?? t("boardArea.repos.projectFallback")}
                 </Badge>
               ))}
             </div>
           )}
-          <p className="mt-1 text-[11px] text-muted-foreground">
+          <p className="mt-1 text-micro text-muted-foreground">
             {t("boardArea.repos.updated", { date: formatRelativeDate(repository.updated_at) })}
           </p>
           <Button variant="outline" size="sm" className="mt-3 gap-2" asChild>

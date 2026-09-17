@@ -728,7 +728,7 @@ export function TaskDetailDrawer({
                               </label>
                               <div className="flex shrink-0 items-center gap-1">
                                 {c.canceled && (
-                                  <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                                  <Badge variant="outline" className="text-micro text-muted-foreground">
                                     {t("boardArea.components.taskDetail.criterionCanceled")}
                                   </Badge>
                                 )}
@@ -981,9 +981,9 @@ export function TaskDetailDrawer({
                   <Label className="text-muted-foreground">{t("boardArea.components.taskDetail.agentRuns", { count: runs.length })}</Label>
                   {agentTokenTotals.length > 0 && (
                     <div className="space-y-1 rounded-lg border border-border bg-muted/10 px-3 py-2">
-                      <p className="text-[11px] font-medium text-muted-foreground">{t("boardArea.components.taskDetail.tokenUsage")}</p>
+                      <p className="text-micro font-medium text-muted-foreground">{t("boardArea.components.taskDetail.tokenUsage")}</p>
                       {agentTokenTotals.map(([agentId, tally]) => (
-                        <div key={agentId} className="flex flex-wrap items-baseline justify-between gap-x-2 text-[11px]">
+                        <div key={agentId} className="flex flex-wrap items-baseline justify-between gap-x-2 text-micro">
                           <span className="font-medium">
                             {agents.find((a) => a.id === agentId)?.name ?? t("boardArea.components.taskDetail.agentFallback")}
                           </span>
@@ -1025,9 +1025,9 @@ export function TaskDetailDrawer({
                               {r.summary && (
                                 <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{r.summary}</p>
                               )}
-                              <p className="mt-1 text-[11px] text-muted-foreground">{formatRelativeDate(r.created_at)}</p>
+                              <p className="mt-1 text-micro text-muted-foreground">{formatRelativeDate(r.created_at)}</p>
                               {(r.prompt_tokens ?? 0) + (r.completion_tokens ?? 0) > 0 && (
-                                <p className="mt-1 text-[11px] text-muted-foreground">
+                                <p className="mt-1 text-micro text-muted-foreground">
                                   {tokenLine({
                                     prompt: r.prompt_tokens ?? 0,
                                     completion: r.completion_tokens ?? 0,
@@ -1324,12 +1324,12 @@ export function TaskDetailDrawer({
                               ? t("boardArea.components.taskDetail.systemAuthor")
                               : t("boardArea.components.taskDetail.userAuthor");
                           return (
-                            <div key={c.id} className="rounded-md border border-border bg-card px-3 py-2 shadow-sm">
+                            <div key={c.id} className="rounded-md border border-border bg-card px-3 py-2 shadow-[var(--shadow-raised)]">
                               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                 {isAgent ? <Bot className="h-3 w-3" /> : isSystem ? <Cog className="h-3 w-3" /> : <User className="h-3 w-3" />}
                                 <span className="font-medium text-foreground">{authorName}</span>
                                 {isAgent && (
-                                  <Badge variant="outline" className="h-4 px-1 text-[10px] font-normal">
+                                  <Badge variant="outline" className="h-4 px-1 text-micro font-normal">
                                     {t("boardArea.components.taskDetail.agentFallback")}
                                   </Badge>
                                 )}
@@ -1412,10 +1412,10 @@ function TestCaseList({ items, t }: { items: TaskTestCase[]; t: TranslateFn }) {
               {c.title}
             </span>
             <div className="flex shrink-0 items-center gap-1">
-              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+              <Badge variant="outline" className="text-micro text-muted-foreground">
                 {t(`boardArea.components.taskDetail.testCaseCategory${pascal(c.category)}`)}
               </Badge>
-              <Badge variant={testCaseBadgeVariant(c.status)} className="text-[10px]">
+              <Badge variant={testCaseBadgeVariant(c.status)} className="text-micro">
                 {t(`boardArea.components.taskDetail.testCaseStatus${pascal(c.status)}`)}
               </Badge>
             </div>
@@ -1436,7 +1436,7 @@ function TestCaseList({ items, t }: { items: TaskTestCase[]; t: TranslateFn }) {
             </p>
           )}
           {c.evidence && (
-            <p className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] text-muted-foreground">
+            <p className="mt-1 whitespace-pre-wrap break-words font-mono text-micro text-muted-foreground">
               {t("boardArea.components.taskDetail.testCaseEvidence")}: {c.evidence}
             </p>
           )}

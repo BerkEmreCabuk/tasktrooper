@@ -45,7 +45,7 @@ export function SessionActionCard({ action, onOpenTask, className }: SessionActi
             {entityLabel} {verbLabel}
           </span>
           {action.entity_key && (
-            <Badge variant="outline" className="font-mono text-[10px]">
+            <Badge variant="outline" className="font-mono text-micro">
               {action.entity_key}
             </Badge>
           )}

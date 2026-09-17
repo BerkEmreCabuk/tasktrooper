@@ -174,7 +174,7 @@ export function DeploySettingsPage() {
                 <p className="font-mono text-xs text-muted-foreground">{file.path}</p>
                 <div className="flex flex-wrap gap-1">
                   {file.keys.map((key) => (
-                    <Badge key={key} variant="outline" className="font-mono text-[11px]">
+                    <Badge key={key} variant="outline" className="font-mono text-micro">
                       {key}
                     </Badge>
                   ))}

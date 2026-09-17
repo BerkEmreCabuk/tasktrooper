@@ -116,7 +116,7 @@ export function MessageList({
                   // max-w-[85%] instead of letting the content's own
                   // wrap/scroll handling (prose-chat, whitespace-pre-wrap)
                   // contain it.
-                  "min-w-0 max-w-[85%] rounded-2xl px-4 py-3 shadow-sm",
+                  "min-w-0 max-w-[85%] rounded-2xl px-4 py-3 shadow-[var(--shadow-raised)]",
                   message.role === "user"
                     ? "bg-primary text-primary-foreground"
                     : isError
@@ -187,7 +187,7 @@ export function MessageList({
 
       {showStreamingBubble && (
         <div className="flex justify-start">
-          <div className="min-w-0 max-w-[85%] rounded-2xl border border-border bg-card px-4 py-3 text-card-foreground shadow-sm">
+          <div className="min-w-0 max-w-[85%] rounded-2xl border border-border bg-card px-4 py-3 text-card-foreground shadow-[var(--shadow-raised)]">
             <div className="mb-1 flex items-center gap-2">
               <span className="text-caption font-medium opacity-80">
                 {t("chatArea.chat.message.assistant")}

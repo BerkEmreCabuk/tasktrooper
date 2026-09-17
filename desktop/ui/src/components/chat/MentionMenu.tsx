@@ -36,7 +36,7 @@ export function MentionMenu({ options, activeIndex, onSelect, onHover }: Mention
         return (
           <div key={`${option.kind}:${option.id}`}>
             {showHeader && (
-              <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="px-2 py-1 text-micro font-medium uppercase tracking-wide text-muted-foreground">
                 {t(`chatArea.chat.composer.mention.${option.kind}`)}
               </div>
             )}

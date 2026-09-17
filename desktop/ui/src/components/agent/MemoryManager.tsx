@@ -479,17 +479,17 @@ export function MemoryManager({ mode, agentId }: MemoryManagerProps) {
                         <p className="text-sm text-muted-foreground">{candidate.description}</p>
                       )}
                       <div className="flex flex-wrap items-center gap-1">
-                        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        <span className="text-micro uppercase tracking-wide text-muted-foreground">
                           {t("agentArea.components.memory.promotePlanAgents")}
                         </span>
                         {candidate.agents.map((agent) => (
-                          <Badge key={agent} variant="secondary" className="text-[10px]">
+                          <Badge key={agent} variant="secondary" className="text-micro">
                             {agent}
                           </Badge>
                         ))}
                       </div>
                       <div className="rounded-md border border-border/60 bg-muted/30 p-3">
-                        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                        <p className="text-micro uppercase tracking-wide text-muted-foreground">
                           {t("agentArea.components.memory.promotePlanFrom")}
                         </p>
                         <p className="mt-1 text-sm whitespace-pre-wrap">{candidate.memory_content}</p>

@@ -406,7 +406,7 @@ function EnvTargetCard({
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">{t(envNameKey)}</CardTitle>
-          <Badge variant={envBadgeVariant(env)} className="font-mono text-[11px]">
+          <Badge variant={envBadgeVariant(env)} className="font-mono text-micro">
             {env}
           </Badge>
         </div>
@@ -655,7 +655,7 @@ function LocalEnvCard({ repositoryId, subProjectPath }: LocalEnvCardProps) {
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="text-base">{t("projectAdmin.prodOps.envNames.local")}</CardTitle>
-          <Badge variant="secondary" className="font-mono text-[11px]">
+          <Badge variant="secondary" className="font-mono text-micro">
             local
           </Badge>
         </div>

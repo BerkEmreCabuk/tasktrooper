@@ -52,13 +52,13 @@ export function PlanView({ plan, agentNameMap, activityByTaskKey }: PlanViewProp
           <CardContent className="space-y-3 px-4 pb-4 pt-0">
             {plan.purpose && (
               <div>
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t("chatArea.chat.plan.purpose")}</p>
+                <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">{t("chatArea.chat.plan.purpose")}</p>
                 <p className="mt-1 text-sm">{plan.purpose}</p>
               </div>
             )}
             {plan.goal && (
               <div>
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{t("chatArea.chat.plan.goal")}</p>
+                <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">{t("chatArea.chat.plan.goal")}</p>
                 <p className="mt-1 text-sm">{plan.goal}</p>
               </div>
             )}
@@ -100,12 +100,12 @@ export function PlanView({ plan, agentNameMap, activityByTaskKey }: PlanViewProp
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-sm font-medium">{task.title}</span>
-                      <Badge variant={taskStatusVariant(task.status)} className="shrink-0 text-[10px]">
+                      <Badge variant={taskStatusVariant(task.status)} className="shrink-0 text-micro">
                         {task.status}
                       </Badge>
                     </div>
                     {task.description && <p className="text-xs text-muted-foreground">{task.description}</p>}
-                    <div className="flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+                    <div className="flex flex-wrap gap-2 text-micro text-muted-foreground">
                       {task.agent_id && <span>{t("chatArea.chat.plan.agent", { name: resolveAgentName(task.agent_id, agentNameMap) })}</span>}
                       {task.skill_ids?.length > 0 && <span>{t("chatArea.chat.plan.skills", { count: task.skill_ids.length })}</span>}
                       {task.depends_on?.length > 0 && <span>{t("chatArea.chat.plan.dependencies", { count: task.depends_on.length })}</span>}
@@ -113,7 +113,7 @@ export function PlanView({ plan, agentNameMap, activityByTaskKey }: PlanViewProp
                     {(task.tool_names?.length ?? 0) > 0 && (
                       <div className="flex flex-wrap gap-1 pt-1">
                         {task.tool_names!.map((name) => (
-                          <Badge key={name} variant="outline" className="font-mono text-[10px]">
+                          <Badge key={name} variant="outline" className="font-mono text-micro">
                             {name}
                           </Badge>
                         ))}
@@ -121,10 +121,10 @@ export function PlanView({ plan, agentNameMap, activityByTaskKey }: PlanViewProp
                     )}
                     <AgentStepList iterations={activityByTaskKey?.[task.task_key] ?? []} compact />
                     {task.result && (
-                      <pre className="mt-2 max-h-24 overflow-auto rounded bg-muted p-2 text-[10px]">{task.result}</pre>
+                      <pre className="mt-2 max-h-24 overflow-auto rounded bg-muted p-2 text-micro">{task.result}</pre>
                     )}
                     {task.error && (
-                      <pre className="mt-2 max-h-24 overflow-auto rounded bg-destructive/10 p-2 text-[10px] text-destructive">
+                      <pre className="mt-2 max-h-24 overflow-auto rounded bg-destructive/10 p-2 text-micro text-destructive">
                         {task.error}
                       </pre>
                     )}
@@ -156,7 +156,7 @@ export function PlanView({ plan, agentNameMap, activityByTaskKey }: PlanViewProp
                 <AlertCircle className="h-3.5 w-3.5 text-warning" />
               )}
               {t("chatArea.chat.plan.verification")}
-              <Badge variant={plan.verification.passed ? "success" : "warning"} className="ml-auto text-[10px]">
+              <Badge variant={plan.verification.passed ? "success" : "warning"} className="ml-auto text-micro">
                 {plan.verification.passed ? t("chatArea.chat.plan.passed") : t("chatArea.chat.plan.failed")}
               </Badge>
             </CardTitle>

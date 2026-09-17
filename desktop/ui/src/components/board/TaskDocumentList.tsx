@@ -55,7 +55,7 @@ export function TaskDocumentList({ documents, agentNameMap, onDelete }: TaskDocu
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium">{doc.title}</span>
-                <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                <span className="mt-0.5 block text-micro text-muted-foreground">
                   {authorOf(doc)}
                   {" · "}
                   {t("boardArea.components.taskDetail.docWords", { count: wordCount(doc.content) })}
@@ -91,7 +91,7 @@ export function TaskDocumentList({ documents, agentNameMap, onDelete }: TaskDocu
               <span className="min-w-0 truncate">{openDoc?.title}</span>
             </DialogTitle>
             {openDoc && (
-              <p className="text-[11px] text-muted-foreground">
+              <p className="text-micro text-muted-foreground">
                 {authorOf(openDoc)}
                 {" · "}
                 {t("boardArea.components.taskDetail.docUpdated", {

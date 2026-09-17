@@ -97,7 +97,7 @@ export function ModelSelect({
               <span className="flex items-center gap-2">
                 <span>{id}</span>
                 {caps.map((cap) => (
-                  <Badge key={cap} variant="outline" className={`px-1 py-0 text-[10px] ${CAPABILITY_STYLES[cap]}`}>
+                  <Badge key={cap} variant="outline" className={`px-1 py-0 text-micro ${CAPABILITY_STYLES[cap]}`}>
                     {t(`agentArea.settings.model.capability.${cap}`)}
                   </Badge>
                 ))}

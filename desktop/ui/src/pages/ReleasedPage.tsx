@@ -167,23 +167,23 @@ export function ReleasedPage() {
               {tasks.map((task) => (
                 <Card
                   key={task.id}
-                  className="cursor-pointer p-4 transition-all hover:border-primary/30 hover:shadow-sm"
+                  className="cursor-pointer p-4 transition-all hover:border-primary/30 hover:shadow-[var(--shadow-overlay)]"
                   onClick={() => {
                     setSelectedId(task.id);
                     setDrawerOpen(true);
                   }}
                 >
                   <div className="flex flex-wrap items-center gap-1">
-                    <Badge variant="outline" className="font-mono text-[10px]">
+                    <Badge variant="outline" className="font-mono text-micro">
                       {task.key}
                     </Badge>
-                    <Badge variant="secondary" className="text-[10px]">
+                    <Badge variant="secondary" className="text-micro">
                       {taskTypeLabel(task.task_type)}
                     </Badge>
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge variant="outline" className="text-micro">
                       {taskPriorityLabel(task.priority)}
                     </Badge>
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge variant="outline" className="text-micro">
                       {repositoryName(task.repository_id)}
                     </Badge>
                   </div>
@@ -193,7 +193,7 @@ export function ReleasedPage() {
                       {task.description}
                     </p>
                   )}
-                  <p className="mt-3 text-[11px] text-muted-foreground">
+                  <p className="mt-3 text-micro text-muted-foreground">
                     {t("boardArea.released.releasedAt", {
                       value: formatRelativeDate(task.column_entered_at ?? task.updated_at),
                     })}
