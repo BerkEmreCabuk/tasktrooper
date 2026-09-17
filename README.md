@@ -242,15 +242,10 @@ board drives it.
 | Interface | Desktop app (macOS, Windows, Linux) | CLI, plus community UIs | CLI | Web UI | Terminal UI |
 | License | Apache-2.0 | MIT | See their repositories | Apache-2.0 | AGPL-3.0 |
 
-Two ideas here come straight from Beads: agents ask for the unblocked queue
-(`list_ready_tasks`) instead of scanning the board, and a task an agent opens
-while working another one is linked back to it (`discovered_from`) without the
-agent having to remember. Where TaskTrooper differs is everything around the
-tracker: the board dispatches on its own, each column has an owner, QA has to
-execute, a pull request is opened and merged per task, and the deploy is
-watched after that. If what you want is a tracker your agents call from any
-tool, Beads is that. If you want the loop closed on one machine with nothing to
-host, that is what TaskTrooper is for.
+Per-project write-ups, including Claude Code on its own, Cursor, Devin, GitHub
+Copilot's coding agent, OpenHands and Spotify's Xirp, are under
+[`docs/compare/`](docs/compare/README.md) and on
+[tasktrooper.ai/compare](https://tasktrooper.ai/compare).
 
 ## License
 
