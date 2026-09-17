@@ -1,0 +1,2 @@
+{"type":"step_start","sessionID":"ses_rl1"}
+{"type":"error","sessionID":"ses_rl1","error":{"name":"rate_limit_exceeded","data":{"message":"Error from provider (Console): Rate limit exceeded. Please try again later."}}}

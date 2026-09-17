@@ -356,6 +356,7 @@ func (e *Executor) gatedQuotaBlock(req domain.TaskExecution) *domain.QuotaBlock 
 		ResumeAt:     until,
 		CLISessionID: req.ResumeSessionID,
 		Detail:       "another Claude Code session hit the usage limit: " + detail,
+		Provider:     domain.LLMProviderClaudeCode,
 	}
 }
 

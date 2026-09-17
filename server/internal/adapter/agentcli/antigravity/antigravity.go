@@ -22,7 +22,10 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -59,6 +62,12 @@ type Executor struct {
 	mcp         MCPConfig
 	mcpProvider MCPProvider
 	now         func() time.Time
+
+	// gateMu guards the account-wide quota gate — see cursor's and
+	// claudecode's identical gate for the reasoning.
+	gateMu      sync.Mutex
+	quotaUntil  time.Time
+	quotaDetail string
 }
 
 var _ port.TaskExecutor = (*Executor)(nil)
@@ -90,6 +99,60 @@ func (e *Executor) Supports(provider domain.LLMProviderType) bool {
 	return e != nil && provider == domain.LLMProviderAntigravity
 }
 
+// armQuotaGate records that a session on this executor hit the quota — see
+// claudecode's identical method for the reasoning.
+func (e *Executor) armQuotaGate(block *domain.QuotaBlock) {
+	if block == nil {
+		return
+	}
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	if block.ResumeAt.After(e.quotaUntil) {
+		e.quotaUntil = block.ResumeAt
+		e.quotaDetail = block.Detail
+	}
+}
+
+// clearQuotaGate lifts the gate once a session proves the limit is no longer
+// in force.
+func (e *Executor) clearQuotaGate() {
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	e.quotaUntil = time.Time{}
+	e.quotaDetail = ""
+}
+
+// QuotaGate reports the gate's current state, for observability.
+func (e *Executor) QuotaGate() (until time.Time, armed bool) {
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	return e.quotaUntil, !e.quotaUntil.IsZero()
+}
+
+func (e *Executor) quotaGateState() (until time.Time, detail string, armed bool) {
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	return e.quotaUntil, e.quotaDetail, !e.quotaUntil.IsZero()
+}
+
+// gatedQuotaBlock is the park Execute returns while the gate is armed, or nil.
+func (e *Executor) gatedQuotaBlock(req domain.TaskExecution) *domain.QuotaBlock {
+	until, detail, armed := e.quotaGateState()
+	if !armed || !e.now().Before(until) {
+		return nil
+	}
+	log.Info().
+		Str("task_key", req.TaskKey).
+		Time("resume_at", until).
+		Msg("antigravity quota gate is armed; parking without spawning")
+	return &domain.QuotaBlock{
+		ResumeAt:     until,
+		CLISessionID: req.ResumeSessionID,
+		Detail:       "another Antigravity session hit the quota: " + detail,
+		Provider:     domain.LLMProviderAntigravity,
+	}
+}
+
 // Execute runs the task in an AGY session and maps its outcome onto the
 // response shape the board runner already reads.
 func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domain.AgentResponse, error) {
@@ -99,6 +162,9 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 	// Never fall back to a default directory — see claudecode.Execute for why.
 	if strings.TrimSpace(req.WorkDir) == "" {
 		return domain.AgentResponse{}, errors.New("antigravity executor: no task workspace to run in")
+	}
+	if block := e.gatedQuotaBlock(req); block != nil {
+		return domain.AgentResponse{}, block
 	}
 
 	mcpCfg, releaseMCP, err := e.resolveMCP(ctx, MCPRun{Policy: req.Policy, Label: req.TaskKey})
@@ -116,6 +182,7 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 	s, err := e.spawn(ctx, invocation{
 		workDir: req.WorkDir,
 		prompt:  flattenHistory(req.History),
+		model:   req.Model,
 		label:   req.TaskKey,
 	})
 	if err != nil {
@@ -128,6 +195,7 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 type invocation struct {
 	workDir string
 	prompt  string
+	model   string
 	label   string
 	// stream forwards assistant text as it arrives. The zero value reports
 	// nothing, which is what a board run wants.
@@ -139,13 +207,19 @@ type invocation struct {
 // Order is fixed so two runs with the same inputs produce byte-identical
 // command lines, which is what makes a failure reproducible from a log line.
 func (e *Executor) buildArgs(inv invocation) []string {
-	return []string{
+	args := []string{
 		"-p", inv.prompt,
 		"--output-format", "stream-json",
 		// The workspace is a throwaway clone on a task branch and there is no
 		// human at this terminal to answer a prompt.
 		"--dangerously-skip-permissions",
 	}
+	// An empty model hands the choice to AGY's own configured default, the
+	// same "omit rather than guess" rule claudecode's --model follows.
+	if model := strings.TrimSpace(inv.model); model != "" {
+		args = append(args, "--model", model)
+	}
+	return args
 }
 
 // spawn runs one CLI session to completion and returns everything it
@@ -173,7 +247,7 @@ func (e *Executor) spawn(ctx context.Context, inv invocation) (session, error) {
 
 	// streamingSink is a pass-through when nobody is listening, so a board run
 	// pays nothing for the chat path existing.
-	out, parseErr := parseStream(stdout, newStreamingSink(&noopSink{}, inv.stream))
+	out, parseErr := parseStream(stdout, newStreamingSink(&traceSink{ctx: ctx, taskKey: inv.label}, inv.stream))
 	// A parse that stopped early left the pipe with unread bytes in it; Wait
 	// would otherwise block on a full pipe nobody is draining.
 	if parseErr != nil {
@@ -204,6 +278,18 @@ type session struct {
 
 // finish turns the session's outcome into either a response or an error.
 func (e *Executor) finish(ctx context.Context, label string, s session) (domain.AgentResponse, error) {
+	resp, err := e.finishInner(ctx, label, s)
+	if err == nil {
+		e.clearQuotaGate()
+		return resp, nil
+	}
+	if block, ok := domain.QuotaBlockOf(err); ok {
+		e.armQuotaGate(block)
+	}
+	return resp, err
+}
+
+func (e *Executor) finishInner(ctx context.Context, label string, s session) (domain.AgentResponse, error) {
 	out := s.out
 	usageapp.TokenUsageFromContext(ctx).Add(out.Usage)
 
@@ -214,6 +300,19 @@ func (e *Executor) finish(ctx context.Context, label string, s session) (domain.
 	}
 	if s.parseErr != nil {
 		return domain.AgentResponse{}, s.parseErr
+	}
+	// Quota detection runs on a session that either never produced a result or
+	// reported one as an error — a healthy session's own text is never checked
+	// against the pattern, the same asymmetry claudecode's finish keeps.
+	if !out.SawResult || out.IsError {
+		if block := quotaBlockFrom(out, s.stderrTail, out.SessionID, e.now()); block != nil {
+			log.Warn().
+				Str("task_key", label).
+				Str("cli_session_id", out.SessionID).
+				Time("resume_at", block.ResumeAt).
+				Msg("antigravity quota reached, parking the task")
+			return domain.AgentResponse{}, block
+		}
 	}
 	// No terminal event means the session did not finish: killed, crashed, or
 	// stopped by the run's own cancellation.
@@ -266,14 +365,6 @@ func flattenHistory(history []domain.Message) string {
 	}
 	return strings.Join(parts, "\n\n")
 }
-
-type noopSink struct{}
-
-func (noopSink) OnSession(sessionID, model string)                       {}
-func (noopSink) OnTurn()                                                 {}
-func (noopSink) OnAssistantText(text string)                             {}
-func (noopSink) OnToolUse(callID, name, arguments string)                {}
-func (noopSink) OnToolResult(callID, name, content string, isError bool) {}
 
 // childEnv is defined in probe.go and reused here — one answer to "what
 // environment does a spawned agy get" for both the probe and a real run.

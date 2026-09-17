@@ -69,6 +69,7 @@ func quotaBlockFrom(out outcome, stderrTail, sessionID string, now time.Time) *d
 			ResumeAt:     resumeAt,
 			CLISessionID: sessionID,
 			Detail:       fmt.Sprintf("Claude subscription limit (%s window) reached", out.RateLimit.RateLimitType),
+			Provider:     domain.LLMProviderClaudeCode,
 		}
 	}
 	if out.APIErrorStatus == 429 {
@@ -84,6 +85,7 @@ func quotaBlockFrom(out outcome, stderrTail, sessionID string, now time.Time) *d
 			ResumeAt:     resumeAt,
 			CLISessionID: sessionID,
 			Detail:       detail,
+			Provider:     domain.LLMProviderClaudeCode,
 		}
 	}
 
@@ -110,6 +112,7 @@ func quotaBlockFrom(out outcome, stderrTail, sessionID string, now time.Time) *d
 		ResumeAt:     resumeAt,
 		CLISessionID: sessionID,
 		Detail:       quotaDetail(text),
+		Provider:     domain.LLMProviderClaudeCode,
 	}
 }
 

@@ -1,0 +1,2 @@
+{"type":"step_start","sessionID":"ses_err1"}
+{"type":"error","sessionID":"ses_err1","error":{"name":"invalid_request","data":{"message":"model 'nonexistent' is not available"}}}

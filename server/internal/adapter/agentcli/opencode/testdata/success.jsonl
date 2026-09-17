@@ -1,0 +1,8 @@
+{"type":"step_start","sessionID":"ses_abc123"}
+{"type":"text","sessionID":"ses_abc123","part":{"id":"prt_1","text":"Reading the runner to see how the task is dispatched."}}
+{"type":"tool_use","sessionID":"ses_abc123","part":{"callID":"call_1","tool":"read","state":{"status":"running","input":{"file_path":"internal/application/board/runner.go"}}}}
+{"type":"tool_use","sessionID":"ses_abc123","part":{"callID":"call_1","tool":"read","state":{"status":"completed","input":{"file_path":"internal/application/board/runner.go"},"output":"package board"}}}
+{"type":"tool_use","sessionID":"ses_abc123","part":{"callID":"call_2","tool":"bash","state":{"status":"running","input":{"command":"go build ./..."}}}}
+{"type":"tool_use","sessionID":"ses_abc123","part":{"callID":"call_2","tool":"bash","state":{"status":"error","input":{"command":"go build ./..."},"output":"exit status 2: undefined: foo"}}}
+{"type":"text","sessionID":"ses_abc123","part":{"id":"prt_1","text":"Reading the runner to see how the task is dispatched. Fixed the undefined symbol and the build is green."}}
+{"type":"step_finish","sessionID":"ses_abc123","part":{"reason":"stop","cost":0.4213,"tokens":{"input":1500,"output":800,"reasoning":0,"cache":{"read":12000,"write":200}}}}

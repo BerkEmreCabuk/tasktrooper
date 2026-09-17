@@ -810,6 +810,43 @@ into a queue nobody asked to join. A chat turn's own session still reports the l
 usual (see `QuotaNotice` above), and a chat turn that *succeeds* still clears the gate for
 every other session on the executor, through the same `finish` wrapper the board path uses.
 
+**The other three CLI executors have their own park, best-effort.** `cursor_agent`,
+`opencode` and `antigravity` each carry a `quota.go` and the same `gateMu` /
+`armQuotaGate` / `gatedQuotaBlock` shape as claudecode's, feeding the identical generic
+`*domain.QuotaBlock` → board park machinery above — migration 101's columns and
+`QuotaSweeper` do not know or care which CLI parked the row. What differs is confidence in
+DETECTION: Claude Code's `rate_limit_event` is a documented, structured signal; the other
+three have no published error schema, so their `quotaBlockFrom` matches the CLI's own wording
+as reported against real installs (cursor-agent's "You've hit your usage limit", AGY's
+"quota reached" with its own `Resets in <duration>` countdown, OpenCode's `error` event
+relaying whichever upstream provider 429'd) rather than a vendor-confirmed contract. AGY's
+reset countdown is parsed into `ResumeAt`; cursor-agent's calendar-day reset is used only
+when it is still in the future; OpenCode's park always uses `DefaultQuotaParkWindow`, since
+it proxies many providers and none of their reset formats are documented to survive
+OpenCode's relay. `domain.QuotaBlock.Provider` records which of the four hit the limit, so
+`UserMessage`/`QueuedMessage` name the right CLI instead of always saying "Claude Code".
+
+**The tool ledger and activity trace, for all four.** `cursor`, `opencode` and `antigravity`
+each now carry their own `trace.go`, the same shape as claudecode's: a `traceSink` that
+writes every `OnToolUse`/`OnToolResult` into both `registry.ToolUsageFromContext(ctx)` (what
+the grounding gates below read — `isUngroundedAnalysis`, `isUngroundedQA`) and the activity
+trace the UI streams (`assistant_message`, `tool_call_start`, `tool_call_result`,
+`iteration_start`), replacing what used to be a `noopSink` that discarded both. Before this,
+a board run on any of the three non-Claude-Code providers recorded NOTHING into the ledger —
+an analiz run that genuinely read the repository through the CLI's own native tools (not
+TaskTrooper's MCP-served ones) still failed `isUngroundedAnalysis` and looped on
+`ErrUngroundedAnalysis`, because the ledger looked untouched regardless of what happened.
+MCP-served calls (`mcp__tasktrooper__*`) were never the problem — those already reach the
+ledger through `mcpserver.Run.Ctx`, the SAME `*registry.ToolUsage` the board runner installed
+via `registry.ContextWithToolUsage`, independent of which CLI is asking — `recordedElsewhere`
+(a `strings.Contains(..., "tasktrooper")` guard, since none of the three document a fixed MCP
+tool-naming prefix the way Claude Code's `mcp__<server>__<tool>` is documented) exists only to
+avoid double-recording those. The gap was the CLI's OWN native tools (Read/Grep/Bash-alikes),
+visible only in its own stdout stream, which nothing fed into the ledger. Each package's
+`nativeToolNames` map — cursor's and antigravity's LOW confidence, opencode's higher — is
+best-effort against public docs and reported issues, not a verified contract; see each file's
+own comment for the confidence level and what a live session would need to confirm it.
+
 ### The tool endpoint (MCP)
 
 A CLI session arrives with the CLI's own tools and no idea a board exists — so without

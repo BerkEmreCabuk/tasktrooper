@@ -28,7 +28,10 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -57,6 +60,14 @@ type Executor struct {
 	mcp         MCPConfig
 	mcpProvider MCPProvider
 	now         func() time.Time
+
+	// gateMu guards the account-wide usage-limit gate: one session's usage-limit
+	// text tells every other session about to spawn instead of each one
+	// independently paying for a failed session of its own. See claudecode's
+	// identical gate for why.
+	gateMu      sync.Mutex
+	quotaUntil  time.Time
+	quotaDetail string
 }
 
 var _ port.TaskExecutor = (*Executor)(nil)
@@ -86,6 +97,60 @@ func (e *Executor) Supports(provider domain.LLMProviderType) bool {
 	return e != nil && provider == domain.LLMProviderCursorAgent
 }
 
+// armQuotaGate records that a session on this executor hit the usage limit —
+// see claudecode's identical method for the reasoning.
+func (e *Executor) armQuotaGate(block *domain.QuotaBlock) {
+	if block == nil {
+		return
+	}
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	if block.ResumeAt.After(e.quotaUntil) {
+		e.quotaUntil = block.ResumeAt
+		e.quotaDetail = block.Detail
+	}
+}
+
+// clearQuotaGate lifts the gate once a session proves the limit is no longer
+// in force.
+func (e *Executor) clearQuotaGate() {
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	e.quotaUntil = time.Time{}
+	e.quotaDetail = ""
+}
+
+// QuotaGate reports the gate's current state, for observability.
+func (e *Executor) QuotaGate() (until time.Time, armed bool) {
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	return e.quotaUntil, !e.quotaUntil.IsZero()
+}
+
+func (e *Executor) quotaGateState() (until time.Time, detail string, armed bool) {
+	e.gateMu.Lock()
+	defer e.gateMu.Unlock()
+	return e.quotaUntil, e.quotaDetail, !e.quotaUntil.IsZero()
+}
+
+// gatedQuotaBlock is the park Execute returns while the gate is armed, or nil.
+func (e *Executor) gatedQuotaBlock(req domain.TaskExecution) *domain.QuotaBlock {
+	until, detail, armed := e.quotaGateState()
+	if !armed || !e.now().Before(until) {
+		return nil
+	}
+	log.Info().
+		Str("task_key", req.TaskKey).
+		Time("resume_at", until).
+		Msg("cursor usage limit gate is armed; parking without spawning")
+	return &domain.QuotaBlock{
+		ResumeAt:     until,
+		CLISessionID: req.ResumeSessionID,
+		Detail:       "another Cursor session hit the usage limit: " + detail,
+		Provider:     domain.LLMProviderCursorAgent,
+	}
+}
+
 // Execute runs the task in a cursor-agent session and maps its outcome onto
 // the response shape the board runner already reads.
 func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domain.AgentResponse, error) {
@@ -94,6 +159,9 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 	}
 	if strings.TrimSpace(req.WorkDir) == "" {
 		return domain.AgentResponse{}, errors.New("cursor executor: no task workspace to run in")
+	}
+	if block := e.gatedQuotaBlock(req); block != nil {
+		return domain.AgentResponse{}, block
 	}
 
 	mcpCfg, releaseMCP, err := e.resolveMCP(ctx, MCPRun{Policy: req.Policy, Label: req.TaskKey})
@@ -111,6 +179,7 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 	s, err := e.spawn(ctx, invocation{
 		workDir: req.WorkDir,
 		prompt:  flattenHistory(req.History),
+		model:   req.Model,
 		label:   req.TaskKey,
 	})
 	if err != nil {
@@ -123,19 +192,27 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 type invocation struct {
 	workDir string
 	prompt  string
+	model   string
 	label   string
 	stream  port.ChatStream
 }
 
 // buildArgs renders the cursor-agent command line for one spawn.
 func (e *Executor) buildArgs(inv invocation) []string {
-	return []string{
+	args := []string{
 		"-p", inv.prompt,
 		// Without this a print-mode run proposes changes and applies none;
 		// there is no human at this terminal to approve them.
 		"--force",
 		"--output-format", "stream-json",
 	}
+	// An empty model hands the choice to cursor-agent's own configured
+	// default, the same "omit rather than guess" rule claudecode's --model
+	// follows.
+	if model := strings.TrimSpace(inv.model); model != "" {
+		args = append(args, "--model", model)
+	}
+	return args
 }
 
 func (e *Executor) spawn(ctx context.Context, inv invocation) (session, error) {
@@ -158,7 +235,7 @@ func (e *Executor) spawn(ctx context.Context, inv invocation) (session, error) {
 		return session{}, fmt.Errorf("start cursor-agent: %w", err)
 	}
 
-	out, parseErr := parseStream(stdout, newStreamingSink(&noopSink{}, inv.stream))
+	out, parseErr := parseStream(stdout, newStreamingSink(&traceSink{ctx: ctx, taskKey: inv.label}, inv.stream))
 	if parseErr != nil {
 		_, _ = io.Copy(io.Discard, stdout)
 	}
@@ -183,6 +260,18 @@ type session struct {
 }
 
 func (e *Executor) finish(ctx context.Context, label string, s session) (domain.AgentResponse, error) {
+	resp, err := e.finishInner(ctx, label, s)
+	if err == nil {
+		e.clearQuotaGate()
+		return resp, nil
+	}
+	if block, ok := domain.QuotaBlockOf(err); ok {
+		e.armQuotaGate(block)
+	}
+	return resp, err
+}
+
+func (e *Executor) finishInner(ctx context.Context, label string, s session) (domain.AgentResponse, error) {
 	out := s.out
 	// No usageapp.TokenUsageFromContext(ctx).Add here: cursor-agent's
 	// stream-json carries no documented usage/token fields, unlike
@@ -194,6 +283,19 @@ func (e *Executor) finish(ctx context.Context, label string, s session) (domain.
 	}
 	if s.parseErr != nil {
 		return domain.AgentResponse{}, s.parseErr
+	}
+	// Quota detection runs on a session that either never produced a result or
+	// reported one as an error — a healthy session's own text is never checked
+	// against the pattern, the same asymmetry claudecode's finish keeps.
+	if !out.SawResult || out.IsError {
+		if block := quotaBlockFrom(out, s.stderrTail, out.SessionID, e.now()); block != nil {
+			log.Warn().
+				Str("task_key", label).
+				Str("cli_session_id", out.SessionID).
+				Time("resume_at", block.ResumeAt).
+				Msg("cursor usage limit reached, parking the task")
+			return domain.AgentResponse{}, block
+		}
 	}
 	if !out.SawResult {
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -239,14 +341,6 @@ func flattenHistory(history []domain.Message) string {
 	}
 	return strings.Join(parts, "\n\n")
 }
-
-type noopSink struct{}
-
-func (noopSink) OnSession(sessionID, model string)                       {}
-func (noopSink) OnTurn()                                                 {}
-func (noopSink) OnAssistantText(text string)                             {}
-func (noopSink) OnToolUse(callID, name, arguments string)                {}
-func (noopSink) OnToolResult(callID, name, content string, isError bool) {}
 
 type tailWriter struct {
 	max int

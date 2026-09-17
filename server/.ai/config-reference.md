@@ -397,6 +397,10 @@ the CLI, so a run's whole history is folded into one prompt; MCP tools reach the
 
 No `enabled`/`max_turns` flags — same "binary on PATH is the switch" rule as `claude_code`.
 
+A session that reports AGY's own "quota reached" (with its `Resets in <duration>` countdown,
+when present) parks the task the same way a Claude Code usage limit does — see
+`architecture.md`'s quota-park section for the shared mechanics and the confidence caveat.
+
 ## Cursor executor (`cursor_agent`)
 
 Agents whose `provider_type` is `cursor_agent` run in a headless `cursor-agent -p --force`
@@ -411,6 +415,10 @@ original bytes when the run ends, since a repository may already have one commit
 | `run_timeout` | — | `1h` | Deadline for one session |
 
 Auth is probed via `cursor-agent status`, not a real turn — the CLI reports it directly.
+
+A session that reports cursor-agent's own usage-limit wording parks the task the same way a
+Claude Code usage limit does — see `architecture.md`'s quota-park section for the shared
+mechanics and the confidence caveat.
 
 ## OpenCode executor (`opencode`)
 
@@ -428,3 +436,7 @@ written to the workspace at all.
 
 A known upstream bug can end a run without its final `step_finish` event; a clean exit with
 real output is treated as success rather than a hard failure.
+
+A session whose `error` event relays a provider rate limit parks the task the same way a
+Claude Code usage limit does, always on the default window — see `architecture.md`'s
+quota-park section for the shared mechanics and why OpenCode never gets a real reset time.

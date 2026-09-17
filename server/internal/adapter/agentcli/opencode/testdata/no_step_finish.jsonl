@@ -1,0 +1,2 @@
+{"type":"step_start","sessionID":"ses_nores1"}
+{"type":"text","sessionID":"ses_nores1","part":{"id":"prt_1","text":"Refactored the handler and the tests pass."}}
