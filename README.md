@@ -14,7 +14,7 @@
 
 # TaskTrooper
 
-**Website:** [tasktrooper.ai](https://tasktrooper.ai) · **Download:** [Releases](https://github.com/makifbaysal/tasktrooper/releases)
+**Website:** [tasktrooper.ai](https://tasktrooper.ai) · **Docs:** [tasktrooper.ai/docs](https://tasktrooper.ai/docs) · **Download:** [Releases](https://github.com/makifbaysal/tasktrooper/releases)
 
 A local-first agent platform for software teams of one. A board of tasks, a set
 of role agents (product manager, architect, backend, frontend, QA), and a
@@ -207,7 +207,7 @@ make package    # build the installer for this OS into desktop/release
 server/       Go backend — API, board, agent loop, tools, embedded Postgres
 desktop/      Electron shell — supervises the backend + embedder, serves the UI
 desktop/ui/   React UI — bundled into the app; runs in a browser for development
-docs/         short reference docs — start with docs/architecture.md
+docs/         user docs (rendered at tasktrooper.ai/docs) — start with docs/README.md
 ```
 
 Each directory has its own `README.md` and `CLAUDE.md`.
@@ -268,6 +268,7 @@ The agent products most people already use. Several of these are what TaskTroope
 | Lifecycle | Thirteen columns: analysis review, code review, QA, PM UAT, human UAT, merge, deploy watch | None | Task in, PR out | Ticket to draft PR; take over in its IDE | Issue to PR | Conversation and task list | Work items and sessions in a workspace |
 | QA | A separate QA agent that must execute: requests, browser, simulators | Whatever you ask it to run | Self-verification with screenshots and logs | Self-tests; your CI | Your CI on the PR | Whatever the agent runs | Not part of the product |
 | After merge | Deploy recipes, health checks, incidents, rollback, store releases | None | None | None | None | Scriptable automations | Not part of the product |
+| Usage limits | Each task parks with a resume time, other runs are held, sessions resume with --resume; unattended | Interactive session waits and continues at reset (esc to cancel); headless runs do not | Spend limit per agent at API rates | Plan limits | Premium request quota per plan | Your provider's limits | Beta |
 | Data | Stays on the machine | Your machine; model calls to Anthropic | Code leaves your machine | Repos and secrets in Devin's environment | GitHub-hosted repos only | Wherever you host it | Your organisation's portal |
 | Price | Free, Apache-2.0; your own model or CLI subscription | Claude subscription or API | Cursor plan plus API-rate usage | Individual and Teams plans | Paid Copilot plans | Free, MIT; cloud option | Beta; plans page |
 | Runs under TaskTrooper? | — | Yes, the default runtime | Yes, the Cursor CLI | No | No; its PRs and CI are read | No | No |

@@ -1,3 +1,8 @@
+---
+title: Architecture
+description: One machine, three processes, one window. How the desktop app, the Go backend, embedded Postgres and the agent sessions fit together.
+---
+
 # Architecture
 
 One machine, three processes, one window.
@@ -28,11 +33,12 @@ SIGTERM (30 s budget), then Postgres, then appium; the embedder lives until quit
 
 ## Identity
 
-There is one tenant (`tenant.LocalTenantID`) and one role (owner). Every
-request is stamped with it after the bearer check; every store call runs
-`SET LOCAL app.tenant_id` so the schema's row-level-security columns keep their
-defaults. Postgres runs as a superuser locally, so RLS is not enforced — it is a
-multi-tenant guard the local product does not need.
+One user, no login. The desktop app generates one bearer token, hands it to
+the backend as `SERVER_API_KEY` and to the page as
+`window.__tasktrooperDesktop.apiToken`; every `/v1` request carries it. The
+listener binds `127.0.0.1` only. Migration 133 dropped the multi-tenant schema
+(row-level security, `tenant_id` columns, `tenants`), so there is nothing to
+scope a request to beyond the token.
 
 ## Data
 

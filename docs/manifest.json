@@ -1,0 +1,42 @@
+{
+  "sections": [
+    { "title": "Getting started", "pages": [
+      { "slug": "install", "title": "Install" },
+      { "slug": "first-run", "title": "First run and setup" },
+      { "slug": "first-task", "title": "Your first task" }
+    ]},
+    { "title": "The board", "pages": [
+      { "slug": "board-and-columns", "title": "Board and columns" },
+      { "slug": "tasks", "title": "Tasks, criteria and documents" },
+      { "slug": "ordering-and-relations", "title": "Ordering and relations" },
+      { "slug": "quality-gates", "title": "Quality gates" }
+    ]},
+    { "title": "Agents", "pages": [
+      { "slug": "role-agents", "title": "Role agents" },
+      { "slug": "custom-agents", "title": "Your own agents" },
+      { "slug": "tool-policies", "title": "Tool policies" },
+      { "slug": "skills-and-rules", "title": "Skills and rules" },
+      { "slug": "memory", "title": "Memory" },
+      { "slug": "self-evolution", "title": "Self-evolution and KPIs" }
+    ]},
+    { "title": "Runtimes", "pages": [
+      { "slug": "runtimes", "title": "Agent CLIs and API providers" },
+      { "slug": "usage-limits", "title": "Usage limits and concurrency" },
+      { "slug": "mcp-servers", "title": "MCP servers" }
+    ]},
+    { "title": "Delivery", "pages": [
+      { "slug": "git-and-pull-requests", "title": "Git and pull requests" },
+      { "slug": "deploy", "title": "Deploy targets and recipes" },
+      { "slug": "incidents", "title": "Production incidents" },
+      { "slug": "mobile-releases", "title": "Mobile devices and store releases" }
+    ]},
+    { "title": "Reference", "pages": [
+      { "slug": "tools", "title": "Agent tools" },
+      { "slug": "configuration", "title": "Configuration" },
+      { "slug": "data-and-security", "title": "Data directory and security" },
+      { "slug": "troubleshooting", "title": "Troubleshooting" },
+      { "slug": "run-from-source", "title": "Run from source" },
+      { "slug": "architecture", "title": "Architecture" }
+    ]}
+  ]
+}
