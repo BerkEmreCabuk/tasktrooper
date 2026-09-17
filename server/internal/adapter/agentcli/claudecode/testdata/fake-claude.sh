@@ -29,6 +29,12 @@
 #                  does), so a line-per-argument file could not be split back
 #                  apart
 #   argv.<n>.txt   the same, per call, for the two-spawn cases
+#   stdin.txt      the prompt, which arrives on stdin rather than in argv
+#   stdin.<n>.txt  the same, per call
+#   system-prompt.txt  a COPY of the file --append-system-prompt-file pointed
+#                  at, for the same reason mcp-config.json is a copy; removed
+#                  when a call carries none, so a stale one cannot pass for it
+#   system-prompt.<n>.txt  the same, per call
 #   calls.txt      how many times it was invoked
 #   env.txt        the environment it was given, sorted
 #   mcp-config.json  a COPY of the file --mcp-config pointed at, taken while the
@@ -50,12 +56,20 @@ for arg in "$@"; do
 done > argv.txt
 cp argv.txt "argv.$calls.txt"
 
+cat > stdin.txt
+cp stdin.txt "stdin.$calls.txt"
+
 env | sort > env.txt
 
+rm -f system-prompt.txt
 prev=""
 for arg in "$@"; do
     if [ "$prev" = "--mcp-config" ] && [ -f "$arg" ]; then
         cat "$arg" > mcp-config.json
+    fi
+    if [ "$prev" = "--append-system-prompt-file" ] && [ -f "$arg" ]; then
+        cat "$arg" > system-prompt.txt
+        cp system-prompt.txt "system-prompt.$calls.txt"
     fi
     prev="$arg"
 done

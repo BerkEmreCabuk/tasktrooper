@@ -51,8 +51,7 @@ func TestToolManifestNamesTheServedToolsAsTheSessionSeesThem(t *testing.T) {
 	_, err := ex.Execute(context.Background(), taskExecution(workDir))
 	require.NoError(t, err)
 
-	argv := readArgv(t, workDir)
-	systemPrompt := argv[indexOf(t, argv, "--append-system-prompt")+1]
+	systemPrompt := readSystemPrompt(t, workDir)
 	assert.Contains(t, systemPrompt, "mcp__tasktrooper__list_acceptance_criteria")
 	assert.Contains(t, systemPrompt, "mcp__tasktrooper__set_criterion_completed")
 	assert.Contains(t, systemPrompt, "You are the backend developer.", "the persona still comes first")
@@ -67,8 +66,9 @@ func TestNoServedToolsMeansNoManifest(t *testing.T) {
 	_, err := ex.Execute(context.Background(), taskExecution(workDir))
 	require.NoError(t, err)
 
-	argv := readArgv(t, workDir)
-	assert.NotContains(t, argv[indexOf(t, argv, "--append-system-prompt")+1], "mcp__tasktrooper__")
+	systemPrompt := readSystemPrompt(t, workDir)
+	assert.Contains(t, systemPrompt, "You are the backend developer.")
+	assert.NotContains(t, systemPrompt, "mcp__tasktrooper__")
 }
 
 // A resumed session already holds the tool definitions, and the resume path
@@ -86,7 +86,7 @@ func TestResumedSessionKeepsItsEmptySystemPrompt(t *testing.T) {
 	_, err := ex.Execute(context.Background(), req)
 	require.NoError(t, err)
 
-	assert.NotContains(t, readArgv(t, workDir), "--append-system-prompt")
+	assert.NotContains(t, readArgv(t, workDir), "--append-system-prompt-file")
 }
 
 // The board run that started without its own tool server is stopped where it

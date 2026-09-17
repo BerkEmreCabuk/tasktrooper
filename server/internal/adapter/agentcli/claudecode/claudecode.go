@@ -603,10 +603,17 @@ func (e *Executor) spawn(ctx context.Context, inv invocation) (session, error) {
 	runCtx, cancelRun := context.WithTimeout(ctx, e.runTimeout)
 	defer cancelRun()
 
-	args := e.buildArgs(inv)
+	systemPromptPath, cleanupSystemPrompt, err := writeSystemPromptFile(inv.systemPrompt)
+	if err != nil {
+		return session{}, err
+	}
+	defer cleanupSystemPrompt()
+
+	args := e.buildArgs(inv, systemPromptPath)
 	cmd := exec.CommandContext(runCtx, e.bin, args...)
 	cmd.Dir = inv.workDir
 	cmd.Env = append(childEnv(ctx), inv.env...)
+	cmd.Stdin = strings.NewReader(inv.prompt)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -946,7 +953,13 @@ func maxTurnsNote(maxTurns int) string {
 	return fmt.Sprintf("[The Claude Code session stopped at its %d-turn budget; anything above is what it had finished by then.]", maxTurns)
 }
 
-func (e *Executor) buildArgs(inv invocation) []string {
+// Neither prompt is on the command line: -p with no positional reads the
+// prompt from stdin, and the system prompt travels as a file. Both name the
+// processes the agent is told to start (vite, agent-server, npm run dev), and
+// an agent tidying up with `pkill -f vite` matches every command line that
+// contains the word — its own CLI and every other task's — which ended whole
+// runs with a bare "exit status 143".
+func (e *Executor) buildArgs(inv invocation, systemPromptPath string) []string {
 	// Order is fixed rather than assembled from a map so two runs with the same
 	// inputs produce byte-identical command lines — which is what makes a
 	// failure reproducible from a log line.
@@ -960,7 +973,7 @@ func (e *Executor) buildArgs(inv invocation) []string {
 	if maxTurns <= 0 {
 		maxTurns = e.maxTurns
 	}
-	args = append(args, inv.prompt,
+	args = append(args,
 		"--output-format", "stream-json",
 		// --verbose is REQUIRED by the CLI alongside stream-json in -p mode;
 		// without it the stream is a single result object and every assistant
@@ -971,14 +984,20 @@ func (e *Executor) buildArgs(inv invocation) []string {
 		// blocks on its first edit until the run is cancelled.
 		"--dangerously-skip-permissions",
 		"--max-turns", strconv.Itoa(maxTurns),
+		// Deny rules hold under --dangerously-skip-permissions. Both commands
+		// match by NAME or command line across the whole machine, so one task's
+		// cleanup of "agent-server" or "vite" takes down the backend serving it
+		// and every other task's dev servers. Refused, the agent falls back to
+		// killing the PID it started.
+		"--disallowedTools", disallowedBashCommands,
 		// Which settings files the session loads. The operator's own are out by
 		// default: their hooks and plugins would run inside a board task, where
 		// nothing chose them and their effects read as the agent misbehaving.
 		// See DefaultSettingSources.
 		"--setting-sources", e.settingSources,
 	)
-	if inv.systemPrompt != "" {
-		args = append(args, "--append-system-prompt", inv.systemPrompt)
+	if systemPromptPath != "" {
+		args = append(args, "--append-system-prompt-file", systemPromptPath)
 	}
 	if inv.effort != "" {
 		args = append(args, "--effort", inv.effort)
@@ -1020,6 +1039,40 @@ func (e *Executor) buildArgs(inv invocation) []string {
 	return args
 }
 
+const disallowedBashCommands = "Bash(pkill:*),Bash(killall:*)"
+
+// writeSystemPromptFile puts the system prompt where --append-system-prompt-file
+// reads it and returns the path with a cleanup that is always non-nil. In the
+// OS temp dir for the same reason the MCP config is: the workspace is a
+// checkout the agent commits from.
+func writeSystemPromptFile(systemPrompt string) (string, func(), error) {
+	noop := func() {}
+	if systemPrompt == "" {
+		return "", noop, nil
+	}
+	f, err := os.CreateTemp("", "tt-claude-system-*.md")
+	if err != nil {
+		return "", noop, fmt.Errorf("create system prompt file: %w", err)
+	}
+	path := f.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		cleanup()
+		return "", noop, fmt.Errorf("secure system prompt file: %w", err)
+	}
+	if _, err := f.WriteString(systemPrompt); err != nil {
+		f.Close()
+		cleanup()
+		return "", noop, fmt.Errorf("write system prompt file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", noop, fmt.Errorf("close system prompt file: %w", err)
+	}
+	return path, cleanup, nil
+}
+
 // continuePrompt is what a resumed session is told. Short on purpose: the
 // session holds the task, the workspace and its own half-finished work, and a
 // re-statement of the task would read as a second, competing instruction.
@@ -1039,10 +1092,10 @@ func continuePrompt(req domain.TaskExecution) string {
 // maps, so the same history always produces the same two strings — which is
 // what lets a resumed or retried run be compared with the one before it.
 //
-// System blocks become one --append-system-prompt string ("append" because the
-// CLI keeps its own system prompt underneath; this is the agent's persona,
+// System blocks become one --append-system-prompt-file body ("append" because
+// the CLI keeps its own system prompt underneath; this is the agent's persona,
 // project context and evidence on top of it). Everything else becomes the
-// positional prompt. Assistant turns are labelled rather than dropped: a
+// prompt on stdin. Assistant turns are labelled rather than dropped: a
 // revision run's history can contain the previous attempt, and silently losing
 // it would make the run repeat work it was told about.
 func flattenHistory(history []domain.Message) (systemPrompt, prompt string) {

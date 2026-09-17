@@ -3090,12 +3090,19 @@ func taskTypeInstruction(task domain.BoardTask) string {
 // finally runs the thing. Naming the environment first — stage if the task has
 // one, otherwise boot the branch locally — is what makes the first tool call an
 // execution instead of a file read.
+//
+// The port and PID sentences are there because QA rounds overlap: two rounds
+// on the default dev port test each other's build, and a round that cleaned up
+// with `pkill -f vite` ended every CLI session whose command line said "vite".
 const qaExecutionInstruction = "Test it as a black box, on a RUNNING product. " +
 	"Start by resolving the environment, before anything else: call get_deploy_target — if it returns a stage " +
 	"base_url, that is where you test (the deploy for this task already ran on entry to ready_for_qa; verify the " +
 	"target answers, and record the address with update_deploy_target if it is missing). If there is no stage " +
 	"target, boot the task branch yourself with run_terminal (install, then the project's dev/start command in the " +
-	"background) and test on 127.0.0.1. Then walk the scenarios with the browser tools (browser_navigate → " +
+	"background) and test on 127.0.0.1. Other tasks boot their own copies on this machine at the same time, so " +
+	"the project's default port may already be another task's build: start yours on a free port you pick, open the " +
+	"address YOUR process printed, and when you are done stop exactly the PID you started — pkill/killall by name " +
+	"is refused, because it takes down every other task's servers too. Then walk the scenarios with the browser tools (browser_navigate → " +
 	"browser_wait_for → browser_fill/browser_click, browser_screenshot as evidence, browser_set_viewport for the " +
 	"phone width) or the mobile_* tools for a device app. Never test against production. " +
 	"Reading source is NOT testing: read_file/grep_code/get_repo_tree are there to find the start command, the " +

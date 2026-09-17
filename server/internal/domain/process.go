@@ -19,8 +19,17 @@ func ExitSignal(err error) (syscall.Signal, bool) {
 		return 0, false
 	}
 	status, ok := exitErr.Sys().(syscall.WaitStatus)
-	if !ok || !status.Signaled() {
+	if !ok {
 		return 0, false
 	}
-	return status.Signal(), true
+	if status.Signaled() {
+		return status.Signal(), true
+	}
+	// A child that traps the signal to shut down cleanly — the Node CLIs all
+	// do — is never "signaled" to the kernel: it exits on its own with the
+	// shell convention 128+n, which is how SIGTERM arrives here as 143.
+	if code := status.ExitStatus(); code > 128 && code <= 128+int(syscall.SIGUSR2) {
+		return syscall.Signal(code - 128), true
+	}
+	return 0, false
 }

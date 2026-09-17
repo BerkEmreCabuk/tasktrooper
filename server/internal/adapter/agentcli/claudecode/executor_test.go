@@ -54,6 +54,23 @@ func readArgv(t *testing.T, workDir string) []string {
 	return strings.Split(strings.TrimRight(string(body), "\x00"), "\x00")
 }
 
+func readPrompt(t *testing.T, workDir string) string {
+	t.Helper()
+	return readFile(t, filepath.Join(workDir, "stdin.txt"))
+}
+
+// readSystemPrompt returns "" when the last call carried no system prompt
+// file, which is what the resume path is asserted on.
+func readSystemPrompt(t *testing.T, workDir string) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(workDir, "system-prompt.txt"))
+	if errors.Is(err, os.ErrNotExist) {
+		return ""
+	}
+	require.NoError(t, err)
+	return string(body)
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	body, err := os.ReadFile(path)
@@ -128,12 +145,37 @@ func TestExecuteBuildsTheDocumentedInvocation(t *testing.T) {
 	assert.Contains(t, argv, "opus")
 	assert.NotContains(t, argv, "--mcp-config", "with no MCPConfig the session runs on the CLI's native tools")
 	assert.NotContains(t, argv, "--resume", "a fresh run must not resume anything")
+	assert.Equal(t, "Bash(pkill:*),Bash(killall:*)", argv[indexOf(t, argv, "--disallowedTools")+1],
+		"a machine-wide kill by name reaches the backend and every other task")
 
-	// System blocks are flattened into one --append-system-prompt, in order;
-	// the user content is the positional prompt.
-	system := argv[indexOf(t, argv, "--append-system-prompt")+1]
-	assert.Equal(t, "You are the backend developer.\n\nProject: TaskTrooper.", system)
-	assert.Equal(t, "Implement the executor seam.", argv[1], "the prompt is the positional argument after -p")
+	// System blocks are flattened into one system prompt file, in order; the
+	// user content arrives on stdin.
+	assert.Equal(t, "You are the backend developer.\n\nProject: TaskTrooper.", readSystemPrompt(t, workDir))
+	assert.Equal(t, "Implement the executor seam.", readPrompt(t, workDir))
+
+	_, statErr := os.Stat(argv[indexOf(t, argv, "--append-system-prompt-file")+1])
+	assert.ErrorIs(t, statErr, os.ErrNotExist, "the system prompt file must not outlive the session")
+}
+
+// `pkill -f <word>` matches full command lines. The prompts name the processes
+// an agent is told to start, so either of them in argv makes the CLI a target
+// of the agent's own cleanup — and of every other task's.
+func TestExecuteKeepsBothPromptsOffTheCommandLine(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "success.jsonl")
+
+	req := taskExecution(workDir)
+	req.History = []domain.Message{
+		{Role: domain.RoleSystem, Content: "Start the UI with vite before testing."},
+		{Role: domain.RoleUser, Content: "Run go run ./cmd/agent-server and check it."},
+	}
+	_, err := ex.Execute(context.Background(), req)
+	require.NoError(t, err)
+
+	commandLine := strings.Join(readArgv(t, workDir), " ")
+	assert.NotContains(t, commandLine, "vite")
+	assert.NotContains(t, commandLine, "agent-server")
+	assert.Contains(t, readSystemPrompt(t, workDir), "vite")
+	assert.Contains(t, readPrompt(t, workDir), "agent-server")
 }
 
 // The child must see a toolchain, not this pod's credentials. Everything about
@@ -249,7 +291,7 @@ func TestExecuteFailsWhenTheSessionNeverFinished(t *testing.T) {
 
 	_, err := ex.Execute(context.Background(), taskExecution(workDir))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "without a result")
+	assert.Contains(t, err.Error(), "killed by signal killed", "137 is 128+SIGKILL, and the message has to name it")
 	assert.Contains(t, err.Error(), "out of memory", "the stderr tail is what says why")
 
 	var block *domain.QuotaBlock
@@ -269,9 +311,9 @@ func TestExecuteResumesTheParkedSession(t *testing.T) {
 
 	argv := readArgv(t, workDir)
 	assert.Equal(t, []string{"-p", "--resume", "sess-abc123"}, argv[:3])
-	assert.NotContains(t, argv, "--append-system-prompt", "the resumed session already has the persona and the task")
-	assert.Contains(t, argv[3], "Continue tt-42 Executor seam")
-	assert.NotContains(t, argv[3], "You are the backend developer.")
+	assert.NotContains(t, argv, "--append-system-prompt-file", "the resumed session already has the persona and the task")
+	assert.Contains(t, readPrompt(t, workDir), "Continue tt-42 Executor seam")
+	assert.NotContains(t, readPrompt(t, workDir), "You are the backend developer.")
 }
 
 // A board task's resumed CLI session can be gone the same way a chat's can —
@@ -299,8 +341,8 @@ func TestExecuteFallsBackToAFreshSessionWhenTheResumeIsRefused(t *testing.T) {
 
 	second := strings.Split(strings.TrimRight(readFile(t, filepath.Join(workDir, "argv.2.txt")), "\x00"), "\x00")
 	assert.NotContains(t, second, "--resume", "the retry starts a new conversation")
-	assert.Contains(t, second, "--append-system-prompt", "which means it must carry the task's full history again")
-	assert.Contains(t, second[indexOf(t, second, "--append-system-prompt")+1], "You are the backend developer.")
+	assert.Contains(t, second, "--append-system-prompt-file", "which means it must carry the task's full history again")
+	assert.Contains(t, readFile(t, filepath.Join(workDir, "system-prompt.2.txt")), "You are the backend developer.")
 
 	assert.Equal(t, "Added the executor seam and wired it in. Build and vet are green.", resp.Message.Content)
 }
@@ -822,8 +864,8 @@ func TestExecuteSendsTheCallersPromptOnResumeInsteadOfTheGenericOne(t *testing.T
 	argv := readArgv(t, workDir)
 	resumeIdx := indexOf(t, argv, "--resume")
 	assert.Equal(t, "sess-abc123", argv[resumeIdx+1])
-	assert.Equal(t, "Tick the acceptance criterion you just finished.", argv[resumeIdx+2],
-		"the positional prompt argument must be the caller's own text")
+	assert.Equal(t, "Tick the acceptance criterion you just finished.", readPrompt(t, workDir),
+		"the prompt must be the caller's own text")
 }
 
 // CLISessionID must ride on the response for a successful run and for one that

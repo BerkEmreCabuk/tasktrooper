@@ -63,8 +63,8 @@ func (r *recorder) stream() port.ChatStream {
 }
 
 // The first turn of a chat has no session to resume, so it goes out exactly like
-// a board run: the system blocks flattened into --append-system-prompt and the
-// conversation as the positional prompt, with no --resume anywhere.
+// a board run: the system blocks flattened into the system prompt file and the
+// conversation on stdin, with no --resume anywhere.
 func TestExecuteChatFirstTurnSendsTheFlattenedHistory(t *testing.T) {
 	ex, workDir := newTestExecutor(t, Config{}, "chat_reply.jsonl")
 
@@ -74,9 +74,9 @@ func TestExecuteChatFirstTurnSendsTheFlattenedHistory(t *testing.T) {
 
 	argv := readArgv(t, workDir)
 	assert.NotContains(t, argv, "--resume", "a first turn has no session to continue")
-	assert.Contains(t, argv, "--append-system-prompt")
-	assert.Contains(t, argv, "You are the backend developer.")
-	assert.Contains(t, argv, "Where are the HTTP routes registered?")
+	assert.Contains(t, argv, "--append-system-prompt-file")
+	assert.Contains(t, readSystemPrompt(t, workDir), "You are the backend developer.")
+	assert.Contains(t, readPrompt(t, workDir), "Where are the HTTP routes registered?")
 
 	assert.Equal(t, "cli-chat-1", result.CLISessionID, "the caller needs the id to continue this chat")
 	assert.False(t, result.Resumed)
@@ -105,11 +105,12 @@ func TestExecuteChatSecondTurnResumesAndSendsOnlyTheNewMessage(t *testing.T) {
 	argv := readArgv(t, workDir)
 	assert.Contains(t, argv, "--resume")
 	assert.Contains(t, argv, "cli-chat-1")
-	assert.Contains(t, argv, "Is the models endpoint in there too?")
-	assert.NotContains(t, argv, "--append-system-prompt",
+	prompt := readPrompt(t, workDir)
+	assert.Contains(t, prompt, "Is the models endpoint in there too?")
+	assert.NotContains(t, argv, "--append-system-prompt-file",
 		"the live session already holds the persona; replaying it costs tokens and reads as a new instruction")
-	assert.NotContains(t, strings.Join(argv, "\x00"), "You are the backend developer.")
-	assert.NotContains(t, strings.Join(argv, "\x00"), "Routes are registered in handler.go.",
+	assert.NotContains(t, prompt, "You are the backend developer.")
+	assert.NotContains(t, prompt, "Routes are registered in handler.go.",
 		"the session remembers its own answers; sending them back is what makes a resumed agent redo work")
 
 	assert.True(t, result.Resumed)
@@ -140,8 +141,8 @@ func TestExecuteChatFallsBackToAFreshSessionWhenTheResumeIsRefused(t *testing.T)
 
 	second := strings.Split(strings.TrimRight(readFile(t, filepath.Join(workDir, "argv.2.txt")), "\x00"), "\x00")
 	assert.NotContains(t, second, "--resume", "the retry starts a new conversation")
-	assert.Contains(t, second, "--append-system-prompt", "which means it must carry the persona again")
-	assert.Contains(t, second, "You are the backend developer.")
+	assert.Contains(t, second, "--append-system-prompt-file", "which means it must carry the persona again")
+	assert.Contains(t, readFile(t, filepath.Join(workDir, "system-prompt.2.txt")), "You are the backend developer.")
 
 	assert.False(t, result.Resumed, "the caller is told this was not a continuation")
 	assert.Equal(t, "cli-chat-1", result.CLISessionID, "and gets the NEW session id to continue from")
