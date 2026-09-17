@@ -17,7 +17,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -192,12 +191,9 @@ func (s *Service) Start(ctx context.Context, repositoryID, taskID uuid.UUID, com
 		s.stopLocked(existing)
 	}
 
-	cmd := exec.Command("sh", "-c", command)
+	cmd := shellCommand(command)
 	cmd.Dir = workspacePath
 	cmd.Env = os.Environ()
-	// Its own process group so Stop can signal every child a shell-wrapped dev
-	// command spawns (webpack behind `npm run dev`, say), not just the shell.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -313,13 +309,13 @@ func (s *Service) stopProcess(p *process) {
 		return
 	}
 	pgid := p.cmd.Process.Pid
-	_ = syscall.Kill(-pgid, syscall.SIGTERM)
+	terminateProcessGroup(pgid)
 	select {
 	case <-p.done:
 		return
 	case <-time.After(stopGrace):
 	}
-	_ = syscall.Kill(-pgid, syscall.SIGKILL)
+	killProcessGroup(pgid)
 	<-p.done
 }
 
