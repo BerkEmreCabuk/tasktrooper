@@ -43,7 +43,7 @@ func (s *IncidentStoreSuite) SetupSuite() {
 	tmp := s.T().TempDir()
 	pg, err := database.StartEmbedded(s.ctx, database.EmbeddedConfig{
 		DataDir:     filepath.Join(tmp, "postgres"),
-		RuntimePath: filepath.Join(tmp, "runtime"),
+		RuntimePath: sharedPGRuntimeDir,
 	})
 	s.Require().NoError(err)
 	s.pg = pg

@@ -56,7 +56,7 @@ func newReplicaFixture(t *testing.T) *replicaFixture {
 
 	pg, err := database.StartEmbedded(ctx, database.EmbeddedConfig{
 		DataDir:     filepath.Join(t.TempDir(), "pg"),
-		RuntimePath: filepath.Join(t.TempDir(), "rt"),
+		RuntimePath: sharedPGRuntimeDir,
 	})
 	if err != nil {
 		t.Fatalf("start embedded postgres: %v", err)
