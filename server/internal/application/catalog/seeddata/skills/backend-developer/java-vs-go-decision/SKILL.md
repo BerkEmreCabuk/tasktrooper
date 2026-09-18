@@ -1,7 +1,7 @@
 ---
 name: java-vs-go-decision
 category: architecture
-description: Use when starting a backend task that could be built in either language - decide Go vs Java (Quarkus/Spring) from the task's shape and the repository's existing stack
+description: Use when starting a backend task that could be built in more than one language - decide Go vs Java (Quarkus/Spring) vs .NET from the task's shape and the repository's existing stack
 ---
 
 # Java vs Go Decision
@@ -45,6 +45,13 @@ digraph decide {
 - The repository is already Java — always.
 - The analiz task specifies Java.
 
+## Choose .NET (C#) when
+
+- The repository is already .NET (a `.sln`/`.slnx`/`.csproj` at or near the root) — always. Then follow dotnet-aspnetcore-service, dotnet-testing-xunit and dotnet-efcore-persistence.
+- The analiz task specifies .NET, or the service must share code or packages with existing .NET services.
+
+Greenfield without a stated language is still a Go-vs-Java decision: .NET is chosen by the repository or the analysis, not by preference.
+
 **Within Java: Quarkus first.** Reach for Spring Boot only when Quarkus does not fit (a required library has no Quarkus extension, the team/repo standard is Spring, or the deployment target expects a Spring app). See quarkus-service-architecture and spring-boot-fallback.
 
 ## Hard Rule
@@ -60,5 +67,5 @@ Never introduce a second language into a single-stack repository. If a Go repo n
 
 ## Red Flags
 
-- You are about to `go mod init` inside a repo full of `pom.xml` (or vice versa).
+- You are about to `go mod init` inside a repo full of `pom.xml` or `.csproj` (or vice versa).
 - Your language choice has no reason beyond preference.

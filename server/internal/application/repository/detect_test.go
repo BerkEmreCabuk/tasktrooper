@@ -52,6 +52,28 @@ func TestDetectRepoKind(t *testing.T) {
 			want:   domain.RepoKindBackend,
 		},
 		{
+			name:   "dotnet solution is a backend",
+			layout: tree{"Shop.sln": "", "src/Api/Api.csproj": "<Project Sdk=\"Microsoft.NET.Sdk.Web\"/>"},
+			want:   domain.RepoKindBackend,
+		},
+		{
+			name: "dotnet projects under one solution are one backend, not a monorepo",
+			layout: tree{
+				"Shop.slnx":            "",
+				"Api/Api.csproj":       "<Project/>",
+				"Worker/Worker.csproj": "<Project/>",
+			},
+			want: domain.RepoKindBackend,
+		},
+		{
+			name: "dotnet api beside a react app is a monorepo",
+			layout: tree{
+				"api/Api.csproj":   "<Project/>",
+				"web/package.json": `{"dependencies":{"react":"^18.0.0"}}`,
+			},
+			want: domain.RepoKindMonorepo,
+		},
+		{
 			name:   "python project is a backend",
 			layout: tree{"pyproject.toml": "[project]\nname='svc'\n"},
 			want:   domain.RepoKindBackend,
@@ -242,6 +264,18 @@ func TestDetectRepoSubProjects(t *testing.T) {
 		require.ElementsMatch(t, []domain.RepoSubProject{
 			{Path: ".", Kind: domain.RepoKindBackend},
 			{Path: "web", Kind: domain.RepoKindFrontend},
+		}, got)
+	})
+
+	t.Run("a dotnet api and a web app without a root solution", func(t *testing.T) {
+		root := materialise(t, tree{
+			"backend/Api.csproj":    "<Project/>",
+			"frontend/package.json": `{"dependencies":{"react":"^18.0.0"}}`,
+		})
+		got := repository.DetectRepoSubProjects(root)
+		require.ElementsMatch(t, []domain.RepoSubProject{
+			{Path: "backend", Kind: domain.RepoKindBackend},
+			{Path: "frontend", Kind: domain.RepoKindFrontend},
 		}, got)
 	})
 

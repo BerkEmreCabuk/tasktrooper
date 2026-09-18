@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/dotnet"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
@@ -385,6 +386,11 @@ func DetectRunCommand(dir string) string {
 	}
 	if fileExists(filepath.Join(dir, "go.mod")) {
 		return "go run ."
+	}
+	// Only a lone project file is a guess worth making: a solution holds
+	// several projects and `dotnet run` refuses to pick the startup one.
+	if target, ok := dotnet.BuildTarget(dir); ok && dotnet.IsProjectFile(target) && dotnet.HasProject(dir) {
+		return "dotnet run --project " + target
 	}
 	return ""
 }

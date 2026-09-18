@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/dotnet"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -42,6 +43,8 @@ func detectBuild(dir string) []Stage {
 		out = append(out, Stage{Name: "build", Command: []string{"mvn", "-q", "compile"}})
 	case markerExists(dir, "build.gradle", "build.gradle.kts"):
 		out = append(out, Stage{Name: "build", Command: []string{"gradle", "build", "-x", "test"}})
+	case dotnet.HasProject(dir):
+		out = append(out, dotnetBuildStages(dir)...)
 	}
 	if markerExists(dir, "pubspec.yaml") {
 		out = append(out, Stage{Name: "analyze", Command: []string{"flutter", "analyze"}})
@@ -58,6 +61,28 @@ func detectBuild(dir string) []Stage {
 }
 
 const npmInstallDefaultTimeout = 15 * time.Minute
+
+// dotnetRestoreTimeout covers a cold NuGet cache on a solution with dozens of
+// projects; the build after it runs --no-restore and keeps the default.
+const dotnetRestoreTimeout = 15 * time.Minute
+
+// dotnetBuildStages restores and builds. `dotnet format --verify-no-changes`
+// is deliberately not a stage: it judges the whole tree, not the diff, and
+// even the SDK's own web API template fails it under a plain .editorconfig —
+// so every task in a repo with pre-existing drift would bounce for lines the
+// agent never touched. A repo that keeps its tree clean opts in through
+// VerifyCommand. Nothing is emitted when the build target is ambiguous: the
+// repository has to declare VerifyCommand there too.
+func dotnetBuildStages(dir string) []Stage {
+	target, ok := dotnet.BuildTarget(dir)
+	if !ok {
+		return nil
+	}
+	return []Stage{
+		{Name: "dotnet-restore", Command: []string{"dotnet", "restore", target}, Setup: true, Timeout: dotnetRestoreTimeout},
+		{Name: "build", Command: []string{"dotnet", "build", target, "--no-restore", "-nologo"}},
+	}
+}
 
 func npmInstallStage(dir, label string) []Stage {
 	if hasNodeModules(dir) {

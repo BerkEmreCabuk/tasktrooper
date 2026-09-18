@@ -83,6 +83,7 @@ func collectManifests(root string, t *treeScan, f *Facts) {
 		}
 		f.Manifests = append(f.Manifests, Manifest{Path: p, Ecosystem: "java", Manager: "gradle"})
 	}
+	collectDotnet(root, t, f)
 	for _, p := range t.find("composer.json") {
 		f.Manifests = append(f.Manifests, Manifest{Path: p, Ecosystem: "php", Manager: "composer"})
 	}

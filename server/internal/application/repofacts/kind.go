@@ -64,7 +64,7 @@ func classifyAppChildren(t *treeScan, f *Facts) map[string]string {
 // classifySingle decides one area's kind from the files under it. prefix "" is
 // the whole repository.
 func classifySingle(t *treeScan, f *Facts, prefix string) (kind, evidence string) {
-	var goFiles, webFiles, swiftFiles, dartFiles, kotlinFiles, pyFiles int
+	var goFiles, webFiles, swiftFiles, dartFiles, kotlinFiles, pyFiles, dotnetFiles int
 	scope := prefix
 	if scope != "" {
 		scope += "/"
@@ -87,6 +87,9 @@ func classifySingle(t *treeScan, f *Facts, prefix string) (kind, evidence string
 			kotlinFiles++
 		case strings.HasSuffix(rel, ".py"):
 			pyFiles++
+		// Unity scripts live under Assets/ and are a game, not a service.
+		case (strings.HasSuffix(rel, ".cs") || strings.HasSuffix(rel, ".fs")) && !isUnityAsset(rel):
+			dotnetFiles++
 		}
 	}
 
@@ -104,7 +107,7 @@ func classifySingle(t *treeScan, f *Facts, prefix string) (kind, evidence string
 		return "worker", languageEvidence(prefix, "worker/job entrypoints", goFiles+pyFiles)
 	}
 
-	backendish := goFiles + pyFiles + kotlinFiles
+	backendish := goFiles + pyFiles + kotlinFiles + dotnetFiles
 	switch {
 	case backendish > webFiles && backendish > 5:
 		return "backend", languageEvidence(prefix, "server-side sources", backendish)
@@ -114,6 +117,10 @@ func classifySingle(t *treeScan, f *Facts, prefix string) (kind, evidence string
 		return "backend", languageEvidence(prefix, "server-side sources", backendish)
 	}
 	return "", ""
+}
+
+func isUnityAsset(rel string) bool {
+	return strings.HasPrefix(rel, "Assets/") || strings.Contains(rel, "/Assets/")
 }
 
 func languageEvidence(prefix, what string, n int) string {

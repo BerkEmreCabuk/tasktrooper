@@ -362,14 +362,20 @@ func runVerification(ctx context.Context, dir string, repo domain.Repository) (b
 	return false, strings.Join(failures, "\n\n")
 }
 
+// dotnetQuietEnv keeps the dotnet CLI from printing its first-run banner and
+// telemetry notice into stage output an agent has to read, and from phoning
+// home from a verify run nobody started by hand.
+var dotnetQuietEnv = []string{"DOTNET_NOLOGO=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1"}
+
 // verifyEnv is the environment a verify stage runs with: the scrubbed parent,
 // the repository's toolchain overlay, and npm_config_yes=false. The last one
 // stops `npx` from installing a package the project does not have, so a missing
 // local binary fails with npm's own "missing packages" error instead of running
 // whatever the registry serves under that name.
 func verifyEnv(parent, overlay []string) []string {
-	extra := make([]string, 0, len(overlay)+1)
+	extra := make([]string, 0, len(overlay)+1+len(dotnetQuietEnv))
 	extra = append(extra, overlay...)
 	extra = append(extra, "npm_config_yes=false")
+	extra = append(extra, dotnetQuietEnv...)
 	return childenv.For(parent, extra)
 }

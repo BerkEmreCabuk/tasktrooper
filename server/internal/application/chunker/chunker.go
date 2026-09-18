@@ -47,6 +47,7 @@ func DefaultRegistry() *Registry {
 		r.Register(ext, KotlinChunker{})
 	}
 	r.Register(".swift", SwiftChunker{})
+	r.Register(".cs", CSharpChunker{})
 	return r
 }
 
@@ -82,6 +83,8 @@ func languageFromExt(ext string) string {
 		return "kotlin"
 	case ".swift":
 		return "swift"
+	case ".cs":
+		return "csharp"
 	default:
 		return "unknown"
 	}

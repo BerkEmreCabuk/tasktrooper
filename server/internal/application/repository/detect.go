@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/dotnet"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -28,8 +29,9 @@ import (
 //     a Go module and a Node package living at different levels
 //  3. frontend — a root package.json whose dependencies name a web framework
 //  4. backend  — everything else: the server-side markers (go.mod, pom.xml,
-//     build.gradle, requirements.txt, pyproject.toml) and the fallback answer
-//     agree here, which is also the repositories.kind column default
+//     build.gradle, requirements.txt, pyproject.toml, a .NET solution or
+//     project) and the fallback answer agree here, which is also the
+//     repositories.kind column default
 func DetectRepoKind(rootPath string) string {
 	root := strings.TrimSpace(rootPath)
 	if root == "" {
@@ -235,6 +237,7 @@ func looksMonorepo(root string) bool {
 func subProjectDirs(root string) []string {
 	var dirs []string
 	seen := map[string]bool{}
+	rootSolution := hasSolutionFile(root)
 	add := func(rel string) {
 		if rel == "" {
 			rel = "."
@@ -254,7 +257,7 @@ func subProjectDirs(root string) []string {
 			if !e.IsDir() || skipDir(e.Name()) {
 				continue
 			}
-			if hasAnyMarker(filepath.Join(root, e.Name()), ecosystemMarkers...) {
+			if isEcosystemProject(filepath.Join(root, e.Name()), rootSolution) {
 				add(e.Name())
 			}
 		}
@@ -268,7 +271,7 @@ func subProjectDirs(root string) []string {
 			if !e.IsDir() {
 				continue
 			}
-			if hasAnyMarker(filepath.Join(root, workspace, e.Name()), ecosystemMarkers...) {
+			if isEcosystemProject(filepath.Join(root, workspace, e.Name()), rootSolution) {
 				add(workspace + "/" + e.Name())
 			}
 		}
@@ -293,6 +296,30 @@ func relDir(root, dir string) string {
 		return "."
 	}
 	return filepath.ToSlash(rel)
+}
+
+// isEcosystemProject reports whether dir is a project of its own. A .NET
+// project directory only counts when the root carries no solution: a solution
+// is the .NET way of saying "these projects are one product", so Api/ and
+// Worker/ under Shop.sln are one backend, not a monorepo of two.
+func isEcosystemProject(dir string, rootSolution bool) bool {
+	if hasAnyMarker(dir, ecosystemMarkers...) {
+		return true
+	}
+	return !rootSolution && dotnet.HasProject(dir)
+}
+
+func hasSolutionFile(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() && dotnet.IsSolutionFile(e.Name()) {
+			return true
+		}
+	}
+	return false
 }
 
 func looksFrontend(root string) bool {

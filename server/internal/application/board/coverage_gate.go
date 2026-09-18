@@ -15,6 +15,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/dotnet"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/toolchain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/childenv"
@@ -63,6 +64,8 @@ func detectCoverage(dir string) *coverageStage {
 			parse:   parseLcovCoverage,
 			lines:   lcovLines,
 		}
+	case dotnet.HasProject(dir):
+		return dotnetCoverageStage(dir)
 	case hasVitest(dir):
 		return &coverageStage{
 			name: "coverage",
@@ -95,6 +98,91 @@ func detectMutation(dir string) *coverageStage {
 	return nil
 }
 
+// dotnetCoverageDir is where the coverage stage points `dotnet test
+// --results-directory`. It is removed after every run, so nothing it writes
+// can end up in the agent's commit.
+const dotnetCoverageDir = ".tasktrooper-coverage"
+
+// dotnetCoverageStage runs the solution's tests through coverlet's data
+// collector (what `dotnet new xunit|nunit|mstest` references by default) and
+// asks it for lcov, so the percentage and the new-code line intersection read
+// the same format Flutter and Vitest already produce. A test project without
+// coverlet.collector writes no report: the run is then "could not read a
+// coverage number", which is advisory, never a block.
+func dotnetCoverageStage(dir string) *coverageStage {
+	target, ok := dotnet.BuildTarget(dir)
+	if !ok {
+		return nil
+	}
+	return &coverageStage{
+		name: "coverage",
+		command: []string{
+			"dotnet", "test", target, "-nologo",
+			"--collect:XPlat Code Coverage",
+			"--results-directory", dotnetCoverageDir,
+			"--", "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=lcov",
+		},
+		parse:     parseDotnetCoverage,
+		lines:     dotnetCoverageLines,
+		artifacts: []string{dotnetCoverageDir},
+	}
+}
+
+// dotnetCoverageLines drops generated code from the reports. Source
+// generators (OpenAPI, Razor, regex, logging) write into obj/ and coverlet
+// instruments that output like hand-written code: a template web API reports
+// hundreds of generated lines against a handful of real ones, which pins the
+// number near zero whatever the tests cover.
+func dotnetCoverageLines(dir string) (lineHits, bool) {
+	reports, _ := filepath.Glob(filepath.Join(dir, dotnetCoverageDir, "*", "coverage.info"))
+	hits, ok := lcovFileLines(dir, reports...)
+	if !ok {
+		return nil, false
+	}
+	for file := range hits {
+		if isGeneratedDotnetSource(file) {
+			delete(hits, file)
+		}
+	}
+	if len(hits) == 0 {
+		return nil, false
+	}
+	return hits, true
+}
+
+func isGeneratedDotnetSource(path string) bool {
+	p := "/" + strings.ToLower(filepath.ToSlash(path))
+	if strings.Contains(p, "/obj/") || strings.Contains(p, "/bin/") {
+		return true
+	}
+	for _, suffix := range []string{".g.cs", ".generated.cs", ".designer.cs", ".g.i.cs"} {
+		if strings.HasSuffix(p, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseDotnetCoverage(dir, _ string) (float64, bool) {
+	hits, ok := dotnetCoverageLines(dir)
+	if !ok {
+		return 0, false
+	}
+	var total, covered int
+	for _, lines := range hits {
+		for _, count := range lines {
+			total++
+			if count > 0 {
+				covered++
+			}
+		}
+	}
+	if total == 0 {
+		return 0, false
+	}
+	return float64(covered) * 100 / float64(total), true
+}
+
 func hasVitest(dir string) bool {
 	return markerExists(dir,
 		"vitest.config.ts", "vitest.config.js", "vitest.config.mts",
@@ -114,7 +202,7 @@ func runCoverage(ctx context.Context, dir string, stage *coverageStage, timeout 
 	defer cancel()
 	cmd := exec.CommandContext(cmdCtx, stage.command[0], stage.command[1:]...)
 	cmd.Dir = dir
-	cmd.Env = childenv.For(os.Environ(), overlay.Env)
+	cmd.Env = childenv.For(os.Environ(), append(append([]string{}, overlay.Env...), dotnetQuietEnv...))
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -123,7 +211,7 @@ func runCoverage(ctx context.Context, dir string, stage *coverageStage, timeout 
 
 	defer func() {
 		for _, artifact := range stage.artifacts {
-			_ = os.Remove(filepath.Join(dir, artifact))
+			_ = os.RemoveAll(filepath.Join(dir, artifact))
 		}
 	}()
 	var lines lineHits

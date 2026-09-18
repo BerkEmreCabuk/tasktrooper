@@ -52,6 +52,57 @@ func TestResolveVerifyStages_Python(t *testing.T) {
 	}
 }
 
+func TestResolveVerifyStages_DotnetSolution(t *testing.T) {
+	dir := t.TempDir()
+	touch(t, dir, "Shop.sln")
+	stages := ResolveVerifyStages(dir, domain.Repository{})
+	if len(stages) != 2 {
+		t.Fatalf("unexpected stages: %+v", stages)
+	}
+	restore, build := stages[0], stages[1]
+	if !restore.Setup || strings.Join(restore.Command, " ") != "dotnet restore Shop.sln" {
+		t.Fatalf("restore stage: %+v", restore)
+	}
+	if strings.Join(build.Command, " ") != "dotnet build Shop.sln --no-restore -nologo" {
+		t.Fatalf("build stage: %+v", build)
+	}
+}
+
+func TestResolveVerifyStages_DotnetNeverGatesOnFormatting(t *testing.T) {
+	dir := t.TempDir()
+	touch(t, dir, "Api.csproj")
+	touch(t, dir, ".editorconfig")
+	stages := ResolveVerifyStages(dir, domain.Repository{})
+	if len(stages) != 2 || stages[1].Name != "build" {
+		t.Fatalf("unexpected stages: %+v", stages)
+	}
+}
+
+func TestResolveVerifyStages_DotnetAmbiguousTargetEmitsNothing(t *testing.T) {
+	dir := t.TempDir()
+	touch(t, dir, "Api.csproj")
+	touch(t, dir, "Worker.csproj")
+	if stages := ResolveVerifyStages(dir, domain.Repository{}); len(stages) != 0 {
+		t.Fatalf("expected no stages for an ambiguous target, got %+v", stages)
+	}
+}
+
+func TestResolveVerifyStages_UnityProjectIsNotBuiltWithDotnet(t *testing.T) {
+	dir := t.TempDir()
+	touch(t, dir, "Game.sln")
+	touch(t, dir, "Assembly-CSharp.csproj")
+	if err := os.MkdirAll(filepath.Join(dir, "Assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "ProjectSettings"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	touch(t, dir, "ProjectSettings/ProjectVersion.txt")
+	if stages := ResolveVerifyStages(dir, domain.Repository{}); len(stages) != 0 {
+		t.Fatalf("expected no dotnet stages for a Unity project, got %+v", stages)
+	}
+}
+
 func writeNPMProject(t *testing.T, dir string) {
 	t.Helper()
 	pkg := `{"scripts":{"build":"next build","test":"vitest run"}}`

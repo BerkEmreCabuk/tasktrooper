@@ -83,7 +83,7 @@ func sharedDeveloperSkills() []skillSeed {
 
 // backendDeveloperTechStacks are the stacks this role's skills actually
 // target, judged from each SKILL.md's content rather than assumed: the role
-// writes both Go and Java (java-vs-go-decision) services and owns the
+// writes Go, Java and .NET (java-vs-go-decision) services and owns the
 // migrations for the shared PostgreSQL database. Skills that apply to either
 // language equally (API contracts, the language decision itself, cloud
 // deploy, code search) stay general instead of being forced onto one stack.
@@ -92,6 +92,7 @@ func backendDeveloperTechStacks() []domain.CreateTechStackRequest {
 		{Name: "Go", Description: "Go services: Fiber HTTP handlers, hexagonal architecture, Mockery-generated tests", Position: 1},
 		{Name: "Java", Description: "Java services: Quarkus first, Spring Boot fallback, JPA/Panache persistence", Position: 2},
 		{Name: "PostgreSQL", Description: "Schema migrations and query patterns for the shared Postgres database", Position: 3},
+		{Name: ".NET", Description: "C# services: ASP.NET Core APIs and workers, EF Core persistence, xUnit tests", Position: 4},
 	}
 }
 
@@ -113,18 +114,21 @@ func backendDeveloperAgent() roleAgentDef {
 			mdSkill("backend-developer", "java-oop-solid-design"),
 			mdSkill("backend-developer", "java-testing-junit-mockito"),
 			mdSkill("backend-developer", "java-persistence"),
+			mdSkill("backend-developer", "dotnet-aspnetcore-service"),
+			mdSkill("backend-developer", "dotnet-testing-xunit"),
+			mdSkill("backend-developer", "dotnet-efcore-persistence"),
 			mdSkill("backend-developer", "cloud-deploy-gcp-aws"),
 			mdSkill("backend-developer", "analiz-task-workflow"),
 		),
 		rules: []domain.CreateOrchestratorRuleRequest{
 			rule("concise-board-comments", 80, "Write board comments the way a colleague does: lead with the finding, three to six lines, fifteen at the very most. No preamble restating the task, no narration of which files you opened, no ## Summary/## Background scaffolding on a short update, no sign-off pleasantries. Keep every command, output, error string and screenshot path — cut the prose around them. If it genuinely does not fit, it is a task document, not a comment."),
-			rule("no-comments-in-code", 100, "Do not add inline comments in Go or Java source or tests. Code must be self-explanatory."),
+			rule("no-comments-in-code", 100, "Do not add inline comments in Go, Java or C# source or tests. Code must be self-explanatory."),
 			rule("closing-summary-comment", 95, "Close a task with one add_task_comment: what you changed and how you verified it (the checks you ran and what they reported). No test script, no step-by-step instructions for the reviewer."),
-			rule("language-choice", 90, "Pick Go or Java per the task and repository (java-vs-go-decision): the repo's existing language always wins; Go for performance/concurrency, Java (Quarkus first, Spring only when Quarkus does not fit) for rich OOP domains. Never introduce a second language into a single-stack repository."),
-			rule("tests-before-done", 90, "Run the affected tests before marking a backend task complete: go test for Go packages, mvn/gradle test for Java modules. Read the output in this run."),
-			rule("go-test-conventions", 85, "In Go, never hand-write mocks: generate them with Mockery v3 from the port interfaces and use the typed EXPECT() API. Prefer table-driven tests and testify suites for shared setup. Java uses JUnit5 + Mockito with parameterized tests."),
+			rule("language-choice", 90, "Pick the language per the task and repository (java-vs-go-decision): the repo's existing language always wins — a .NET repo stays C#; Go for performance/concurrency, Java (Quarkus first, Spring only when Quarkus does not fit) for rich OOP domains. Never introduce a second language into a single-stack repository."),
+			rule("tests-before-done", 90, "Run the affected tests before marking a backend task complete: go test for Go packages, mvn/gradle test for Java modules, dotnet test for .NET test projects. Read the output in this run."),
+			rule("go-test-conventions", 85, "In Go, never hand-write mocks: generate them with Mockery v3 from the port interfaces and use the typed EXPECT() API. Prefer table-driven tests and testify suites for shared setup. Java uses JUnit5 + Mockito with parameterized tests. C# uses the repository's framework (xUnit by default) with NSubstitute and [Theory] for input tables."),
 			rule("hexagonal-boundaries", 80, "Keep the domain framework-free: no adapter/framework imports (Fiber, pgx, JAX-RS, Spring web, JPA types) in domain or service layers. Cross-layer calls go through ports/interfaces."),
-			rule("migration-safety", 70, "Database schema changes require a new migration (up/down pair for Go; Flyway/Liquibase for Java); never modify existing migrations and never rely on hibernate auto-DDL in non-test environments."),
+			rule("migration-safety", 70, "Database schema changes require a new migration (up/down pair for Go; Flyway/Liquibase for Java; dotnet ef migrations add for EF Core); never modify existing migrations and never rely on hibernate auto-DDL or EnsureCreated in non-test environments."),
 			rule("tdd-first", 100, "Write a failing test before the production code and watch it fail for the right reason; write the minimal code to pass. No production code without a failing test first. Bug fixes start with a reproducing test."),
 			rule("revision-root-cause", 90, "For a need_revision task, investigate the root cause named in the comment/pipeline before fixing, address every point explicitly, and add a test that guards the fix."),
 		},

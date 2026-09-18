@@ -284,13 +284,31 @@ func goModulePath(dir string) string {
 // what vitest's lcov reporter writes — into per-line hits. SF: is the file,
 // DA:<line>,<hits> the record.
 func lcovLines(dir string) (lineHits, bool) {
-	f, err := os.Open(filepath.Join(dir, "coverage", "lcov.info"))
-	if err != nil {
+	return lcovFileLines(dir, filepath.Join(dir, "coverage", "lcov.info"))
+}
+
+// lcovFileLines merges several lcov reports into one set of line hits. A .NET
+// solution writes one report per test project, and two test projects that
+// exercise the same source line are the same line — record keeps the max, so
+// the merge never double-counts it.
+func lcovFileLines(dir string, paths ...string) (lineHits, bool) {
+	hits := make(lineHits)
+	for _, path := range paths {
+		readLcovInto(dir, path, hits)
+	}
+	if len(hits) == 0 {
 		return nil, false
+	}
+	return hits, true
+}
+
+func readLcovInto(dir, path string, hits lineHits) {
+	f, err := os.Open(path) //nolint:gosec // a report the coverage stage just wrote inside the workspace
+	if err != nil {
+		return
 	}
 	defer f.Close()
 
-	hits := make(lineHits)
 	current := ""
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
@@ -328,10 +346,6 @@ func lcovLines(dir string) (lineHits, bool) {
 			current = ""
 		}
 	}
-	if len(hits) == 0 {
-		return nil, false
-	}
-	return hits, true
 }
 
 // measureNewCode intersects the diff with the coverage profile.

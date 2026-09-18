@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
+	"github.com/smacker/go-tree-sitter/csharp"
 	"github.com/smacker/go-tree-sitter/java"
 	"github.com/smacker/go-tree-sitter/javascript"
 	"github.com/smacker/go-tree-sitter/kotlin"
@@ -32,6 +33,12 @@ func ParseTSX(content []byte) *sitter.Tree {
 func ParseJava(content []byte) *sitter.Tree {
 	parser := sitter.NewParser()
 	parser.SetLanguage(java.GetLanguage())
+	return parser.Parse(nil, content)
+}
+
+func ParseCSharp(content []byte) *sitter.Tree {
+	parser := sitter.NewParser()
+	parser.SetLanguage(csharp.GetLanguage())
 	return parser.Parse(nil, content)
 }
 

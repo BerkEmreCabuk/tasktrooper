@@ -169,6 +169,58 @@ interface Speaker {
 	s.Equal("interface", kinds["Speaker"])
 }
 
+func (s *SitterChunkerSuite) TestCSharpTypesAndMembers() {
+	src := []byte(`using System;
+
+namespace Shop.Api;
+
+public sealed class OrderService : IOrderService
+{
+    private readonly IOrderRepository _orders;
+    public int Retries { get; init; } = 3;
+
+    public OrderService(IOrderRepository orders)
+    {
+        _orders = orders;
+    }
+
+    public async Task<Order?> FindAsync(Guid id, CancellationToken ct)
+    {
+        return await _orders.GetAsync(id, ct);
+    }
+}
+
+public interface IOrderService
+{
+    Task<Order?> FindAsync(Guid id, CancellationToken ct);
+}
+
+public record Order(Guid Id, decimal Total);
+
+namespace Legacy
+{
+    public struct Money { public decimal Amount; public void Round() { } }
+}
+`)
+	chunks, err := chunker.CSharpChunker{}.Chunk("src/Shop.Api/OrderService.cs", src)
+	s.Require().NoError(err)
+
+	kinds := symbolKinds(chunks)
+	s.Equal("class", kinds["OrderService"])
+	s.Equal("method", kinds["OrderService.OrderService"])
+	s.Equal("method", kinds["OrderService.FindAsync"])
+	s.Equal("interface", kinds["IOrderService"])
+	s.Equal("record", kinds["Order"])
+	s.Equal("struct", kinds["Money"])
+	s.Equal("method", kinds["Money.Round"])
+	for _, ch := range chunks {
+		s.Equal("csharp", ch.Language)
+		if ch.SymbolName == "OrderService" {
+			s.Contains(ch.Content, "Retries", "properties stay in the type header")
+		}
+	}
+}
+
 func (s *SitterChunkerSuite) TestPythonDecoratedFunctionAndClass() {
 	src := []byte(`import os
 
@@ -234,6 +286,7 @@ func (s *SitterChunkerSuite) TestRegistryCoversEveryIndexableLanguage() {
 		"a.java":  "java",
 		"a.kt":    "kotlin",
 		"a.swift": "swift",
+		"a.cs":    "csharp",
 	}
 	sources := map[string]string{
 		"typescript": "export function run() { return 1 }\n",
@@ -242,6 +295,7 @@ func (s *SitterChunkerSuite) TestRegistryCoversEveryIndexableLanguage() {
 		"java":       "class A { void run() {} }\n",
 		"kotlin":     "fun run(): Int = 1\n",
 		"swift":      "func run() -> Int { 1 }\n",
+		"csharp":     "class A { void run() {} }\n",
 	}
 	for path, lang := range cases {
 		chunks, err := reg.Chunk(path, []byte(sources[lang]))

@@ -91,6 +91,56 @@ func TestParseLcovCoverageReportsUnmeasuredWithoutAReport(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestDetectCoverageForDotnetSolution(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Shop.sln"), nil, 0o644))
+	stage := detectCoverage(dir)
+	require.NotNil(t, stage)
+	assert.Equal(t, []string{"dotnet", "test", "Shop.sln"}, stage.command[:3])
+	assert.Contains(t, stage.command, "--collect:XPlat Code Coverage")
+	assert.Equal(t, []string{dotnetCoverageDir}, stage.artifacts)
+}
+
+// Two test projects covering the same source line report it twice; the line
+// counts once, and a hit in either report makes it covered.
+func TestParseDotnetCoverageMergesPerProjectReports(t *testing.T) {
+	dir := t.TempDir()
+	write := func(run, body string) {
+		p := filepath.Join(dir, dotnetCoverageDir, run)
+		require.NoError(t, os.MkdirAll(p, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(p, "coverage.info"), []byte(body), 0o644))
+	}
+	write("run-a", "SF:src/Api/Orders.cs\nDA:1,1\nDA:2,0\nend_of_record\n")
+	write("run-b", "SF:src/Api/Orders.cs\nDA:2,3\nDA:3,0\nend_of_record\n")
+
+	pct, ok := parseDotnetCoverage(dir, "")
+	require.True(t, ok)
+	assert.InDelta(t, 66.7, pct, 0.1)
+
+	hits, ok := dotnetCoverageLines(dir)
+	require.True(t, ok)
+	assert.Equal(t, 3, hits["src/Api/Orders.cs"][2])
+}
+
+func TestParseDotnetCoverageIgnoresGeneratedSource(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, dotnetCoverageDir, "run")
+	require.NoError(t, os.MkdirAll(p, 0o755))
+	report := "SF:src/Api/Pricing.cs\nDA:1,1\nDA:2,0\nend_of_record\n" +
+		"SF:src/Api/obj/Debug/net10.0/Gen/OpenApi.generated.cs\nDA:1,0\nDA:2,0\nDA:3,0\nend_of_record\n" +
+		"SF:src/Api/Migrations/20260101_Init.Designer.cs\nDA:1,0\nend_of_record\n"
+	require.NoError(t, os.WriteFile(filepath.Join(p, "coverage.info"), []byte(report), 0o644))
+
+	pct, ok := parseDotnetCoverage(dir, "")
+	require.True(t, ok)
+	assert.InDelta(t, 50.0, pct, 0.1)
+}
+
+func TestParseDotnetCoverageWithoutReportsIsUnmeasured(t *testing.T) {
+	_, ok := parseDotnetCoverage(t.TempDir(), "")
+	assert.False(t, ok)
+}
+
 func TestParseReportedCoverageDefersToTheSharedReader(t *testing.T) {
 	pct, ok := parseReportedCoverage("", "Lines        : 93.5%")
 	require.True(t, ok)

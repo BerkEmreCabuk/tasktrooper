@@ -40,7 +40,7 @@ type LanguageStat struct {
 // so the profile can say "React 19 + Vite" without the agent opening anything.
 type Manifest struct {
 	Path      string   `json:"path"`
-	Ecosystem string   `json:"ecosystem"` // npm | go | python | rust | dart | swift | ruby | java | php
+	Ecosystem string   `json:"ecosystem"` // npm | go | python | rust | dart | swift | ruby | java | php | dotnet
 	Name      string   `json:"name,omitempty"`
 	Version   string   `json:"version,omitempty"` // language/runtime version when the manifest pins one
 	Manager   string   `json:"manager,omitempty"` // resolved from the lockfile that sits next to it

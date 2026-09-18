@@ -165,3 +165,15 @@ func TestDetectRunCommandFallsBackToGoRun(t *testing.T) {
 func TestDetectRunCommandFindsNothingItRecognises(t *testing.T) {
 	assert.Equal(t, "", DetectRunCommand(t.TempDir()))
 }
+
+func TestDetectRunCommandRunsALoneDotnetProject(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Api.csproj"), []byte(`<Project Sdk="Microsoft.NET.Sdk.Web"/>`), 0o644))
+	assert.Equal(t, "dotnet run --project Api.csproj", DetectRunCommand(dir))
+}
+
+func TestDetectRunCommandDoesNotGuessADotnetSolutionsStartupProject(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Shop.sln"), nil, 0o644))
+	assert.Equal(t, "", DetectRunCommand(dir))
+}
