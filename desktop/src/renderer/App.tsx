@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowUpCircle, Loader2, RefreshCw, WifiOff } from "lucide-react";
-import type { AppInfo, CloudStatus, UpdateStatus } from "@ipc/types.js";
+import type { AppInfo, CloudStatus, SupervisorSnapshot, UpdateStatus } from "@ipc/types.js";
 import { Button } from "@shared/ui/button.js";
 import { api } from "./bridge";
+import { unreachableCopy } from "./copy";
 
 // Only macOS draws traffic lights inside the window, over the title bar.
 const IS_MAC = navigator.userAgent.includes("Macintosh");
@@ -27,17 +28,21 @@ const IS_MAC = navigator.userAgent.includes("Macintosh");
  *    the worst available answer.
  */
 export default function App() {
+  const [snapshot, setSnapshot] = useState<SupervisorSnapshot | null>(null);
   const [cloud, setCloud] = useState<CloudStatus | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
 
   useEffect(() => {
+    void api.supervisorState().then(setSnapshot);
     void api.cloudStatus().then(setCloud);
     void api.appInfo().then(setInfo);
     void api.updateStatus().then(setUpdate);
+    const offState = api.onSupervisorState(setSnapshot);
     const offCloud = api.onCloudStatus(setCloud);
     const offUpdate = api.onUpdateStatus(setUpdate);
     return () => {
+      offState();
       offCloud();
       offUpdate();
     };
@@ -51,7 +56,7 @@ export default function App() {
 
       <div className="min-h-0 flex-1">
         {cloud?.state === "failed" ? <Unreachable status={cloud} info={info} onRetry={reload} /> : null}
-        {cloud?.state === "loading" ? <Loading /> : null}
+        {cloud?.state === "loading" ? <Loading detail={snapshot?.detail} /> : null}
         {/* When the hosted app is up, the view covers this area exactly, which
             is why there is nothing to render for it here. */}
       </div>
@@ -140,10 +145,7 @@ function Unreachable({
       <div className="max-w-md text-center">
         <WifiOff className="mx-auto size-8 text-muted-foreground" />
         <h1 className="mt-4 text-base font-semibold">TaskTrooper could not start</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          Everything runs on this Mac, so there is nothing to show until the local server is up. Start it from the
-          TaskTrooper icon in the menu bar, or retry below.
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">{unreachableCopy(IS_MAC)}</p>
         {status.description ? (
           <code className="selectable mt-3 block break-all rounded bg-muted px-2 py-1.5 font-mono text-xs">
             {status.description}
@@ -159,4 +161,3 @@ function Unreachable({
     </div>
   );
 }
-
