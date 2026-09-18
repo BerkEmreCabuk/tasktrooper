@@ -398,12 +398,9 @@ export function BoardPage() {
                   Claude usage limit sent people hunting for a chat that does
                   not exist. */}
               {task.blocked_resource === "work_order" ? (
-                // A dependency on another task is a normal, expected state —
-                // not an alert — so it reads like the other plain info chips
-                // (key, repo, initiative) instead of standing out in amber.
                 <Badge
                   variant="outline"
-                  className="max-w-[9rem] truncate text-micro"
+                  className="max-w-[9rem] truncate border-amber-500/40 bg-amber-500/10 text-micro text-amber-600 dark:text-amber-400"
                   title={t("boardArea.board.blockedResourceTitle", {
                     reason: task.blocked_question || blockedResourceLabel(task.blocked_resource),
                   })}
