@@ -165,3 +165,23 @@ func TestOverlayEmptyForUndeclaredRepo(t *testing.T) {
 		t.Fatalf("expected empty overlay, got %+v", ov)
 	}
 }
+
+func TestReadPinsDotnetSDKFromGlobalJSON(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "global.json", `{"sdk":{"version":"10.0.100","rollForward":"latestFeature"}}`)
+	pins := ReadPins(dir)
+	if len(pins) != 1 || pins[0] != (Pin{Language: "dotnet", Version: "10.0.100", Exact: true, Source: "global.json"}) {
+		t.Fatalf("got %+v", pins)
+	}
+	if req := Detect(dir); req != (Requirements{}) {
+		t.Fatalf("a dotnet pin must not become a PATH requirement: %+v", req)
+	}
+}
+
+func TestReadPinsIgnoresGlobalJSONWithoutSDK(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "global.json", `{"msbuild-sdks":{"Microsoft.Build.Traversal":"4.1.0"}}`)
+	if pins := ReadPins(dir); len(pins) != 0 {
+		t.Fatalf("got %+v", pins)
+	}
+}

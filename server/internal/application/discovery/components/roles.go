@@ -147,7 +147,7 @@ func backendEvidence(info *ManifestInfo, goSig *goSignals) (domain.ComponentRole
 			return domain.ComponentRoleBackend, domain.ConfidenceHigh, domain.SourceEvidence{Path: info.Path, Note: name + " dependency"}, true
 		}
 	case "dotnet":
-		if mod, ok := anyDepContains(info, "Microsoft.AspNetCore"); ok {
+		if mod, ok := anyDepContains(info, "Microsoft.AspNetCore", "Microsoft.NET.Sdk.Web"); ok {
 			return domain.ComponentRoleBackend, domain.ConfidenceHigh, domain.SourceEvidence{Path: info.Path, Note: mod + " dependency"}, true
 		}
 	}
@@ -171,6 +171,10 @@ func workerEvidence(dir string, info *ManifestInfo, goSig *goSignals) (domain.So
 	case "ruby":
 		if name, _, ok := info.anyDep("sidekiq"); ok {
 			return domain.SourceEvidence{Path: info.Path, Note: name + " dependency"}, true
+		}
+	case "dotnet":
+		if sdk, ok := anyDepContains(info, "Microsoft.NET.Sdk.Worker"); ok {
+			return domain.SourceEvidence{Path: info.Path, Note: sdk}, true
 		}
 	case "go":
 		if goSig != nil && goSig.HasMain && !goSig.ListensHTTP && goSig.UsesQueue {

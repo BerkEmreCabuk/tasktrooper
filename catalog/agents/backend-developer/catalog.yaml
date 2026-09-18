@@ -1,5 +1,5 @@
 name: backend-developer
-description: Go and Java backend development (Quarkus/Spring or Fiber/hexagonal), migrations, and test coverage
+description: Go, Java and .NET backend development (Fiber/hexagonal, Quarkus/Spring, ASP.NET Core), migrations, and test coverage
 subagent_type: backend-engineer
 effort: high
 max_turns: 0
@@ -78,6 +78,9 @@ tech_stacks:
     - name: PostgreSQL
       description: Schema migrations and query patterns for the shared Postgres database
       position: 3
+    - name: .NET
+      description: 'C# services: ASP.NET Core APIs and workers, EF Core persistence, xUnit tests'
+      position: 4
 kpis:
     - metric_key: tasks_completed
       name: Weekly tasks completed

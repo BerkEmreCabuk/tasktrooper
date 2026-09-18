@@ -277,6 +277,8 @@ func ecosystemDefaults(tree *inventory.Tree, dir string, info *ManifestInfo) []d
 	}
 	ev := domain.SourceEvidence{Path: info.Path}
 	switch info.Ecosystem {
+	case "dotnet":
+		return dotnetCommands(tree, dir, info)
 	case "go":
 		return []domain.DetectedCommand{
 			{Purpose: domain.CommandBuild, Command: "go build ./...", Source: ev},

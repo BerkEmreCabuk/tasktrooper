@@ -97,6 +97,7 @@ var pinSources = []func(pinReader) []Pin{
 	rubyPins,
 	javaPins,
 	rustPins,
+	dotnetPins,
 	flutterPins,
 	pubspecPins,
 	packageJSONPins,
@@ -223,6 +224,25 @@ func rustPins(r pinReader) []Pin {
 		return pin("rust", firstLine(text), "rust-toolchain")
 	}
 	return nil
+}
+
+// dotnetPins reads global.json's sdk.version. It is reported and never put
+// into the environment: the dotnet host reads global.json itself on every
+// invocation, so the pin is enforced without any overlay.
+func dotnetPins(r pinReader) []Pin {
+	text, ok := r.text("global.json")
+	if !ok {
+		return nil
+	}
+	var doc struct {
+		SDK struct {
+			Version string `json:"version"`
+		} `json:"sdk"`
+	}
+	if json.Unmarshal([]byte(text), &doc) != nil {
+		return nil
+	}
+	return pin("dotnet", doc.SDK.Version, "global.json")
 }
 
 func flutterPins(r pinReader) []Pin {

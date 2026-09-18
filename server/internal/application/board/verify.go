@@ -328,9 +328,12 @@ func stageWorkDir(root, dir string) (string, error) {
 	return filepath.Join(root, clean), nil
 }
 
+var dotnetQuietEnv = []string{"DOTNET_NOLOGO=1", "DOTNET_CLI_TELEMETRY_OPTOUT=1", "DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1"}
+
 func verifyEnv(parent, overlay []string) []string {
-	extra := make([]string, 0, len(overlay)+1)
+	extra := make([]string, 0, len(overlay)+1+len(dotnetQuietEnv))
 	extra = append(extra, overlay...)
 	extra = append(extra, "npm_config_yes=false")
+	extra = append(extra, dotnetQuietEnv...)
 	return childenv.For(parent, extra)
 }

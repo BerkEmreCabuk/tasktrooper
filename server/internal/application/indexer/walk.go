@@ -22,6 +22,7 @@ var indexableExtensions = map[string]struct{}{
 	".kt":    {},
 	".kts":   {},
 	".swift": {},
+	".cs":    {},
 }
 
 func WalkIndexableFiles(root string) ([]string, error) {
