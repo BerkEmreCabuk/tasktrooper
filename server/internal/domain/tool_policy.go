@@ -299,14 +299,22 @@ func buildRequiredAnalizTools() []string {
 }
 
 // MissingAnalizTools reports which of RequiredAnalizTools a policy does not
-// grant. An unrestricted policy (empty allowlist) is never missing anything,
-// matching ToolAllowedByPolicy's own reading of a zero policy.
+// grant.
 func MissingAnalizTools(p ToolPolicy) []string {
+	return MissingTools(p, RequiredAnalizTools)
+}
+
+// MissingTools reports which of required a policy does not grant. An
+// unrestricted policy (empty allowlist) is never missing anything, matching
+// ToolAllowedByPolicy's own reading of a zero policy. Generalized out of
+// MissingAnalizTools so a role's own RequiredTools can be checked against an
+// assignment candidate the same way analiz's fixed list always was.
+func MissingTools(p ToolPolicy, required []string) []string {
 	if p.IsZero() {
 		return nil
 	}
 	var missing []string
-	for _, name := range RequiredAnalizTools {
+	for _, name := range required {
 		if !ToolAllowedByPolicy(name, p) {
 			missing = append(missing, name)
 		}

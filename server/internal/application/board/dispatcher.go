@@ -39,7 +39,15 @@ type Dispatcher struct {
 	workOrder    *WorkOrder
 	gatePolicy   PipelineGatePolicy
 	reviewLoop   *ReviewLoopGuard
+	// workflows/roles are wired but not yet read anywhere in B1 — see
+	// release-b-plan.md WP-B2a, which replaces this package's hardcoded
+	// column/type branches with wf.Has(...) reads.
+	workflows port.WorkflowReader
+	roles     port.RoleResolver
 }
+
+func (d *Dispatcher) SetWorkflows(w port.WorkflowReader)  { d.workflows = w }
+func (d *Dispatcher) SetRoleResolver(r port.RoleResolver) { d.roles = r }
 
 type PipelineGatePolicy interface {
 	RequirePipelineForReview(ctx context.Context, repositoryID uuid.UUID) bool

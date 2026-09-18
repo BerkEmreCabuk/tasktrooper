@@ -55,6 +55,225 @@ export interface WorkspaceConfig {
   transitions: BoardTransition[];
 }
 
+/** A column subscription may also filter which task types wake the agent; null = every type. */
+export interface AgentColumnSubscription {
+  column_slug: string;
+  task_types: string[] | null;
+}
+
+export interface AgentSubscriptionsResponse {
+  column_slugs: string[];
+  subscriptions: AgentColumnSubscription[];
+}
+
+export type RoleArea = "backend" | "frontend" | "mobile";
+
+export const ROLE_AREAS: RoleArea[] = ["backend", "frontend", "mobile"];
+
+/** One behaviour attached to a task type or a workflow stage; params keyed by BehaviourSpec.params[].name. */
+export interface BehaviourRef {
+  key: string;
+  params?: Record<string, string>;
+}
+
+export interface RoleAssignment {
+  agent_id: string;
+  /** Read-only, filled by the server for display. */
+  agent_name?: string;
+  /** null = any area. */
+  areas: RoleArea[] | null;
+  priority: number;
+}
+
+export interface Role {
+  id: string;
+  key: string;
+  name: string;
+  description: string;
+  required_tools: string[];
+  assignments: RoleAssignment[];
+  /** Purpose keys (system_task_assignee, repo_profiler) currently pointed at this role. */
+  purposes: string[];
+}
+
+export interface CreateRoleInput {
+  key: string;
+  name: string;
+  description?: string;
+  required_tools?: string[];
+}
+
+export interface UpdateRoleInput {
+  name: string;
+  description?: string;
+  required_tools?: string[];
+}
+
+export interface SetRoleAssignmentsInput {
+  assignments: { agent_id: string; areas: RoleArea[] | null; priority: number }[];
+  confirm_grant_tools?: boolean;
+}
+
+// 422 (missing_tools, saved:false) is a normal outcome here, not an error —
+// the caller opens a confirm-and-grant dialog. Mirrors AnalizAssignmentResult's
+// old shape, generalized to any role.
+export interface RoleAssignmentsResult {
+  saved: boolean;
+  role?: Role;
+  granted_tools?: Record<string, string[]>;
+  missing_tools?: Record<string, string[]>;
+}
+
+export interface AgentRoleRef {
+  role_id: string;
+  key: string;
+  name: string;
+  areas: RoleArea[] | null;
+}
+
+export interface SetAgentRolesInput {
+  roles: { role_id: string; areas: RoleArea[] | null }[];
+  confirm_grant_tools?: boolean;
+}
+
+export interface AgentRolesResult {
+  saved: boolean;
+  roles?: AgentRoleRef[];
+  granted_tools?: Record<string, string[]>;
+  missing_tools?: Record<string, string[]>;
+}
+
+/** Hook names, not roles: which role currently answers a system-created task / repo profile run. */
+export type RolePurposeKey = "system_task_assignee" | "repo_profiler";
+
+export const ROLE_PURPOSE_KEYS: RolePurposeKey[] = ["system_task_assignee", "repo_profiler"];
+
+export interface RolePurposeAssignment {
+  purpose: RolePurposeKey;
+  role_id: string | null;
+}
+
+export type AssigneeMode = "none" | "default" | "override";
+
+export interface TaskTypeDef {
+  key: string;
+  label: string;
+  key_prefix: string;
+  position: number;
+  is_default: boolean;
+  is_defect: boolean;
+  assignee_role_id?: string | null;
+  assignee_mode: AssigneeMode;
+  behaviours: BehaviourRef[];
+  built_in: boolean;
+  task_count: number;
+}
+
+export interface CreateTaskTypeInput {
+  key: string;
+  label: string;
+  key_prefix: string;
+  /** Copies label/prefix/behaviours/stages from an existing type as a starting point. */
+  clone_from?: string;
+}
+
+export interface UpdateTaskTypeInput {
+  label: string;
+  key_prefix: string;
+  position: number;
+  is_default: boolean;
+  is_defect: boolean;
+  assignee_role_id?: string | null;
+  assignee_mode: AssigneeMode;
+  behaviours: BehaviourRef[];
+}
+
+export type StageKind =
+  | "intake"
+  | "queue"
+  | "work"
+  | "review"
+  | "approval"
+  | "rework"
+  | "parked"
+  | "terminal";
+
+export const STAGE_KINDS: StageKind[] = [
+  "intake",
+  "queue",
+  "work",
+  "review",
+  "approval",
+  "rework",
+  "parked",
+  "terminal",
+];
+
+export type StageParticipantMode = "worker" | "approver";
+
+export interface StageParticipant {
+  role_id: string;
+  mode: StageParticipantMode;
+  instructions: string;
+  position: number;
+}
+
+export interface WorkflowStage {
+  id?: string;
+  column_slug: string;
+  position: number;
+  on_path: boolean;
+  kind: StageKind;
+  behaviours: BehaviourRef[];
+  instructions: string;
+  participants: StageParticipant[];
+}
+
+export interface TaskTypeWorkflow {
+  task_type: string;
+  stages: WorkflowStage[];
+}
+
+export interface WorkflowProblem {
+  column_slug: string;
+  field: string;
+  message: string;
+}
+
+// 422 with `problems` is a normal outcome (inline per-stage/field errors), not
+// a thrown error.
+export interface UpdateWorkflowResult {
+  saved: boolean;
+  stages?: WorkflowStage[];
+  error?: string;
+  problems?: WorkflowProblem[];
+}
+
+export type BehaviourParamType = "column" | "string" | "enum" | "bool";
+
+export interface BehaviourParamSpec {
+  name: string;
+  type: BehaviourParamType;
+  options?: string[];
+  required: boolean;
+}
+
+export type BehaviourScope = "stage" | "type";
+
+export interface BehaviourSpec {
+  key: string;
+  scope: BehaviourScope;
+  label: string;
+  description: string;
+  params: BehaviourParamSpec[];
+}
+
+export interface WorkflowBehavioursResponse {
+  behaviours: BehaviourSpec[];
+  kinds: StageKind[];
+  areas: RoleArea[];
+}
+
 export interface ActivityItem {
   id: string;
   kind: "board_event" | "agent_run";
@@ -728,7 +947,10 @@ export interface SavePipelineConfigInput {
 
 export type Project = Repository;
 
-export type TaskType = "task" | "analiz" | "bug" | "technical";
+// Task types are data now (task_types table), not a closed enum — see
+// TaskTypeDef / api.listTaskTypes. Built-in keys (task/analiz/bug/technical)
+// keep their special treatment only in lib/project-board's label mapping.
+export type TaskType = string;
 
 export type TaskPriority = "low" | "medium" | "high" | "critical";
 
@@ -1184,24 +1406,6 @@ export interface AppSettings {
   default_language: string;
   pipeline_container_runtime?: string;
   boilerplate_catalog_repo?: string;
-  analiz_assignee_backend?: string;
-  analiz_assignee_frontend?: string;
-  analiz_assignee_mobile?: string;
-}
-
-export interface UpdateAnalizAssignmentRequest {
-  backend?: string;
-  frontend?: string;
-  mobile?: string;
-  confirm_grant_tools?: boolean;
-}
-
-export interface AnalizAssignmentResult {
-  saved: boolean;
-  settings?: AppSettings;
-  missing_tools?: Record<string, string[]>;
-  granted_tools?: Record<string, string[]>;
-  hint?: string;
 }
 
 export interface GitHubConnectionStatus {
@@ -2592,25 +2796,6 @@ export const api = {
       body: JSON.stringify(settings),
     }),
 
-  // 422 with a missing_tools body is a normal outcome here (the caller opens a
-  // confirmation dialog), not an error — so this bypasses request()'s
-  // throw-on-non-2xx and returns the parsed AnalizAssignmentResult either way.
-  updateAnalizAssignment: async (req: UpdateAnalizAssignmentRequest) => {
-    const res = await fetchWithTimeout(
-      apiUrl("/v1/settings/analiz-assignment"),
-      {
-        method: "PUT",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(req),
-      },
-      WRITE_TIMEOUT_MS,
-    );
-    if (!res.ok && res.status !== 422) {
-      throw await apiErrorFrom(res);
-    }
-    return (await res.json()) as AnalizAssignmentResult;
-  },
-
   listLLMProviders: () => request<LLMProvidersResponse>("/v1/llm/providers"),
 
   connectLLMProvider: (type: LLMProviderType, body: ConnectLLMProviderRequest) =>
@@ -3706,13 +3891,104 @@ export const api = {
     }),
 
   getAgentSubscriptions: (agentId: string) =>
-    request<{ column_slugs: string[] }>(`/v1/agents/${agentId}/subscriptions`),
+    request<AgentSubscriptionsResponse>(`/v1/agents/${agentId}/subscriptions`),
 
-  setAgentSubscriptions: (agentId: string, columnSlugs: string[]) =>
+  // Detailed form: each column may filter which task types wake the agent
+  // (null = every type). Superset of the legacy column_slugs-only PUT.
+  setAgentSubscriptions: (agentId: string, subscriptions: AgentColumnSubscription[]) =>
     request<void>(`/v1/agents/${agentId}/subscriptions`, {
       method: "PUT",
-      body: JSON.stringify({ column_slugs: columnSlugs }),
+      body: JSON.stringify({ subscriptions }),
     }),
+
+  listRoles: () => request<{ roles: Role[] }>("/v1/roles"),
+
+  createRole: (data: CreateRoleInput) =>
+    request<Role>("/v1/roles", { method: "POST", body: JSON.stringify(data) }),
+
+  updateRole: (id: string, data: UpdateRoleInput) =>
+    request<Role>(`/v1/roles/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+
+  deleteRole: (id: string) => request<void>(`/v1/roles/${id}`, { method: "DELETE" }),
+
+  // 422 (missing_tools, saved:false) is a normal outcome — the caller opens a
+  // confirm-and-grant dialog — so this bypasses request()'s throw-on-non-2xx.
+  setRoleAssignments: async (id: string, req: SetRoleAssignmentsInput) => {
+    const res = await fetchWithTimeout(
+      apiUrl(`/v1/roles/${id}/assignments`),
+      {
+        method: "PUT",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(req),
+      },
+      WRITE_TIMEOUT_MS,
+    );
+    if (!res.ok && res.status !== 422) {
+      throw await apiErrorFrom(res);
+    }
+    return (await res.json()) as RoleAssignmentsResult;
+  },
+
+  getAgentRoles: (agentId: string) => request<{ roles: AgentRoleRef[] }>(`/v1/agents/${agentId}/roles`),
+
+  setAgentRoles: async (agentId: string, req: SetAgentRolesInput) => {
+    const res = await fetchWithTimeout(
+      apiUrl(`/v1/agents/${agentId}/roles`),
+      {
+        method: "PUT",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(req),
+      },
+      WRITE_TIMEOUT_MS,
+    );
+    if (!res.ok && res.status !== 422) {
+      throw await apiErrorFrom(res);
+    }
+    return (await res.json()) as AgentRolesResult;
+  },
+
+  listRolePurposes: () => request<{ purposes: RolePurposeAssignment[] }>("/v1/role-purposes"),
+
+  setRolePurpose: (purpose: RolePurposeKey, roleId: string | null) =>
+    request<void>(`/v1/role-purposes/${purpose}`, {
+      method: "PUT",
+      body: JSON.stringify({ role_id: roleId }),
+    }),
+
+  listTaskTypes: () => request<{ task_types: TaskTypeDef[] }>("/v1/task-types"),
+
+  createTaskType: (data: CreateTaskTypeInput) =>
+    request<TaskTypeDef>("/v1/task-types", { method: "POST", body: JSON.stringify(data) }),
+
+  updateTaskType: (key: string, data: UpdateTaskTypeInput) =>
+    request<TaskTypeDef>(`/v1/task-types/${key}`, { method: "PUT", body: JSON.stringify(data) }),
+
+  deleteTaskType: (key: string) => request<void>(`/v1/task-types/${key}`, { method: "DELETE" }),
+
+  getTaskTypeWorkflow: (key: string) => request<TaskTypeWorkflow>(`/v1/task-types/${key}/workflow`),
+
+  // 422 with `problems` is a normal outcome (inline per-stage validation),
+  // not an error — bypasses request()'s throw-on-non-2xx like the role/agent
+  // assignment writes above.
+  updateTaskTypeWorkflow: async (key: string, stages: WorkflowStage[]) => {
+    const res = await fetchWithTimeout(
+      apiUrl(`/v1/task-types/${key}/workflow`),
+      {
+        method: "PUT",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ stages }),
+      },
+      WRITE_TIMEOUT_MS,
+    );
+    if (!res.ok && res.status !== 422) {
+      throw await apiErrorFrom(res);
+    }
+    return (await res.json()) as UpdateWorkflowResult;
+  },
+
+  listWorkflows: () => request<{ workflows: TaskTypeWorkflow[] }>("/v1/workflows"),
+
+  listWorkflowBehaviours: () => request<WorkflowBehavioursResponse>("/v1/workflow/behaviours"),
 
   listAllTasks: () =>
     request<{ tasks: BoardTask[] }>("/v1/tasks"),

@@ -22,7 +22,14 @@ type AgentCatalog interface {
 type Service struct {
 	store  port.SettingsStore
 	agents AgentCatalog
+
+	// workflows/roles: see board.Dispatcher's own fields of the same name.
+	workflows port.WorkflowReader
+	roles     port.RoleResolver
 }
+
+func (s *Service) SetWorkflows(w port.WorkflowReader)  { s.workflows = w }
+func (s *Service) SetRoleResolver(r port.RoleResolver) { s.roles = r }
 
 func NewService(store port.SettingsStore) *Service {
 	return &Service{store: store}

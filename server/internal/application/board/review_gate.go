@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
 )
 
@@ -29,11 +30,17 @@ type EscapeCharger interface {
 type ReviewGate struct {
 	spans   VerdictStore
 	escapes EscapeCharger
+	// workflows/roles: see Dispatcher's own fields of the same name.
+	workflows port.WorkflowReader
+	roles     port.RoleResolver
 }
 
 func NewReviewGate(spans VerdictStore, escapes EscapeCharger) *ReviewGate {
 	return &ReviewGate{spans: spans, escapes: escapes}
 }
+
+func (g *ReviewGate) SetWorkflows(w port.WorkflowReader)  { g.workflows = w }
+func (g *ReviewGate) SetRoleResolver(r port.RoleResolver) { g.roles = r }
 
 // InterceptAgentMove reports whether an agent's move out of a review column may
 // proceed. An approval becomes a recorded verdict and is held; a rejection is

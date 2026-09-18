@@ -13,12 +13,28 @@ import (
 // Service manages the single implicit workspace: global board columns,
 // board membership, column subscriptions and board settings.
 type Service struct {
-	board port.BoardConfigStore
+	board  port.BoardConfigStore
+	stages WorkflowStageChecker
 }
 
 func NewService(board port.BoardConfigStore) *Service {
 	return &Service{board: board}
 }
+
+// WorkflowStageChecker is the slice of application/workflow.Service
+// UpdateColumns needs to refuse an orphaning column removal. Declared here
+// rather than imported so this package does not depend on the workflow
+// package (which would need to depend back on a board-columns lister, since
+// its own stage validation reads the same column list).
+type WorkflowStageChecker interface {
+	ColumnHasBehaviourStages(ctx context.Context, slug string) (bool, error)
+}
+
+// SetWorkflowStageChecker wires the guard UpdateColumns uses to refuse
+// removing a column slug a workflow stage with behaviours still references.
+// Nil (the pre-wiring default) leaves UpdateColumns exactly as it behaved
+// before workflow stages existed.
+func (s *Service) SetWorkflowStageChecker(c WorkflowStageChecker) { s.stages = c }
 
 func (s *Service) GetSettings(ctx context.Context) (domain.BoardSettings, error) {
 	return s.board.GetSettings(ctx)
@@ -123,6 +139,28 @@ func (s *Service) UpdateColumns(ctx context.Context, req domain.UpdateBoardColum
 	if len(req.Columns) == 0 {
 		return fmt.Errorf("columns are required")
 	}
+	if s.stages != nil {
+		existing, err := s.board.ListColumns(ctx)
+		if err != nil {
+			return err
+		}
+		next := make(map[string]bool, len(req.Columns))
+		for _, c := range req.Columns {
+			next[c.Slug] = true
+		}
+		for _, c := range existing {
+			if next[c.Slug] {
+				continue
+			}
+			has, err := s.stages.ColumnHasBehaviourStages(ctx, c.Slug)
+			if err != nil {
+				return err
+			}
+			if has {
+				return fmt.Errorf("%w: %s", domain.ErrColumnHasWorkflowStages, c.Slug)
+			}
+		}
+	}
 	return s.board.ReplaceColumns(ctx, req.Columns)
 }
 
@@ -155,6 +193,14 @@ func (s *Service) ListAgentSubscriptions(ctx context.Context, agentID uuid.UUID)
 
 func (s *Service) SetAgentSubscriptions(ctx context.Context, agentID uuid.UUID, columnSlugs []string) error {
 	return s.board.SetAgentSubscriptions(ctx, agentID, columnSlugs)
+}
+
+func (s *Service) ListAgentSubscriptionsDetailed(ctx context.Context, agentID uuid.UUID) ([]domain.AgentColumnSubscription, error) {
+	return s.board.ListAgentSubscriptionsDetailed(ctx, agentID)
+}
+
+func (s *Service) SetAgentSubscriptionsDetailed(ctx context.Context, agentID uuid.UUID, subs []domain.AgentColumnSubscription) error {
+	return s.board.SetAgentSubscriptionsDetailed(ctx, agentID, subs)
 }
 
 func (s *Service) IsMember(ctx context.Context, agentID uuid.UUID) (bool, error) {

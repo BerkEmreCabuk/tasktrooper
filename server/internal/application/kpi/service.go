@@ -15,11 +15,18 @@ import (
 type Service struct {
 	store port.AgentKPIStore
 	deps  MetricDeps
+
+	// workflows/roles: see board.Dispatcher's own fields of the same name.
+	workflows port.WorkflowReader
+	roles     port.RoleResolver
 }
 
 func NewService(store port.AgentKPIStore, deps MetricDeps) *Service {
 	return &Service{store: store, deps: deps}
 }
+
+func (s *Service) SetWorkflows(w port.WorkflowReader)  { s.workflows = w }
+func (s *Service) SetRoleResolver(r port.RoleResolver) { s.roles = r }
 
 func (s *Service) ListMetrics() []domain.KPIMetricInfo {
 	return ListMetrics()

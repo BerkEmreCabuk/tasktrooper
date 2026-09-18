@@ -36,7 +36,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useI18n } from "@/hooks/useI18n";
-import { TASK_PRIORITY_OPTIONS, TASK_TYPE_OPTIONS } from "@/lib/project-board";
+import { useTaskTypes } from "@/hooks/useTaskTypes";
+import { TASK_PRIORITY_OPTIONS, taskTypeOptions } from "@/lib/project-board";
 
 interface CriterionDraft {
   id: string;
@@ -85,6 +86,8 @@ export function CreateTaskDialog({
   onCreated,
 }: CreateTaskDialogProps) {
   const { t } = useI18n();
+  const { taskTypes } = useTaskTypes();
+  const typeOptions = taskTypeOptions(taskTypes);
   const [repositoryId, setRepositoryId] = useState("");
   const [taskTitle, setTaskTitle] = useState("");
   const [taskType, setTaskType] = useState<TaskType>("task");
@@ -262,9 +265,9 @@ export function CreateTaskDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {TASK_TYPE_OPTIONS.map((o) => (
+                  {typeOptions.map((o) => (
                     <SelectItem key={o.value} value={o.value}>
-                      {t(o.labelKey)}
+                      {o.label}
                     </SelectItem>
                   ))}
                 </SelectContent>

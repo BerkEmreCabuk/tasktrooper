@@ -361,6 +361,75 @@ access token; `PUT {team_id}` re-scopes), `GET /v1/settings/vercel/teams`,
 (`{area, provider, external_id, source}`), `DELETE …/hosting/links/{area|root}`.
 409 = Vercel not connected.
 
+## Roles, task types & workflows
+
+Task types (`task`/`analiz`/`bug`/`technical` plus anything custom) and their
+per-column workflow stages are data now, not a closed enum — edited under
+Settings → Roles / Settings → Workflows (`pages/RolesSettingsPage.tsx`,
+`pages/WorkflowSettingsPage.tsx`). `TaskType` (`api.ts`) is a plain `string`;
+`hooks/useTaskTypes.ts` loads the list and `lib/project-board.ts`'s
+`taskTypeOptions`/`taskTypeLabel` read it, falling back to the four built-ins
+(with their locale strings) until the list has loaded.
+
+- `GET /v1/roles` → `{roles:[{id,key,name,description,required_tools:[],assignments:[{agent_id,agent_name,areas:[]|null,priority}],purposes:[]}]}`.
+  `areas: null` means "any area"; `purposes` lists which system duties (below)
+  currently point at this role.
+- `POST /v1/roles` `{key,name,description,required_tools}` → 201. `PUT
+  /v1/roles/{id}` `{name,description,required_tools}` (key is immutable after
+  creation). `DELETE /v1/roles/{id}` → 204.
+- `PUT /v1/roles/{id}/assignments` `{assignments:[{agent_id,areas,priority}],confirm_grant_tools}`
+  → `200 {saved:true,role,granted_tools?}` or `422
+  {saved:false,missing_tools:{<agent_id>:[..]}}` when an assigned agent's tool
+  policy is short of the role's `required_tools` — the UI opens
+  `components/workflow/MissingToolsDialog.tsx` and resubmits with
+  `confirm_grant_tools:true`. The 422 is a normal outcome, not a thrown error.
+- `GET /v1/agents/{agentId}/roles` → `{roles:[{role_id,key,name,areas}]}`. `PUT
+  /v1/agents/{agentId}/roles` `{roles:[{role_id,areas}],confirm_grant_tools}` —
+  same 200/422 shape as the role assignments PUT, mirrored the other
+  direction. Edited from `components/agent/AgentRolesSection.tsx`, composed
+  into `pages/AgentColumnsPage.tsx`.
+- `GET /v1/role-purposes` → `{purposes:[{purpose,role_id|null}]}`. `PUT
+  /v1/role-purposes/{purpose}` `{role_id|null}`. Purposes are hook names, not
+  roles: `system_task_assignee` (who answers a system-created task) and
+  `repo_profiler` (who runs repository profiling) — edited as "System duties"
+  on the Roles page.
+- `GET /v1/task-types` → `{task_types:[{key,label,key_prefix,position,is_default,is_defect,assignee_role_id,assignee_mode,behaviours:[{key,params}],built_in,task_count}]}`.
+  `assignee_mode` is `none` (leave whatever was requested), `default` (fill
+  only when nothing requested) or `override` (always fill from the role,
+  replacing anything requested).
+- `POST /v1/task-types` `{key,label,key_prefix,clone_from?}` → 201.
+  `clone_from` copies another type's behaviours/stages as a starting point.
+  `PUT /v1/task-types/{key}` `{label,key_prefix,position,is_default,is_defect,assignee_role_id,assignee_mode,behaviours}`
+  — `409` when changing `key_prefix` on a type that already has tasks. `DELETE
+  /v1/task-types/{key}` → `204` or `409` (has tasks, or is the default type).
+- `GET /v1/task-types/{key}/workflow` → `{task_type,stages:[{id,column_slug,position,on_path,kind,behaviours:[{key,params}],instructions,participants:[{role_id,mode,instructions,position}]}]}`.
+  `kind` is one of `intake|queue|work|review|approval|rework|parked|terminal`.
+  A board column with no stage row for a type has no behaviours and routes to
+  the assignee (today's custom-column behaviour).
+- `PUT /v1/task-types/{key}/workflow` `{stages:[…]}` → `200` or `422
+  {error,problems:[{column_slug,field,message}]}` — the UI
+  (`components/workflow/StageEditor.tsx`) shows each problem inline under the
+  stage/field it names, expanding that stage automatically is not required
+  since problems are visible as a per-row badge before expansion too.
+- `GET /v1/workflows` → `{workflows:[{task_type,stages}]}` (every type at
+  once).
+- `GET /v1/workflow/behaviours` → `{behaviours:[{key,scope,label,description,params:[{name,type,options?,required}]}],kinds:[..],areas:[...]}`.
+  `scope` is `stage` or `type`; `params[].type` is `column|string|enum|bool`.
+  Entirely drives `components/workflow/BehaviourPicker.tsx` — no behaviour key
+  is hardcoded client-side.
+- `GET /v1/agents/{agentId}/subscriptions` → `{column_slugs:[...],
+  subscriptions:[{column_slug,task_types:[]|null}]}`. `PUT` accepts
+  `{subscriptions:[...]}` (superset of the legacy `{column_slugs:[...]}` body,
+  which is still accepted server-side); `task_types: null` wakes the agent for
+  every type on that column, a non-null array filters to those types.
+  `pages/AgentColumnsPage.tsx` edits this per column, alongside the agent's
+  roles (`AgentRolesSection`).
+
+The old `/v1/settings/analiz-assignment` route and `analiz_assignee_*`
+`AppSettings` fields are gone — any role can now hold the
+`system_task_assignee`/analysis-assignment duty, not just a hardcoded
+analyst agent. `/settings/analiz-assignment` redirects to `/settings/roles`.
+
 ## Task assignee
 
 A board task is assigned to an agent only (`assignee_agent_id`); there is no person assignee.

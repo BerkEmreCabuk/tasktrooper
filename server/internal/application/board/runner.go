@@ -184,6 +184,9 @@ type PullRequestReader interface {
 // in front of the revision run that has to act on them.
 func (r *Runner) SetPullRequestReader(reader PullRequestReader) { r.prReader = reader }
 
+func (r *Runner) SetWorkflows(w port.WorkflowReader)   { r.workflows = w }
+func (r *Runner) SetRoleResolver(rr port.RoleResolver) { r.roles = rr }
+
 type Runner struct {
 	// agentLoop is the ROUTER in production (agent.Router), not the bare loop:
 	// every run this package starts — the main one, the verify-fix rounds, the
@@ -241,13 +244,16 @@ type Runner struct {
 	prRecorder TaskPRRecorder
 	prReader   PullRequestReader
 	agentCLIs  AgentCLIConnections
-	queue      chan RunJob
-	wg         sync.WaitGroup
-	cancel     context.CancelFunc
-	drain      chan struct{}
-	drainOnce  sync.Once
-	activeMu   sync.RWMutex
-	active     map[uuid.UUID]struct{}
+	// workflows/roles: see Dispatcher's own fields of the same name.
+	workflows port.WorkflowReader
+	roles     port.RoleResolver
+	queue     chan RunJob
+	wg        sync.WaitGroup
+	cancel    context.CancelFunc
+	drain     chan struct{}
+	drainOnce sync.Once
+	activeMu  sync.RWMutex
+	active    map[uuid.UUID]struct{}
 	// queued is every run this process has accepted but not started: sitting in
 	// the channel, or parked behind another run on the same task. The
 	// reconciler needs it. A pending row heartbeats nothing — Touch only runs

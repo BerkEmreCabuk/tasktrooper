@@ -103,7 +103,14 @@ type Service struct {
 
 	mu       sync.Mutex
 	inflight map[uuid.UUID]*refreshState
+
+	// workflows/roles: see board.Dispatcher's own fields of the same name.
+	workflows port.WorkflowReader
+	roles     port.RoleResolver
 }
+
+func (s *Service) SetWorkflows(w port.WorkflowReader)  { s.workflows = w }
+func (s *Service) SetRoleResolver(r port.RoleResolver) { s.roles = r }
 
 // refreshState is the per-repo in-flight ledger entry. written flips when an
 // agent section lands during the run — the success signal the loop's own

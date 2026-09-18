@@ -163,6 +163,86 @@ onto the task it just stopped, and re-run would start every agent configured for
 column rather than the one asked for. Each records its own board event
 (`task.run_cancelled` / `task.rerun_requested`).
 
+## Roles, task types and workflows (migration 143)
+
+Roles, task types and their per-column workflow stages are data now, not hardcoded agent
+names / `TaskType*` constants / column literals — see `internal/domain/{role,workflow,
+workflow_behaviour}.go` and `internal/application/workflow`. Dispatch reads an in-memory
+snapshot (`application/workflow.Service`, both `port.WorkflowReader` and
+`port.RoleResolver`), reloaded after every write; an empty/never-loaded snapshot fails
+every read CLOSED rather than answering as if a type or stage were simply absent.
+
+- `GET /v1/roles` → `{roles:[{id,key,name,description,required_tools:[],
+  assignments:[{agent_id,agent_name,areas:[]|null,priority}],purposes:[]}]}`. `areas: null`
+  means "any area"; a specific list narrows the assignment to those repo areas
+  (`backend`/`frontend`/`mobile`).
+- `POST /v1/roles` `{key,name,description,required_tools}` → `201` role. `key` is
+  immutable once created (task-type assignee and system-purpose references are keyed off
+  the id, but the key itself never changes underneath a stored reference).
+- `PUT /v1/roles/{id}` `{name,description,required_tools}` → role.
+- `DELETE /v1/roles/{id}` → `204`.
+- `PUT /v1/roles/{id}/assignments` `{assignments:[{agent_id,areas,priority}],
+  confirm_grant_tools}` → `200 {saved:true,role,granted_tools?:{<agent_id>:[..]}}` when
+  every assigned agent already carries (or was just granted) the role's `required_tools`,
+  else `422 {saved:false,missing_tools:{<agent_id>:[..]}}` — the same
+  confirm-then-grant shape `PUT /v1/settings/analiz-assignment` already used, generalized
+  off a role's own tool list instead of the fixed analiz one.
+- `GET /v1/agents/{agentId}/roles` → `{roles:[{role_id,key,name,areas}]}`.
+- `PUT /v1/agents/{agentId}/roles` `{roles:[{role_id,areas}],confirm_grant_tools}` — the
+  agent-centric write of the same relationship, replacing every role membership this
+  agent holds in one call; same `200`/`422` tool-grant shape, checked against the union of
+  every named role's `required_tools`.
+- `GET /v1/role-purposes` / `PUT /v1/role-purposes/{purpose}` `{role_id|null}` — the
+  `system_task_assignee` (who `CreateWorkflowSetupTask`/deploy/repodocs/prodops hand their
+  own system-opened tasks to) and `repo_profiler` (who a repository-profile refresh goes
+  to) hooks. `role_id: null` clears the hook; nothing resolves for it until set again.
+- `GET /v1/task-types` → `{task_types:[{key,label,key_prefix,position,is_default,
+  is_defect,assignee_role_id,assignee_mode,behaviours:[{key,params}],built_in,
+  task_count}]}`. `assignee_mode` is `none` (task/bug/technical today — the requested
+  assignee, or none, stands), `default` (fills from the role only when nothing was
+  requested) or `override` (the role's agent for the task's area always wins when the role
+  has one there — analiz's behaviour today).
+- `POST /v1/task-types` `{key,label,key_prefix,clone_from?}` → `201`. `clone_from` copies
+  another type's whole workflow-stage set onto the new type.
+- `PUT /v1/task-types/{key}` `{label,key_prefix,position,is_default,is_defect,
+  assignee_role_id,assignee_mode,behaviours}` → type; `409` when `key_prefix` changes on a
+  type that already has tasks (every existing task's key was rendered with the old
+  prefix — see `postgres/repository.go`'s `taskKeySQL`, which now reads the prefix from
+  `task_types` instead of a hardcoded switch).
+- `DELETE /v1/task-types/{key}` → `204` | `409` (has tasks, or is the board's default
+  type).
+- `GET /v1/task-types/{key}/workflow` → `{task_type,stages:[{id,column_slug,position,
+  on_path,kind,behaviours:[{key,params}],instructions,
+  participants:[{role_id,mode,instructions,position}]}]}`. A board column with no stage
+  row for a type carries no behaviours and routes to the task's assignee — the same
+  fallback a custom column gets today.
+- `PUT /v1/task-types/{key}/workflow` `{stages:[…]}` → `200` (the saved set) |
+  `422 {error,problems:[{column_slug,field,message}]}` on an unknown behaviour key, a
+  behaviour attached at the wrong scope (a `(type)`-scoped one on a stage, or vice versa),
+  an invalid/missing param, a `column` param naming a slug the board does not have, or more
+  than one `worker`/`approver` participant in a stage.
+- `GET /v1/workflows` → `{workflows:[{task_type,stages}]}` — every type's full workflow in
+  one call.
+- `GET /v1/workflow/behaviours` → `{behaviours:[{key,scope,label,description,
+  params:[{name,type,options?,required}]}],kinds:[..],areas:["backend","frontend",
+  "mobile"]}` — the registry (`domain.BehaviourRegistry`) driving both the stage editor's
+  behaviour picker and its own validation; `scope` is `stage` or `type`.
+- `GET /v1/agents/{agentId}/subscriptions` now also returns
+  `subscriptions:[{column_slug,task_types:[]|null}]` alongside the legacy `column_slugs`
+  array (`task_types: null` = every type). `PUT` accepts either body: `subscriptions` with
+  the per-column filter, or the legacy `column_slugs` (each column saved with no filter,
+  unchanged from before). This is also the fix for a standing bug: saving through the
+  agent-scoped endpoint used to silently drop `task_type_filter` on every write.
+- `PUT /v1/board/columns` (`UpdateBoardColumns`) now refuses (`409`) removing a column
+  slug that a workflow stage with behaviours still references — `workflow_stages` carries
+  no FK to `board_columns` on purpose (`ReplaceColumns` deletes every row and reinserts on
+  every save), so this refusal is the only thing standing between a rename and an orphaned
+  stage.
+
+Task keys: `T-n` / `A-n` / `B-n` / `TC-n` render from `task_types.key_prefix` now, not a
+hardcoded Go switch — a custom type's own prefix works the moment the type exists, with no
+further migration.
+
 ## POST /v1/repositories/{id}/tasks/{taskId}/chat
 
 Opens — or reopens — the thread a human discusses ONE board task in, returning the

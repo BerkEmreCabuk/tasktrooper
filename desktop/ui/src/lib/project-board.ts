@@ -5,6 +5,7 @@ import type {
   TaskPipeline,
   TaskPriority,
   TaskType,
+  TaskTypeDef,
 } from "@/api";
 import { tStatic } from "@/hooks/useI18n";
 
@@ -70,13 +71,15 @@ export const DEFAULT_BOARD_COLUMNS: {
   { slug: "released", label: "Released", position: 12, is_backlog: false },
 ];
 
-// labelKey resolves against the i18n `lib.projectBoard.*` namespace; render with
-// t(o.labelKey) in components (reactive to the language switch).
-export const TASK_TYPE_OPTIONS: { value: TaskType; labelKey: string }[] = [
-  { value: "task", labelKey: "lib.projectBoard.taskType.task" },
-  { value: "analiz", labelKey: "lib.projectBoard.taskType.analiz" },
-  { value: "bug", labelKey: "lib.projectBoard.taskType.bug" },
-  { value: "technical", labelKey: "lib.projectBoard.taskType.technical" },
+// The four types that shipped before task types became data (task_types
+// table, see hooks/useTaskTypes). Their locale strings stay the translation
+// for these keys as long as nobody has renamed them server-side — see
+// taskTypeLabel below.
+export const BUILT_IN_TASK_TYPES: { key: string; defaultLabel: string; labelKey: string }[] = [
+  { key: "task", defaultLabel: "Task", labelKey: "lib.projectBoard.taskType.task" },
+  { key: "analiz", defaultLabel: "Analysis", labelKey: "lib.projectBoard.taskType.analiz" },
+  { key: "bug", defaultLabel: "Bug", labelKey: "lib.projectBoard.taskType.bug" },
+  { key: "technical", defaultLabel: "Technical", labelKey: "lib.projectBoard.taskType.technical" },
 ];
 
 export const TASK_PRIORITY_OPTIONS: { value: TaskPriority; labelKey: string }[] = [
@@ -86,10 +89,47 @@ export const TASK_PRIORITY_OPTIONS: { value: TaskPriority; labelKey: string }[] 
   { value: "critical", labelKey: "lib.projectBoard.taskPriority.critical" },
 ];
 
-export function taskTypeLabel(type: TaskType): string {
-  const key = `lib.projectBoard.taskType.${type}`;
-  const label = tStatic(key);
-  return label === key ? type : label;
+/**
+ * A task type's display label. `types` is the loaded task_types list
+ * (hooks/useTaskTypes); omitted or not-yet-loaded, this falls back to the
+ * built-in locale strings so a board painted before the list arrives still
+ * reads correctly for task/analiz/bug/technical.
+ *
+ * For a built-in key whose server label is still the untouched English
+ * default ("Task", "Analysis", ...), the locale string is preferred so the
+ * label translates with the app language. Once an operator edits that type's
+ * label in Settings → Workflows, or for any custom type, the server's label
+ * is shown verbatim — it is that operator's own text, not ours to translate.
+ */
+export function taskTypeLabel(type: TaskType, types?: TaskTypeDef[]): string {
+  const builtIn = BUILT_IN_TASK_TYPES.find((b) => b.key === type);
+  const server = types?.find((t) => t.key === type);
+  if (server) {
+    if (builtIn && server.label === builtIn.defaultLabel) {
+      const label = tStatic(builtIn.labelKey);
+      return label === builtIn.labelKey ? server.label : label;
+    }
+    return server.label;
+  }
+  if (builtIn) {
+    const label = tStatic(builtIn.labelKey);
+    return label === builtIn.labelKey ? type : label;
+  }
+  return type;
+}
+
+/**
+ * Select options for a task-type picker. Prefers the loaded task_types list
+ * (server order via `position`); falls back to the four built-ins when the
+ * list has not loaded yet or came back empty (a workspace mid-migration).
+ */
+export function taskTypeOptions(types: TaskTypeDef[] | undefined): { value: string; label: string }[] {
+  if (types && types.length > 0) {
+    return [...types]
+      .sort((a, b) => a.position - b.position)
+      .map((t) => ({ value: t.key, label: taskTypeLabel(t.key, types) }));
+  }
+  return BUILT_IN_TASK_TYPES.map((b) => ({ value: b.key, label: taskTypeLabel(b.key) }));
 }
 
 export function taskPriorityLabel(priority: TaskPriority): string {

@@ -307,25 +307,151 @@ export const settingsPages: SettingsPagesDict = {
     add: "Ekle",
   },
 
-  analizAssignment: {
-    title: "Analiz Görev Atama",
+  roles: {
+    title: "Roller",
     subtitle:
-      "Backend, frontend veya mobile alanı için oluşturulan analiz görevinin hangi agent'a otomatik atanacağı.",
+      "Agent'ların atandığı isimli görevler (developer, analyst, architect, QA, product manager, …) ve şu anda hangi sistem görevinin hangi role bağlı olduğu.",
     loadFailed: "Yüklenemedi",
-    savedToast: "Atama kaydedildi",
     saveFailed: "Kayıt başarısız",
-    discardedToast: "Atama kaydedilmedi",
+    savedToast: "Rol kaydedildi",
+    createdToast: "Rol oluşturuldu",
+    deletedToast: "Rol silindi",
+    deleteFailed: "Silme başarısız",
+    assignmentsSavedToast: "Atamalar kaydedildi",
+    purposeSavedToast: "Görev kaydedildi",
 
-    areas: {
+    newRole: "Yeni rol",
+    empty: "Henüz rol yok.",
+    agentCount: "{count} agent",
+    selectRole: "Düzenlemek için bir rol seçin.",
+
+    detailsTitle: "Detaylar",
+    nameLabel: "Ad",
+    descriptionLabel: "Açıklama",
+    toolsLabel: "Gerekli tool'lar",
+    toolsPlaceholder: "satır başına bir tool",
+    toolsHelp:
+      "Bu role atanan bir agent'ın policy'sinde bu tool'ların hepsi bulunmalı — biri eksikse önce eklenmesi istenir.",
+    keyLabel: "Key",
+    keyPlaceholder: "ör. developer",
+    keyHelp: "Küçük harf, harf/rakam/alt çizgi. Oluşturulduktan sonra değiştirilemez.",
+    create: "Oluştur",
+    deleteRole: "Rolü sil",
+    deleteRoleDescription: "“{name}” kalıcı olarak silinecek. Bu role sahip agent'lar rolü kaybeder.",
+    removeAssignment: "Kaldır",
+
+    assignmentsTitle: "Agent atamaları",
+    assignmentsSubtitle:
+      "Bu rol için hangi agent'ların, hangi alan(lar)da ve birden fazlası uygun olduğunda hangi öncelik sırasıyla seçilebileceği.",
+    saveAssignments: "Atamaları kaydet",
+    noAssignments: "Henüz atanmış agent yok.",
+    addAgent: "Agent ekle…",
+    priority: "Öncelik",
+    areaAny: "Herhangi bir alan",
+    area: {
       backend: "Backend",
       frontend: "Frontend",
       mobile: "Mobile",
     },
 
+    dutiesTitle: "Sistem görevleri",
+    dutiesSubtitle:
+      "Rol değil, hook adı: sistem tarafından oluşturulan bir görevi veya repo profilleme çalışmasını şu anda hangi rol yanıtlıyor.",
+    dutyNone: "— yok —",
+    duty: {
+      system_task_assignee: "Sistem tarafından oluşturulan görevler",
+      repo_profiler: "Repo profilleme",
+    },
+
     missingToolsTitle: "Eksik tool'lar",
     missingToolsBody:
-      "Seçilen agent'ta analiz iş akışının ihtiyaç duyduğu bazı tool'lar eksik. Eklenip atama kaydedilsin mi?",
+      "Bir veya daha fazla agent'ta bu rolün gerektirdiği tool'lar eksik. Eklenip atama kaydedilsin mi?",
     grantTools: "Evet, ekle",
+  },
+
+  workflows: {
+    title: "İş Akışları",
+    subtitle: "Görev tipleri ve her birinin geçtiği sıralı, kolon bazlı iş akışı aşamaları.",
+    loadFailed: "Yüklenemedi",
+    saveFailed: "Kayıt başarısız",
+    savedToast: "Görev tipi kaydedildi",
+    createdToast: "Görev tipi oluşturuldu",
+    deletedToast: "Görev tipi silindi",
+    deleteFailed: "Silme başarısız",
+    stagesSavedToast: "Aşamalar kaydedildi",
+    stagesInvalid: "Kaydetmeden önce bazı aşamaların düzeltilmesi gerekiyor",
+
+    newType: "Yeni görev tipi",
+    empty: "Henüz görev tipi yok.",
+    defaultTag: "varsayılan",
+    selectType: "Düzenlemek için bir görev tipi seçin.",
+
+    detailsTitle: "Detaylar",
+    labelLabel: "Etiket",
+    prefixLabel: "Key öneki",
+    prefixLocked: "Bu tipte görev olduğu sürece önek kilitlidir.",
+    prefixPlaceholder: "ör. T",
+    isDefaultLabel: "Yeni görevler için varsayılan tip",
+    isDefectLabel: "Defekt olarak sayılır (bugs_assigned KPI)",
+    deleteType: "Görev tipini sil",
+    deleteTypeDescription: "“{label}” kalıcı olarak silinecek. Bu yalnızca görevi yokken çalışır.",
+
+    assigneeModeLabel: "Atama modu",
+    assigneeMode: {
+      none: "Yok",
+      default: "Varsayılan",
+      override: "Geçersiz kıl",
+    },
+    assigneeModeHelp: {
+      none: "Bu tipteki yeni görevler istenen atananı (varsa) korur.",
+      default: "Rolün agent'ı, yalnızca hiçbir atanan istenmediğinde atanan alanını doldurur.",
+      override: "Rolün agent'ı, istenen ne olursa olsun her zaman atanan alanını doldurur.",
+    },
+    assigneeRoleLabel: "Atanan rol",
+
+    typeBehavioursLabel: "Tip geneli davranışlar",
+
+    keyLabel: "Key",
+    cloneFromLabel: "Şuradan kopyala",
+    cloneFromNone: "— boş —",
+    create: "Oluştur",
+
+    stagesTitle: "Aşamalar",
+    stagesSubtitle: "Bu tipin sırayla geçtiği her board kolonu için bir satır. Satırları oklarla taşıyın.",
+    saveStages: "Aşamaları kaydet",
+    addStage: "Aşama ekle…",
+    removeStage: "Aşamayı kaldır",
+    moveUp: "Yukarı taşı",
+    moveDown: "Aşağı taşı",
+    orphanedStage: "Kolon artık yok",
+    offPath: "Ana akış dışı",
+    kindLabel: "Tür",
+    onPathLabel: "Ana akışta",
+    behavioursLabel: "Davranışlar",
+    noBehaviours: "Bu kapsamda kullanılabilir davranış yok.",
+    instructionsLabel: "Talimatlar",
+    participantsLabel: "Katılımcılar",
+    participantMode: {
+      worker: "Yürütücü",
+      approver: "Onaylayıcı",
+    },
+    addParticipant: {
+      worker: "Yürütücü ekle",
+      approver: "Onaylayıcı ekle",
+    },
+    removeParticipant: "Kaldır",
+    participantInstructionsPlaceholder: "Bu katılımcı için bu aşamada ek talimat (opsiyonel)",
+    noSubscriberWarning: "“{role}” rolüne sahip hiçbir agent bu kolona abone değil — bu iş asla ona düşmeyecek.",
+    kind: {
+      intake: "Giriş",
+      queue: "Kuyruk",
+      work: "Çalışma",
+      review: "İnceleme",
+      approval: "Onay",
+      rework: "Yeniden çalışma",
+      parked: "Bekletilmiş",
+      terminal: "Bitiş",
+    },
   },
 
 };

@@ -53,6 +53,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/settings"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/vercelops"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -107,6 +108,7 @@ type Handler struct {
 	repositorySvc     *repository.Service
 	initiativeSvc     *initiative.Service
 	workspaceSvc      *workspace.Service
+	workflowSvc       *workflow.Service
 	boardEvents       port.BoardEventStore
 	taskRuns          port.TaskAgentRunStore
 	runControl        BoardRunControl
@@ -163,6 +165,7 @@ type Config struct {
 	RepositorySvc     *repository.Service
 	InitiativeSvc     *initiative.Service
 	WorkspaceSvc      *workspace.Service
+	WorkflowSvc       *workflow.Service
 	BoardEvents       port.BoardEventStore
 	TaskRuns          port.TaskAgentRunStore
 	RunControl        BoardRunControl
@@ -220,6 +223,7 @@ func NewHandler(cfg Config) *Handler {
 		repositorySvc:     cfg.RepositorySvc,
 		initiativeSvc:     cfg.InitiativeSvc,
 		workspaceSvc:      cfg.WorkspaceSvc,
+		workflowSvc:       cfg.WorkflowSvc,
 		boardEvents:       cfg.BoardEvents,
 		taskRuns:          cfg.TaskRuns,
 		runControl:        cfg.RunControl,
@@ -287,6 +291,7 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	h.registerStoreOpsRoutes(app)
 	h.registerGCloudOpsRoutes(app)
 	h.registerWorkspaceRoutes(app)
+	h.registerWorkflowRoutes(app)
 	h.registerEvolutionRoutes(app)
 
 	h.registerSettingsRoutes(app)

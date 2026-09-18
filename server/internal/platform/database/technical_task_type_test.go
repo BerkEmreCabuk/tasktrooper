@@ -129,17 +129,31 @@ func (s *TechnicalTaskTypeSuite) TestRestrictedInstallGainsHumanUATEdges() {
 	s.True(stillLegal, "the migration must be additive, not replace the operator's existing graph")
 }
 
+// TestTaskTypeCheckConstraintAcceptsTechnical predates migration 143, which
+// replaces the CHECK this test named with a FK to task_types (a custom type
+// is now legal the moment a row exists for it, with no further migration —
+// see 143_roles_task_types_workflows.up.sql). The assertion now checks the
+// FK exists and that 'technical' is a real task_types row instead.
 func (s *TechnicalTaskTypeSuite) TestTaskTypeCheckConstraintAcceptsTechnical() {
 	pool := s.freshDatabase()
 
 	s.Require().NoError(database.RunMigrations(s.ctx, pool))
 
-	var definition string
+	var fkExists bool
 	s.Require().NoError(pool.QueryRow(s.ctx,
-		`SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'board_tasks_task_type_check'`).
-		Scan(&definition))
-	s.Contains(definition, "'technical'")
-	s.Contains(definition, "'task'")
-	s.Contains(definition, "'analiz'")
-	s.Contains(definition, "'bug'")
+		`SELECT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'board_tasks_task_type_fk')`).
+		Scan(&fkExists))
+	s.True(fkExists, "board_tasks.task_type must be FK-governed by task_types")
+
+	for _, key := range []string{"task", "analiz", "bug", "technical"} {
+		var exists bool
+		s.Require().NoError(pool.QueryRow(s.ctx,
+			`SELECT EXISTS (SELECT 1 FROM task_types WHERE key = $1)`, key).Scan(&exists))
+		s.True(exists, "task_types must carry a row for %q", key)
+	}
+
+	var technicalPrefix string
+	s.Require().NoError(pool.QueryRow(s.ctx,
+		`SELECT key_prefix FROM task_types WHERE key = 'technical'`).Scan(&technicalPrefix))
+	s.Equal("TC", technicalPrefix)
 }

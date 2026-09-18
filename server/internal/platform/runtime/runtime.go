@@ -96,6 +96,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops/pipeline"
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/vercelops"
+	workflowapp "github.com/makifbaysal/tasktrooper/server/internal/application/workflow"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/secrets"
@@ -791,6 +792,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var documentStore port.TaskDocumentStore
 	var initiativeStore port.InitiativeProjectStore
 	var boardConfigStore port.BoardConfigStore
+	var roleStore port.RoleStore
+	var workflowStore port.WorkflowStore
+	var workflowSvc *workflowapp.Service
 	var commentStore port.TaskCommentStore
 	var boardEventStore port.BoardEventStore
 	var taskAgentRunStore port.TaskAgentRunStore
@@ -859,6 +863,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			documentStore = pgstore.NewTaskDocumentStore(pgDB)
 			initiativeStore = pgstore.NewInitiativeProjectStore(pgDB)
 			boardConfigStore = pgstore.NewBoardConfigStore(pgDB)
+			roleStore = pgstore.NewRoleStore(pgDB)
+			workflowStore = pgstore.NewWorkflowStore(pgDB)
+			workflowSvc = workflowapp.NewService(roleStore, workflowStore)
 			commentStore = pgstore.NewTaskCommentStore(pgDB)
 			boardEventStore = pgstore.NewBoardEventStore(pgDB)
 			taskAgentRunStore = pgstore.NewTaskAgentRunStore(pgDB)
@@ -1158,6 +1165,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			Tasks: boardTaskStore,
 			Spans: taskSpanStore,
 		})
+		if workflowSvc != nil {
+			kpiSvc.SetWorkflows(workflowSvc)
+			kpiSvc.SetRoleResolver(workflowSvc)
+		}
 	}
 
 	var boardRunner *boardapp.Runner
@@ -1175,6 +1186,19 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var hostChatExecutor port.ChatExecutor
 	if boardConfigStore != nil {
 		workspaceSvc = workspace.NewService(boardConfigStore)
+	}
+	if workflowSvc != nil {
+		workflowSvc.SetBoardColumnLister(boardConfigStore)
+		// The snapshot has to exist before anything reads it — Workflow/
+		// AgentForRole etc. fail closed on an empty cache (see
+		// workflow.ErrSnapshotEmpty) rather than guessing. Every write this
+		// service makes reloads again; this is only the boot load.
+		if err := workflowSvc.Reload(ctx); err != nil {
+			log.Warn().Err(err).Msg("workflow: initial snapshot load failed; roles/workflows unavailable until the next successful write")
+		}
+		if workspaceSvc != nil {
+			workspaceSvc.SetWorkflowStageChecker(workflowSvc)
+		}
 	}
 	gitClient := gitadapter.NewClient()
 	if githubTokens != nil {
@@ -1284,7 +1308,15 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			boardRunner.SetAgentCLIConnections(agentCLISvc)
 		}
 		boardRunner.SetToolchainDetector(localtoolchain.New(cfg.Storage.Sessions.WorkspaceRoot))
+		if workflowSvc != nil {
+			boardRunner.SetWorkflows(workflowSvc)
+			boardRunner.SetRoleResolver(workflowSvc)
+		}
 		boardDispatcher = boardapp.NewDispatcher(boardConfigStore, boardEventStore, taskAgentRunStore, boardRunner, cfg.Board.DispatchEnabled)
+		if workflowSvc != nil {
+			boardDispatcher.SetWorkflows(workflowSvc)
+			boardDispatcher.SetRoleResolver(workflowSvc)
+		}
 		if taskSpanStore != nil {
 			boardDispatcher.SetSpans(taskSpanStore)
 		}
@@ -1491,6 +1523,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 
 		if boardTaskStore != nil && cfg.Board.DispatchEnabled {
 			reconciler = boardapp.NewReconciler(taskAgentRunStore, boardTaskStore, boardDispatcher, cfg.Board.ReconcileStaleAfter)
+			if workflowSvc != nil {
+				reconciler.SetWorkflows(workflowSvc)
+				reconciler.SetRoleResolver(workflowSvc)
+			}
 			// No live-run checker any more. It asked THIS process whether a run
 			// was executing, which on a shared deployment reports every other
 			// replica's live run as abandoned; the run row's own heartbeat is
@@ -1510,6 +1546,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var scoreTracker *boardapp.ScoreTracker
 	if repositoryStore != nil && boardTaskStore != nil {
 		repositorySvc = repository.NewService(repositoryStore, boardTaskStore, criterionStore, relationStore, documentStore, commentStore, workspaceSvc, boardDispatcher, indexSvc, cfg.Indexer.AllowedRoots)
+		if workflowSvc != nil {
+			repositorySvc.SetWorkflows(workflowSvc)
+			repositorySvc.SetRoleResolver(workflowSvc)
+		}
 		repositorySvc.SetGit(gitClient, cfg.Storage.Sessions.WorkspaceRoot)
 		repositorySvc.SetPublicBaseURL(cfg.Server.PublicBaseURL)
 		repositorySvc.SetTestCaseStore(testCaseStore)
@@ -1544,7 +1584,12 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// evidence: which stages a task actually passed through.
 			repositorySvc.SetSpanStore(taskSpanStore)
 			if scoreTracker != nil {
-				repositorySvc.SetReviewGate(boardapp.NewReviewGate(taskSpanStore, scoreTracker))
+				reviewGate := boardapp.NewReviewGate(taskSpanStore, scoreTracker)
+				if workflowSvc != nil {
+					reviewGate.SetWorkflows(workflowSvc)
+					reviewGate.SetRoleResolver(workflowSvc)
+				}
+				repositorySvc.SetReviewGate(reviewGate)
 			}
 		}
 		if boardRunner != nil {
@@ -1621,6 +1666,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			profileSectionStore = pgstore.NewRepositoryProfileStore(e.pgDB)
 		}
 		profileSvc := repoprofileapp.NewService(repositoryStore, profileSectionStore, e.agentRouter)
+		if workflowSvc != nil {
+			profileSvc.SetWorkflows(workflowSvc)
+			profileSvc.SetRoleResolver(workflowSvc)
+		}
 		if catalogStore != nil {
 			profileSvc.SetAgentLister(catalogStore.ListAgents)
 		}
@@ -1639,6 +1688,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			repositorySvc.SetAttachmentStore(attachmentStore)
 		}
 		boardKit := &board.ToolKit{Tasks: repositorySvc}
+		if workflowSvc != nil {
+			boardKit.Workflows = workflowSvc
+			boardKit.Roles = workflowSvc
+		}
 		if initiativeStore != nil {
 			boardKit.Workspace = workspaceLister{projects: initiativeStore, repos: repositoryStore}
 		}
@@ -1846,6 +1899,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// feeds a task back. Wiring them after the pipeline runner means
 			// the runner can report failed deploys as incidents.
 			deploySvc := deploy.NewService(deployTargetStore, repositoryStore)
+			if workflowSvc != nil {
+				deploySvc.SetWorkflows(workflowSvc)
+				deploySvc.SetRoleResolver(workflowSvc)
+			}
 			deploySvc.SetTaskCreator(repositorySvc)
 			repositorySvc.SetDeployTargets(deployTargetStore)
 			if catalogStore != nil {
@@ -1858,6 +1915,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// lives, an agent can be asked to write it" idea as deploySvc
 			// above, so it shares its TaskCreator/AgentLister wiring.
 			repoDocsSvc := repodocs.NewService(repositorySvc)
+			if workflowSvc != nil {
+				repoDocsSvc.SetWorkflows(workflowSvc)
+				repoDocsSvc.SetRoleResolver(workflowSvc)
+			}
 			repoDocsSvc.SetTaskCreator(repositorySvc)
 			if catalogStore != nil {
 				repoDocsSvc.SetAgentLister(catalogStore.ListAgents)
@@ -2048,6 +2109,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				prodOpsDeps.Agents = catalogStore.ListAgents
 			}
 			prodOpsSvc := prodops.NewService(prodOpsDeps)
+			if workflowSvc != nil {
+				prodOpsSvc.SetWorkflows(workflowSvc)
+				prodOpsSvc.SetRoleResolver(workflowSvc)
+			}
 			e.prodOpsSvc = prodOpsSvc
 			pipelineRunner.SetIncidentReporter(prodOpsSvc)
 
@@ -2409,8 +2474,15 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var settingsSvc *settings.Service
 	if settingsStore != nil {
 		settingsSvc = settings.NewService(settingsStore)
+		if workflowSvc != nil {
+			settingsSvc.SetWorkflows(workflowSvc)
+			settingsSvc.SetRoleResolver(workflowSvc)
+		}
 		if catalogSvc != nil {
 			settingsSvc.SetAgentCatalog(catalogSvc)
+			if workflowSvc != nil {
+				workflowSvc.SetAgentCatalog(catalogSvc)
+			}
 		}
 		if repositorySvc != nil {
 			repositorySvc.SetAnalizAssignmentSource(settingsSvc)
@@ -2600,6 +2672,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		LocalPreviewSvc:   localPreviewSvc,
 		InitiativeSvc:     initiativeSvc,
 		WorkspaceSvc:      workspaceSvc,
+		WorkflowSvc:       workflowSvc,
 		BoardEvents:       boardEventStore,
 		TaskRuns:          taskAgentRunStore,
 		RunControl:        boardRunControl,

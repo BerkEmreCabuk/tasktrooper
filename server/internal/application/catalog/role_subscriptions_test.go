@@ -151,6 +151,24 @@ func (m *memBoardConfigStore) SetAgentSubscriptions(_ context.Context, agentID u
 	return nil
 }
 
+func (m *memBoardConfigStore) ListAgentSubscriptionsDetailed(_ context.Context, agentID uuid.UUID) ([]domain.AgentColumnSubscription, error) {
+	slugs := m.subs[agentID]
+	out := make([]domain.AgentColumnSubscription, 0, len(slugs))
+	for _, slug := range slugs {
+		out = append(out, domain.AgentColumnSubscription{ColumnSlug: slug})
+	}
+	return out, nil
+}
+
+func (m *memBoardConfigStore) SetAgentSubscriptionsDetailed(_ context.Context, agentID uuid.UUID, subs []domain.AgentColumnSubscription) error {
+	slugs := make([]string, 0, len(subs))
+	for _, s := range subs {
+		slugs = append(slugs, s.ColumnSlug)
+	}
+	m.subs[agentID] = slugs
+	return nil
+}
+
 func (m *memBoardConfigStore) ListTransitions(context.Context) ([]domain.BoardTransition, error) {
 	return nil, nil
 }

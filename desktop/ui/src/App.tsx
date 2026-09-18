@@ -21,7 +21,8 @@ import { MCPServersPage } from "@/pages/MCPServersPage";
 import { SettingsLayout } from "@/components/layout/SettingsLayout";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { BoardSettingsPage } from "@/pages/BoardSettingsPage";
-import { AnalizAssignmentSettingsPage } from "@/pages/AnalizAssignmentSettingsPage";
+import { RolesSettingsPage } from "@/pages/RolesSettingsPage";
+import { WorkflowSettingsPage } from "@/pages/WorkflowSettingsPage";
 import { LLMSettingsPage } from "@/pages/LLMSettingsPage";
 import { UsageSettingsPage } from "@/pages/UsageSettingsPage";
 import { SkillsPage } from "@/pages/SkillsPage";
@@ -87,7 +88,11 @@ export default function App() {
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route index element={<SettingsPage />} />
                   <Route path="board" element={<BoardSettingsPage />} />
-                  <Route path="analiz-assignment" element={<AnalizAssignmentSettingsPage />} />
+                  <Route path="roles" element={<RolesSettingsPage />} />
+                  <Route path="workflows" element={<WorkflowSettingsPage />} />
+                  {/* Roles replace the single analiz-assignment picker (any role may now
+                      carry that duty, not just an analyst) — old bookmarks/links land here. */}
+                  <Route path="analiz-assignment" element={<Navigate to="/settings/roles" replace />} />
                   <Route path="llm" element={<LLMSettingsPage />} />
                   <Route path="memory" element={<Navigate to="/memory" replace />} />
                   <Route path="mcp" element={<MCPServersPage />} />

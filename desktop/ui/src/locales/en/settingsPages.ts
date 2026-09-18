@@ -324,25 +324,151 @@ export const settingsPages = {
     add: "Add",
   },
 
-  analizAssignment: {
-    title: "Analysis Task Assignment",
+  roles: {
+    title: "Roles",
     subtitle:
-      "Which agent an analysis (analiz) task for the backend, frontend or mobile area is auto-assigned to on creation.",
+      "Named jobs (developer, analyst, architect, QA, product manager, …) that agents are assigned to, and which system duties currently answer to which role.",
     loadFailed: "Failed to load",
-    savedToast: "Assignment saved",
     saveFailed: "Failed to save",
-    discardedToast: "Assignment not saved",
+    savedToast: "Role saved",
+    createdToast: "Role created",
+    deletedToast: "Role deleted",
+    deleteFailed: "Failed to delete",
+    assignmentsSavedToast: "Assignments saved",
+    purposeSavedToast: "Duty saved",
 
-    areas: {
+    newRole: "New role",
+    empty: "No roles yet.",
+    agentCount: "{count} agents",
+    selectRole: "Select a role to edit it.",
+
+    detailsTitle: "Details",
+    nameLabel: "Name",
+    descriptionLabel: "Description",
+    toolsLabel: "Required tools",
+    toolsPlaceholder: "one tool per line",
+    toolsHelp:
+      "An agent assigned to this role must have every one of these tools in its policy — assigning one that doesn't asks to grant them first.",
+    keyLabel: "Key",
+    keyPlaceholder: "e.g. developer",
+    keyHelp: "Lowercase, letters/digits/underscore. Cannot be changed after creation.",
+    create: "Create",
+    deleteRole: "Delete role",
+    deleteRoleDescription: "“{name}” will be permanently deleted. Agents holding it lose the role.",
+    removeAssignment: "Remove",
+
+    assignmentsTitle: "Agent assignments",
+    assignmentsSubtitle:
+      "Which agents may be picked for this role, in which area(s), and in what priority order when more than one qualifies.",
+    saveAssignments: "Save assignments",
+    noAssignments: "No agents assigned yet.",
+    addAgent: "Add an agent…",
+    priority: "Priority",
+    areaAny: "Any area",
+    area: {
       backend: "Backend",
       frontend: "Frontend",
       mobile: "Mobile",
     },
 
+    dutiesTitle: "System duties",
+    dutiesSubtitle:
+      "Hook names, not roles: which role currently answers a system-created task or a repository profiling run.",
+    dutyNone: "— none —",
+    duty: {
+      system_task_assignee: "System-created tasks",
+      repo_profiler: "Repository profiling",
+    },
+
     missingToolsTitle: "Missing tools",
     missingToolsBody:
-      "The selected agent is missing tools the analysis workflow needs. Add them and save the assignment?",
+      "One or more agents are missing tools this role requires. Add them and save the assignment?",
     grantTools: "Yes, add them",
+  },
+
+  workflows: {
+    title: "Workflows",
+    subtitle: "Task types and the ordered, per-column workflow stages each one moves through.",
+    loadFailed: "Failed to load",
+    saveFailed: "Failed to save",
+    savedToast: "Task type saved",
+    createdToast: "Task type created",
+    deletedToast: "Task type deleted",
+    deleteFailed: "Failed to delete",
+    stagesSavedToast: "Stages saved",
+    stagesInvalid: "Some stages need attention before this can be saved",
+
+    newType: "New task type",
+    empty: "No task types yet.",
+    defaultTag: "default",
+    selectType: "Select a task type to edit it.",
+
+    detailsTitle: "Details",
+    labelLabel: "Label",
+    prefixLabel: "Key prefix",
+    prefixLocked: "The prefix is locked once this type has tasks.",
+    prefixPlaceholder: "e.g. T",
+    isDefaultLabel: "Default type for new tasks",
+    isDefectLabel: "Counted as a defect (bugs_assigned KPI)",
+    deleteType: "Delete task type",
+    deleteTypeDescription: "“{label}” will be permanently deleted. This only works while it has no tasks.",
+
+    assigneeModeLabel: "Assignee mode",
+    assigneeMode: {
+      none: "None",
+      default: "Default",
+      override: "Override",
+    },
+    assigneeModeHelp: {
+      none: "New tasks of this type keep whatever assignee was requested, or none.",
+      default: "The role's agent fills the assignee only when none was requested.",
+      override: "The role's agent always fills the assignee, replacing anything requested.",
+    },
+    assigneeRoleLabel: "Assignee role",
+
+    typeBehavioursLabel: "Type-wide behaviours",
+
+    keyLabel: "Key",
+    cloneFromLabel: "Clone from",
+    cloneFromNone: "— blank —",
+    create: "Create",
+
+    stagesTitle: "Stages",
+    stagesSubtitle: "One row per board column this type visits, in order. Move rows with the arrows.",
+    saveStages: "Save stages",
+    addStage: "Add a stage for…",
+    removeStage: "Remove stage",
+    moveUp: "Move up",
+    moveDown: "Move down",
+    orphanedStage: "Column no longer exists",
+    offPath: "Off path",
+    kindLabel: "Kind",
+    onPathLabel: "On the happy path",
+    behavioursLabel: "Behaviours",
+    noBehaviours: "No behaviours available at this scope.",
+    instructionsLabel: "Instructions",
+    participantsLabel: "Participants",
+    participantMode: {
+      worker: "Worker",
+      approver: "Approver",
+    },
+    addParticipant: {
+      worker: "Add worker",
+      approver: "Add approver",
+    },
+    removeParticipant: "Remove",
+    participantInstructionsPlaceholder: "Extra instructions for this participant at this stage (optional)",
+    noSubscriberWarning: "No agent holding “{role}” is subscribed to this column — it will never get this work.",
+    kind: {
+      intake: "Intake",
+      queue: "Queue",
+      work: "Work",
+      review: "Review",
+      approval: "Approval",
+      rework: "Rework",
+      parked: "Parked",
+      terminal: "Terminal",
+    },
   },
 
 };

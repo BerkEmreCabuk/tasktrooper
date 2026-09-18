@@ -201,6 +201,50 @@ func (s *BoardConfigStore) SetAgentSubscriptions(ctx context.Context, agentID uu
 	return tx.Commit(ctx)
 }
 
+// ListAgentSubscriptionsDetailed is ListAgentSubscriptions plus the per-column
+// task_type_filter ListAgentSubscriptions drops on the floor.
+func (s *BoardConfigStore) ListAgentSubscriptionsDetailed(ctx context.Context, agentID uuid.UUID) ([]domain.AgentColumnSubscription, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT column_slug, task_type_filter FROM agent_column_subscriptions WHERE agent_id = $1 ORDER BY column_slug
+	`, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("list agent subscriptions: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.AgentColumnSubscription
+	for rows.Next() {
+		var sub domain.AgentColumnSubscription
+		if err := rows.Scan(&sub.ColumnSlug, &sub.TaskTypes); err != nil {
+			return nil, err
+		}
+		out = append(out, sub)
+	}
+	return out, rows.Err()
+}
+
+// SetAgentSubscriptionsDetailed is SetAgentSubscriptions with the filter
+// preserved — the fix for the bug SetAgentSubscriptions has always had (it
+// silently drops task_type_filter on every save, see release-b-plan.md §0).
+func (s *BoardConfigStore) SetAgentSubscriptionsDetailed(ctx context.Context, agentID uuid.UUID, subs []domain.AgentColumnSubscription) error {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `DELETE FROM agent_column_subscriptions WHERE agent_id = $1`, agentID); err != nil {
+		return err
+	}
+	for _, sub := range subs {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO agent_column_subscriptions (agent_id, column_slug, task_type_filter) VALUES ($1, $2, $3)
+			ON CONFLICT DO NOTHING
+		`, agentID, sub.ColumnSlug, sub.TaskTypes); err != nil {
+			return fmt.Errorf("insert agent subscription: %w", err)
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 func (s *BoardConfigStore) ListTransitions(ctx context.Context) ([]domain.BoardTransition, error) {
 	rows, err := s.pool.Query(ctx, `SELECT from_slug, to_slug FROM board_column_transitions`)
 	if err != nil {

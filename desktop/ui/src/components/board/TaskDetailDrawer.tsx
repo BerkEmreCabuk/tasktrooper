@@ -61,6 +61,7 @@ import { Separator } from "@/components/ui/separator";
 import { useI18n } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
 import { useRunActivity } from "@/hooks/useRunActivity";
+import { useTaskTypes } from "@/hooks/useTaskTypes";
 import { desktopRunner } from "@/lib/desktop-bridge";
 import { subtaskActivityByKey } from "@/lib/sessionGraph";
 import {
@@ -69,9 +70,9 @@ import {
   formatResumeIn,
   runStatusVariant,
   TASK_PRIORITY_OPTIONS,
-  TASK_TYPE_OPTIONS,
   taskPriorityLabel,
   taskTypeLabel,
+  taskTypeOptions,
 } from "@/lib/project-board";
 import { formatDate, formatRelativeDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
@@ -119,6 +120,7 @@ export function TaskDetailDrawer({
   onUpdated,
 }: TaskDetailDrawerProps) {
   const { t } = useI18n();
+  const { taskTypes } = useTaskTypes();
   const navigate = useNavigate();
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [runs, setRuns] = useState<TaskAgentRun[]>([]);
@@ -575,7 +577,7 @@ export function TaskDetailDrawer({
               {initiativeName && <Badge variant="outline">{initiativeName}</Badge>}
               {task && (
                 <>
-                  <Badge variant="outline">{taskTypeLabel(task.task_type)}</Badge>
+                  <Badge variant="outline">{taskTypeLabel(task.task_type, taskTypes)}</Badge>
                   <Badge variant="outline">{taskPriorityLabel(task.priority)}</Badge>
                 </>
               )}
@@ -1182,9 +1184,9 @@ export function TaskDetailDrawer({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {TASK_TYPE_OPTIONS.map((o) => (
+                          {taskTypeOptions(taskTypes).map((o) => (
                             <SelectItem key={o.value} value={o.value}>
-                              {t(o.labelKey)}
+                              {o.label}
                             </SelectItem>
                           ))}
                         </SelectContent>

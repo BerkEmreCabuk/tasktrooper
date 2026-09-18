@@ -1,6 +1,7 @@
 package http
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -33,30 +34,61 @@ func (h *Handler) registerWorkspaceRoutes(app fiber.Router) {
 	app.Put("/v1/agents/:agentId/subscriptions", h.SetAgentSubscriptions)
 }
 
+// agentSubscriptionJSON is one column an agent subscribes to, with its
+// optional per-column task-type filter (null/omitted = every type).
+type agentSubscriptionJSON struct {
+	ColumnSlug string   `json:"column_slug"`
+	TaskTypes  []string `json:"task_types"`
+}
+
+// GetAgentSubscriptions serves both the legacy `column_slugs` shape and the
+// new `subscriptions` shape (with each column's task-type filter) in one
+// response, so a UI build that only reads the old field keeps working.
 func (h *Handler) GetAgentSubscriptions(c *fiber.Ctx) error {
 	agentID, err := uuid.Parse(c.Params("agentId"))
 	if err != nil {
 		return badRequest(c, "invalid agent id")
 	}
-	slugs, err := h.workspaceSvc.ListAgentSubscriptions(h.enrichContext(c), agentID)
+	detailed, err := h.workspaceSvc.ListAgentSubscriptionsDetailed(h.enrichContext(c), agentID)
 	if err != nil {
 		return internalError(c, err)
 	}
-	return c.JSON(fiber.Map{"column_slugs": slugs})
+	slugs := make([]string, 0, len(detailed))
+	subs := make([]agentSubscriptionJSON, 0, len(detailed))
+	for _, d := range detailed {
+		slugs = append(slugs, d.ColumnSlug)
+		subs = append(subs, agentSubscriptionJSON{ColumnSlug: d.ColumnSlug, TaskTypes: d.TaskTypes})
+	}
+	return c.JSON(fiber.Map{"column_slugs": slugs, "subscriptions": subs})
 }
 
+// SetAgentSubscriptions accepts either shape: `subscriptions` (per-column
+// task_types filter) when present, else the legacy `column_slugs` (each
+// column saved with no filter — the same "every type" behaviour it always
+// had).
 func (h *Handler) SetAgentSubscriptions(c *fiber.Ctx) error {
 	agentID, err := uuid.Parse(c.Params("agentId"))
 	if err != nil {
 		return badRequest(c, "invalid agent id")
 	}
 	var req struct {
-		ColumnSlugs []string `json:"column_slugs"`
+		ColumnSlugs   []string                `json:"column_slugs"`
+		Subscriptions []agentSubscriptionJSON `json:"subscriptions"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return badRequest(c, "invalid request body")
 	}
-	if err := h.workspaceSvc.SetAgentSubscriptions(h.enrichContext(c), agentID, req.ColumnSlugs); err != nil {
+	var subs []domain.AgentColumnSubscription
+	if len(req.Subscriptions) > 0 {
+		for _, s := range req.Subscriptions {
+			subs = append(subs, domain.AgentColumnSubscription{ColumnSlug: s.ColumnSlug, TaskTypes: s.TaskTypes})
+		}
+	} else {
+		for _, slug := range req.ColumnSlugs {
+			subs = append(subs, domain.AgentColumnSubscription{ColumnSlug: slug})
+		}
+	}
+	if err := h.workspaceSvc.SetAgentSubscriptionsDetailed(h.enrichContext(c), agentID, subs); err != nil {
 		return badRequest(c, err.Error())
 	}
 	return c.SendStatus(fiber.StatusNoContent)
@@ -134,6 +166,9 @@ func (h *Handler) UpdateBoardColumns(c *fiber.Ctx) error {
 		return badRequest(c, "invalid request body")
 	}
 	if err := h.workspaceSvc.UpdateColumns(h.enrichContext(c), req); err != nil {
+		if errors.Is(err, domain.ErrColumnHasWorkflowStages) {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": err.Error()})
+		}
 		return badRequest(c, err.Error())
 	}
 	columns, err := h.workspaceSvc.ListColumns(h.enrichContext(c))

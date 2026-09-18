@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
+import type { TaskTypeDef } from "@/api";
 import {
   pipelineStatusVariant,
   runStatusVariant,
-  TASK_TYPE_OPTIONS,
   taskPipelineCardIcon,
   taskTypeLabel,
+  taskTypeOptions,
   workOrderBlockerLabel,
 } from "@/lib/project-board";
 
@@ -86,13 +87,93 @@ describe("runStatusVariant", () => {
   });
 });
 
-describe("TASK_TYPE_OPTIONS / taskTypeLabel", () => {
-  it("includes technical alongside task/analiz/bug", () => {
-    expect(TASK_TYPE_OPTIONS.map((o) => o.value)).toEqual(["task", "analiz", "bug", "technical"]);
+describe("taskTypeOptions / taskTypeLabel", () => {
+  it("falls back to the four built-ins when no task_types list has loaded", () => {
+    expect(taskTypeOptions(undefined).map((o) => o.value)).toEqual(["task", "analiz", "bug", "technical"]);
+    expect(taskTypeOptions([]).map((o) => o.value)).toEqual(["task", "analiz", "bug", "technical"]);
   });
 
-  it("labels the technical type in the active locale", () => {
+  it("labels a built-in type from the locale when no list is loaded", () => {
     expect(taskTypeLabel("technical")).toBe("Technical");
+  });
+
+  it("orders options by the server list's position and prefers its labels", () => {
+    const types: TaskTypeDef[] = [
+      {
+        key: "bug",
+        label: "Bug",
+        key_prefix: "B",
+        position: 1,
+        is_default: false,
+        is_defect: true,
+        assignee_mode: "none",
+        behaviours: [],
+        built_in: true,
+        task_count: 0,
+      },
+      {
+        key: "task",
+        label: "Task",
+        key_prefix: "T",
+        position: 0,
+        is_default: true,
+        is_defect: false,
+        assignee_mode: "none",
+        behaviours: [],
+        built_in: true,
+        task_count: 0,
+      },
+      {
+        key: "spike",
+        label: "Spike",
+        key_prefix: "SP",
+        position: 2,
+        is_default: false,
+        is_defect: false,
+        assignee_mode: "none",
+        behaviours: [],
+        built_in: false,
+        task_count: 0,
+      },
+    ];
+    expect(taskTypeOptions(types).map((o) => o.value)).toEqual(["task", "bug", "spike"]);
+    expect(taskTypeOptions(types).map((o) => o.label)).toEqual(["Task", "Bug", "Spike"]);
+  });
+
+  it("prefers the server's custom label over the locale once a built-in type is renamed", () => {
+    const types: TaskTypeDef[] = [
+      {
+        key: "technical",
+        label: "Ops",
+        key_prefix: "TC",
+        position: 3,
+        is_default: false,
+        is_defect: false,
+        assignee_mode: "none",
+        behaviours: [],
+        built_in: true,
+        task_count: 0,
+      },
+    ];
+    expect(taskTypeLabel("technical", types)).toBe("Ops");
+  });
+
+  it("translates a built-in type whose server label is still the untouched English default", () => {
+    const types: TaskTypeDef[] = [
+      {
+        key: "technical",
+        label: "Technical",
+        key_prefix: "TC",
+        position: 3,
+        is_default: false,
+        is_defect: false,
+        assignee_mode: "none",
+        behaviours: [],
+        built_in: true,
+        task_count: 0,
+      },
+    ];
+    expect(taskTypeLabel("technical", types)).toBe("Technical");
   });
 });
 

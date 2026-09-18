@@ -1,4 +1,4 @@
-import { BarChart3, Bot, FileSearch, Globe, Kanban, Plug, Server } from "lucide-react";
+import { BarChart3, Bot, GitBranch, Globe, Kanban, Plug, Server, Users } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { PageContent } from "@/components/layout/PageContent";
 import { PageHeader } from "@/components/admin/PageHeader";
@@ -10,10 +10,11 @@ export function SettingsLayout() {
   const tabs = [
     { to: "/settings", label: t("frame.layout.settingsTabs.general"), icon: Globe, end: true },
     { to: "/settings/board", label: "Board", icon: Kanban, end: true },
+    { to: "/settings/roles", label: t("frame.layout.settingsTabs.roles"), icon: Users, end: true },
     {
-      to: "/settings/analiz-assignment",
-      label: t("frame.layout.settingsTabs.analizAssignment"),
-      icon: FileSearch,
+      to: "/settings/workflows",
+      label: t("frame.layout.settingsTabs.workflows"),
+      icon: GitBranch,
       end: true,
     },
     { to: "/settings/llm", label: t("frame.layout.settingsTabs.llm"), icon: Bot, end: true },

@@ -75,7 +75,14 @@ type Service struct {
 	// re-ingests every sweep, and a page per sweep is an alert storm.
 	notifyMu   sync.Mutex
 	lastNotify map[uuid.UUID]time.Time
+
+	// workflows/roles: see board.Dispatcher's own fields of the same name.
+	workflows port.WorkflowReader
+	roles     port.RoleResolver
 }
+
+func (s *Service) SetWorkflows(w port.WorkflowReader)  { s.workflows = w }
+func (s *Service) SetRoleResolver(r port.RoleResolver) { s.roles = r }
 
 func NewService(deps Deps) *Service {
 	return &Service{

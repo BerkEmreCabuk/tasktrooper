@@ -46,6 +46,12 @@ func (f *fakeBoardConfigStore) ListAgentSubscriptions(context.Context, uuid.UUID
 func (f *fakeBoardConfigStore) SetAgentSubscriptions(context.Context, uuid.UUID, []string) error {
 	return nil
 }
+func (f *fakeBoardConfigStore) ListAgentSubscriptionsDetailed(context.Context, uuid.UUID) ([]domain.AgentColumnSubscription, error) {
+	return nil, nil
+}
+func (f *fakeBoardConfigStore) SetAgentSubscriptionsDetailed(context.Context, uuid.UUID, []domain.AgentColumnSubscription) error {
+	return nil
+}
 func (f *fakeBoardConfigStore) ListTransitions(context.Context) ([]domain.BoardTransition, error) {
 	return nil, nil
 }

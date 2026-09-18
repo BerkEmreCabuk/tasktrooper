@@ -46,6 +46,17 @@ func (f *fakeAgentCatalogHTTP) ListAgents(context.Context) ([]domain.Agent, erro
 	return out, nil
 }
 
+// GetAgent satisfies workflow.AgentCatalog too (reused by
+// handler_workflow_test.go's role-assignment tool-grant tests).
+func (f *fakeAgentCatalogHTTP) GetAgent(_ context.Context, id uuid.UUID) (domain.Agent, error) {
+	for _, a := range f.agents {
+		if a.ID == id {
+			return a, nil
+		}
+	}
+	return domain.Agent{}, notFoundErrHTTP{}
+}
+
 func (f *fakeAgentCatalogHTTP) UpdateAgent(_ context.Context, id uuid.UUID, req domain.UpdateAgentRequest) (domain.Agent, error) {
 	updated := domain.Agent{ID: id, Name: req.Name, ToolPolicy: req.ToolPolicy}
 	for name, a := range f.agents {

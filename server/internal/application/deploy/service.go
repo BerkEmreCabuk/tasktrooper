@@ -44,7 +44,13 @@ type Service struct {
 	// tolerated, which is the right call for a transient store-API outage but
 	// exactly wrong for "this identifier may not be saved at all".
 	storeIdentifierGuard func(ctx context.Context, repositoryID uuid.UUID, provider, identifier string) error
+	// workflows/roles: see board.Dispatcher's own fields of the same name.
+	workflows port.WorkflowReader
+	roles     port.RoleResolver
 }
+
+func (s *Service) SetWorkflows(w port.WorkflowReader)  { s.workflows = w }
+func (s *Service) SetRoleResolver(r port.RoleResolver) { s.roles = r }
 
 func NewService(targets port.DeployTargetStore, repos RepositoryResolver) *Service {
 	return &Service{targets: targets, repos: repos}

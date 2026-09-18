@@ -21,7 +21,13 @@ type Reconciler struct {
 	staleAfter   time.Duration
 	plans        PlanSettler
 	criteriaLoop *CriteriaLoopGuard
+	// workflows/roles: see Dispatcher's own fields of the same name.
+	workflows port.WorkflowReader
+	roles     port.RoleResolver
 }
+
+func (r *Reconciler) SetWorkflows(w port.WorkflowReader)   { r.workflows = w }
+func (r *Reconciler) SetRoleResolver(rr port.RoleResolver) { r.roles = rr }
 
 // PlanSettler is the slice of the catalog the reconciler needs to close out the
 // orchestration plan a dead run left behind. A killed pod writes nothing on its

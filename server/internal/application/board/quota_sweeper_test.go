@@ -147,6 +147,12 @@ func (emptyBoardConfig) ListAgentSubscriptions(context.Context, uuid.UUID) ([]st
 func (emptyBoardConfig) SetAgentSubscriptions(context.Context, uuid.UUID, []string) error {
 	return nil
 }
+func (emptyBoardConfig) ListAgentSubscriptionsDetailed(context.Context, uuid.UUID) ([]domain.AgentColumnSubscription, error) {
+	return nil, nil
+}
+func (emptyBoardConfig) SetAgentSubscriptionsDetailed(context.Context, uuid.UUID, []domain.AgentColumnSubscription) error {
+	return nil
+}
 func (emptyBoardConfig) ListTransitions(context.Context) ([]domain.BoardTransition, error) {
 	return nil, nil
 }

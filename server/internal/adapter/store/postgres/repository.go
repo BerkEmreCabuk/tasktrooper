@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -718,9 +719,12 @@ func NewBoardTaskStore(pool *DB) *BoardTaskStore {
 // and cannot be parked on a quota it has never run against, and the board reads
 // both from the list endpoints, which go through boardTaskSelect.
 // taskKeySQL builds a task's key for the queries that need it as a plain column
-// (relations, deploy packages) rather than as a scanned task. It must agree with
-// domain.TaskKeyPrefix — the same key, whichever side computes it.
-const taskKeySQL = `CASE bt.task_type WHEN 'bug' THEN 'B' WHEN 'analiz' THEN 'A' ELSE 'T' END || '-' || bt.task_number`
+// (relations, deploy packages) rather than as a scanned task. It reads the
+// prefix from task_types rather than a hardcoded CASE — the CASE form used to
+// have no 'technical' branch (fell through to 'T'), the actual bug that made
+// this a task-type table column in the first place, and a hardcoded list
+// would go stale the moment an admin adds a custom type.
+const taskKeySQL = `(SELECT key_prefix FROM task_types WHERE key = bt.task_type) || '-' || bt.task_number`
 
 const boardTaskColumns = `id, repository_id, task_number, title, task_type,
 		description, technical_description, initiative_project_id, board_column,
@@ -731,7 +735,8 @@ const boardTaskColumns = `id, repository_id, task_number, title, task_type,
 		has_migration, stage_verified_at, verified_sha,
 		before_deploy, after_deploy, rollback_plan,
 		pr_url, pr_number, merge_commit_sha,
-		NULL::timestamptz, NULL::timestamptz`
+		NULL::timestamptz, NULL::timestamptz,
+		(SELECT key_prefix FROM task_types WHERE key = task_type)`
 
 // The quota lateral is what puts "resumes at 14:30" on a parked card: the reset
 // time lives on the RUN (task_agent_runs.quota_resume_at, migration 101), which
@@ -752,7 +757,8 @@ const boardTaskSelect = `
 		bt.has_migration, bt.stage_verified_at, bt.verified_sha,
 		bt.before_deploy, bt.after_deploy, bt.rollback_plan,
 		bt.pr_url, bt.pr_number, bt.merge_commit_sha,
-		sp.entered_at, qr.quota_resume_at
+		sp.entered_at, qr.quota_resume_at,
+		tt.key_prefix
 	FROM board_tasks bt
 	LEFT JOIN LATERAL (
 		SELECT entered_at FROM task_column_spans
@@ -765,6 +771,7 @@ const boardTaskSelect = `
 		  AND r.task_id = bt.id AND r.quota_resume_at IS NOT NULL
 		ORDER BY r.updated_at DESC LIMIT 1
 	) qr ON true
+	LEFT JOIN task_types tt ON tt.key = bt.task_type
 `
 
 func scanBoardTask(scanner interface {
@@ -774,6 +781,10 @@ func scanBoardTask(scanner interface {
 	var col, taskType, priority string
 	var blockedQuestion, blockedOrigin, blockedResource, prURL, mergeCommitSHA *string
 	var prNumber *int
+	// keyPrefix is nullable only in theory (a LEFT JOIN guards against a
+	// task_type value the FK should make impossible); "" falls back to the
+	// raw type string rather than panicking a key together.
+	var keyPrefix *string
 	err := scanner.Scan(
 		&task.ID, &task.RepositoryID, &task.TaskNumber, &task.Title, &taskType,
 		&task.Description, &task.TechnicalDescription, &task.InitiativeProjectID, &col,
@@ -786,6 +797,7 @@ func scanBoardTask(scanner interface {
 		&task.BeforeDeploy, &task.AfterDeploy, &task.RollbackPlan,
 		&prURL, &prNumber, &mergeCommitSHA,
 		&task.ColumnEnteredAt, &task.BlockedResumeAt,
+		&keyPrefix,
 	)
 	if err != nil {
 		return domain.BoardTask{}, err
@@ -816,9 +828,16 @@ func scanBoardTask(scanner interface {
 	task.Column = domain.TaskColumn(col)
 	task.TaskType = domain.TaskType(taskType)
 	task.Priority = domain.TaskPriority(priority)
-	// The key is derived, not stored: the prefix is the task's type, so a type
-	// change renames the task rather than leaving a key that lies about it.
-	task.Key = domain.FormatTaskKey(task.TaskType, task.TaskNumber)
+	// The key is derived, not stored: the prefix comes from task_types.key_prefix
+	// (joined in by boardTaskSelect/boardTaskColumns), not a hardcoded Go switch —
+	// a type change renames the task rather than leaving a key that lies about
+	// it, and a custom type's own prefix (e.g. TC-n for technical) is rendered
+	// correctly without this package knowing the type exists.
+	prefix := string(task.TaskType)
+	if keyPrefix != nil && *keyPrefix != "" {
+		prefix = *keyPrefix
+	}
+	task.Key = prefix + "-" + strconv.Itoa(task.TaskNumber)
 	return task, nil
 }
 
@@ -871,17 +890,17 @@ func (s *BoardTaskStore) GetByNumber(ctx context.Context, number int) (domain.Bo
 }
 
 func (s *BoardTaskStore) LookupByKey(ctx context.Context, keyPrefix string, number int) (domain.BoardTask, error) {
-	// The prefix names the type now, so the lookup is by type and number. An
-	// unknown letter matches nothing rather than falling through to "task",
-	// which would answer a lookup for "X-1" with T-1.
-	taskType, ok := domain.TaskTypeForKeyPrefix(keyPrefix)
-	if !ok {
+	// The prefix names the type now (task_types.key_prefix), so the lookup is
+	// by prefix and number rather than by a hardcoded reverse mapping — an
+	// unknown/custom prefix matches whatever type owns it, and one nobody owns
+	// matches nothing rather than falling through to "task".
+	row := s.pool.QueryRow(ctx, boardTaskSelect+`
+		WHERE bt.task_number = $1 AND tt.key_prefix = $2
+	`, number, strings.ToUpper(strings.TrimSpace(keyPrefix)))
+	task, err := scanBoardTask(row)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.BoardTask{}, fmt.Errorf("lookup board task: %w", port.ErrNotFound)
 	}
-	row := s.pool.QueryRow(ctx, boardTaskSelect+`
-		WHERE bt.task_number = $1 AND bt.task_type = $2
-	`, number, string(taskType))
-	task, err := scanBoardTask(row)
 	if err != nil {
 		return domain.BoardTask{}, fmt.Errorf("lookup board task: %w", err)
 	}

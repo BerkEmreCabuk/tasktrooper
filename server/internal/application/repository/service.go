@@ -135,6 +135,10 @@ type Service struct {
 	// with no Postgres, where pushDeliveries above is the whole mechanism and
 	// is correct — one process there sees every delivery.
 	deliveries DeliveryLedger
+
+	// workflows/roles: see board.Dispatcher's own fields of the same name.
+	workflows port.WorkflowReader
+	roles     port.RoleResolver
 }
 
 func NewService(
@@ -545,6 +549,9 @@ func (s *Service) SetGitHubTokenSource(src func(ctx context.Context) (string, er
 func (s *Service) SetAgentLister(fn func(ctx context.Context) ([]domain.Agent, error)) {
 	s.agentLister = fn
 }
+
+func (s *Service) SetWorkflows(w port.WorkflowReader)  { s.workflows = w }
+func (s *Service) SetRoleResolver(r port.RoleResolver) { s.roles = r }
 
 // SetAnalizAssignmentSource wires the backend/frontend/mobile analiz-assignment
 // settings CreateTask consults to override an analiz task's assignee. Nil (the

@@ -273,6 +273,21 @@ export const agentArea = {
     heading: "Watched Columns",
     help: "This agent runs automatically when a task is created in or moved to these columns. (Assigned tasks always go to the assigned agent.)",
     empty: "No board columns defined.",
+    taskTypeFilterLabel: "Task types",
+    taskTypeFilterEmpty: "No task types loaded",
+    taskTypeFilterAll: "Wakes for every task type in this column.",
+    taskTypeFilterSome: "Wakes only for the selected task types.",
+  },
+  roles: {
+    heading: "Roles",
+    help: "The named jobs this agent holds, and the area(s) it holds each one in — edited here or from the role's own page under Settings → Roles.",
+    empty: "No roles assigned yet.",
+    addRole: "Add a role…",
+    toast: {
+      loadFailed: "Failed to load roles",
+      saved: "Roles saved",
+      saveFailed: "Save failed",
+    },
   },
   components: {
     kpi: {

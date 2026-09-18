@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
 // TaskCreator opens the board task that authors a missing doc, and reads it
@@ -46,7 +47,13 @@ type Service struct {
 	tasks  TaskCreator
 	merger TaskPRMerger
 	agents func(ctx context.Context) ([]domain.Agent, error)
+	// workflows/roles: see board.Dispatcher's own fields of the same name.
+	workflows port.WorkflowReader
+	roles     port.RoleResolver
 }
+
+func (s *Service) SetWorkflows(w port.WorkflowReader)  { s.workflows = w }
+func (s *Service) SetRoleResolver(r port.RoleResolver) { s.roles = r }
 
 func NewService(repos RepositoryStore) *Service {
 	return &Service{repos: repos}

@@ -23,6 +23,15 @@ type BoardConfigStore interface {
 
 	ListAgentSubscriptions(ctx context.Context, agentID uuid.UUID) ([]string, error)
 	SetAgentSubscriptions(ctx context.Context, agentID uuid.UUID, columnSlugs []string) error
+	// ListAgentSubscriptionsDetailed/SetAgentSubscriptionsDetailed are
+	// ListAgentSubscriptions/SetAgentSubscriptions with the per-column
+	// task-type filter preserved — see domain.AgentColumnSubscription. The
+	// plain string-slice pair above stays (catalog's template seeding uses
+	// it, and it is a strict subset: every column with no filter) rather than
+	// being replaced, so a caller with no interest in filters keeps the
+	// simpler shape.
+	ListAgentSubscriptionsDetailed(ctx context.Context, agentID uuid.UUID) ([]domain.AgentColumnSubscription, error)
+	SetAgentSubscriptionsDetailed(ctx context.Context, agentID uuid.UUID, subs []domain.AgentColumnSubscription) error
 
 	ListTransitions(ctx context.Context) ([]domain.BoardTransition, error)
 	SetTransitions(ctx context.Context, transitions []domain.BoardTransition) error

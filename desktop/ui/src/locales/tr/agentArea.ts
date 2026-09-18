@@ -273,6 +273,21 @@ export const agentArea: AgentAreaDict = {
     heading: "Dinlenen Kolonlar",
     help: "Bir görev bu kolonlarda oluşturulduğunda veya bu kolonlara taşındığında bu ajan otomatik çalışır. (Atanmış görevler her zaman atanan ajana gider.)",
     empty: "Board kolonu tanımlı değil.",
+    taskTypeFilterLabel: "Görev tipleri",
+    taskTypeFilterEmpty: "Görev tipi yüklenmedi",
+    taskTypeFilterAll: "Bu kolondaki her görev tipinde çalışır.",
+    taskTypeFilterSome: "Yalnızca seçilen görev tiplerinde çalışır.",
+  },
+  roles: {
+    heading: "Roller",
+    help: "Bu agent'ın sahip olduğu isimli görevler ve her birini hangi alan(lar)da taşıdığı — burada veya Ayarlar → Roller altındaki rolün kendi sayfasından düzenlenir.",
+    empty: "Henüz rol atanmadı.",
+    addRole: "Rol ekle…",
+    toast: {
+      loadFailed: "Roller yüklenemedi",
+      saved: "Roller kaydedildi",
+      saveFailed: "Kayıt başarısız",
+    },
   },
   components: {
     kpi: {

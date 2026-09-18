@@ -343,6 +343,312 @@ paths:
         '409':
           description: No release engine available
 
+  /v1/roles:
+    get:
+      summary: List roles with their agent assignments and purposes
+      security:
+        - bearerAuth: []
+    post:
+      summary: Create a role
+      description: key is immutable once created.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, name]
+              properties:
+                key:
+                  type: string
+                name:
+                  type: string
+                description:
+                  type: string
+                required_tools:
+                  type: array
+                  items:
+                    type: string
+      responses:
+        '201':
+          description: The created role
+
+  /v1/roles/{id}:
+    put:
+      summary: Update a role's name/description/required_tools (key unchanged)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+    delete:
+      summary: Delete a role
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+
+  /v1/roles/{id}/assignments:
+    put:
+      summary: Replace a role's agent assignments
+      description: >-
+        assignments: [{agent_id, areas, priority}]. When an assignment names
+        an agent missing the role's required_tools, the request is refused
+        with 422 {saved:false, missing_tools} unless confirm_grant_tools is
+        set, in which case the missing tools are granted to that agent's
+        policy and 200 {saved:true, role, granted_tools} is returned.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                assignments:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      agent_id:
+                        type: string
+                      areas:
+                        type: array
+                        items:
+                          type: string
+                        nullable: true
+                      priority:
+                        type: integer
+                confirm_grant_tools:
+                  type: boolean
+      responses:
+        '200':
+          description: Saved
+        '422':
+          description: Missing required tools on one or more assigned agents
+
+  /v1/agents/{agentId}/roles:
+    get:
+      summary: List the roles an agent holds
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+    put:
+      summary: Replace every role membership this agent holds
+      description: >-
+        roles: [{role_id, areas}]. Same confirm_grant_tools/missing_tools
+        contract as PUT /v1/roles/{id}/assignments, checked against the union
+        of every named role's required_tools.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Saved
+        '422':
+          description: Missing required tools
+
+  /v1/role-purposes:
+    get:
+      summary: List the system-purpose to role mapping
+      description: purposes = system_task_assignee, repo_profiler.
+      security:
+        - bearerAuth: []
+
+  /v1/role-purposes/{purpose}:
+    put:
+      summary: Set (or clear, with role_id null) which role fulfils a purpose
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: purpose
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role_id:
+                  type: string
+                  nullable: true
+      responses:
+        '204':
+          description: Saved
+
+  /v1/task-types:
+    get:
+      summary: List task types
+      security:
+        - bearerAuth: []
+    post:
+      summary: Create a task type, optionally cloning another type's workflow stages
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, label, key_prefix]
+              properties:
+                key:
+                  type: string
+                label:
+                  type: string
+                key_prefix:
+                  type: string
+                  description: 1-4 uppercase letters, unique.
+                clone_from:
+                  type: string
+      responses:
+        '201':
+          description: The created task type
+
+  /v1/task-types/{key}:
+    put:
+      summary: Update a task type
+      description: >-
+        409 when key_prefix changes on a type that already has tasks (every
+        existing task's key was rendered with the old prefix).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The updated task type
+        '409':
+          description: key_prefix change refused (type has tasks)
+    delete:
+      summary: Delete a task type
+      description: 409 when the type has tasks, or is the default type.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Deleted
+        '409':
+          description: Type has tasks, or is the default type
+
+  /v1/task-types/{key}/workflow:
+    get:
+      summary: Read a task type's ordered workflow stages
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+    put:
+      summary: Replace a task type's whole workflow stage set
+      description: >-
+        422 {error, problems:[{column_slug, field, message}]} on an unknown
+        behaviour key, a behaviour attached at the wrong scope, an invalid
+        param, or more than one worker/approver participant in a stage.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The saved stage set
+        '422':
+          description: Validation problems
+
+  /v1/workflows:
+    get:
+      summary: List every task type's full workflow (stages + behaviours)
+      security:
+        - bearerAuth: []
+
+  /v1/workflow/behaviours:
+    get:
+      summary: The behaviour registry — every key, its scope, and its params
+      description: >-
+        Drives the workflow stage editor's behaviour picker and its
+        validation. Also returns the fixed stage kinds and repo areas.
+      security:
+        - bearerAuth: []
+
+  /v1/agents/{agentId}/subscriptions:
+    get:
+      summary: An agent's column subscriptions, with each column's task-type filter
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+    put:
+      summary: Replace an agent's column subscriptions
+      description: >-
+        Accepts subscriptions:[{column_slug, task_types}] (task_types null or
+        omitted = every type); the legacy column_slugs:[...] body is still
+        accepted and saves each column with no filter.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Saved
+
   /metrics:
     get:
       summary: Prometheus metrics
