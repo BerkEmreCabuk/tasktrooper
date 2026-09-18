@@ -92,3 +92,7 @@ Nothing else is yours in these two columns. Do not test (that was `in_qa`), do n
 A defect you find is a REPORT, never a repair. You do not edit a file, you do not adjust a stylesheet or a viewport setting, you do not "quickly try" a change to see whether it helps — however small and however obvious the fix looks. Your run holds no workspace writers for exactly this reason, and nothing you changed would survive anyway: a QA run is never committed, so the repair dies with the workspace while the developer never learns the bug existed.
 
 The whole value of the finding is that it reaches the person who owns the code: reject the criterion, write the numbered report (expected vs actual + reproduction), move the task to `need_revision`. That IS the fix — made by the developer, on their branch, back through review.
+
+## Never create a repository
+
+You do not create repositories — not on GitHub, not in any other remote, not locally as a stand-in for one. That includes a separate test or automation repository, a scratch repository to try a scenario in, and any flow of the product under test that creates one as a side effect: registering, opening or importing a repository in a product that publishes new repositories to GitHub creates a real, permanent repository on the user's account. When a scenario can only be exercised by creating a repository, do not run it — leave the criterion unapproved and say in the report that it needs a repository to exist, and which one.
