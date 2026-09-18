@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Header } from "@/components/layout/Header";
 import { I18nProvider } from "@/hooks/useI18n";
+import { SetupProvider } from "@/hooks/useSetup";
 import { ThemeProvider } from "@/hooks/useTheme";
 import type { TaskTrooperDesktopHost } from "@/lib/desktop-bridge";
 
@@ -9,7 +10,9 @@ function renderHeader(props: Parameters<typeof Header>[0] = {}) {
   return render(
     <I18nProvider>
       <ThemeProvider>
-        <Header {...props} />
+        <SetupProvider>
+          <Header {...props} />
+        </SetupProvider>
       </ThemeProvider>
     </I18nProvider>,
   );
@@ -48,7 +51,9 @@ describe("Header logo alignment", () => {
   });
 
   it("uses the same nav-inset alignment regardless of the desktop shell, since the shell renders the app below its title bar", () => {
-    window.__tasktrooperDesktop = { runner: {} } as unknown as TaskTrooperDesktopHost;
+    window.__tasktrooperDesktop = {
+      runner: { snapshot: () => Promise.resolve(null), subscribe: () => () => {} },
+    } as unknown as TaskTrooperDesktopHost;
     const { container } = renderHeader({ sidebarCollapsed: false });
     const logo = container.querySelector(LOGO_SELECTOR);
     const brand = logo?.closest("div")?.parentElement;

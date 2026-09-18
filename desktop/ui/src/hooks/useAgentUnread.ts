@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type Agent } from "@/api";
-import { useActivity } from "@/hooks/useActivity";
-import { agentIdForItem } from "@/lib/notifications";
 import { usePolling } from "@/hooks/usePolling";
 
 const POLL_INTERVAL_MS = 20_000;
@@ -37,16 +35,19 @@ export interface AgentUnread {
 }
 
 /**
- * Which agents in `agents` have a chat message or an agent-authored task
- * comment newer than the last time this viewer looked, so the sidebar can put
- * a dot next to them.
+ * Which agents in `agents` have a chat message newer than the last time this
+ * viewer looked, so the sidebar can put a dot next to them.
+ *
+ * Deliberately DM-only: a task comment or a column move is about a task, not
+ * a message from the agent, and lighting up the sidebar for those trained the
+ * user to check chats that had nothing new in them. `GET /v1/sessions` is the
+ * one signal that means "this agent said something to me."
  *
  * There is no server-side "unread" concept (a chat session carries no
- * viewer identity, this being a single-user app) — this polls two cheap
- * signals that already carry every event's timestamp (`GET /v1/sessions`, and
- * `GET /v1/activity` filtered to agent comments, see `lib/notifications`)
- * rather than one request per agent, and compares the latest of the two to
- * the viewer's own last-viewed timestamps.
+ * viewer identity, this being a single-user app) — this polls that one cheap
+ * signal, which already carries every session's timestamp, rather than one
+ * request per agent, and compares it to the viewer's own last-viewed
+ * timestamps.
  *
  * `activeAgentId` (the agent whose chat is currently open, if any) is never
  * reported unread, and every poll while it is open advances that agent's
@@ -73,28 +74,6 @@ export function useAgentUnread(agents: Agent[], activeAgentId: string | null): A
     hasAgents,
   );
 
-  const { items: activityItems } = useActivity(50, POLL_INTERVAL_MS);
-  const latestCommentByAgent = useMemo(() => {
-    const latest: Record<string, string> = {};
-    for (const item of activityItems) {
-      if (item.event_type !== "task.commented") continue;
-      const agentId = agentIdForItem(item, []);
-      if (!agentId) continue;
-      const prev = latest[agentId];
-      if (!prev || item.created_at > prev) latest[agentId] = item.created_at;
-    }
-    return latest;
-  }, [activityItems]);
-
-  const latestOverallByAgent = useMemo(() => {
-    const merged: Record<string, string> = { ...latestByAgent };
-    for (const [agentId, ts] of Object.entries(latestCommentByAgent)) {
-      const prev = merged[agentId];
-      if (!prev || ts > prev) merged[agentId] = ts;
-    }
-    return merged;
-  }, [latestByAgent, latestCommentByAgent]);
-
   const markAgentSeen = useCallback((agentId: string, iso: string) => {
     setLastViewed((prev) => {
       if (prev[agentId] && prev[agentId] >= iso) return prev;
@@ -109,22 +88,22 @@ export function useAgentUnread(agents: Agent[], activeAgentId: string | null): A
   // not leave that agent looking unread the moment the user clicks away.
   useEffect(() => {
     if (!activeAgentId) return;
-    const latest = latestOverallByAgent[activeAgentId];
+    const latest = latestByAgent[activeAgentId];
     if (!latest) return;
     markAgentSeen(activeAgentId, latest);
-  }, [activeAgentId, latestOverallByAgent, markAgentSeen]);
+  }, [activeAgentId, latestByAgent, markAgentSeen]);
 
   const unread = useMemo(() => {
     const set = new Set<string>();
     for (const agent of agents) {
       if (agent.id === activeAgentId) continue;
-      const latest = latestOverallByAgent[agent.id];
+      const latest = latestByAgent[agent.id];
       if (!latest) continue;
       const viewed = lastViewed[agent.id];
       if (!viewed || latest > viewed) set.add(agent.id);
     }
     return set;
-  }, [agents, activeAgentId, latestOverallByAgent, lastViewed]);
+  }, [agents, activeAgentId, latestByAgent, lastViewed]);
 
   return { unread, markAgentSeen };
 }

@@ -73,7 +73,7 @@ describe("useAgentUnread", () => {
     await waitFor(() => expect(result.current.unread.has("agent-1")).toBe(true));
   });
 
-  it("reports an agent unread from an agent's task comment, with no session at all", async () => {
+  it("does not report an agent unread from a task comment alone (DM-only)", async () => {
     listActivity.mockResolvedValue({
       items: [
         {
@@ -87,21 +87,13 @@ describe("useAgentUnread", () => {
       ],
     });
     const { result } = renderHook(() => useAgentUnread(agents, null));
-    await waitFor(() => expect(result.current.unread.has("agent-2")).toBe(true));
+    await waitFor(() => expect(listSessions).toHaveBeenCalled());
+    expect(result.current.unread.has("agent-2")).toBe(false);
   });
 
   it("clears an agent via markAgentSeen and persists it to localStorage", async () => {
-    listActivity.mockResolvedValue({
-      items: [
-        {
-          id: "evt-1",
-          kind: "board_event",
-          task_id: "task-1",
-          event_type: "task.commented",
-          payload: { author_type: "agent", author_id: "agent-2", content: "done" },
-          created_at: "2026-09-18T10:00:00Z",
-        },
-      ],
+    listSessions.mockResolvedValue({
+      sessions: [{ id: "s1", agent_id: "agent-2", title: "t", model: "m", created_at: "", updated_at: "2026-09-18T10:00:00Z" }],
     });
     const { result } = renderHook(() => useAgentUnread(agents, null));
     await waitFor(() => expect(result.current.unread.has("agent-2")).toBe(true));
