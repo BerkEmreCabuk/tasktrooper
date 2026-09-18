@@ -52,7 +52,7 @@ var metricRegistry = map[string]MetricDef{
 			Description: "Number of tasks moved into the done/released column",
 			Direction:   domain.KPIDirectionHigherBetter,
 		},
-		Resolve: countScoreEvents(
+		Resolve: countDistinctTaskEvents(
 			domain.ScoreEventTaskCompleted, domain.ScoreEventTaskReleased,
 			domain.ScoreEventQATaskTested, domain.ScoreEventPMUATCompleted,
 		),
@@ -81,6 +81,14 @@ var metricRegistry = map[string]MetricDef{
 		},
 		Resolve: resolveFailedRuns,
 	},
+	"gate_rejected_runs": {
+		Info: domain.KPIMetricInfo{
+			Key: "gate_rejected_runs", Label: "Gate-Rejected Runs", Unit: "runs",
+			Description: "Runs the host rejected for skipping required grounding (reading the repo, running or checking the product)",
+			Direction:   domain.KPIDirectionLowerBetter,
+		},
+		Resolve: resolveGateRejectedRuns,
+	},
 	"bugs_assigned": {
 		Info: domain.KPIMetricInfo{
 			Key: "bugs_assigned", Label: "Bugs Assigned", Unit: "bugs",
@@ -95,7 +103,8 @@ var metricRegistry = map[string]MetricDef{
 			Description: "Percentage of tasks completed without a revision (0-100)",
 			Direction:   domain.KPIDirectionHigherBetter,
 		},
-		Resolve: resolveFirstPassRate,
+		MinSample: minFirstPassSample,
+		Resolve:   resolveFirstPassRate,
 	},
 	"clean_time_in_progress": {
 		Info: domain.KPIMetricInfo{
@@ -156,6 +165,7 @@ func ListMetrics() []domain.KPIMetricInfo {
 	out := make([]domain.KPIMetricInfo, 0, len(metricRegistry))
 	for _, key := range []string{
 		"tasks_completed", "revisions_received", "uat_failures", "failed_runs",
+		"gate_rejected_runs",
 		"bugs_assigned", "first_pass_rate",
 		"clean_time_in_progress", "clean_time_code_review", "clean_time_in_qa",
 		"clean_time_pm_uat", "review_escapes", "tool_error_rate",
@@ -171,6 +181,45 @@ func MetricByKey(key string) (MetricDef, error) {
 		return MetricDef{}, fmt.Errorf("metric %q is not trackable by the system", key)
 	}
 	return def, nil
+}
+
+// countDistinctTaskEvents counts DISTINCT tasks among matching events rather
+// than the events themselves: a task that is completed and then released
+// (or completed twice by a flaky reconciler) writes several events for one
+// piece of work, and this must not be scored as several. An event with no
+// TaskID (older data, or an event type that never carried one) has nothing to
+// dedupe against, so it counts on its own.
+func countDistinctTaskEvents(eventTypes ...string) MetricResolver {
+	return func(ctx context.Context, deps MetricDeps, agentID uuid.UUID, from, to time.Time) (float64, error) {
+		events, err := deps.Perf.EventsInWindow(ctx, agentID, from, to)
+		if err != nil {
+			return 0, err
+		}
+		matches := func(eventType string) bool {
+			for _, t := range eventTypes {
+				if eventType == t {
+					return true
+				}
+			}
+			return false
+		}
+		seen := make(map[uuid.UUID]bool)
+		count := 0
+		for _, e := range events {
+			if !matches(e.EventType) {
+				continue
+			}
+			if e.TaskID == nil {
+				count++
+				continue
+			}
+			if !seen[*e.TaskID] {
+				seen[*e.TaskID] = true
+				count++
+			}
+		}
+		return float64(count), nil
+	}
 }
 
 func countScoreEvents(eventTypes ...string) MetricResolver {
@@ -212,6 +261,12 @@ const minCleanSample = 3
 // period holding one run that made two calls and failed one of them is not a
 // 50% error rate, it is no measurement.
 const minToolCallSample = 20
+
+// minFirstPassSample is the fewest distinct completed tasks first_pass_rate
+// will score on. One completed task scores 0% or 100%, and an idle period
+// with nothing completed must stay unmeasured rather than read as a 0%
+// first-pass rate.
+const minFirstPassSample = 3
 
 // resolveToolErrorRate is the share of the agent's tool calls that came back as
 // errors over the period.
@@ -333,8 +388,8 @@ func resolveFirstPassRate(ctx context.Context, deps MetricDeps, agentID uuid.UUI
 			revised[key] = true
 		}
 	}
-	if len(completed) == 0 {
-		return 0, nil
+	if len(completed) < minFirstPassSample {
+		return 0, ErrInsufficientData
 	}
 	clean := 0
 	for taskID := range completed {
@@ -343,4 +398,27 @@ func resolveFirstPassRate(ctx context.Context, deps MetricDeps, agentID uuid.UUI
 		}
 	}
 	return float64(clean) / float64(len(completed)) * 100.0, nil
+}
+
+// resolveGateRejectedRuns counts runs a grounding gate failed for skipping
+// required verification, as distinct from failed_runs: that metric also
+// counts infra failures (session limits, a restart landing mid-run) which are
+// not the agent's doing and must not be scored against it.
+func resolveGateRejectedRuns(ctx context.Context, deps MetricDeps, agentID uuid.UUID, from, to time.Time) (float64, error) {
+	if deps.Runs == nil {
+		return 0, fmt.Errorf("task run store unavailable")
+	}
+	runs, err := deps.Runs.ListRecent(ctx, 500)
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, r := range runs {
+		if r.AgentID == agentID && r.Status == domain.TaskAgentRunStatusFailed &&
+			!r.CreatedAt.Before(from) && r.CreatedAt.Before(to) &&
+			domain.IsRunGateRejection(r.Summary) {
+			count++
+		}
+	}
+	return float64(count), nil
 }

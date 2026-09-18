@@ -20,7 +20,7 @@ func NewEvolutionStore(pool *DB) *EvolutionStore {
 	return &EvolutionStore{pool: pool}
 }
 
-const reflectionColumns = "id, agent_id, trigger_kind, status, window_start, window_end, summary, performance_snapshot, raw_output, error, created_at, completed_at"
+const reflectionColumns = "id, agent_id, trigger_kind, status, window_start, window_end, summary, performance_snapshot, raw_output, error, decision, created_at, completed_at"
 
 func (s *EvolutionStore) CreateReflection(ctx context.Context, r domain.AgentReflection) (domain.AgentReflection, error) {
 	row := s.pool.QueryRow(ctx, `
@@ -44,11 +44,19 @@ func (s *EvolutionStore) CompleteReflection(ctx context.Context, r domain.AgentR
 			return err
 		}
 	}
+	var decisionJSON []byte
+	if r.Decision != nil {
+		var err error
+		decisionJSON, err = json.Marshal(r.Decision)
+		if err != nil {
+			return err
+		}
+	}
 	_, err := s.pool.Exec(ctx, `
 		UPDATE agent_reflections
-		SET status = $2, summary = $3, performance_snapshot = $4, raw_output = $5, error = $6, completed_at = now()
+		SET status = $2, summary = $3, performance_snapshot = $4, raw_output = $5, error = $6, decision = $7, completed_at = now()
 		WHERE id = $1
-	`, r.ID, r.Status, r.Summary, snapJSON, nullIfEmpty(r.RawOutput), nullIfEmpty(r.Error))
+	`, r.ID, r.Status, r.Summary, snapJSON, nullIfEmpty(r.RawOutput), nullIfEmpty(r.Error), decisionJSON)
 	if err != nil {
 		return fmt.Errorf("complete reflection: %w", err)
 	}
@@ -184,16 +192,22 @@ func (s *EvolutionStore) UpdateEventImpact(ctx context.Context, id uuid.UUID, im
 
 func scanReflection(row pgx.Row) (domain.AgentReflection, error) {
 	var r domain.AgentReflection
-	var snapJSON []byte
+	var snapJSON, decisionJSON []byte
 	var rawOutput, errMsg *string
 	if err := row.Scan(&r.ID, &r.AgentID, &r.Trigger, &r.Status, &r.WindowStart, &r.WindowEnd,
-		&r.Summary, &snapJSON, &rawOutput, &errMsg, &r.CreatedAt, &r.CompletedAt); err != nil {
+		&r.Summary, &snapJSON, &rawOutput, &errMsg, &decisionJSON, &r.CreatedAt, &r.CompletedAt); err != nil {
 		return domain.AgentReflection{}, err
 	}
 	if len(snapJSON) > 0 {
 		var snap domain.PerformanceSnapshot
 		if json.Unmarshal(snapJSON, &snap) == nil {
 			r.PerformanceSnapshot = &snap
+		}
+	}
+	if len(decisionJSON) > 0 {
+		var decision domain.ReflectionDecision
+		if json.Unmarshal(decisionJSON, &decision) == nil {
+			r.Decision = &decision
 		}
 	}
 	if rawOutput != nil {

@@ -199,6 +199,12 @@ export const chatArea: ChatAreaDict = {
       openRepo: "Depo Aç",
       createRepo: "Depo Oluştur",
     },
+    noAgents: {
+      title: "Henüz ajan yok",
+      description:
+        "Altı rol ajanından oluşan hazır ekibi kurun ya da bir şablondan veya sıfırdan tek bir ajan ekleyin.",
+      cta: "Ajan ekle",
+    },
     wizard: {
       ariaLabel: "Takım oluşturma adımları",
       infoTitle: "Bilgiler",
@@ -223,6 +229,12 @@ export const chatArea: ChatAreaDict = {
       skillsRules: "{skills} yetenek · {rules} kural",
       creating: "Oluşturuluyor…",
       create: "Oluştur",
+      setupTeam: "Hazır ekibi kur",
+      settingUpTeam: "Ekip kuruluyor…",
+      setupTeamCreated: "Hazır ekip kuruldu ({count} ajan)",
+      setupTeamPartial: "{total} ajandan {created} tanesi oluşturuldu — kalanları eklemek için bu pencereyi tekrar açın",
+      setupTeamFailed: "Hazır ekip kurulamadı",
+      orPickOne: "Ya da tek bir ajan ekleyin",
     },
   },
   rag: {

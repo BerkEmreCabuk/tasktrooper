@@ -18,24 +18,72 @@ import (
 // task's pull request. The column still dispatches nobody for anything else —
 // the dispatcher wakes this subscription only for a move into done on a task
 // whose PR is unmerged (board.doneMergeWake).
-func TestEnsureRoleSubscriptions_QAOwnsItsThreeColumns(t *testing.T) {
+//
+// This exercises the path a user actually takes now: creating the agent from
+// its built-in template (CreateAgentFromTemplate), not a boot-time reconcile.
+func TestCreateAgentFromTemplate_QAOwnsItsThreeColumns(t *testing.T) {
 	store := newMemCatalogStore()
+	templates := &memTemplateStore{}
 	board := &memBoardConfigStore{subs: map[uuid.UUID][]string{}}
 	svc := NewService(store, stubLLMClient{}, "")
+	svc.SetTemplateStore(templates)
 	svc.SetBoardConfigStore(board)
+	ctx := context.Background()
 
-	qaID := uuid.New()
-	store.agents = []domain.Agent{{ID: qaID, Name: "qa-agent", Enabled: true}}
-
-	require.NoError(t, svc.ensureRoleSubscriptions(context.Background()))
+	require.NoError(t, svc.EnsureRoleTemplates(ctx))
+	agent, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "qa-agent"), domain.CreateAgentRequest{})
+	require.NoError(t, err)
 
 	assert.ElementsMatch(t,
 		[]string{string(domain.TaskColumnReadyForQA), string(domain.TaskColumnInQA), string(domain.TaskColumnDone)},
-		board.subs[qaID])
+		board.subs[agent.ID])
 }
 
-// An admin who narrowed QA's subscriptions keeps their setup across restarts.
-func TestEnsureRoleSubscriptions_LeavesExistingSubscriptionsAlone(t *testing.T) {
+// system-architect and product-manager get their own single column the same
+// way.
+func TestCreateAgentFromTemplate_ArchitectAndPMGetTheirColumn(t *testing.T) {
+	store := newMemCatalogStore()
+	templates := &memTemplateStore{}
+	board := &memBoardConfigStore{subs: map[uuid.UUID][]string{}}
+	svc := NewService(store, stubLLMClient{}, "")
+	svc.SetTemplateStore(templates)
+	svc.SetBoardConfigStore(board)
+	ctx := context.Background()
+
+	require.NoError(t, svc.EnsureRoleTemplates(ctx))
+
+	architect, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "system-architect"), domain.CreateAgentRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, []string{string(domain.TaskColumnCodeReview)}, board.subs[architect.ID])
+
+	pm, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "product-manager"), domain.CreateAgentRequest{})
+	require.NoError(t, err)
+	assert.Equal(t, []string{string(domain.TaskColumnPMUAT)}, board.subs[pm.ID])
+}
+
+// Routing looks these agents up by their exact role name (domain/role_agent.go,
+// repoprofile.architectAgentName, the analiz-assignment settings). An agent
+// renamed on create is not the one those lookups find, so it gets no
+// subscription — a second desk nobody is dispatched to.
+func TestCreateAgentFromTemplate_RenamedAgentGetsNoSubscription(t *testing.T) {
+	store := newMemCatalogStore()
+	templates := &memTemplateStore{}
+	board := &memBoardConfigStore{subs: map[uuid.UUID][]string{}}
+	svc := NewService(store, stubLLMClient{}, "")
+	svc.SetTemplateStore(templates)
+	svc.SetBoardConfigStore(board)
+	ctx := context.Background()
+
+	require.NoError(t, svc.EnsureRoleTemplates(ctx))
+	agent, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "qa-agent"), domain.CreateAgentRequest{Name: "qa-agent-2"})
+	require.NoError(t, err)
+
+	assert.Empty(t, board.subs[agent.ID])
+}
+
+// An admin who narrowed QA's subscriptions keeps their setup: the helper only
+// sets a subscription when the agent currently has none.
+func TestSetRoleSubscriptionsIfDefault_LeavesExistingSubscriptionsAlone(t *testing.T) {
 	store := newMemCatalogStore()
 	qaID := uuid.New()
 	board := &memBoardConfigStore{subs: map[uuid.UUID][]string{
@@ -43,11 +91,21 @@ func TestEnsureRoleSubscriptions_LeavesExistingSubscriptionsAlone(t *testing.T) 
 	}}
 	svc := NewService(store, stubLLMClient{}, "")
 	svc.SetBoardConfigStore(board)
-	store.agents = []domain.Agent{{ID: qaID, Name: "qa-agent", Enabled: true}}
 
-	require.NoError(t, svc.ensureRoleSubscriptions(context.Background()))
+	require.NoError(t, svc.setRoleSubscriptionsIfDefault(context.Background(), domain.Agent{ID: qaID, Name: "qa-agent"}))
 
 	assert.Equal(t, []string{string(domain.TaskColumnReadyForQA)}, board.subs[qaID])
+}
+
+func findTemplateID(t *testing.T, templates *memTemplateStore, name string) uuid.UUID {
+	t.Helper()
+	for _, tpl := range templates.templates {
+		if tpl.Name == name {
+			return tpl.ID
+		}
+	}
+	t.Fatalf("no built-in template named %q", name)
+	return uuid.Nil
 }
 
 type memBoardConfigStore struct {

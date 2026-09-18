@@ -291,61 +291,6 @@ var roleReleaseWatchTools = []string{
 	domain.RollbackReleaseToolName,
 }
 
-// roleToolGrant is one tool that was added to a role policy AFTER installs
-// existed, plus the tool whose presence proves the role already does that job.
-//
-// It exists because the two ways a new tool used to reach an existing install
-// are both closed. ToolPolicy is not reconciled on restart — an admin's
-// customization has to survive — and before migration 133 a migration could
-// not backfill it either: `agents` carried FORCE ROW LEVEL SECURITY and the
-// migration runner had no tenant in scope, so migration 073's UPDATE pattern
-// matched zero rows in every tenant. Without this, an install that upgraded
-// would read a refusal naming `record_test_cases` from an agent that does not
-// hold it.
-//
-// `requires` is what keeps this from being policy reconciliation by another
-// name: the grant lands only where the paired capability is already granted, so
-// a policy an admin narrowed (QA without review_criterion, a developer without
-// set_criterion_completed) is left exactly as narrow as they made it. A grant
-// is never a removal, and nothing here touches a tool the seed did not add.
-type roleToolGrant struct {
-	tool     string
-	requires string
-	// roles empties to "every role that satisfies requires".
-	roles []string
-}
-
-var roleToolGrants = []roleToolGrant{
-	// Cancelling a criterion is the other half of ticking one (migration 131).
-	{tool: "cancel_criterion", requires: "set_criterion_completed"},
-	// Reading the round QA recorded: context for the developer fixing a
-	// rejection and for the PM signing the task off (migration 130).
-	{tool: "list_test_cases", requires: "list_acceptance_criteria"},
-	// Writing it is QA's alone — the role whose deliverable IS the round.
-	{tool: "record_test_cases", requires: "review_criterion", roles: []string{"qa-agent"}},
-	{tool: "set_test_case_result", requires: "review_criterion", roles: []string{"qa-agent"}},
-}
-
-// grantMissingRoleTools adds the post-install tool grants this agent qualifies
-// for, and reports whether it changed anything.
-func grantMissingRoleTools(agent *domain.Agent) bool {
-	var changed bool
-	for _, grant := range roleToolGrants {
-		if len(grant.roles) > 0 && !slices.Contains(grant.roles, agent.Name) {
-			continue
-		}
-		if !slices.Contains(agent.ToolPolicy.AllowTools, grant.requires) {
-			continue
-		}
-		if slices.Contains(agent.ToolPolicy.AllowTools, grant.tool) {
-			continue
-		}
-		agent.ToolPolicy.AllowTools = append(agent.ToolPolicy.AllowTools, grant.tool)
-		changed = true
-	}
-	return changed
-}
-
 func toolPolicyEqual(a, b domain.ToolPolicy) bool {
 	return slices.Equal(sortedCopy(a.AllowTools), sortedCopy(b.AllowTools)) &&
 		slices.Equal(sortedCopy(a.AllowMCPServers), sortedCopy(b.AllowMCPServers))

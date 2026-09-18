@@ -77,6 +77,43 @@ func TestReflectionOutputSchema_MarshalsAndSatisfiesStrictMode(t *testing.T) {
 	assertStrictObjectSchema(t, schema, "reflection")
 }
 
+// TestReflectionOutputSchema_ChangesRequireReason locks the contract that made
+// the prompt-only "matching the provided schema" instruction unenforceable: a
+// CLI-path model has no schema at all, so parseReflectionOutput is the only
+// enforcement there is. The HTTP-path schema still requires reason on every
+// change kind so a provider with strict structured-output support enforces it
+// too.
+func TestReflectionOutputSchema_ChangesRequireReason(t *testing.T) {
+	schema := reflectionOutputSchema()
+	props, _ := schema["properties"].(map[string]interface{})
+
+	for _, key := range []string{"skills", "rules", "memories"} {
+		arr, ok := props[key].(map[string]interface{})
+		if !ok {
+			t.Fatalf("schema missing array property %q", key)
+		}
+		items, ok := arr["items"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("%s: missing items schema", key)
+		}
+		required, _ := items["required"].([]string)
+		found := false
+		for _, r := range required {
+			if r == "reason" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s: items schema does not require \"reason\": %v", key, required)
+		}
+		itemProps, _ := items["properties"].(map[string]interface{})
+		if _, ok := itemProps["reason"]; !ok {
+			t.Errorf("%s: items schema has no \"reason\" property", key)
+		}
+	}
+}
+
 // recordingLLM answers with one canned response and remembers every request it
 // was handed, so a test can inspect what the caller actually asked for.
 type recordingLLM struct {
@@ -108,7 +145,7 @@ func TestRunLLM_RequestCarriesTheReflectionSchema(t *testing.T) {
 		cfg: domain.EvolutionConfig{MaxSkillChanges: 3, MaxRuleChanges: 3, MaxMemoryChanges: 5},
 	}
 
-	output, raw, err := svc.runLLM(context.Background(), domain.Agent{Name: "backend-developer"}, "evidence text")
+	output, raw, _, err := svc.runLLM(context.Background(), domain.Agent{Name: "backend-developer"}, "evidence text")
 	if err != nil {
 		t.Fatalf("runLLM: %v", err)
 	}

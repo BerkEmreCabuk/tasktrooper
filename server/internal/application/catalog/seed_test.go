@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -112,32 +113,6 @@ func TestSeedData_EverySkillFileIsReferenced(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-}
-
-func TestEnsureRoleAgents_PreservesCustomToolPolicy(t *testing.T) {
-	store := newMemCatalogStore()
-	svc := NewService(store, stubLLMClient{}, "")
-
-	agentID := uuid.New()
-	customPolicy := domain.ToolPolicy{
-		AllowMCPServers: []string{"filesystem"},
-		AllowTools:      []string{"run_terminal"},
-	}
-	store.agents = []domain.Agent{{
-		ID:           agentID,
-		Name:         "backend-developer",
-		SubagentType: "backend-engineer",
-		SystemPrompt: roleAgentDefinitions()[0].agent.SystemPrompt,
-		ToolPolicy:   customPolicy,
-		Enabled:      true,
-	}}
-
-	err := svc.EnsureRoleAgents(context.Background())
-	require.NoError(t, err)
-
-	got, err := store.GetAgent(context.Background(), agentID)
-	require.NoError(t, err)
-	assert.Equal(t, customPolicy, got.ToolPolicy)
 }
 
 type memCatalogStore struct {
@@ -419,109 +394,212 @@ func claudeCodeAttached(p domain.LLMProviderType) bool {
 	return p == domain.LLMProviderClaudeCode
 }
 
-func TestEnsureRoleAgents_SeedsSonnetWithOpusForHardWork(t *testing.T) {
+// Boot no longer creates any agent — only EnsureRoleTemplates runs, which
+// upserts the six built-in templates and nothing in the agents table. This is
+// the decision this file used to exercise through EnsureRoleAgents at boot;
+// there is no boot-time agent creation left to test.
+func TestEnsureRoleTemplates_CreatesNoAgents(t *testing.T) {
 	store := newMemCatalogStore()
+	templates := &memTemplateStore{}
 	svc := NewService(store, stubLLMClient{}, "")
+	svc.SetTemplateStore(templates)
 	svc.SetHostExecutorProbe(claudeCodeAttached)
 
-	require.NoError(t, svc.EnsureRoleAgents(context.Background()))
+	require.NoError(t, svc.EnsureRoleTemplates(context.Background()))
 
 	agents, err := store.ListAgents(context.Background())
 	require.NoError(t, err)
-	require.Len(t, agents, 6)
-	for _, a := range agents {
+	assert.Empty(t, agents)
+	assert.Len(t, templates.templates, len(roleAgentDefinitions()))
+	for _, tpl := range templates.templates {
+		assert.True(t, tpl.BuiltIn, tpl.Name)
+	}
+}
+
+// Creating a role agent from its built-in template does what the old
+// boot-time seed used to do on CREATE: fill the Claude Code provider/model
+// pair when the host can actually run it.
+func TestCreateAgentFromTemplate_FillsClaudeCodeModelsWhenHostCanRun(t *testing.T) {
+	store := newMemCatalogStore()
+	templates := &memTemplateStore{}
+	svc := NewService(store, stubLLMClient{}, "")
+	svc.SetTemplateStore(templates)
+	svc.SetHostExecutorProbe(claudeCodeAttached)
+	ctx := context.Background()
+	require.NoError(t, svc.EnsureRoleTemplates(ctx))
+
+	for _, tpl := range templates.templates {
+		agent, err := svc.CreateAgentFromTemplate(ctx, tpl.ID, domain.CreateAgentRequest{})
+		require.NoError(t, err)
 		// The provider is asserted with the names, not beside them: these two
 		// aliases are Claude Code CLI values and mean nothing anywhere else.
-		assert.Equal(t, domain.LLMProviderClaudeCode, a.ProviderType, a.Name)
-		assert.Equal(t, "sonnet", a.Model, a.Name)
-		assert.Equal(t, "opus", a.ModelHeavy, a.Name)
+		assert.Equal(t, domain.LLMProviderClaudeCode, agent.ProviderType, agent.Name)
+		assert.Equal(t, "sonnet", agent.Model, agent.Name)
+		assert.Equal(t, "opus", agent.ModelHeavy, agent.Name)
 	}
 }
 
 // A host with no CLI attached gets no model names at all. CreateAgent refuses
-// an agent on a provider it cannot execute, so seeding the pair there would not
-// produce a mildly wrong agent — it would produce none of the six.
-func TestEnsureRoleAgents_SeedsNoModelsWhereTheCLICannotRun(t *testing.T) {
+// an agent on a provider it cannot execute, so filling the pair there would
+// not produce a mildly wrong agent — it would produce no agent at all.
+func TestCreateAgentFromTemplate_NoModelsWhenHostCannotRun(t *testing.T) {
 	store := newMemCatalogStore()
+	templates := &memTemplateStore{}
 	svc := NewService(store, stubLLMClient{}, "")
+	svc.SetTemplateStore(templates)
+	ctx := context.Background()
+	require.NoError(t, svc.EnsureRoleTemplates(ctx))
 
-	require.NoError(t, svc.EnsureRoleAgents(context.Background()))
-
-	agents, err := store.ListAgents(context.Background())
-	require.NoError(t, err)
-	require.Len(t, agents, 6)
-	for _, a := range agents {
-		assert.Empty(t, a.ProviderType, a.Name)
-		assert.Empty(t, a.Model, a.Name)
-		assert.Empty(t, a.ModelHeavy, a.Name)
+	for _, tpl := range templates.templates {
+		agent, err := svc.CreateAgentFromTemplate(ctx, tpl.ID, domain.CreateAgentRequest{})
+		require.NoError(t, err)
+		assert.Empty(t, agent.ProviderType, agent.Name)
+		assert.Empty(t, agent.Model, agent.Name)
+		assert.Empty(t, agent.ModelHeavy, agent.Name)
 	}
 }
 
-// Seeding runs once, on first sight, so an install seeded before these
-// defaults existed has role agents with empty models. It is reconciled on the
-// next run rather than by a migration.
-func TestEnsureRoleAgents_BackfillsAnAlreadySeededAgent(t *testing.T) {
+// A provider the caller chose on create — the override, since a built-in
+// template itself never names one — is left alone entirely. `sonnet` is a CLI
+// alias; sending it to api.anthropic.com is the "Invalid model" failure
+// TestUpdateAgent_ProviderSwitchDropsTheOldProvidersModels records.
+func TestCreateAgentFromTemplate_LeavesAnOverriddenProviderAlone(t *testing.T) {
 	store := newMemCatalogStore()
+	templates := &memTemplateStore{}
 	svc := NewService(store, stubLLMClient{}, "")
+	svc.SetTemplateStore(templates)
 	svc.SetHostExecutorProbe(claudeCodeAttached)
+	ctx := context.Background()
+	require.NoError(t, svc.EnsureRoleTemplates(ctx))
 
-	agentID := uuid.New()
-	store.agents = []domain.Agent{{
-		ID: agentID, Name: "backend-developer", SubagentType: "backend-engineer", Enabled: true,
-	}}
-
-	require.NoError(t, svc.EnsureRoleAgents(context.Background()))
-
-	got, err := store.GetAgent(context.Background(), agentID)
-	require.NoError(t, err)
-	assert.Equal(t, domain.LLMProviderClaudeCode, got.ProviderType)
-	assert.Equal(t, "sonnet", got.Model)
-	assert.Equal(t, "opus", got.ModelHeavy)
-}
-
-// A model a person picked survives the next seed run, and so does the empty
-// ModelHeavy beside it: filling only the heavy half would bolt an opus
-// escalation onto a choice made to stay cheap.
-func TestEnsureRoleAgents_KeepsAModelAPersonPicked(t *testing.T) {
-	store := newMemCatalogStore()
-	svc := NewService(store, stubLLMClient{}, "")
-	svc.SetHostExecutorProbe(claudeCodeAttached)
-
-	agentID := uuid.New()
-	store.agents = []domain.Agent{{
-		ID: agentID, Name: "qa-agent", SubagentType: "qa-engineer", Enabled: true,
-		ProviderType: domain.LLMProviderClaudeCode, Model: "haiku",
-	}}
-
-	require.NoError(t, svc.EnsureRoleAgents(context.Background()))
-
-	got, err := store.GetAgent(context.Background(), agentID)
-	require.NoError(t, err)
-	assert.Equal(t, "haiku", got.Model)
-	assert.Empty(t, got.ModelHeavy)
-}
-
-// An agent somebody moved to an HTTP provider is left alone entirely. `sonnet`
-// is a CLI alias; sending it to api.anthropic.com is the "Invalid model"
-// failure TestUpdateAgent_ProviderSwitchDropsTheOldProvidersModels records.
-func TestEnsureRoleAgents_LeavesAnotherProvidersAgentAlone(t *testing.T) {
-	store := newMemCatalogStore()
-	svc := NewService(store, stubLLMClient{}, "")
-	svc.SetHostExecutorProbe(claudeCodeAttached)
-
-	agentID := uuid.New()
-	store.agents = []domain.Agent{{
-		ID: agentID, Name: "system-architect", SubagentType: "architect", Enabled: true,
+	agent, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "system-architect"), domain.CreateAgentRequest{
 		ProviderType: domain.LLMProviderAnthropic,
-	}}
-
-	require.NoError(t, svc.EnsureRoleAgents(context.Background()))
-
-	got, err := store.GetAgent(context.Background(), agentID)
+	})
 	require.NoError(t, err)
-	assert.Equal(t, domain.LLMProviderAnthropic, got.ProviderType)
-	assert.Empty(t, got.Model)
-	assert.Empty(t, got.ModelHeavy)
+	assert.Equal(t, domain.LLMProviderAnthropic, agent.ProviderType)
+	assert.Empty(t, agent.Model)
+	assert.Empty(t, agent.ModelHeavy)
+}
+
+// Creating from the built-in qa-agent template also gets its default KPIs —
+// the template carries defaultRoleKPIs the same way the old boot seed did.
+func TestCreateAgentFromTemplate_SetsDefaultKPIs(t *testing.T) {
+	store := newMemCatalogStore()
+	templates := &memTemplateStore{}
+	kpis := &memKPIStore{}
+	svc := NewService(store, stubLLMClient{}, "")
+	svc.SetTemplateStore(templates)
+	svc.SetKPIStore(kpis)
+	ctx := context.Background()
+	require.NoError(t, svc.EnsureRoleTemplates(ctx))
+
+	agent, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "qa-agent"), domain.CreateAgentRequest{})
+	require.NoError(t, err)
+
+	got, err := kpis.ListByAgent(ctx, agent.ID)
+	require.NoError(t, err)
+	want := defaultRoleKPIs("qa-agent")
+	require.Len(t, got, len(want))
+	gotKeys := make(map[string]bool, len(got))
+	for _, k := range got {
+		gotKeys[k.MetricKey] = true
+	}
+	for _, w := range want {
+		assert.True(t, gotKeys[w.MetricKey], "missing KPI %s", w.MetricKey)
+	}
+}
+
+// EnsureRoleTemplates runs again on every boot (it upserts the built-in
+// templates by name); an agent already created from one, and since edited by
+// a user (or by self-evolution), must not be touched by that re-run — nothing
+// reconciles an existing agent against its template any more.
+func TestEnsureRoleTemplates_DoesNotRevertAUserEditedAgentSkill(t *testing.T) {
+	store := newMemCatalogStore()
+	templates := &memTemplateStore{}
+	svc := NewService(store, stubLLMClient{}, "")
+	svc.SetTemplateStore(templates)
+	ctx := context.Background()
+	require.NoError(t, svc.EnsureRoleTemplates(ctx))
+
+	agent, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "qa-agent"), domain.CreateAgentRequest{})
+	require.NoError(t, err)
+	skills, err := svc.ListSkillsByAgent(ctx, agent.ID)
+	require.NoError(t, err)
+	require.NotEmpty(t, skills)
+	edited := skills[0]
+	edited.Content = "an operator rewrote this skill by hand"
+	_, err = store.UpdateSkill(ctx, edited)
+	require.NoError(t, err)
+
+	// A second boot re-upserts the templates from the same role definitions.
+	require.NoError(t, svc.EnsureRoleTemplates(ctx))
+
+	got, err := svc.GetSkillForAgent(ctx, agent.ID, edited.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "an operator rewrote this skill by hand", got.Content)
+}
+
+type memKPIStore struct {
+	kpis []domain.AgentKPI
+}
+
+func (m *memKPIStore) CreateKPI(_ context.Context, k domain.AgentKPI) (domain.AgentKPI, error) {
+	if k.ID == uuid.Nil {
+		k.ID = uuid.New()
+	}
+	m.kpis = append(m.kpis, k)
+	return k, nil
+}
+
+func (m *memKPIStore) UpdateKPI(_ context.Context, k domain.AgentKPI) (domain.AgentKPI, error) {
+	for i, existing := range m.kpis {
+		if existing.ID == k.ID {
+			m.kpis[i] = k
+			return k, nil
+		}
+	}
+	return domain.AgentKPI{}, assert.AnError
+}
+
+func (m *memKPIStore) DeleteKPI(_ context.Context, id uuid.UUID) error {
+	for i, k := range m.kpis {
+		if k.ID == id {
+			m.kpis = append(m.kpis[:i], m.kpis[i+1:]...)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (m *memKPIStore) GetKPI(_ context.Context, id uuid.UUID) (domain.AgentKPI, error) {
+	for _, k := range m.kpis {
+		if k.ID == id {
+			return k, nil
+		}
+	}
+	return domain.AgentKPI{}, assert.AnError
+}
+
+func (m *memKPIStore) ListByAgent(_ context.Context, agentID uuid.UUID) ([]domain.AgentKPI, error) {
+	var out []domain.AgentKPI
+	for _, k := range m.kpis {
+		if k.AgentID == agentID {
+			out = append(out, k)
+		}
+	}
+	return out, nil
+}
+
+func (m *memKPIStore) UpsertResult(_ context.Context, r domain.AgentKPIResult) (domain.AgentKPIResult, error) {
+	return r, nil
+}
+
+func (m *memKPIStore) ListResults(context.Context, uuid.UUID, time.Time, time.Time) ([]domain.AgentKPIResult, error) {
+	return nil, nil
+}
+
+func (m *memKPIStore) LatestResults(context.Context, uuid.UUID) ([]domain.AgentKPIResult, error) {
+	return nil, nil
 }
 
 // Every seeded name is one the CLI was actually probed with, so the picker the

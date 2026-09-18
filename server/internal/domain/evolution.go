@@ -35,6 +35,13 @@ const (
 	EvolutionTargetSkill  = "skill"
 	EvolutionTargetRule   = "rule"
 	EvolutionTargetMemory = "memory"
+
+	ReflectionOutcomeApplied    = "applied"
+	ReflectionOutcomeRejected   = "rejected"    // budget full etc.
+	ReflectionOutcomeSkipped    = "skipped"     // self-evolution off, unknown id, run-log memory, cap reached
+	ReflectionOutcomeFailed     = "failed"      // store error
+	ReflectionOutcomeRolledBack = "rolled_back" // golden gate reverted it
+	ReflectionOutcomeNotApplied = "not_applied" // legacy reflection, parsed on read, never applied
 )
 
 // PerformanceSnapshot is stored on a completed reflection and serves as the
@@ -61,6 +68,7 @@ type AgentReflection struct {
 	PerformanceSnapshot *PerformanceSnapshot `json:"performance_snapshot,omitempty"`
 	RawOutput           string               `json:"raw_output,omitempty"`
 	Error               string               `json:"error,omitempty"`
+	Decision            *ReflectionDecision  `json:"decision,omitempty"`
 	CreatedAt           time.Time            `json:"created_at"`
 	CompletedAt         *time.Time           `json:"completed_at,omitempty"`
 }
@@ -99,6 +107,7 @@ type ReflectionSkillChange struct {
 	Category    string   `json:"category"`
 	Content     string   `json:"content"`
 	SourceURLs  []string `json:"source_urls,omitempty"`
+	Reason      string   `json:"reason,omitempty"`
 }
 
 type ReflectionRuleChange struct {
@@ -107,6 +116,7 @@ type ReflectionRuleChange struct {
 	Name     string `json:"name"`
 	Content  string `json:"content"`
 	Priority int    `json:"priority"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 type ReflectionMemoryChange struct {
@@ -114,11 +124,55 @@ type ReflectionMemoryChange struct {
 	MemoryID string `json:"memory_id,omitempty"`
 	Content  string `json:"content"`
 	Category string `json:"category"`
+	Reason   string `json:"reason,omitempty"`
 }
 
 type ReflectionRevert struct {
 	EvolutionEventID string `json:"evolution_event_id"`
 	Reason           string `json:"reason,omitempty"`
+}
+
+// ReflectionDecision is the structured record of what a reflection proposed and
+// what actually happened to each proposal — the UI's source of truth instead of
+// re-deriving it from the free-text Summary. Legacy rows (completed before this
+// existed) get one synthesized on read in service.go's ListReflections; Legacy
+// is what tells the UI that record was never actually applied.
+type ReflectionDecision struct {
+	Analysis       string                    `json:"analysis,omitempty"`
+	SelfAssessment string                    `json:"self_assessment,omitempty"`
+	Baseline       *PerformanceSnapshot      `json:"baseline,omitempty"`
+	CatalogBefore  ReflectionCatalogCounts   `json:"catalog_before"`
+	CatalogAfter   ReflectionCatalogCounts   `json:"catalog_after"`
+	Changes        []ReflectionChangeOutcome `json:"changes"`
+	Gate           *ReflectionGateResult     `json:"gate,omitempty"`
+	Legacy         bool                      `json:"legacy,omitempty"`
+}
+
+type ReflectionCatalogCounts struct {
+	Skills      int `json:"skills"`
+	Rules       int `json:"rules"`
+	Memories    int `json:"memories"`
+	SkillBudget int `json:"skill_budget"`
+	RuleBudget  int `json:"rule_budget"`
+}
+
+type ReflectionChangeOutcome struct {
+	Kind     string     `json:"kind"`   // skill|rule|memory|revert
+	Action   string     `json:"action"` // create|update|delete|revert
+	Name     string     `json:"name"`
+	TargetID string     `json:"target_id,omitempty"`
+	Reason   string     `json:"reason,omitempty"`
+	Outcome  string     `json:"outcome"`
+	Detail   string     `json:"detail,omitempty"`
+	EventID  *uuid.UUID `json:"event_id,omitempty"`
+}
+
+type ReflectionGateResult struct {
+	BeforeRate float64 `json:"before_rate"`
+	AfterRate  float64 `json:"after_rate"`
+	Keep       bool    `json:"keep"`
+	Reason     string  `json:"reason,omitempty"`
+	RolledBack int     `json:"rolled_back"`
 }
 
 // MemoryPromotion is one team memory that was turned into a skill: the skill

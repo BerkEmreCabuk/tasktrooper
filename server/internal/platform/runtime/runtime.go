@@ -1084,14 +1084,22 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}) {
 			e.reg.Register(tool)
 		}
-		// Orchestration is always on, and the role agents it dispatches to are
-		// seeded as a boot step: background work, because a dozen writes must
-		// not hold up anything.
-		e.bootSeed.AddStep("role_agents", func(stepCtx context.Context) error {
-			err := catalogSvc.EnsureRoleAgents(stepCtx)
-			// The seed stores skills without vectors so it never waits on the
-			// embedder. The backfill outlives the boot step's deadline on
-			// purpose: a first launch is still downloading the model.
+		// Orchestration is always on, but the role agents it dispatches to are
+		// no longer created here: they exist only once the user creates one
+		// from the built-in template gallery, so self-evolution's edits to an
+		// agent are never reverted by a restart. What boot still does is keep
+		// that gallery current — upsert the six built-in templates from the
+		// role definitions — as a background step, because a dozen writes
+		// must not hold up anything.
+		e.bootSeed.AddStep("agent_templates", func(stepCtx context.Context) error {
+			err := catalogSvc.EnsureRoleTemplates(stepCtx)
+			// A template-created agent's skills are stored without vectors too
+			// (seedSkill, shared with the old boot seed), so this backfill is
+			// still what fills them in — it just now runs over whatever the
+			// user has created by the time this boot happens to catch it,
+			// rather than over agents this very step just inserted. It
+			// outlives the boot step's deadline on purpose: a first launch is
+			// still downloading the model.
 			go func() {
 				backfillCtx, cancel := context.WithTimeout(context.WithoutCancel(stepCtx), 30*time.Minute)
 				defer cancel()

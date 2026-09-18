@@ -3,6 +3,7 @@ package evolution
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -259,7 +260,96 @@ func (s *Service) ListReflections(ctx context.Context, agentID uuid.UUID, limit 
 	if limit <= 0 {
 		limit = 20
 	}
-	return s.store.ListReflections(ctx, agentID, limit)
+	reflections, err := s.store.ListReflections(ctx, agentID, limit)
+	if err != nil {
+		return nil, err
+	}
+	deriveLegacyDecisions(reflections)
+	return reflections, nil
+}
+
+// deriveLegacyDecisions fills in ReflectionDecision, on the response only, for
+// completed reflections written before Decision existed — they still hold
+// RawOutput, and the fixed parseReflectionOutput can now read it. Nothing here
+// is written back: a legacy row stays legacy every time it's listed, tagged so
+// the UI can tell "derived after the fact" from "the actual apply record".
+//
+// reflections is s.store.ListReflections' own result, ordered created_at DESC,
+// which the baseline backfill below depends on: for row i, an older completed
+// reflection with a snapshot is anything at index > i.
+func deriveLegacyDecisions(reflections []domain.AgentReflection) {
+	for i := range reflections {
+		r := &reflections[i]
+		if r.Status != domain.ReflectionStatusCompleted {
+			continue
+		}
+		if r.Decision == nil && r.RawOutput != "" {
+			if output, analysis, err := parseReflectionOutput(r.RawOutput); err == nil {
+				r.Decision = &domain.ReflectionDecision{
+					Legacy:         true,
+					Analysis:       analysis,
+					SelfAssessment: strings.TrimSpace(output.SelfAssessment),
+					Changes:        legacyChangeOutcomes(output),
+				}
+			}
+		}
+		if r.Decision == nil {
+			continue
+		}
+		if r.Summary == "" {
+			switch {
+			case r.Decision.SelfAssessment != "":
+				r.Summary = r.Decision.SelfAssessment
+			case r.Decision.Analysis != "":
+				r.Summary = truncate(r.Decision.Analysis, 600)
+			}
+		}
+	}
+	for i := range reflections {
+		r := &reflections[i]
+		if r.Decision == nil || r.Decision.Baseline != nil {
+			continue
+		}
+		for j := i + 1; j < len(reflections); j++ {
+			older := reflections[j]
+			if older.Status == domain.ReflectionStatusCompleted && older.PerformanceSnapshot != nil {
+				r.Decision.Baseline = older.PerformanceSnapshot
+				break
+			}
+		}
+	}
+}
+
+// legacyChangeOutcomes reconstructs the proposed-change list a legacy
+// reflection never got to apply: every change lands with outcome=not_applied,
+// since a legacy row (by definition) predates this outcome bookkeeping.
+func legacyChangeOutcomes(output domain.ReflectionOutput) []domain.ReflectionChangeOutcome {
+	var out []domain.ReflectionChangeOutcome
+	for _, ch := range output.Skills {
+		out = append(out, domain.ReflectionChangeOutcome{
+			Kind: "skill", Action: ch.Action, Name: ch.Name, TargetID: ch.SkillID, Reason: ch.Reason,
+			Outcome: domain.ReflectionOutcomeNotApplied,
+		})
+	}
+	for _, ch := range output.Rules {
+		out = append(out, domain.ReflectionChangeOutcome{
+			Kind: "rule", Action: ch.Action, Name: ch.Name, TargetID: ch.RuleID, Reason: ch.Reason,
+			Outcome: domain.ReflectionOutcomeNotApplied,
+		})
+	}
+	for _, ch := range output.Memories {
+		out = append(out, domain.ReflectionChangeOutcome{
+			Kind: "memory", Action: ch.Action, Name: truncate(ch.Content, 60), TargetID: ch.MemoryID, Reason: ch.Reason,
+			Outcome: domain.ReflectionOutcomeNotApplied,
+		})
+	}
+	for _, rv := range output.Reverts {
+		out = append(out, domain.ReflectionChangeOutcome{
+			Kind: "revert", Action: "revert", TargetID: rv.EvolutionEventID, Reason: rv.Reason,
+			Outcome: domain.ReflectionOutcomeNotApplied,
+		})
+	}
+	return out
 }
 
 func (s *Service) ListEvents(ctx context.Context, agentID uuid.UUID, limit int) ([]domain.AgentEvolutionEvent, error) {

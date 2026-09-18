@@ -2384,6 +2384,13 @@ func isUngroundedAnalysis(task domain.BoardTask, resp domain.AgentResponse, usag
 	return !usage.UsedAny(domain.CodeExplorationTools...)
 }
 
+// ungroundedAnalysisReason is package-level (rather than local to
+// failRunUngrounded) so domain.IsRunGateRejection's prefix list can be tested
+// against the exact string runner.go writes.
+const ungroundedAnalysisReason = "Analysis rejected: the run never read the repository " +
+	"(no codebase_search / grep_code / get_repo_tree / get_symbol_skeleton / expand_symbol_context call succeeded). " +
+	"An analiz answer must name real files and interfaces from the code, not assumed ones."
+
 // failRunUngrounded ends an analiz run that produced an answer without reading
 // the repository. The agent's own text is kept in the comment (it may contain a
 // usable question or assumption) but is not published as the analysis, and the
@@ -2391,9 +2398,7 @@ func isUngroundedAnalysis(task domain.BoardTask, resp domain.AgentResponse, usag
 // the same task and, this time, the explicit reason the last attempt was
 // rejected.
 func (r *Runner) failRunUngrounded(ctx context.Context, job RunJob, run domain.TaskAgentRun, resp domain.AgentResponse) error {
-	const reason = "Analysis rejected: the run never read the repository " +
-		"(no codebase_search / grep_code / get_repo_tree / get_symbol_skeleton / expand_symbol_context call succeeded). " +
-		"An analiz answer must name real files and interfaces from the code, not assumed ones."
+	const reason = ungroundedAnalysisReason
 
 	if r.taskUpdater != nil {
 		content := reason

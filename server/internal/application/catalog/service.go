@@ -59,11 +59,13 @@ func invalidInput(format string, a ...any) error {
 	return invalidInputError{msg: fmt.Sprintf(format, a...)}
 }
 
-// SeedingInProgress reports whether EnsureRoleAgents is still creating/syncing
-// the default role agents (each with its own skill-embedding calls). On a
-// brand-new install this can take a while; callers (the /admin/agents handler)
-// surface it so the frontend can wait for the full roster instead of
-// rendering agents one at a time as they're inserted.
+// SeedingInProgress reports whether EnsureRoleTemplates is still upserting the
+// built-in agent templates. Agents themselves are no longer created at boot —
+// only the user creates one, from the template gallery — so this is brief and
+// touches no skill-embedding calls; it is kept, rather than hardcoded false,
+// so the /admin/agents handler's existing "seeding" response field stays
+// truthful instead of becoming a constant the frontend's poll can no longer
+// learn anything from.
 func (s *Service) SeedingInProgress() bool {
 	return s.seeding.Load()
 }

@@ -8,8 +8,21 @@ import (
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/kpi"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/stretchr/testify/require"
 )
+
+// stubRuns embeds the port interface so a test only implements the one method
+// it needs (ListRecent), matching the pattern already used at
+// internal/adapter/http/handler_run_steps_test.go.
+type stubRuns struct {
+	port.TaskAgentRunStore
+	runs []domain.TaskAgentRun
+}
+
+func (s *stubRuns) ListRecent(context.Context, int) ([]domain.TaskAgentRun, error) {
+	return s.runs, nil
+}
 
 type stubSpans struct{ hours []float64 }
 
@@ -130,6 +143,78 @@ func TestTasksCompletedForDeveloperIsUnchangedByQAPMEvents(t *testing.T) {
 	value, err := def.Resolve(context.Background(), deps, agentID, time.Now().Add(-24*time.Hour), time.Now())
 	require.NoError(t, err)
 	require.Equal(t, 2.0, value)
+}
+
+func TestTasksCompletedCountsDistinctTasksNotEvents(t *testing.T) {
+	// The real bug: a task that was completed and then released writes two
+	// events for one piece of work, and must count once, not twice.
+	def, err := kpi.MetricByKey("tasks_completed")
+	require.NoError(t, err)
+	agentID := uuid.New()
+	taskA := uuid.New()
+	taskB := uuid.New()
+	deps := kpi.MetricDeps{Perf: &stubPerf{events: []domain.AgentScoreEvent{
+		{AgentID: agentID, TaskID: &taskA, EventType: domain.ScoreEventTaskCompleted},
+		{AgentID: agentID, TaskID: &taskA, EventType: domain.ScoreEventTaskReleased},
+		{AgentID: agentID, TaskID: &taskB, EventType: domain.ScoreEventTaskCompleted},
+		// No TaskID: has nothing to dedupe against, counts on its own.
+		{AgentID: agentID, EventType: domain.ScoreEventQATaskTested},
+	}}}
+	value, err := def.Resolve(context.Background(), deps, agentID, time.Now().Add(-24*time.Hour), time.Now())
+	require.NoError(t, err)
+	require.Equal(t, 3.0, value)
+}
+
+func TestFirstPassRateBelowMinSampleIsInsufficient(t *testing.T) {
+	def, err := kpi.MetricByKey("first_pass_rate")
+	require.NoError(t, err)
+	agentID := uuid.New()
+	taskA, taskB := uuid.New(), uuid.New()
+	// Only two distinct completed tasks: an idle-ish week must not score a
+	// 0% or 100% first-pass rate off two data points.
+	deps := kpi.MetricDeps{Perf: &stubPerf{events: []domain.AgentScoreEvent{
+		{AgentID: agentID, TaskID: &taskA, EventType: domain.ScoreEventTaskCompleted},
+		{AgentID: agentID, TaskID: &taskB, EventType: domain.ScoreEventTaskCompleted},
+	}}}
+	_, err = def.Resolve(context.Background(), deps, agentID, time.Now().Add(-24*time.Hour), time.Now())
+	require.ErrorIs(t, err, kpi.ErrInsufficientData)
+}
+
+func TestFirstPassRateAtMinSampleScores(t *testing.T) {
+	def, err := kpi.MetricByKey("first_pass_rate")
+	require.NoError(t, err)
+	agentID := uuid.New()
+	taskA, taskB, taskC := uuid.New(), uuid.New(), uuid.New()
+	deps := kpi.MetricDeps{Perf: &stubPerf{events: []domain.AgentScoreEvent{
+		{AgentID: agentID, TaskID: &taskA, EventType: domain.ScoreEventTaskCompleted},
+		{AgentID: agentID, TaskID: &taskB, EventType: domain.ScoreEventTaskCompleted},
+		{AgentID: agentID, TaskID: &taskC, EventType: domain.ScoreEventTaskCompleted},
+		{AgentID: agentID, TaskID: &taskC, EventType: domain.ScoreEventRevisionRequested},
+	}}}
+	value, err := def.Resolve(context.Background(), deps, agentID, time.Now().Add(-24*time.Hour), time.Now())
+	require.NoError(t, err)
+	require.InDelta(t, 200.0/3.0, value, 0.01)
+}
+
+func TestGateRejectedRuns_CountsOnlyGateRejectionsInWindow(t *testing.T) {
+	def, err := kpi.MetricByKey("gate_rejected_runs")
+	require.NoError(t, err)
+	agentID := uuid.New()
+	now := time.Now()
+	deps := kpi.MetricDeps{Runs: &stubRuns{runs: []domain.TaskAgentRun{
+		{AgentID: agentID, Status: domain.TaskAgentRunStatusFailed, Summary: "Analysis rejected: no repo reads", CreatedAt: now},
+		{AgentID: agentID, Status: domain.TaskAgentRunStatusFailed, Summary: "QA round rejected: never ran the product", CreatedAt: now},
+		{AgentID: agentID, Status: domain.TaskAgentRunStatusFailed, Summary: "pm_uat rejected: never checked the product", CreatedAt: now},
+		// Infra failure, not a gate rejection: must not count.
+		{AgentID: agentID, Status: domain.TaskAgentRunStatusFailed, Summary: "session limit reached", CreatedAt: now},
+		// Gate-rejection text but outside the window: must not count.
+		{AgentID: agentID, Status: domain.TaskAgentRunStatusFailed, Summary: "Analysis rejected: no repo reads", CreatedAt: now.Add(-48 * time.Hour)},
+		// A different agent's gate rejection must not count.
+		{AgentID: uuid.New(), Status: domain.TaskAgentRunStatusFailed, Summary: "Analysis rejected: no repo reads", CreatedAt: now},
+	}}}
+	value, err := def.Resolve(context.Background(), deps, agentID, now.Add(-24*time.Hour), now.Add(24*time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 3.0, value)
 }
 
 func TestAllListedMetricsAreResolvable(t *testing.T) {

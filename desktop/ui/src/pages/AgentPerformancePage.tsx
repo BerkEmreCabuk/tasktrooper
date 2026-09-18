@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -13,6 +13,7 @@ import {
 import { PageContent } from "@/components/layout/PageContent";
 import { PageHeader } from "@/components/admin/PageHeader";
 import { AgentKPISection } from "@/components/agent/AgentKPISection";
+import { ReflectionHistory, reflectionTriggerLabel } from "@/components/agent/ReflectionHistory";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -121,6 +122,8 @@ export function AgentPerformancePage() {
   const [loading, setLoading] = useState(true);
   const [reflecting, setReflecting] = useState(false);
   const [expandedEvent, setExpandedEvent] = useState<string | null>(null);
+  const [openReflectionId, setOpenReflectionId] = useState<string | null>(null);
+  const prevReflectionsRef = useRef<AgentReflection[]>([]);
 
   const eventTypeLabels: Record<string, string> = {
     task_completed: t("agentArea.perf.eventType.task_completed"),
@@ -155,12 +158,6 @@ export function AgentPerformancePage() {
     insufficient_data: { label: t("agentArea.perf.impact.insufficient_data"), className: "bg-muted text-muted-foreground" },
   };
 
-  const triggerLabels: Record<string, string> = {
-    periodic: t("agentArea.perf.trigger.periodic"),
-    revision: t("agentArea.perf.trigger.revision"),
-    manual: t("agentArea.perf.trigger.manual"),
-  };
-
   const load = useCallback(async () => {
     if (!agentId) return;
     try {
@@ -174,12 +171,29 @@ export function AgentPerformancePage() {
       setAgent(agentData);
       setPerf(perfData);
       setEvents(evData.events ?? []);
-      setReflections(refData.reflections ?? []);
+      const nextReflections = refData.reflections ?? [];
+      const prevReflections = prevReflectionsRef.current;
+      // A running reflection that is no longer running just finished — tell
+      // the user even if they navigated away from this tab while it ran.
+      for (const next of nextReflections) {
+        const was = prevReflections.find((r) => r.id === next.id);
+        if (was?.status === "running" && next.status !== "running") {
+          if (next.status === "completed") {
+            toast.success(t("agentArea.perf.toast.analysisComplete"), {
+              action: { label: t("agentArea.perf.reflections.viewResult"), onClick: () => setOpenReflectionId(next.id) },
+            });
+          } else if (next.status === "failed") {
+            toast.error(next.error || t("agentArea.perf.toast.analysisFailed"));
+          }
+        }
+      }
+      prevReflectionsRef.current = nextReflections;
+      setReflections(nextReflections);
       setMemoryCount((memData.memories ?? []).length);
     } finally {
       setLoading(false);
     }
-  }, [agentId]);
+  }, [agentId, t]);
 
   useEffect(() => {
     void load();
@@ -299,15 +313,31 @@ export function AgentPerformancePage() {
           </div>
           <p className="text-xs text-muted-foreground">{t("agentArea.perf.selfEvo.help")}</p>
           <div className="text-xs text-muted-foreground">
-            {reflections.length > 0
-              ? t("agentArea.perf.selfEvo.lastAnalysis", {
+            {reflections.length > 0 ? (
+              <button
+                type="button"
+                className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                onClick={() => setOpenReflectionId(reflections[0].id)}
+              >
+                {t("agentArea.perf.selfEvo.lastAnalysis", {
                   date: fmtDate(reflections[0].created_at),
-                  trigger: triggerLabels[reflections[0].trigger] ?? reflections[0].trigger,
-                })
-              : t("agentArea.perf.selfEvo.noAnalysisYet")}
+                  trigger: reflectionTriggerLabel(t, reflections[0].trigger),
+                })}
+              </button>
+            ) : (
+              t("agentArea.perf.selfEvo.noAnalysisYet")
+            )}
           </div>
         </Card>
       </div>
+
+      <ReflectionHistory
+        reflections={reflections}
+        events={events}
+        kpis={perf?.kpis ?? []}
+        openId={openReflectionId}
+        onOpenChange={setOpenReflectionId}
+      />
 
       {agentId ? <AgentKPISection agentId={agentId} /> : null}
 
@@ -366,43 +396,6 @@ export function AgentPerformancePage() {
                 </Card>
               );
             })}
-          </div>
-        )}
-      </section>
-
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold">{t("agentArea.perf.reflections.heading")}</h3>
-        {reflections.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("agentArea.perf.reflections.empty")}</p>
-        ) : (
-          <div className="space-y-2">
-            {reflections.map((r) => (
-              <Card key={r.id} className="space-y-1 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      className={
-                        r.status === "completed"
-                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
-                          : r.status === "failed"
-                            ? "bg-red-500/15 text-red-600 dark:text-red-400"
-                            : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
-                      }
-                    >
-                      {r.status === "completed"
-                        ? t("agentArea.perf.reflections.statusCompleted")
-                        : r.status === "failed"
-                          ? t("agentArea.perf.reflections.statusFailed")
-                          : t("agentArea.perf.reflections.statusRunning")}
-                    </Badge>
-                    <span className="text-xs text-muted-foreground">{triggerLabels[r.trigger] ?? r.trigger}</span>
-                  </div>
-                  <span className="text-xs text-muted-foreground">{fmtDate(r.created_at)}</span>
-                </div>
-                {r.summary ? <p className="text-sm whitespace-pre-wrap">{r.summary}</p> : null}
-                {r.error ? <p className="text-xs text-red-500">{r.error}</p> : null}
-              </Card>
-            ))}
           </div>
         )}
       </section>

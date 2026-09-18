@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LayoutTemplate, Plus } from "lucide-react";
+import { LayoutTemplate, Plus, Users } from "lucide-react";
 import { toast } from "sonner";
 import { api, type AgentTemplate } from "@/api";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,7 @@ export function NewAgentDialog({ open, onOpenChange, onCreated }: NewAgentDialog
   const navigate = useNavigate();
   const [templates, setTemplates] = useState<AgentTemplate[]>([]);
   const [creatingFromId, setCreatingFromId] = useState<string | null>(null);
+  const [settingUpTeam, setSettingUpTeam] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -55,6 +56,36 @@ export function NewAgentDialog({ open, onOpenChange, onCreated }: NewAgentDialog
     }
   };
 
+  const builtInTemplates = templates.filter((tpl) => tpl.built_in);
+
+  // One click for the common case (nothing to configure yet, want the whole
+  // team): create all six built-in role agents through the same
+  // create-from-template call the per-template picker below uses, one by
+  // one so a single failure does not undo the ones that already landed.
+  const setupReadyMadeTeam = async () => {
+    setSettingUpTeam(true);
+    let created = 0;
+    try {
+      for (const tpl of builtInTemplates) {
+        await api.createAgentFromTemplate(tpl.id);
+        created++;
+      }
+      if (created === builtInTemplates.length) {
+        toast.success(t("chatArea.workspace.newAgent.setupTeamCreated", { count: created }));
+        onOpenChange(false);
+      } else {
+        toast.warning(
+          t("chatArea.workspace.newAgent.setupTeamPartial", { created, total: builtInTemplates.length }),
+        );
+      }
+    } catch {
+      toast.error(t("chatArea.workspace.newAgent.setupTeamFailed"));
+    } finally {
+      setSettingUpTeam(false);
+      if (created > 0) onCreated?.();
+    }
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
@@ -65,14 +96,32 @@ export function NewAgentDialog({ open, onOpenChange, onCreated }: NewAgentDialog
           </DialogDescription>
         </DialogHeader>
 
-        <Button onClick={createBlank} className="w-full justify-start gap-2">
+        {builtInTemplates.length > 0 && (
+          <Button
+            onClick={setupReadyMadeTeam}
+            disabled={settingUpTeam || creatingFromId !== null}
+            className="w-full justify-start gap-2"
+          >
+            <Users className="h-4 w-4" />
+            {settingUpTeam ? t("chatArea.workspace.newAgent.settingUpTeam") : t("chatArea.workspace.newAgent.setupTeam")}
+          </Button>
+        )}
+
+        <Button
+          onClick={createBlank}
+          disabled={settingUpTeam}
+          variant={builtInTemplates.length > 0 ? "outline" : "default"}
+          className="w-full justify-start gap-2"
+        >
           <Plus className="h-4 w-4" />
           {t("chatArea.workspace.newAgent.createBlank")}
         </Button>
 
         <div className="flex items-center gap-2 pt-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
           <LayoutTemplate className="h-3.5 w-3.5" />
-          {t("chatArea.workspace.newAgent.fromTemplate")}
+          {builtInTemplates.length > 0
+            ? t("chatArea.workspace.newAgent.orPickOne")
+            : t("chatArea.workspace.newAgent.fromTemplate")}
         </div>
 
         {templates.length === 0 ? (
@@ -97,7 +146,7 @@ export function NewAgentDialog({ open, onOpenChange, onCreated }: NewAgentDialog
                 </div>
                 <Button
                   size="sm"
-                  disabled={creatingFromId !== null}
+                  disabled={creatingFromId !== null || settingUpTeam}
                   onClick={() => createFromTemplate(tpl)}
                 >
                   {creatingFromId === tpl.id ? t("chatArea.workspace.newAgent.creating") : t("chatArea.workspace.newAgent.create")}

@@ -24,8 +24,11 @@ func roleAgent(name, subagentType string, toolPolicy domain.ToolPolicy) domain.C
 // cannot truncate anything: a lower level produces a less deliberative but
 // still complete run, so a level per role is safe to ship.
 //
-// Like ToolPolicy, this lands on CREATE only (see ensureRoleAgent): an operator
-// who tunes a level through the API keeps it across restarts.
+// domain.AgentTemplate has no Effort field, so this value never actually
+// reaches a template-created agent today — CreateAgentFromTemplate has
+// nothing to carry it from. It is left set here, ready for a template schema
+// that does, rather than deleted with the reconciler that used to apply it
+// directly (ensureRoleAgent, removed when boot-time role agent creation was).
 //
 // The levels below are starting points, not measurements. They encode one
 // claim: the work a role does has a natural depth, and a checklist pass and a

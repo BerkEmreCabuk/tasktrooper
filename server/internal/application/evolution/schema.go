@@ -27,8 +27,9 @@ func reflectionOutputSchema() map[string]interface{} {
 			"category":    map[string]interface{}{"type": "string"},
 			"content":     map[string]interface{}{"type": "string"},
 			"source_urls": map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "string"}},
+			"reason":      map[string]interface{}{"type": "string"},
 		},
-		"required": []string{"action", "skill_id", "name", "description", "category", "content", "source_urls"},
+		"required": []string{"action", "skill_id", "name", "description", "category", "content", "source_urls", "reason"},
 	}
 	ruleChange := map[string]interface{}{
 		"type":                 "object",
@@ -39,8 +40,9 @@ func reflectionOutputSchema() map[string]interface{} {
 			"name":     map[string]interface{}{"type": "string"},
 			"content":  map[string]interface{}{"type": "string"},
 			"priority": map[string]interface{}{"type": "integer"},
+			"reason":   map[string]interface{}{"type": "string"},
 		},
-		"required": []string{"action", "rule_id", "name", "content", "priority"},
+		"required": []string{"action", "rule_id", "name", "content", "priority", "reason"},
 	}
 	memoryChange := map[string]interface{}{
 		"type":                 "object",
@@ -50,8 +52,9 @@ func reflectionOutputSchema() map[string]interface{} {
 			"memory_id": map[string]interface{}{"type": "string"},
 			"content":   map[string]interface{}{"type": "string"},
 			"category":  map[string]interface{}{"type": "string"},
+			"reason":    map[string]interface{}{"type": "string"},
 		},
-		"required": []string{"action", "memory_id", "content", "category"},
+		"required": []string{"action", "memory_id", "content", "category", "reason"},
 	}
 	revert := map[string]interface{}{
 		"type":                 "object",

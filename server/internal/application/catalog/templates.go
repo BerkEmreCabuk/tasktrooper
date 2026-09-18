@@ -59,9 +59,17 @@ func (s *Service) CreateAgentFromTemplate(ctx context.Context, templateID uuid.U
 	if override.ProviderType != "" {
 		req.ProviderType = override.ProviderType
 	}
+	if tpl.BuiltIn {
+		s.fillTemplateAgentModels(&req)
+	}
 	agent, err := s.CreateAgent(ctx, req)
 	if err != nil {
 		return domain.Agent{}, err
+	}
+	if tpl.BuiltIn {
+		if err := s.setRoleSubscriptionsIfDefault(ctx, agent); err != nil {
+			return domain.Agent{}, fmt.Errorf("subscribe %s: %w", agent.Name, err)
+		}
 	}
 	stackIDs, err := s.recreateTechStacks(ctx, agent.ID, tpl)
 	if err != nil {
@@ -174,6 +182,8 @@ func (s *Service) EnsureRoleTemplates(ctx context.Context) error {
 	if s.templates == nil {
 		return nil
 	}
+	s.seeding.Store(true)
+	defer s.seeding.Store(false)
 	for _, def := range roleAgentDefinitions() {
 		tpl := domain.AgentTemplate{
 			Name:         def.agent.Name,
@@ -251,6 +261,100 @@ func (s *Service) recreateTechStacks(ctx context.Context, agentID uuid.UUID, tpl
 
 func stackKey(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
+}
+
+// fillTemplateAgentModels puts the Claude Code provider/model pair on a
+// built-in-role create request that names none, the same thing the old
+// boot-time seed did on CREATE (fillRoleAgentModels, before this became the
+// only path that creates a role agent). Filled as a pair: an override that
+// set either name on its own is left alone rather than getting an escalation
+// bolted onto a choice made to stay cheap. The provider is stamped only when
+// claudeCodeRunnable says this host can actually execute it — CreateAgent
+// refuses the provider otherwise, and every role agent creation would fail
+// instead of merely lacking a model.
+func (s *Service) fillTemplateAgentModels(req *domain.CreateAgentRequest) {
+	if req.Model != "" || req.ModelHeavy != "" {
+		return
+	}
+	switch req.ProviderType {
+	case roleAgentProvider:
+		// Already the seeded provider; only the names are missing.
+	case "":
+		if !s.claudeCodeRunnable() {
+			return
+		}
+		req.ProviderType = roleAgentProvider
+	default:
+		// The template (or an override) chose another provider deliberately;
+		// these aliases mean nothing there.
+		return
+	}
+	req.Model, req.ModelHeavy = roleAgentModel, roleAgentModelHeavy
+}
+
+// claudeCodeRunnable asks the same question checkHostExecutor does — may an
+// agent be saved onto the CLI provider here — and asks it first, so a
+// built-in template never proposes a configuration that guard would refuse.
+func (s *Service) claudeCodeRunnable() bool {
+	return s.hostExecutor != nil && s.hostExecutor(roleAgentProvider)
+}
+
+// setRoleSubscriptionsIfDefault subscribes each reviewing role, the moment it
+// is created from its built-in template under its own name, to the hand-off
+// column it owns, so tasks flow to the next stage's agent automatically
+// instead of back to the implementer-assignee:
+//
+//	system-architect -> code_review                    (reviews the diff)
+//	qa-agent         -> ready_for_qa, in_qa, done      (picks it up, tests it, merges its PR)
+//	product-manager  -> pm_uat                         (reviews against acceptance criteria)
+//
+// (analiz_review and human_uat have no subscriber by design — they are the
+// human approval gates.)
+//
+// QA owns both of its testing columns: ready_for_qa is the queue it is handed,
+// in_qa is where it tests. Subscribing it to ready_for_qa alone left in_qa
+// unowned, so a task moved there resolved back to the implementer-assignee.
+//
+// done is the third, and it is not a testing column: it is where the task's
+// pull request gets merged. It had no subscriber and dispatched nobody, so a
+// signed-off task's change sat on a branch until a human pressed Merge. The
+// dispatcher wakes this subscription ONLY for a task whose PR is still
+// unmerged and only on a move into done (Dispatcher.doneMergeWake), so the
+// column cannot go back to what it did before — dispatching the implementer
+// onto its own finished task, which is how done tasks drifted into released.
+//
+// Only fires when the created agent's name is exactly the role name: routing
+// looks these agents up by that exact name (domain/role_agent.go,
+// repoprofile.architectAgentName, the analiz-assignment settings), so an
+// agent renamed on create (a second "qa-agent" copy, say) is not the one
+// those lookups find, and a subscription on it would just be a second desk
+// nobody is dispatched to. It is additive besides: only set when the agent
+// currently has none, so a later admin customization survives.
+func (s *Service) setRoleSubscriptionsIfDefault(ctx context.Context, agent domain.Agent) error {
+	if s.boardConfig == nil {
+		return nil
+	}
+	roleColumns := map[string][]domain.TaskColumn{
+		"system-architect": {domain.TaskColumnCodeReview},
+		"qa-agent":         {domain.TaskColumnReadyForQA, domain.TaskColumnInQA, domain.TaskColumnDone},
+		"product-manager":  {domain.TaskColumnPMUAT},
+	}
+	columns, ok := roleColumns[agent.Name]
+	if !ok {
+		return nil
+	}
+	subs, err := s.boardConfig.ListAgentSubscriptions(ctx, agent.ID)
+	if err != nil {
+		return err
+	}
+	if len(subs) > 0 {
+		return nil
+	}
+	slugs := make([]string, 0, len(columns))
+	for _, col := range columns {
+		slugs = append(slugs, string(col))
+	}
+	return s.boardConfig.SetAgentSubscriptions(ctx, agent.ID, slugs)
 }
 
 func (s *Service) uniqueAgentName(ctx context.Context, base string) string {

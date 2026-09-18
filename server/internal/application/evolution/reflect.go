@@ -57,16 +57,21 @@ func (s *Service) processReflection(ctx context.Context, reflection domain.Agent
 		return
 	}
 
-	evidence, skills, rules, err := s.gatherEvidence(ctx, agentRec, reflection)
+	evidence, skills, rules, baseline, err := s.gatherEvidence(ctx, agentRec, reflection)
 	if err != nil {
 		s.failReflection(ctx, reflection, "", fmt.Sprintf("evidence gathering failed: %v", err))
 		return
 	}
 
-	output, rawOutput, err := s.runLLM(ctx, agentRec, evidence)
+	output, rawOutput, analysis, err := s.runLLM(ctx, agentRec, evidence)
 	if err != nil {
 		s.failReflection(ctx, reflection, rawOutput, err.Error())
 		return
+	}
+
+	catalogBefore := domain.ReflectionCatalogCounts{
+		Skills: len(skills), Rules: len(rules), Memories: s.countMemories(ctx, agentRec.ID),
+		SkillBudget: s.cfg.MaxSkillsPerAgent, RuleBudget: s.cfg.MaxRulesPerAgent,
 	}
 
 	// The gate needs a baseline measured against the pre-change catalog, so it
@@ -78,14 +83,19 @@ func (s *Service) processReflection(ctx context.Context, reflection domain.Agent
 		beforeRun = s.runGoldenEval(ctx, agentRec, reflection.ID, goldenPhaseBefore)
 	}
 
-	applyLog, applied := s.applyOutput(ctx, agentRec, reflection, output, skills, rules)
+	applyLog, events, outcomes := s.applyOutput(ctx, agentRec, reflection, output, skills, rules)
 
-	summary := strings.TrimSpace(output.SelfAssessment)
+	selfAssessment := strings.TrimSpace(output.SelfAssessment)
+	summary := selfAssessment
+	if summary == "" && analysis != "" {
+		summary = truncate(analysis, 600)
+	}
 	if len(applyLog) > 0 {
 		summary = summary + "\n\nApplied changes:\n- " + strings.Join(applyLog, "\n- ")
 	}
 
 	snapshot := s.captureSnapshot(ctx, reflection.AgentID)
+	var gateResult *domain.ReflectionGateResult
 	if len(applyLog) > 0 && agentRec.SelfEvolutionEnabled {
 		afterRun := s.runGoldenEval(ctx, agentRec, reflection.ID, goldenPhaseAfter)
 		if afterRun.ran() {
@@ -96,21 +106,60 @@ func (s *Service) processReflection(ctx context.Context, reflection domain.Agent
 		if gate && beforeRun.ran() && afterRun.ran() {
 			beforeRate := beforeRun.Rate
 			snapshot.GoldenPassRateBefore = &beforeRate
-			summary += s.enforceGoldenGate(ctx, agentRec, reflection, beforeRun, afterRun, applyLog, applied)
+			var line string
+			line, gateResult = s.enforceGoldenGate(ctx, agentRec, reflection, beforeRun, afterRun, applyLog, events, outcomes)
+			summary += line
 		}
 	}
 	if len(summary) > 4000 {
 		summary = summary[:4000]
 	}
 
+	catalogAfter := domain.ReflectionCatalogCounts{
+		Skills: catalogBefore.Skills, Rules: catalogBefore.Rules,
+		SkillBudget: s.cfg.MaxSkillsPerAgent, RuleBudget: s.cfg.MaxRulesPerAgent,
+	}
+	if after, err := s.catalog.ListSkillsByAgent(ctx, agentRec.ID); err == nil {
+		catalogAfter.Skills = len(after)
+	}
+	if after, err := s.catalog.ListRulesByAgent(ctx, agentRec.ID); err == nil {
+		catalogAfter.Rules = len(after)
+	}
+	catalogAfter.Memories = s.countMemories(ctx, agentRec.ID)
+
 	reflection.Status = domain.ReflectionStatusCompleted
 	reflection.Summary = summary
 	reflection.RawOutput = rawOutput
 	reflection.PerformanceSnapshot = snapshot
+	reflection.Decision = &domain.ReflectionDecision{
+		Analysis:       analysis,
+		SelfAssessment: selfAssessment,
+		Baseline:       baseline,
+		CatalogBefore:  catalogBefore,
+		CatalogAfter:   catalogAfter,
+		Changes:        outcomes,
+		Gate:           gateResult,
+	}
 	if err := s.store.CompleteReflection(ctx, reflection); err != nil {
 		log.Warn().Err(err).Msg("complete reflection failed")
 	}
 	log.Info().Str("agent", agentRec.Name).Str("trigger", reflection.Trigger).Int("changes", len(applyLog)).Msg("reflection completed")
+}
+
+// countMemories is the catalog-count half of ReflectionDecision's before/after
+// bookkeeping; the query mirrors gatherEvidence's own listing (every scope, one
+// agent) but with a high limit since this is a count, not evidence to show.
+func (s *Service) countMemories(ctx context.Context, agentID uuid.UUID) int {
+	if s.memories == nil {
+		return 0
+	}
+	mems, err := s.memories.List(ctx, domain.MemoryQuery{
+		AgentID: agentID, Owner: domain.MemoryOwnerAgent, Repo: domain.MemoryRepoScopeAny, Limit: 1000,
+	})
+	if err != nil {
+		return 0
+	}
+	return len(mems)
 }
 
 func (s *Service) failReflection(ctx context.Context, reflection domain.AgentReflection, rawOutput, errMsg string) {
@@ -147,7 +196,7 @@ func (s *Service) captureSnapshot(ctx context.Context, agentID uuid.UUID) *domai
 	return snap
 }
 
-func (s *Service) runLLM(ctx context.Context, agentRec domain.Agent, evidence string) (domain.ReflectionOutput, string, error) {
+func (s *Service) runLLM(ctx context.Context, agentRec domain.Agent, evidence string) (domain.ReflectionOutput, string, string, error) {
 	system := reflectionSystemPrompt(agentRec, s.cfg)
 	messages := []domain.Message{
 		{Role: domain.RoleSystem, Content: system},
@@ -200,11 +249,11 @@ func (s *Service) runLLM(ctx context.Context, agentRec domain.Agent, evidence st
 
 	raw, err := callOnce(messages)
 	if err != nil {
-		return domain.ReflectionOutput{}, "", fmt.Errorf("reflection llm call failed: %w", err)
+		return domain.ReflectionOutput{}, "", "", fmt.Errorf("reflection llm call failed: %w", err)
 	}
-	output, parseErr := parseReflectionOutput(raw)
+	output, analysis, parseErr := parseReflectionOutput(raw)
 	if parseErr == nil {
-		return output, raw, nil
+		return output, raw, analysis, nil
 	}
 
 	retryMsgs := append(messages,
@@ -213,13 +262,13 @@ func (s *Service) runLLM(ctx context.Context, agentRec domain.Agent, evidence st
 	)
 	raw2, err := callOnce(retryMsgs)
 	if err != nil {
-		return domain.ReflectionOutput{}, raw, fmt.Errorf("reflection retry failed: %w", err)
+		return domain.ReflectionOutput{}, raw, "", fmt.Errorf("reflection retry failed: %w", err)
 	}
-	output, parseErr = parseReflectionOutput(raw2)
+	output, analysis, parseErr = parseReflectionOutput(raw2)
 	if parseErr != nil {
-		return domain.ReflectionOutput{}, raw2, fmt.Errorf("reflection output unparseable after retry: %w", parseErr)
+		return domain.ReflectionOutput{}, raw2, "", fmt.Errorf("reflection output unparseable after retry: %w", parseErr)
 	}
-	return output, raw2, nil
+	return output, raw2, analysis, nil
 }
 
 func (s *Service) applyOutput(
@@ -229,9 +278,10 @@ func (s *Service) applyOutput(
 	output domain.ReflectionOutput,
 	skills []domain.Skill,
 	rules []domain.OrchestratorRule,
-) ([]string, []domain.AgentEvolutionEvent) {
+) ([]string, []domain.AgentEvolutionEvent, []domain.ReflectionChangeOutcome) {
 	var applied []string
 	var events []domain.AgentEvolutionEvent
+	var outcomes []domain.ReflectionChangeOutcome
 	scoreAt := 100.0
 	if score, err := s.perf.GetScore(ctx, agentRec.ID); err == nil {
 		scoreAt = score.Score
@@ -242,16 +292,24 @@ func (s *Service) applyOutput(
 	ctx = catalog.WithVersionSource(ctx, catalog.VersionSource{
 		Source: domain.CatalogVersionSourceEvolution, ReflectionID: &reflection.ID,
 	})
-	recordEvent := func(e domain.AgentEvolutionEvent) {
+	// recordEvent returns the persisted event (and any store error) so callers
+	// can attach the event's id to the ReflectionChangeOutcome they record for
+	// the same change — the two records need to point at each other so the
+	// golden gate can later mark an outcome rolled_back by matching event ids.
+	recordEvent := func(e domain.AgentEvolutionEvent) (domain.AgentEvolutionEvent, error) {
 		e.ReflectionID = &reflection.ID
 		e.AgentID = agentRec.ID
 		e.ScoreAtChange = scoreAt
 		created, err := s.store.CreateEvent(ctx, e)
 		if err != nil {
 			log.Warn().Err(err).Str("change", e.ChangeType).Msg("evolution event persist failed")
-			return
+			return domain.AgentEvolutionEvent{}, err
 		}
 		events = append(events, created)
+		return created, nil
+	}
+	recordOutcome := func(o domain.ReflectionChangeOutcome) {
+		outcomes = append(outcomes, o)
 	}
 	skillByID := map[string]domain.Skill{}
 	for _, sk := range skills {
@@ -263,21 +321,49 @@ func (s *Service) applyOutput(
 	}
 
 	if agentRec.SelfEvolutionEnabled {
-		applied = append(applied, s.applySkillChanges(ctx, agentRec, output.Skills, skillByID, recordEvent)...)
-		applied = append(applied, s.applyRuleChanges(ctx, agentRec, output.Rules, ruleByID, recordEvent)...)
-		applied = append(applied, s.applyReverts(ctx, agentRec, output.Reverts, recordEvent)...)
-	} else if len(output.Skills) > 0 || len(output.Rules) > 0 || len(output.Reverts) > 0 {
-		log.Info().Str("agent", agentRec.Name).Msg("skill/rule changes proposed but self_evolution_enabled=false; skipped")
+		applied = append(applied, s.applySkillChanges(ctx, agentRec, output.Skills, skillByID, recordEvent, recordOutcome)...)
+		applied = append(applied, s.applyRuleChanges(ctx, agentRec, output.Rules, ruleByID, recordEvent, recordOutcome)...)
+		applied = append(applied, s.applyReverts(ctx, agentRec, output.Reverts, recordEvent, recordOutcome)...)
+	} else {
+		if len(output.Skills) > 0 || len(output.Rules) > 0 || len(output.Reverts) > 0 {
+			log.Info().Str("agent", agentRec.Name).Msg("skill/rule changes proposed but self_evolution_enabled=false; skipped")
+		}
+		for _, ch := range output.Skills {
+			recordOutcome(domain.ReflectionChangeOutcome{
+				Kind: "skill", Action: ch.Action, Name: ch.Name, TargetID: ch.SkillID, Reason: ch.Reason,
+				Outcome: domain.ReflectionOutcomeSkipped, Detail: "self-evolution disabled for this agent",
+			})
+		}
+		for _, ch := range output.Rules {
+			recordOutcome(domain.ReflectionChangeOutcome{
+				Kind: "rule", Action: ch.Action, Name: ch.Name, TargetID: ch.RuleID, Reason: ch.Reason,
+				Outcome: domain.ReflectionOutcomeSkipped, Detail: "self-evolution disabled for this agent",
+			})
+		}
+		for _, rv := range output.Reverts {
+			recordOutcome(domain.ReflectionChangeOutcome{
+				Kind: "revert", Action: "revert", TargetID: rv.EvolutionEventID, Reason: rv.Reason,
+				Outcome: domain.ReflectionOutcomeSkipped, Detail: "self-evolution disabled for this agent",
+			})
+		}
 	}
 
 	maxMem := s.cfg.MaxMemoryChanges
 	for i, mc := range output.Memories {
 		if i >= maxMem {
-			break
+			recordOutcome(domain.ReflectionChangeOutcome{
+				Kind: "memory", Action: mc.Action, Name: truncate(mc.Content, 60), TargetID: mc.MemoryID, Reason: mc.Reason,
+				Outcome: domain.ReflectionOutcomeSkipped, Detail: "memory change cap reached",
+			})
+			continue
 		}
 		switch mc.Action {
 		case "create":
 			if s.memories == nil {
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "memory", Action: "create", Name: truncate(mc.Content, 60), Reason: mc.Reason,
+					Outcome: domain.ReflectionOutcomeSkipped, Detail: "memory service unavailable",
+				})
 				continue
 			}
 			// The evidence this reads is a pile of run transcripts, so the
@@ -288,6 +374,10 @@ func (s *Service) applyOutput(
 			if reason := domain.MemoryRunLogReason(mc.Content); reason != "" {
 				log.Info().Str("agent", agentRec.Name).Str("reason", reason).
 					Str("content", truncate(mc.Content, 80)).Msg("reflection memory skipped: run log, not a durable lesson")
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "memory", Action: "create", Name: truncate(mc.Content, 60), Reason: mc.Reason,
+					Outcome: domain.ReflectionOutcomeSkipped, Detail: reason,
+				})
 				continue
 			}
 			// Reflection reasons over runs from every repository at once, so it
@@ -297,35 +387,69 @@ func (s *Service) applyOutput(
 			mem, err := s.memories.Save(ctx, agentRec.ID, nil, mc.Content, mc.Category, domain.MemorySourceReflection)
 			if err != nil {
 				log.Warn().Err(err).Msg("reflection memory save failed")
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "memory", Action: "create", Name: truncate(mc.Content, 60), Reason: mc.Reason,
+					Outcome: domain.ReflectionOutcomeFailed, Detail: err.Error(),
+				})
 				continue
 			}
 			after, _ := json.Marshal(map[string]string{"content": mc.Content, "category": mc.Category})
-			recordEvent(domain.AgentEvolutionEvent{
+			ev, evErr := recordEvent(domain.AgentEvolutionEvent{
 				ChangeType: domain.EvolutionChangeMemoryCreated, TargetKind: domain.EvolutionTargetMemory,
 				TargetID: &mem.ID, TargetName: truncate(mc.Content, 80), After: after,
 				Impact: domain.EvolutionImpactNeutral,
 			})
 			applied = append(applied, "memory saved: "+truncate(mc.Content, 60))
+			outcome := domain.ReflectionChangeOutcome{
+				Kind: "memory", Action: "create", Name: truncate(mc.Content, 60), TargetID: mem.ID.String(),
+				Reason: mc.Reason, Outcome: domain.ReflectionOutcomeApplied,
+			}
+			if evErr == nil {
+				id := ev.ID
+				outcome.EventID = &id
+			}
+			recordOutcome(outcome)
 		case "delete":
 			if s.memories == nil || mc.MemoryID == "" {
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "memory", Action: "delete", TargetID: mc.MemoryID, Reason: mc.Reason,
+					Outcome: domain.ReflectionOutcomeSkipped, Detail: "missing memory id",
+				})
 				continue
 			}
 			memID, err := uuid.Parse(mc.MemoryID)
 			if err != nil {
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "memory", Action: "delete", TargetID: mc.MemoryID, Reason: mc.Reason,
+					Outcome: domain.ReflectionOutcomeSkipped, Detail: "invalid memory id",
+				})
 				continue
 			}
 			if err := s.memories.Delete(ctx, agentRec.ID, memID); err != nil {
 				log.Warn().Err(err).Msg("reflection memory delete failed")
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "memory", Action: "delete", TargetID: mc.MemoryID, Reason: mc.Reason,
+					Outcome: domain.ReflectionOutcomeFailed, Detail: err.Error(),
+				})
 				continue
 			}
-			recordEvent(domain.AgentEvolutionEvent{
+			ev, evErr := recordEvent(domain.AgentEvolutionEvent{
 				ChangeType: domain.EvolutionChangeMemoryDeleted, TargetKind: domain.EvolutionTargetMemory,
 				TargetID: &memID, TargetName: mc.MemoryID, Impact: domain.EvolutionImpactNeutral,
 			})
 			applied = append(applied, "memory deleted: "+mc.MemoryID)
+			outcome := domain.ReflectionChangeOutcome{
+				Kind: "memory", Action: "delete", TargetID: mc.MemoryID, Reason: mc.Reason,
+				Outcome: domain.ReflectionOutcomeApplied,
+			}
+			if evErr == nil {
+				id := ev.ID
+				outcome.EventID = &id
+			}
+			recordOutcome(outcome)
 		}
 	}
-	return applied, events
+	return applied, events, outcomes
 }
 
 func (s *Service) applySkillChanges(
@@ -333,7 +457,8 @@ func (s *Service) applySkillChanges(
 	agentRec domain.Agent,
 	changes []domain.ReflectionSkillChange,
 	skillByID map[string]domain.Skill,
-	recordEvent func(domain.AgentEvolutionEvent),
+	recordEvent func(domain.AgentEvolutionEvent) (domain.AgentEvolutionEvent, error),
+	recordOutcome func(domain.ReflectionChangeOutcome),
 ) []string {
 	var applied []string
 	count := 0
@@ -346,7 +471,11 @@ func (s *Service) applySkillChanges(
 	}
 	for _, ch := range changes {
 		if count >= s.cfg.MaxSkillChanges {
-			break
+			recordOutcome(domain.ReflectionChangeOutcome{
+				Kind: "skill", Action: ch.Action, Name: ch.Name, TargetID: ch.SkillID, Reason: ch.Reason,
+				Outcome: domain.ReflectionOutcomeSkipped, Detail: "max skill changes per reflection reached",
+			})
+			continue
 		}
 		// A create that names an existing skill is the model trying to replace
 		// it; treat it as the update it meant, instead of adding a second
@@ -361,6 +490,10 @@ func (s *Service) applySkillChanges(
 			log.Info().Str("agent", agentRec.Name).Str("skill", ch.Name).Int("budget", s.cfg.MaxSkillsPerAgent).
 				Msg("skill create rejected: agent is at its skill budget")
 			applied = append(applied, "skill create rejected (budget full, merge into an existing skill instead): "+ch.Name)
+			recordOutcome(domain.ReflectionChangeOutcome{
+				Kind: "skill", Action: "create", Name: ch.Name, Reason: ch.Reason,
+				Outcome: domain.ReflectionOutcomeRejected, Detail: "skill budget full",
+			})
 			continue
 		}
 		switch ch.Action {
@@ -370,18 +503,35 @@ func (s *Service) applySkillChanges(
 			})
 			if err != nil {
 				log.Warn().Err(err).Str("skill", ch.Name).Msg("skill create failed")
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "skill", Action: "create", Name: ch.Name, Reason: ch.Reason,
+					Outcome: domain.ReflectionOutcomeFailed, Detail: err.Error(),
+				})
 				continue
 			}
-			recordEvent(domain.AgentEvolutionEvent{
+			ev, evErr := recordEvent(domain.AgentEvolutionEvent{
 				ChangeType: domain.EvolutionChangeSkillCreated, TargetKind: domain.EvolutionTargetSkill,
 				TargetID: &created.ID, TargetName: created.Name, After: snapshotSkill(created, ch.SourceURLs),
 			})
 			applied = append(applied, "skill created: "+created.Name)
 			count++
 			budget++
+			outcome := domain.ReflectionChangeOutcome{
+				Kind: "skill", Action: "create", Name: created.Name, TargetID: created.ID.String(),
+				Reason: ch.Reason, Outcome: domain.ReflectionOutcomeApplied,
+			}
+			if evErr == nil {
+				id := ev.ID
+				outcome.EventID = &id
+			}
+			recordOutcome(outcome)
 		case "update":
 			existing, ok := skillByID[ch.SkillID]
 			if !ok {
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "skill", Action: "update", Name: ch.Name, TargetID: ch.SkillID, Reason: ch.Reason,
+					Outcome: domain.ReflectionOutcomeSkipped, Detail: "unknown skill id",
+				})
 				continue
 			}
 			before := snapshotSkill(existing, nil)
@@ -393,31 +543,61 @@ func (s *Service) applySkillChanges(
 			})
 			if err != nil {
 				log.Warn().Err(err).Str("skill", existing.Name).Msg("skill update failed")
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "skill", Action: "update", Name: existing.Name, TargetID: existing.ID.String(), Reason: ch.Reason,
+					Outcome: domain.ReflectionOutcomeFailed, Detail: err.Error(),
+				})
 				continue
 			}
-			recordEvent(domain.AgentEvolutionEvent{
+			ev, evErr := recordEvent(domain.AgentEvolutionEvent{
 				ChangeType: domain.EvolutionChangeSkillUpdated, TargetKind: domain.EvolutionTargetSkill,
 				TargetID: &updated.ID, TargetName: updated.Name, Before: before, After: snapshotSkill(updated, ch.SourceURLs),
 			})
 			applied = append(applied, "skill updated: "+updated.Name)
 			count++
+			outcome := domain.ReflectionChangeOutcome{
+				Kind: "skill", Action: "update", Name: updated.Name, TargetID: updated.ID.String(),
+				Reason: ch.Reason, Outcome: domain.ReflectionOutcomeApplied,
+			}
+			if evErr == nil {
+				id := ev.ID
+				outcome.EventID = &id
+			}
+			recordOutcome(outcome)
 		case "delete":
 			existing, ok := skillByID[ch.SkillID]
 			if !ok {
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "skill", Action: "delete", TargetID: ch.SkillID, Reason: ch.Reason,
+					Outcome: domain.ReflectionOutcomeSkipped, Detail: "unknown skill id",
+				})
 				continue
 			}
 			before := snapshotSkill(existing, nil)
 			if err := s.manager.DeleteSkillForAgent(ctx, agentRec.ID, existing.ID); err != nil {
 				log.Warn().Err(err).Str("skill", existing.Name).Msg("skill delete failed")
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "skill", Action: "delete", Name: existing.Name, TargetID: existing.ID.String(), Reason: ch.Reason,
+					Outcome: domain.ReflectionOutcomeFailed, Detail: err.Error(),
+				})
 				continue
 			}
-			recordEvent(domain.AgentEvolutionEvent{
+			ev, evErr := recordEvent(domain.AgentEvolutionEvent{
 				ChangeType: domain.EvolutionChangeSkillDeleted, TargetKind: domain.EvolutionTargetSkill,
 				TargetID: &existing.ID, TargetName: existing.Name, Before: before,
 			})
 			applied = append(applied, "skill deleted: "+existing.Name)
 			count++
 			budget--
+			outcome := domain.ReflectionChangeOutcome{
+				Kind: "skill", Action: "delete", Name: existing.Name, TargetID: existing.ID.String(),
+				Reason: ch.Reason, Outcome: domain.ReflectionOutcomeApplied,
+			}
+			if evErr == nil {
+				id := ev.ID
+				outcome.EventID = &id
+			}
+			recordOutcome(outcome)
 		}
 	}
 	return applied
@@ -428,7 +608,8 @@ func (s *Service) applyRuleChanges(
 	agentRec domain.Agent,
 	changes []domain.ReflectionRuleChange,
 	ruleByID map[string]domain.OrchestratorRule,
-	recordEvent func(domain.AgentEvolutionEvent),
+	recordEvent func(domain.AgentEvolutionEvent) (domain.AgentEvolutionEvent, error),
+	recordOutcome func(domain.ReflectionChangeOutcome),
 ) []string {
 	var applied []string
 	count := 0
@@ -439,7 +620,11 @@ func (s *Service) applyRuleChanges(
 	}
 	for _, ch := range changes {
 		if count >= s.cfg.MaxRuleChanges {
-			break
+			recordOutcome(domain.ReflectionChangeOutcome{
+				Kind: "rule", Action: ch.Action, Name: ch.Name, TargetID: ch.RuleID, Reason: ch.Reason,
+				Outcome: domain.ReflectionOutcomeSkipped, Detail: "max rule changes per reflection reached",
+			})
+			continue
 		}
 		if ch.Action == "create" {
 			if existing, ok := byName[strings.ToLower(strings.TrimSpace(ch.Name))]; ok {
@@ -451,6 +636,10 @@ func (s *Service) applyRuleChanges(
 			log.Info().Str("agent", agentRec.Name).Str("rule", ch.Name).Int("budget", s.cfg.MaxRulesPerAgent).
 				Msg("rule create rejected: agent is at its rule budget")
 			applied = append(applied, "rule create rejected (budget full, tighten an existing rule instead): "+ch.Name)
+			recordOutcome(domain.ReflectionChangeOutcome{
+				Kind: "rule", Action: "create", Name: ch.Name, Reason: ch.Reason,
+				Outcome: domain.ReflectionOutcomeRejected, Detail: "rule budget full",
+			})
 			continue
 		}
 		switch ch.Action {
@@ -460,18 +649,35 @@ func (s *Service) applyRuleChanges(
 			})
 			if err != nil {
 				log.Warn().Err(err).Str("rule", ch.Name).Msg("rule create failed")
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "rule", Action: "create", Name: ch.Name, Reason: ch.Reason,
+					Outcome: domain.ReflectionOutcomeFailed, Detail: err.Error(),
+				})
 				continue
 			}
-			recordEvent(domain.AgentEvolutionEvent{
+			ev, evErr := recordEvent(domain.AgentEvolutionEvent{
 				ChangeType: domain.EvolutionChangeRuleCreated, TargetKind: domain.EvolutionTargetRule,
 				TargetID: &created.ID, TargetName: created.Name, After: snapshotRule(created),
 			})
 			applied = append(applied, "rule created: "+created.Name)
 			count++
 			budget++
+			outcome := domain.ReflectionChangeOutcome{
+				Kind: "rule", Action: "create", Name: created.Name, TargetID: created.ID.String(),
+				Reason: ch.Reason, Outcome: domain.ReflectionOutcomeApplied,
+			}
+			if evErr == nil {
+				id := ev.ID
+				outcome.EventID = &id
+			}
+			recordOutcome(outcome)
 		case "update":
 			existing, ok := ruleByID[ch.RuleID]
 			if !ok {
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "rule", Action: "update", Name: ch.Name, TargetID: ch.RuleID, Reason: ch.Reason,
+					Outcome: domain.ReflectionOutcomeSkipped, Detail: "unknown rule id",
+				})
 				continue
 			}
 			before := snapshotRule(existing)
@@ -485,31 +691,61 @@ func (s *Service) applyRuleChanges(
 			})
 			if err != nil {
 				log.Warn().Err(err).Str("rule", existing.Name).Msg("rule update failed")
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "rule", Action: "update", Name: existing.Name, TargetID: existing.ID.String(), Reason: ch.Reason,
+					Outcome: domain.ReflectionOutcomeFailed, Detail: err.Error(),
+				})
 				continue
 			}
-			recordEvent(domain.AgentEvolutionEvent{
+			ev, evErr := recordEvent(domain.AgentEvolutionEvent{
 				ChangeType: domain.EvolutionChangeRuleUpdated, TargetKind: domain.EvolutionTargetRule,
 				TargetID: &updated.ID, TargetName: updated.Name, Before: before, After: snapshotRule(updated),
 			})
 			applied = append(applied, "rule updated: "+updated.Name)
 			count++
+			outcome := domain.ReflectionChangeOutcome{
+				Kind: "rule", Action: "update", Name: updated.Name, TargetID: updated.ID.String(),
+				Reason: ch.Reason, Outcome: domain.ReflectionOutcomeApplied,
+			}
+			if evErr == nil {
+				id := ev.ID
+				outcome.EventID = &id
+			}
+			recordOutcome(outcome)
 		case "delete":
 			existing, ok := ruleByID[ch.RuleID]
 			if !ok {
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "rule", Action: "delete", TargetID: ch.RuleID, Reason: ch.Reason,
+					Outcome: domain.ReflectionOutcomeSkipped, Detail: "unknown rule id",
+				})
 				continue
 			}
 			before := snapshotRule(existing)
 			if err := s.manager.DeleteRuleForAgent(ctx, agentRec.ID, existing.ID); err != nil {
 				log.Warn().Err(err).Str("rule", existing.Name).Msg("rule delete failed")
+				recordOutcome(domain.ReflectionChangeOutcome{
+					Kind: "rule", Action: "delete", Name: existing.Name, TargetID: existing.ID.String(), Reason: ch.Reason,
+					Outcome: domain.ReflectionOutcomeFailed, Detail: err.Error(),
+				})
 				continue
 			}
-			recordEvent(domain.AgentEvolutionEvent{
+			ev, evErr := recordEvent(domain.AgentEvolutionEvent{
 				ChangeType: domain.EvolutionChangeRuleDeleted, TargetKind: domain.EvolutionTargetRule,
 				TargetID: &existing.ID, TargetName: existing.Name, Before: before,
 			})
 			applied = append(applied, "rule deleted: "+existing.Name)
 			count++
 			budget--
+			outcome := domain.ReflectionChangeOutcome{
+				Kind: "rule", Action: "delete", Name: existing.Name, TargetID: existing.ID.String(),
+				Reason: ch.Reason, Outcome: domain.ReflectionOutcomeApplied,
+			}
+			if evErr == nil {
+				id := ev.ID
+				outcome.EventID = &id
+			}
+			recordOutcome(outcome)
 		}
 	}
 	return applied
@@ -520,29 +756,51 @@ func (s *Service) applyReverts(
 	ctx context.Context,
 	agentRec domain.Agent,
 	reverts []domain.ReflectionRevert,
-	recordEvent func(domain.AgentEvolutionEvent),
+	recordEvent func(domain.AgentEvolutionEvent) (domain.AgentEvolutionEvent, error),
+	recordOutcome func(domain.ReflectionChangeOutcome),
 ) []string {
 	var applied []string
 	for _, rv := range reverts {
 		eventID, err := uuid.Parse(rv.EvolutionEventID)
 		if err != nil {
+			recordOutcome(domain.ReflectionChangeOutcome{
+				Kind: "revert", Action: "revert", TargetID: rv.EvolutionEventID, Reason: rv.Reason,
+				Outcome: domain.ReflectionOutcomeSkipped, Detail: "invalid event id",
+			})
 			continue
 		}
 		original, err := s.store.GetEvent(ctx, eventID)
 		if err != nil || original.AgentID != agentRec.ID {
+			recordOutcome(domain.ReflectionChangeOutcome{
+				Kind: "revert", Action: "revert", TargetID: rv.EvolutionEventID, Reason: rv.Reason,
+				Outcome: domain.ReflectionOutcomeSkipped, Detail: "unknown evolution event",
+			})
 			continue
 		}
 		restored, err := s.revertEvent(ctx, agentRec, original)
 		if err != nil {
 			log.Warn().Err(err).Str("event", eventID.String()).Msg("revert failed")
+			recordOutcome(domain.ReflectionChangeOutcome{
+				Kind: "revert", Action: "revert", Name: original.TargetName, TargetID: rv.EvolutionEventID, Reason: rv.Reason,
+				Outcome: domain.ReflectionOutcomeFailed, Detail: err.Error(),
+			})
 			continue
 		}
-		recordEvent(domain.AgentEvolutionEvent{
+		ev, evErr := recordEvent(domain.AgentEvolutionEvent{
 			ChangeType: domain.EvolutionChangeRevert, TargetKind: original.TargetKind,
 			TargetID: original.TargetID, TargetName: original.TargetName,
 			Before: original.After, After: original.Before, RevertedEventID: &original.ID,
 		})
 		applied = append(applied, "reverted: "+original.ChangeType+" "+original.TargetName+" ("+restored+")")
+		outcome := domain.ReflectionChangeOutcome{
+			Kind: "revert", Action: "revert", Name: original.TargetName, TargetID: rv.EvolutionEventID,
+			Reason: rv.Reason, Outcome: domain.ReflectionOutcomeApplied, Detail: restored,
+		}
+		if evErr == nil {
+			id := ev.ID
+			outcome.EventID = &id
+		}
+		recordOutcome(outcome)
 	}
 	return applied
 }

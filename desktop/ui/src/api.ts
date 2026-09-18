@@ -2038,6 +2038,54 @@ export interface EvolutionEvent {
   created_at: string;
 }
 
+export interface PerformanceSnapshot {
+  score: number;
+  kpi_composite: number;
+  /** metric_key -> attainment (0..1). */
+  kpis?: Record<string, number>;
+  /** 0..1. */
+  golden_pass_rate?: number;
+  /** 0..1. The rate this snapshot's golden_pass_rate is compared against. */
+  golden_pass_rate_before?: number;
+  captured_at: string;
+}
+
+export type ReflectionOutcome = "applied" | "rejected" | "skipped" | "failed" | "rolled_back" | "not_applied";
+
+interface ReflectionCatalogCounts {
+  skills: number;
+  rules: number;
+  memories: number;
+  skill_budget: number;
+  rule_budget: number;
+}
+
+export interface ReflectionChange {
+  kind: "skill" | "rule" | "memory" | "revert";
+  action: "create" | "update" | "delete" | "revert";
+  name: string;
+  target_id?: string;
+  reason?: string;
+  outcome: ReflectionOutcome;
+  detail?: string;
+  event_id?: string;
+}
+
+export interface ReflectionDecision {
+  /** Model's markdown prose. */
+  analysis?: string;
+  /** 2-4 sentence summary. */
+  self_assessment?: string;
+  /** Previous analysis' snapshot ("before"). */
+  baseline?: PerformanceSnapshot;
+  catalog_before: ReflectionCatalogCounts;
+  catalog_after: ReflectionCatalogCounts;
+  changes: ReflectionChange[];
+  gate?: { before_rate: number; after_rate: number; keep: boolean; reason?: string; rolled_back: number };
+  /** An older analysis parsed after the fact; its proposals were never applied. */
+  legacy?: boolean;
+}
+
 export interface AgentReflection {
   id: string;
   agent_id: string;
@@ -2046,7 +2094,9 @@ export interface AgentReflection {
   window_start: string;
   window_end: string;
   summary: string;
-  performance_snapshot?: { score: number; kpi_composite: number; kpis?: Record<string, number>; captured_at: string };
+  performance_snapshot?: PerformanceSnapshot;
+  raw_output?: string;
+  decision?: ReflectionDecision;
   error?: string;
   created_at: string;
   completed_at?: string;

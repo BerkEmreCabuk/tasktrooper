@@ -328,9 +328,10 @@ func (h *Handler) ListAgents(c *fiber.Ctx) error {
 	if err != nil {
 		return internalError(c, err)
 	}
-	// The role agent seed is scheduled at boot but may not have started yet;
-	// reporting only the catalog's own flag let the first read answer "done,
-	// and empty", and the sidebar stopped waiting.
+	// The built-in template upsert is scheduled at boot but may not have
+	// started yet; reporting only the catalog's own flag let the first read
+	// answer "done, and empty" before boot ever touched the templates table,
+	// and the sidebar stopped waiting on work that was never going to happen.
 	seeding := h.catalogSvc.SeedingInProgress()
 	if !seeding && h.bootSeed != nil && h.bootSeed.Booting() {
 		seeding = true

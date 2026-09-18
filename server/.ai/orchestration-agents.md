@@ -11,7 +11,18 @@ Skills and orchestrator rules are **agent-scoped**. Each skill and rule belongs 
 
 ## Default role agents
 
-At boot `EnsureRoleAgents` creates any missing role agents (by name) and fills in missing skills/rules for partially seeded agents. The seed stores skills without embeddings, so it never waits on the embedder; `catalog.BackfillSkillEmbeddings` embeds them in the background (retried for up to 30 min). `/admin/agents` reports `seeding: true` until the boot steps finish (`bootseed.Booting`).
+Role agents are never created automatically. At boot `EnsureRoleTemplates` only
+upserts the six built-in agent templates (by name) — it touches the
+`agent_templates` gallery, not `agents`. A role agent exists once the user
+creates it from the template gallery (`CreateAgentFromTemplate`); nothing
+reconciles it against its template afterward, so self-evolution's (or an
+admin's) edits to a created agent survive every restart instead of being
+reverted by the next boot. `seedSkill` still stores a copied skill without an
+embedding, so it never waits on the embedder; `catalog.BackfillSkillEmbeddings`
+embeds them in the background (retried for up to 30 min). `/admin/agents`
+reports `seeding: true` only for the brief `EnsureRoleTemplates` upsert;
+`bootseed.Booting` can still hold it true a little longer for other boot
+steps.
 
 | Name | Subagent type | Effort | Purpose |
 |------|---------------|--------|---------|
@@ -22,7 +33,7 @@ At boot `EnsureRoleAgents` creates any missing role agents (by name) and fills i
 | `qa-agent` | `generalPurpose` | medium | Manual test rounds, QA columns, read-only code tools |
 | `system-architect` | `system-architect` | high | Analysis (`analiz`) tasks, code review, task decomposition |
 
-Each role agent is seeded with 6–17 skills and 3–10 rules. Skill embeddings are filled in after the seed by the backfill above. Seed reconciliation updates existing skill/rule content on restart when the markdown under `internal/application/catalog/seeddata/` changes; renamed/removed entries must be listed in `deprecatedRoleSkills`/`deprecatedRoleRules` (`seed.go`) to be deleted from existing installs. Tool policies and effort are applied on agent CREATE only — admin customizations survive restarts, so policy additions reach existing installs via the admin UI.
+Each role template carries 6–17 skills and 3–10 rules, copied onto a new agent when it is created from the template. Skill embeddings are filled in after creation by the backfill above. Changing the markdown under `internal/application/catalog/seeddata/` only changes what the NEXT agent created from a template gets — `EnsureRoleTemplates` re-upserts the templates on every boot, but nothing re-syncs an already-created agent against them. Tool policies and effort are applied on agent CREATE only, from the template.
 
 ### Seeded models
 
@@ -34,11 +45,11 @@ Each role agent is seeded with 6–17 skills and 3–10 rules. Skill embeddings 
 
 Declared as one triple in `role_seed.go` (`roleAgentProvider` / `roleAgentModel` / `roleAgentModelHeavy`): a model name is only valid for the provider it was picked from, so the seed never writes a name without its provider. Both are aliases from `domain.ClaudeCodeModels()` rather than pinned ids, so a model release cannot stale them silently.
 
-`fillRoleAgentModels` (`seed.go`) reaches existing installs on restart instead of a migration. It fills the pair only when **both** `model` and `model_heavy` are empty and `provider_type` is `claude_code` or still empty — either name set, or any other provider, and the agent is left untouched. The provider is stamped only where the `checkHostExecutor` probe says the CLI can run here; a host with no runner keeps empty models, because `CreateAgent` refuses that provider there and the seed would lose all six agents.
+`fillTemplateAgentModels` (`templates.go`) applies the pair when `CreateAgentFromTemplate` creates an agent from a **built-in** template that names no provider/model itself. It fills the pair only when **both** `model` and `model_heavy` are empty and `provider_type` is `claude_code` or still empty — either name set (by an override the caller passed), or any other provider, and the request is left untouched. The provider is stamped only where the `checkHostExecutor` probe (`claudeCodeRunnable`) says the CLI can run here; a host with no runner keeps empty models, because `CreateAgent` refuses that provider there.
 
 ### QA test flow (seeded skill set)
 
-**QA runs manual tests only.** The automation phase is deferred, not deleted: four skills (`e2e-automation-project`, `automation-pipeline-integration`, `test-doubles-wiremock`, `test-database-seeding`) are seeded through `mdSkillDisabled` and two rules (`e2e-automation-project`, `deterministic-test-env`) through `disabledRule`, so they are **disabled** — files and seed lines stay in place, but the prompt builder injects only enabled entries. `manual-only-testing` replaced the `manual-before-automation` rule (old name in `deprecatedRoleRules`). Seed reconciles the `Enabled` field too; before it did, a skill whose only change was that flag never reached existing installs. Re-enabling is `mdSkillDisabled` → `mdSkill`, no migration. The `mobile-manual-testing` skill defines which layer of a mobile task can actually run in this environment (build, the repo's own lint/tests, the API side of the flow) and how to report what cannot run **without approving it** — a Linux runner has no simulator.
+**QA runs manual tests only.** The automation phase is deferred, not deleted: four skills (`e2e-automation-project`, `automation-pipeline-integration`, `test-doubles-wiremock`, `test-database-seeding`) are seeded through `mdSkillDisabled` and two rules (`e2e-automation-project`, `deterministic-test-env`) through `disabledRule`, so they are **disabled** — files and seed lines stay in place, but the prompt builder injects only enabled entries. `manual-only-testing` replaced the `manual-before-automation` rule. Re-enabling is `mdSkillDisabled` → `mdSkill`, no migration — but, like every other change under `seeddata/`, it only reaches the NEXT agent created from the `qa-agent` template, not one that already exists. The `mobile-manual-testing` skill defines which layer of a mobile task can actually run in this environment (build, the repo's own lint/tests, the API side of the flow) and how to report what cannot run **without approving it** — a Linux runner has no simulator.
 
 `qa-agent` is designed for the two-phase flow below; phase 2 is currently off. It never tests in prod (`never-test-in-prod` rule):
 
@@ -107,7 +118,7 @@ like every other, so omitting it files the skill as general.
 
 ## Agent templates
 
-`agent_templates` (migration 030) stores read-only agent snapshots: agent fields + `skills`/`rules` JSONB. The role agents are seeded as built-in templates by `EnsureRoleAgents` (idempotent upsert by name).
+`agent_templates` (migration 030) stores read-only agent snapshots: agent fields + `skills`/`rules` JSONB. The six role agents exist only as built-in templates (`BuiltIn: true`) until a user creates one, upserted by name on every boot by `EnsureRoleTemplates` — `CreateAgentFromTemplate` is what actually inserts into `agents`.
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -183,7 +194,7 @@ A task's record, and the agents working on it, multiplied from several places; e
 |---|---|
 | `catalog/seeddata/agents/qa-agent.md` + `role_seed.go` | Step 0 of the QA flow: `ready_for_qa` → `in_qa` before testing. Rule `qa-enter-in-qa-before-testing` (priority 100); `qa-pass-to-pm-uat` / `qa-fail-to-need-revision` exit from `in_qa` |
 | `board/runner.go` `columnInstruction` | Separate cases for `ready_for_qa` and `in_qa`. The general preamble says "moving to a column is not work, do not make it the plan's first item"; the `ready_for_qa` instruction keeps that and positions the move as **the opening act of the first test step** |
-| `catalog/seed.go` + migrations 070 / 104 | `qa-agent` subscribes to `ready_for_qa`, `in_qa` **and** `done` (`done` = PR merge, not testing). Seed only writes subscriptions for agents that have none, so existing installs are backfilled by migration |
+| `catalog/templates.go` (`setRoleSubscriptionsIfDefault`) + migrations 070 / 104 | `qa-agent` subscribes to `ready_for_qa`, `in_qa` **and** `done` (`done` = PR merge, not testing), set the moment `CreateAgentFromTemplate` creates it under that exact name. Only writes subscriptions when the agent has none, so a later admin customization survives; installs from before this existed were backfilled by migration |
 | `board/dispatcher.go` `isHandoffGateColumn` | `in_qa` + `human_uat` added |
 
 In a column that is not a hand-off gate, `task.moved` resolves to the **assignee**. That woke the wrong agent in three places:

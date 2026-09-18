@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { Bot, Brain, FileText, Inbox, Kanban, Layers, ListChecks, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Rocket, Settings } from "lucide-react";
+import { Bot, Brain, FileText, Inbox, Kanban, Layers, ListChecks, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Rocket, Settings, Users } from "lucide-react";
 import type { Agent, WorkspaceConfig } from "@/api";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import { SidebarNavLink } from "@/components/layout/SidebarNavLink";
 import { Spinner } from "@/components/ui/spinner";
 import { NewAgentDialog } from "@/components/workspace/NewAgentDialog";
@@ -161,6 +162,19 @@ export function WorkspaceSidebar({
                 }
               />
             ))}
+            {!loading && !collapsed && agents.length === 0 && (
+              <EmptyState
+                icon={Users}
+                title={t("chatArea.workspace.noAgents.title")}
+                description={t("chatArea.workspace.noAgents.description")}
+                className="py-6"
+                action={
+                  <Button size="sm" onClick={() => setNewAgentOpen(true)}>
+                    {t("chatArea.workspace.noAgents.cta")}
+                  </Button>
+                }
+              />
+            )}
 
             {!collapsed && (
               <p className="px-3 pt-4 pb-1 text-micro font-medium tracking-wide text-muted-foreground uppercase">

@@ -74,7 +74,7 @@ func TestReflectionWebResearchRunsOnTheHostExecutor(t *testing.T) {
 		},
 	}
 
-	out, _, err := svc.runLLM(context.Background(), domain.Agent{
+	out, _, _, err := svc.runLLM(context.Background(), domain.Agent{
 		Name: "backend-developer", ProviderType: domain.LLMProviderClaudeCode, Model: "opus",
 	}, "evidence text")
 	if err != nil {
@@ -123,7 +123,7 @@ func TestReflectionWithoutWebResearchStaysOnTheLLMClient(t *testing.T) {
 		cfg:       domain.EvolutionConfig{MaxSkillChanges: 3, MaxRuleChanges: 3, MaxMemoryChanges: 5},
 	}
 
-	if _, _, err := svc.runLLM(context.Background(), domain.Agent{
+	if _, _, _, err := svc.runLLM(context.Background(), domain.Agent{
 		Name: "backend-developer", ProviderType: domain.LLMProviderClaudeCode, Model: "opus",
 	}, "evidence"); err != nil {
 		t.Fatalf("runLLM: %v", err)

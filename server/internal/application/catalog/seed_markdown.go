@@ -13,11 +13,12 @@ var seedData embed.FS
 
 // skillSeed pairs a skill's create request with the tech stack name (if any)
 // its `tech_stack:` front-matter named. A name travels here instead of an id
-// because no id exists yet at parse time: EnsureRoleAgents resolves it against
-// the stack it creates on the agent being seeded, and EnsureRoleTemplates never
-// has an agent to resolve one against at all — it stores the name on the
-// template the same way domain.TemplateSkill does. Empty means general, the
-// same convention TemplateSkill.TechStack uses.
+// because no id exists yet at parse time: EnsureRoleTemplates has no agent to
+// resolve one against at all, so it stores the name on the template the same
+// way domain.TemplateSkill does; CreateAgentFromTemplate later resolves it
+// against the stack it recreates on the new agent (recreateTechStacks in
+// templates.go). Empty means general, the same convention TemplateSkill.TechStack
+// uses.
 type skillSeed struct {
 	req       domain.CreateSkillRequest
 	techStack string
@@ -49,14 +50,16 @@ func mdSkill(scope, name string) skillSeed {
 	}
 }
 
-// mdSkillDisabled seeds a skill the role still OWNS but must not use yet: the
-// row exists, the prompt builder skips it (it injects enabled skills only), and
-// turning the capability back on is a one-word edit rather than an archaeology
-// exercise over deleted files.
+// mdSkillDisabled seeds a skill the role's built-in template still OWNS but
+// must not use yet: the row exists, the prompt builder skips it (it injects
+// enabled skills only), and turning the capability back on is a one-word edit
+// rather than an archaeology exercise over deleted files.
 //
-// This is how a deferred capability is parked. Deleting the skill from the role
-// (deprecatedRoleSkills) is for one that is wrong, not for one whose turn has
-// not come — that path also drops any edit an operator made to it.
+// This is how a deferred capability is parked, as opposed to one that turned
+// out to be wrong and is simply removed from the role definition below —
+// removing it here only changes what the NEXT agent created from the
+// template gets; an existing agent's own copy of the skill is never touched,
+// since nothing reconciles an agent against its template after creation.
 func mdSkillDisabled(scope, name string) skillSeed {
 	seed := mdSkill(scope, name)
 	seed.req.Enabled = false

@@ -45,6 +45,14 @@ func (f *fakeManager) UpdateRuleForAgent(_ context.Context, agentID, ruleID uuid
 
 func (f *fakeManager) DeleteRuleForAgent(_ context.Context, _, _ uuid.UUID) error { return nil }
 
+// noopRecordEvent/noopRecordOutcome stand in for applyOutput's real callbacks
+// in tests that exercise applySkillChanges/applyRuleChanges directly and don't
+// care about the event or outcome bookkeeping, only the manager calls.
+func noopRecordEvent(domain.AgentEvolutionEvent) (domain.AgentEvolutionEvent, error) {
+	return domain.AgentEvolutionEvent{}, nil
+}
+func noopRecordOutcome(domain.ReflectionChangeOutcome) {}
+
 func skillMap(names ...string) map[string]domain.Skill {
 	out := map[string]domain.Skill{}
 	for _, n := range names {
@@ -61,7 +69,7 @@ func TestSkillBudgetRejectsCreateAtCap(t *testing.T) {
 
 	applied := s.applySkillChanges(context.Background(), domain.Agent{ID: uuid.New(), Name: "dev"},
 		[]domain.ReflectionSkillChange{{Action: "create", Name: "gamma", Description: "d", Content: "c"}},
-		existing, func(domain.AgentEvolutionEvent) {})
+		existing, noopRecordEvent, noopRecordOutcome)
 
 	if len(mgr.created) != 0 {
 		t.Fatalf("create should be rejected at budget, got %v", mgr.created)
@@ -86,7 +94,7 @@ func TestSkillBudgetFreesAfterDelete(t *testing.T) {
 		[]domain.ReflectionSkillChange{
 			{Action: "delete", SkillID: doomed},
 			{Action: "create", Name: "gamma", Description: "d", Content: "c"},
-		}, existing, func(domain.AgentEvolutionEvent) {})
+		}, existing, noopRecordEvent, noopRecordOutcome)
 
 	if len(mgr.created) != 1 {
 		t.Fatalf("create after delete should fit the budget, got %v", mgr.created)
@@ -99,7 +107,7 @@ func TestCreateOnExistingNameBecomesUpdate(t *testing.T) {
 
 	s.applySkillChanges(context.Background(), domain.Agent{ID: uuid.New()},
 		[]domain.ReflectionSkillChange{{Action: "create", Name: "Alpha", Description: "d", Content: "new body"}},
-		skillMap("alpha"), func(domain.AgentEvolutionEvent) {})
+		skillMap("alpha"), noopRecordEvent, noopRecordOutcome)
 
 	if len(mgr.created) != 0 || len(mgr.updated) != 1 {
 		t.Fatalf("same-name create should merge into an update: created=%v updated=%v", mgr.created, mgr.updated)
@@ -114,7 +122,7 @@ func TestRuleBudgetRejectsCreateAtCap(t *testing.T) {
 
 	applied := s.applyRuleChanges(context.Background(), domain.Agent{ID: uuid.New()},
 		[]domain.ReflectionRuleChange{{Action: "create", Name: "second", Content: "c"}},
-		existing, func(domain.AgentEvolutionEvent) {})
+		existing, noopRecordEvent, noopRecordOutcome)
 
 	if len(mgr.rcreated) != 0 || len(applied) != 1 || !strings.Contains(applied[0], "rejected") {
 		t.Fatalf("rule create should be rejected at budget: created=%v applied=%v", mgr.rcreated, applied)

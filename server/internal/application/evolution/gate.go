@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/catalog"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/rs/zerolog/log"
@@ -30,28 +31,53 @@ func (s *Service) enforceGoldenGate(
 	before, after goldenRun,
 	applyLog []string,
 	events []domain.AgentEvolutionEvent,
-) string {
+	outcomes []domain.ReflectionChangeOutcome,
+) (string, *domain.ReflectionGateResult) {
 	catalogEvents := catalogChangeEvents(events)
 	if len(catalogEvents) == 0 {
-		return ""
+		return "", nil
 	}
 
 	verdict := s.judgeGoldenGate(ctx, agentRec, before, after, gateSummaryChanges(applyLog))
 	line := fmt.Sprintf("\n\nGolden gate: %.0f%% → %.0f%% | verdict %s — %s",
 		before.Rate*100, after.Rate*100, keepWord(verdict.Keep), verdict.Reason)
+	result := &domain.ReflectionGateResult{BeforeRate: before.Rate, AfterRate: after.Rate, Keep: verdict.Keep, Reason: verdict.Reason}
 	if verdict.Keep {
 		log.Info().Str("agent", agentRec.Name).Float64("before", before.Rate).Float64("after", after.Rate).
 			Msg("golden gate kept the changes")
-		return line
+		return line, result
 	}
 
-	reverted := s.revertChangeSet(ctx, agentRec, reflection, catalogEvents, verdict.Reason)
+	revertedIDs := s.revertChangeSet(ctx, agentRec, reflection, catalogEvents, verdict.Reason)
+	result.RolledBack = len(revertedIDs)
+	markOutcomesRolledBack(outcomes, revertedIDs)
 	log.Warn().Str("agent", agentRec.Name).Float64("before", before.Rate).Float64("after", after.Rate).
-		Int("reverted", reverted).Msg("golden gate reverted the changes")
-	if reverted == 0 {
-		return line + "\nRollback failed: the changes are still live — inspect them by hand."
+		Int("reverted", len(revertedIDs)).Msg("golden gate reverted the changes")
+	if len(revertedIDs) == 0 {
+		return line + "\nRollback failed: the changes are still live — inspect them by hand.", result
 	}
-	return line + fmt.Sprintf("\nRolled back %d change(s); the agent is back on its pre-reflection skills and rules.", reverted)
+	return line + fmt.Sprintf("\nRolled back %d change(s); the agent is back on its pre-reflection skills and rules.", len(revertedIDs)), result
+}
+
+// markOutcomesRolledBack flips the outcome of every applied change the gate
+// just reverted, matched by the evolution event id the apply step attached to
+// it — the same id revertChangeSet reports as successfully undone. outcomes is
+// mutated in place: it shares a backing array with the slice
+// ReflectionDecision.Changes will be set to, so the caller sees the update
+// without a second pass.
+func markOutcomesRolledBack(outcomes []domain.ReflectionChangeOutcome, revertedEventIDs []uuid.UUID) {
+	if len(revertedEventIDs) == 0 {
+		return
+	}
+	reverted := make(map[uuid.UUID]bool, len(revertedEventIDs))
+	for _, id := range revertedEventIDs {
+		reverted[id] = true
+	}
+	for i := range outcomes {
+		if outcomes[i].EventID != nil && reverted[*outcomes[i].EventID] {
+			outcomes[i].Outcome = domain.ReflectionOutcomeRolledBack
+		}
+	}
 }
 
 func keepWord(keep bool) string {
@@ -85,13 +111,13 @@ func (s *Service) revertChangeSet(
 	reflection domain.AgentReflection,
 	events []domain.AgentEvolutionEvent,
 	reason string,
-) int {
+) []uuid.UUID {
 	revertCtx := catalog.WithVersionSource(ctx, catalog.VersionSource{
 		Source:       domain.CatalogVersionSourceEvolution,
 		Reason:       "golden gate rollback: " + reason,
 		ReflectionID: &reflection.ID,
 	})
-	reverted := 0
+	var reverted []uuid.UUID
 	for i := len(events) - 1; i >= 0; i-- {
 		original := events[i]
 		if _, err := s.revertEvent(revertCtx, agentRec, original); err != nil {
@@ -115,7 +141,7 @@ func (s *Service) revertChangeSet(
 		if err := s.store.UpdateEventImpact(ctx, original.ID, domain.EvolutionImpactRegressed); err != nil {
 			log.Warn().Err(err).Msg("golden gate impact update failed")
 		}
-		reverted++
+		reverted = append(reverted, original.ID)
 	}
 	return reverted
 }

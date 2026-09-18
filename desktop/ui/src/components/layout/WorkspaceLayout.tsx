@@ -6,12 +6,13 @@ import { useCachedState, useFirstLoad } from "@/hooks/useCachedState";
 import { CACHE_CONFIG } from "@/lib/project-board";
 import { cn } from "@/lib/utils";
 
-// A brand-new install seeds its default agents in the background (each one
-// runs its own LLM skill-embedding calls), so the roster can take a few
-// seconds to finish. Rather than showing agents one at a time as they're
-// inserted, poll until the backend reports seeding is done and reveal the
-// full roster together. Cap the polling so a stuck/unreachable LLM can't
-// spin the sidebar forever.
+// Boot only upserts the built-in agent TEMPLATES in the background (no
+// embedding calls, and nothing in `agents`) — a brand-new install has zero
+// agents until the user creates one, which is the empty state
+// WorkspaceSidebar renders. `seeding` still briefly covers that upsert (and
+// general boot), so poll until the backend reports it done rather than
+// painting the roster mid-boot. Cap the polling so a stuck/unreachable boot
+// step can't spin the sidebar forever.
 const SEED_POLL_INTERVAL_MS = 1500;
 const SEED_POLL_MAX_ATTEMPTS = 20;
 
