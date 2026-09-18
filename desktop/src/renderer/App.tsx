@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowUpCircle, Loader2, RefreshCw, WifiOff } from "lucide-react";
-import type { AppInfo, CloudStatus, SupervisorSnapshot, UpdateStatus } from "@ipc/types.js";
+import { ArrowUpCircle, Loader2, RefreshCw, WifiOff } from "lucide-react";
+import type { AppInfo, CloudStatus, UpdateStatus } from "@ipc/types.js";
 import { Button } from "@shared/ui/button.js";
-import { StatusDot, type Tone } from "@shared/components/StatusDot.js";
 import { api } from "./bridge";
 
 // Only macOS draws traffic lights inside the window, over the title bar.
@@ -28,21 +27,17 @@ const IS_MAC = navigator.userAgent.includes("Macintosh");
  *    the worst available answer.
  */
 export default function App() {
-  const [snapshot, setSnapshot] = useState<SupervisorSnapshot | null>(null);
   const [cloud, setCloud] = useState<CloudStatus | null>(null);
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [update, setUpdate] = useState<UpdateStatus | null>(null);
 
   useEffect(() => {
-    void api.supervisorState().then(setSnapshot);
     void api.cloudStatus().then(setCloud);
     void api.appInfo().then(setInfo);
     void api.updateStatus().then(setUpdate);
-    const offState = api.onSupervisorState(setSnapshot);
     const offCloud = api.onCloudStatus(setCloud);
     const offUpdate = api.onUpdateStatus(setUpdate);
     return () => {
-      offState();
       offCloud();
       offUpdate();
     };
@@ -52,27 +47,7 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col bg-background text-foreground">
-      <nav className={`drag-region flex h-11 shrink-0 items-center gap-2 border-b border-border pr-3 ${IS_MAC ? "pl-20" : "pl-3"}`}>
-        <span className="text-sm font-medium">TaskTrooper</span>
-
-        <div className="flex-1" />
-
-        <UpdateAffordance status={update} />
-
-        {/* Not a button any more: there is no local page to send anyone to.
-            It is a read-out, and its tooltip is the sentence the tray shows. */}
-        <span
-          className="flex items-center gap-2 rounded-md px-2 py-1 text-xs text-muted-foreground"
-          title={snapshot?.detail ?? "The local server"}
-        >
-          <StatusDot tone={tone(snapshot)} pulse={snapshot?.state === "starting"} />
-          {label(snapshot)}
-        </span>
-
-        <Button variant="ghost" size="sm" className="no-drag" onClick={reload} title="Reload">
-          <RefreshCw />
-        </Button>
-      </nav>
+      <nav className={`drag-region flex h-11 shrink-0 items-center gap-2 border-b border-border pr-3 ${IS_MAC ? "pl-20" : "pl-3"}`} />
 
       <div className="min-h-0 flex-1">
         {cloud?.state === "failed" ? <Unreachable status={cloud} info={info} onRetry={reload} /> : null}
@@ -80,6 +55,8 @@ export default function App() {
         {/* When the hosted app is up, the view covers this area exactly, which
             is why there is nothing to render for it here. */}
       </div>
+
+      <UpdatePopup status={update} />
     </div>
   );
 }
@@ -100,65 +77,46 @@ function Loading({ detail }: { detail?: string }) {
 }
 
 /**
- * The whole update UI: at most one small thing in the title bar.
+ * The whole update UI: a small floating popup, not a title-bar affordance.
  *
- * Three of the seven phases draw nothing at all — `unsupported`, `idle` and
- * `current` — because a build that is already the newest one has nothing to say
- * and saying it anyway is how a title bar becomes a notification area. There is
- * no modal, no toast, and nothing that appears while the user is doing
- * something else.
+ * Four of the seven phases draw nothing at all — `unsupported`, `idle`,
+ * `checking` and `current` — because a build that is already the newest one
+ * has nothing to say. `error` also stays silent here; a failed background
+ * check is not something worth interrupting the user for.
  *
- * `ready` is the only phase with a button, and it is worded as what it does
- * rather than what it wants: pressing it takes the four child processes down in
- * order and brings the app back on the new version. A task that is mid-run is
- * the reason this is never automatic — quitting normally also applies it, but
- * without returning, which is what somebody pressing Quit meant.
+ * The popup only appears once a download is actually in flight (`available`,
+ * with its percent) or finished (`ready`). Clicking it in the `ready` state
+ * is what does the restart: the four child processes are stopped in order and
+ * the app comes back on the new version. A task that is mid-run is the reason
+ * this is never automatic — quitting normally also applies it, but without
+ * returning, which is what somebody pressing Quit meant.
  */
-function UpdateAffordance({ status }: { status: UpdateStatus | null }) {
+function UpdatePopup({ status }: { status: UpdateStatus | null }) {
   const restart = useCallback(() => void api.restartToUpdate(), []);
 
-  if (!status) return null;
+  if (!status || (status.phase !== "available" && status.phase !== "ready")) return null;
 
-  switch (status.phase) {
-    case "ready":
-      return (
+  return (
+    <div className="no-drag fixed bottom-4 right-4 z-50 w-64 rounded-lg border border-border bg-popover p-3 shadow-lg">
+      {status.phase === "ready" ? (
         <Button
-          variant="ghost"
+          variant="secondary"
           size="sm"
-          className="no-drag text-xs"
+          className="w-full gap-2 text-xs"
           onClick={restart}
           title={`${status.detail ?? "An update is ready."} The four local processes are stopped in order first. Quitting normally installs it too, without reopening.`}
         >
-          <ArrowUpCircle />
+          <ArrowUpCircle className="size-3.5" />
           Restart to update
         </Button>
-      );
-
-    case "available":
-      return (
-        <span className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground" title={status.detail}>
-          <Loader2 className="size-3 animate-spin" />
-          {status.percent ? `${status.percent}%` : "update"}
-        </span>
-      );
-
-    case "error":
-      return (
-        <span
-          className="flex items-center gap-1.5 px-2 py-1 text-xs text-muted-foreground"
-          title={`Could not check for updates: ${status.detail ?? "no reason given"}${
-            status.feed ? ` (feed: ${status.feed})` : ""
-          }`}
-        >
-          <AlertTriangle className="size-3" />
-          update check failed
-        </span>
-      );
-
-    default:
-      // idle, checking, current, unsupported: nothing worth a pixel.
-      return null;
-  }
+      ) : (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground" title={status.detail}>
+          <Loader2 className="size-3.5 shrink-0 animate-spin" />
+          <span>Downloading update{status.percent ? `… ${status.percent}%` : "…"}</span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -202,36 +160,3 @@ function Unreachable({
   );
 }
 
-function tone(snapshot: SupervisorSnapshot | null): Tone {
-  switch (snapshot?.state) {
-    case "running":
-      return "ok";
-    case "degraded":
-    case "starting":
-    case "preflight":
-    case "stopping":
-      return "warn";
-    case "failed":
-      return "bad";
-    default:
-      return "idle";
-  }
-}
-
-function label(snapshot: SupervisorSnapshot | null): string {
-  switch (snapshot?.state) {
-    case "running":
-      return "running on this Mac";
-    case "degraded":
-      return "degraded";
-    case "preflight":
-    case "starting":
-      return "starting";
-    case "stopping":
-      return "stopping";
-    case "failed":
-      return "not running";
-    default:
-      return "stopped";
-  }
-}
