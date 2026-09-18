@@ -187,6 +187,31 @@ func (r *Runner) SetPullRequestReader(reader PullRequestReader) { r.prReader = r
 func (r *Runner) SetWorkflows(w port.WorkflowReader)   { r.workflows = w }
 func (r *Runner) SetRoleResolver(rr port.RoleResolver) { r.roles = rr }
 
+// workflowFor resolves a task type's workflow once per call site, the way
+// every stage/type behaviour check in this package reads it. WorkflowReader
+// already answers an unknown/deleted type with the default type's workflow
+// (see port.WorkflowReader), so an error here means the in-memory snapshot
+// itself is unreadable — a boot-time condition, not steady state. Rather than
+// letting that crash a run already in flight, it is logged and treated as a
+// workflow with no stages/behaviours at all: every Has/Param check below then
+// reads false, which is the same "unclaimed column, no behaviours" fallback
+// domain.Workflow.Stage already documents for a column with no row — a
+// (catastrophic, transient) blank snapshot degrades a run's automation
+// exactly the way an ordinary custom column always has, rather than failing
+// it outright.
+func (r *Runner) workflowFor(ctx context.Context, taskType domain.TaskType) domain.Workflow {
+	if r.workflows == nil {
+		return domain.Workflow{}
+	}
+	wf, err := r.workflows.Workflow(ctx, taskType)
+	if err != nil {
+		log.Warn().Err(err).Str("task_type", string(taskType)).
+			Msg("board run: workflow snapshot unreadable, run continues with every stage/type behaviour off")
+		return domain.Workflow{}
+	}
+	return wf
+}
+
 type Runner struct {
 	// agentLoop is the ROUTER in production (agent.Router), not the bare loop:
 	// every run this package starts — the main one, the verify-fix rounds, the
@@ -914,6 +939,11 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	if job.Task.Column != dispatchedIn {
 		job.EnteredFrom = dispatchedIn
 	}
+	// Resolved once, after the automatic move above has settled the task's
+	// real column, and reused by every stage/type behaviour check for the
+	// rest of this run rather than each asking the (in-memory, but not free)
+	// reader again.
+	wf := r.workflowFor(ctx, job.Task.TaskType)
 
 	skills, err := r.catalog.ListSkillsByAgent(ctx, agentRec.ID)
 	if err != nil {
@@ -1111,9 +1141,9 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	}
 
 	systemPrompt := prompt.BuildSystemPromptFor(agentRec, enabledSkills, techStacks, ruleTexts, r.language(runCtx), skillDelivery)
-	criteriaItems := r.criteriaForRun(runCtx, job)
+	criteriaItems := r.criteriaForRun(runCtx, job, wf)
 	changedSinceVerdict := r.changedSinceByVerifiedSHA(runCtx, workDir, criteriaItems)
-	triggerMsg := buildTriggerMessage(job, criteriaItems, changedSinceVerdict)
+	triggerMsg := buildTriggerMessage(job, wf, criteriaItems, changedSinceVerdict)
 
 	// Every context block below is computed here, in its original relative
 	// order, so every side effect (git reads, the PR lookup's early return,
@@ -1158,14 +1188,14 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	}
 	if taskWorkspace != "" && r.git != nil {
 		if diff, diffErr := r.git.TaskDiff(ctx, taskWorkspace); diffErr == nil && diff != "" {
-			diffMsg = reviewDiffMessage(job.Task.Column, diff)
+			diffMsg = reviewDiffMessage(wf, job.Task.Column, diff)
 		}
 	}
 	// A code review is a review OF A PULL REQUEST. If the developer's run never
 	// got one opened, open it here before the reviewer reads anything; a branch
 	// that still cannot have a PR is not reviewable, and saying so beats a
 	// verdict nobody can trace back to a diff on the remote.
-	if job.Task.Column == domain.TaskColumnCodeReview && taskWorkspace != "" && r.git != nil {
+	if wf.Has(job.Task.Column, domain.BehaviourRequirePRForReview) && taskWorkspace != "" && r.git != nil {
 		var prErr error
 		prMsg, prErr = r.reviewPRContext(ctx, taskWorkspace, job.Task.ID)
 		if prErr != nil {
@@ -1242,7 +1272,11 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 		// the web app's layout. On a single-kind repo (or an agent whose role
 		// names no area) the narrowing is a no-op and everything goes in.
 		projectDesc = repoCtx.Description
-		projectProfile = r.projects.ProfileForRun(ctx, job.RepositoryID, profileKindForAgent(agentRec.Name, repoCtx.Kind))
+		profileKind := ""
+		if repoCtx.Kind == domain.RepoKindMonorepo && r.roles != nil {
+			profileKind = r.roles.AgentArea(ctx, agentRec.ID)
+		}
+		projectProfile = r.projects.ProfileForRun(ctx, job.RepositoryID, profileKind)
 		if projectProfile == "" {
 			projectProfile = repoCtx.ProfileMD
 		}
@@ -1336,20 +1370,18 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	}
 
 	policy := domain.MergeToolPolicy(r.defaultPolicy, agentRec.ToolPolicy)
-	// Role first (what this agent may do), task type second (what this task has
-	// any use for): an analiz run loses the file writers, because its deliverable
-	// is a document and nothing it wrote to the workspace would ever be committed.
-	// Two narrowings, and they answer different questions: the task type says
-	// what this DELIVERABLE may touch (an analiz produces a document), the column
-	// says what this RUN is for (a review or a QA round produces a verdict about
-	// someone else's work, never a change to it).
-	upliftedPolicy := domain.RestrictCodeToolsForVerification(
-		domain.RestrictToolsForVerdictColumn(
-			domain.RestrictToolsForTaskType(domain.UpliftWorkspaceTools(policy), job.Task.TaskType),
-			job.Task.Column,
-		),
-		job.Task.Column,
-	)
+	// Role first (what this agent may do), task type and stage second (what
+	// this task has any use for): an analiz run loses the file writers,
+	// because its deliverable is a document and nothing it wrote to the
+	// workspace would ever be committed. The type narrowing and the stage
+	// narrowing answer different questions: the type says what this
+	// DELIVERABLE may touch (an analiz produces a document), the stage says
+	// what this RUN is for (a review or a QA round produces a verdict about
+	// someone else's work, never a change to it) — both read off the same
+	// workflow RestrictToolsForStage takes, in place of the three
+	// literal-column/type narrowings this used to chain by hand.
+	stage, _ := wf.Stage(job.Task.Column)
+	upliftedPolicy := domain.RestrictToolsForStage(domain.UpliftWorkspaceTools(policy), stage, wf.Type)
 
 	var resp domain.AgentResponse
 	// Shared with every follow-up step dispatched on runCtx below (verify-fix,
@@ -1490,7 +1522,7 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	// evidence (a real diff, an executed command, ticked criteria) for those.
 	buildVerified := true
 	if r.verifyEnabled && taskWorkspace != "" && resp.Clarification == nil && resp.ResourceBlock == nil &&
-		job.Task.TaskType != domain.TaskTypeAnaliz && producesADiff(job.Task.Column) {
+		wf.Has(job.Task.Column, domain.BehaviourBuildVerify) {
 		var quotaBlock *domain.QuotaBlock
 		resp, buildVerified, quotaBlock = r.verifyAndFix(runCtx, job, agentRec, history, resp, model, upliftedPolicy, taskWorkspace)
 		if quotaBlock != nil {
@@ -1514,7 +1546,7 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	// its summary says — DE-1's architect wrote a full spec out of eight tool
 	// calls, none of which read anything. Fail it here so the reconciler retries
 	// instead of leaving an invented analysis on the board as a completed run.
-	if resp.ResourceBlock == nil && isUngroundedAnalysis(job.Task, resp, toolUsage) {
+	if resp.ResourceBlock == nil && isUngroundedAnalysis(wf, job.Task, resp, toolUsage) {
 		// Assigned to the named err so the deferred activity recorder reports
 		// this run as failed too, not just the board row.
 		err = r.failRunUngrounded(ctx, job, run, resp)
@@ -1526,7 +1558,7 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	// have produced one. DE-1's QA run wrote its scenario list in the future
 	// tense ("I will run these and verify each criterion"), called one board
 	// tool, and was stamped completed.
-	if resp.ResourceBlock == nil && isUngroundedQA(job.Task, resp, toolUsage) {
+	if resp.ResourceBlock == nil && isUngroundedQA(wf, job.Task, resp, toolUsage) {
 		err = r.failRunUngroundedQA(ctx, job, run, resp, ungroundedQAReason)
 		return err
 	}
@@ -1535,7 +1567,7 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	// a QA round that never put the interface in front of itself has not tested
 	// the thing the user sees. Commands cannot see a button rendering as a bare
 	// "?"; a screenshot can, and the model is on vision.
-	if resp.Clarification == nil && resp.ResourceBlock == nil && r.qaSkippedTheUI(ctx, job, toolUsage) {
+	if resp.Clarification == nil && resp.ResourceBlock == nil && r.qaSkippedTheUI(ctx, job, wf, toolUsage) {
 		err = r.failRunUngroundedQA(ctx, job, run, resp, noUIEvidenceReason)
 		return err
 	}
@@ -1543,14 +1575,14 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	// The same rule again, on PM's own end of the board: a pm_uat run's
 	// approval is only worth anything if PM put the product in front of itself,
 	// not just read QA's notes and the board.
-	if resp.ResourceBlock == nil && isUngroundedPMUAT(job.Task, resp, toolUsage) {
+	if resp.ResourceBlock == nil && isUngroundedPMUAT(wf, job.Task, resp, toolUsage) {
 		err = r.failRunUngroundedPMUAT(ctx, job, run, resp, ungroundedPMUATReason)
 		return err
 	}
 
 	// And the coverage gap this gate exists to close: PM approving a criterion
 	// that QA's own case list never actually proves, purely on QA's say-so.
-	if resp.Clarification == nil && resp.ResourceBlock == nil && r.pmSkippedCoverageEvidence(ctx, job, run, toolUsage) {
+	if resp.Clarification == nil && resp.ResourceBlock == nil && r.pmSkippedCoverageEvidence(ctx, job, wf, run, toolUsage) {
 		err = r.failRunUngroundedPMUAT(ctx, job, run, resp, pmUncoveredCriterionReason)
 		return err
 	}
@@ -1614,7 +1646,7 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	// Same reason the build gate is skipped: a review run produces a verdict,
 	// not a commit. Committing from it would put the reviewer's name on the
 	// author's branch and push whatever the workspace happened to contain.
-	if taskWorkspace != "" && resp.Clarification == nil && resp.ResourceBlock == nil && producesADiff(job.Task.Column) {
+	if taskWorkspace != "" && resp.Clarification == nil && resp.ResourceBlock == nil && wf.Has(job.Task.Column, domain.BehaviourCommitOnFinish) {
 		commitMsg := r.writeCommitMessage(ctx, commitDetails{
 			TaskKey:   job.Task.Key,
 			Title:     job.Task.Title,
@@ -1635,8 +1667,8 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 		// errors on the card — handing it on as well would contradict that in the
 		// same second.
 		if buildVerified {
-			r.advanceToCodeReview(ctx, job, taskWorkspace, toolUsage)
-			r.advanceToAnalizReview(ctx, job, toolUsage)
+			r.advanceToCodeReview(ctx, job, wf, taskWorkspace, toolUsage)
+			r.advanceToAnalizReview(ctx, job, wf, toolUsage)
 		} else {
 			log.Info().Str("task_id", job.Task.ID.String()).
 				Msg("hand-off: build verification failed after every fix round, task stays in the working column")
@@ -2029,14 +2061,16 @@ func (r *Runner) enterWorkingColumn(ctx context.Context, job RunJob) domain.Boar
 		return task
 	}
 
-	var column domain.TaskColumn
-	switch task.Column {
-	case domain.TaskColumnTodo:
-		if task.AssigneeAgentID == nil || *task.AssigneeAgentID != job.Run.AgentID {
-			return task
-		}
-		column = domain.TaskColumnInProgress
-	case domain.TaskColumnNeedRevision:
+	wf := r.workflowFor(ctx, task.TaskType)
+	if !wf.Has(task.Column, domain.BehaviourAutoEnter) {
+		return task
+	}
+	target, _ := wf.Param(task.Column, domain.BehaviourAutoEnter, "to")
+	column := domain.TaskColumn(target)
+	if column == "" {
+		return task
+	}
+	if assigneeOnly, _ := wf.Param(task.Column, domain.BehaviourAutoEnter, "assignee_only"); assigneeOnly == "true" {
 		// A revision run works the code exactly like an in_progress run does, so
 		// the card belongs in in_progress while it does. Leaving that move to the
 		// agent left the board reading "waiting on the developer" for the whole
@@ -2047,17 +2081,10 @@ func (r *Runner) enterWorkingColumn(ctx context.Context, job RunJob) domain.Boar
 		if task.AssigneeAgentID == nil || *task.AssigneeAgentID != job.Run.AgentID {
 			return task
 		}
-		column = domain.TaskColumnInProgress
-	case domain.TaskColumnReadyForQA:
-		// An analiz task has no QA stage at all; it never reaches this column,
-		// and if a human drags one here nothing about it is testable.
-		if task.TaskType == domain.TaskTypeAnaliz {
-			return task
-		}
-		column = domain.TaskColumnInQA
-	default:
-		return task
 	}
+	// assignee_only=false (ready_for_qa -> in_qa today): a hand-off gate column
+	// dispatches by subscription, not by assignee, so every run that reaches it
+	// is the right agent to make the move — see route_to_subscribers.
 
 	agentID := job.Run.AgentID
 	updated, err := r.taskUpdater.UpdateTask(ctx, job.RepositoryID, task.ID, domain.UpdateBoardTaskRequest{
@@ -2119,16 +2146,12 @@ type taskColumnReader interface {
 // Attributed to the agent, exactly like enterWorkingColumn: the dispatcher skips
 // the agent whose own tool call produced a move event, so attributing it to the
 // system here would dispatch this same agent again on its own hand-off.
-func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, taskWorkspace string, usage *registry.ToolUsage) {
+func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, wf domain.Workflow, taskWorkspace string, usage *registry.ToolUsage) {
 	if r.taskUpdater == nil || r.git == nil || taskWorkspace == "" {
 		return
 	}
-	if job.Task.TaskType == domain.TaskTypeAnaliz {
-		return
-	}
-	switch job.Task.Column {
-	case domain.TaskColumnInProgress, domain.TaskColumnNeedRevision:
-	default:
+	target, ok := wf.Param(job.Task.Column, domain.BehaviourAdvanceOnDiff, "to")
+	if !ok || target == "" {
 		return
 	}
 
@@ -2200,7 +2223,7 @@ func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, taskWorksp
 		}
 	}
 
-	column := domain.TaskColumnCodeReview
+	column := domain.TaskColumn(target)
 	agentID := job.Run.AgentID
 	if _, err := r.taskUpdater.UpdateTask(ctx, job.RepositoryID, job.Task.ID, domain.UpdateBoardTaskRequest{
 		Column:       &column,
@@ -2242,16 +2265,12 @@ func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, taskWorksp
 // deliverable is the spec/plan documents attached to the card, not a change to
 // the branch, so AnalizDocumentTools is this column's equivalent of
 // ImplementationVerificationTools.
-func (r *Runner) advanceToAnalizReview(ctx context.Context, job RunJob, usage *registry.ToolUsage) {
+func (r *Runner) advanceToAnalizReview(ctx context.Context, job RunJob, wf domain.Workflow, usage *registry.ToolUsage) {
 	if r.taskUpdater == nil {
 		return
 	}
-	if job.Task.TaskType != domain.TaskTypeAnaliz {
-		return
-	}
-	switch job.Task.Column {
-	case domain.TaskColumnInProgress, domain.TaskColumnNeedRevision:
-	default:
+	target, ok := wf.Param(job.Task.Column, domain.BehaviourAdvanceOnDocument, "to")
+	if !ok || target == "" {
 		return
 	}
 
@@ -2271,7 +2290,7 @@ func (r *Runner) advanceToAnalizReview(ctx context.Context, job RunJob, usage *r
 		}
 	}
 
-	column := domain.TaskColumnAnalizReview
+	column := domain.TaskColumn(target)
 	agentID := job.Run.AgentID
 	if _, err := r.taskUpdater.UpdateTask(ctx, job.RepositoryID, job.Task.ID, domain.UpdateBoardTaskRequest{
 		Column:       &column,
@@ -2379,12 +2398,13 @@ func (r *Runner) failRun(ctx context.Context, run domain.TaskAgentRun, err error
 	return err
 }
 
-// isUngroundedAnalysis reports an analiz run that answered without reading the
-// repository. A run that ended in a question is exempt — asking IS the answer,
-// and blocking it would trade an invented analysis for an unanswerable loop.
-// A nil tracker means the run was never measured (chat, tests) and never blocks.
-func isUngroundedAnalysis(task domain.BoardTask, resp domain.AgentResponse, usage *registry.ToolUsage) bool {
-	if task.TaskType != domain.TaskTypeAnaliz || resp.Clarification != nil || usage == nil {
+// isUngroundedAnalysis reports a run of a require_repo_grounding task type
+// (analiz today) that answered without reading the repository. A run that
+// ended in a question is exempt — asking IS the answer, and blocking it would
+// trade an invented analysis for an unanswerable loop. A nil tracker means the
+// run was never measured (chat, tests) and never blocks.
+func isUngroundedAnalysis(wf domain.Workflow, task domain.BoardTask, resp domain.AgentResponse, usage *registry.ToolUsage) bool {
+	if !wf.TypeHas(domain.BehaviourRequireRepoGrounding) || resp.Clarification != nil || usage == nil {
 		return false
 	}
 	return !usage.UsedAny(domain.CodeExplorationTools...)
@@ -2440,30 +2460,28 @@ func (r *Runner) failRunUngrounded(ctx context.Context, job RunJob, run domain.T
 // the run never read the repository.
 var ErrUngroundedAnalysis = errors.New("analiz run produced no repository exploration")
 
-// isUngroundedQA reports a QA run that reported on a product it never ran.
+// isUngroundedQA reports a QA run that reported on a product it never ran —
+// the require_execution_evidence stage behaviour.
 //
-// Only the QA columns are judged, and only for work that has something to run:
-// an analiz task has no QA phase, and a run that ended in a question is exempt
-// for the same reason the analiz gate exempts one — asking IS the answer. A nil
-// tracker means the run was never measured and never blocks.
+// Only stages that carry it are judged, and only for work that has something
+// to run: an analiz task's stages never carry it, so it has no QA phase, and a
+// run that ended in a question is exempt for the same reason the analiz gate
+// exempts one — asking IS the answer. A nil tracker means the run was never
+// measured and never blocks.
 //
 // review_criterion is not evidence here (see domain.QAExecutionTools): a run
 // that approves criteria without executing anything is precisely the failure,
 // and letting the claim count as its own proof would reopen it.
-func isUngroundedQA(task domain.BoardTask, resp domain.AgentResponse, usage *registry.ToolUsage) bool {
-	if task.TaskType == domain.TaskTypeAnaliz || resp.Clarification != nil || usage == nil {
-		return false
-	}
-	switch task.Column {
-	case domain.TaskColumnInQA, domain.TaskColumnReadyForQA:
-	default:
+func isUngroundedQA(wf domain.Workflow, task domain.BoardTask, resp domain.AgentResponse, usage *registry.ToolUsage) bool {
+	if resp.Clarification != nil || usage == nil || !wf.Has(task.Column, domain.BehaviourRequireExecutionEvidence) {
 		return false
 	}
 	return !usage.UsedAny(domain.QAExecutionTools...)
 }
 
 // qaSkippedTheUI reports a QA round on a user-facing repository that never
-// looked at the interface.
+// looked at the interface. It runs on the same require_execution_evidence
+// stages isUngroundedQA does.
 //
 // It is the gap isUngroundedQA leaves open: run_terminal satisfies that check,
 // so a web task could be "tested" with a build and a test command and every
@@ -2471,13 +2489,8 @@ func isUngroundedQA(task domain.BoardTask, resp domain.AgentResponse, usage *reg
 // model. The agents run on vision-capable models — the miss was never the
 // model's, because no image was ever captured for it to look at. A store button
 // that renders as a bare "?" is invisible to `npm run build`.
-func (r *Runner) qaSkippedTheUI(ctx context.Context, job RunJob, usage *registry.ToolUsage) bool {
-	if usage == nil || r.projects == nil {
-		return false
-	}
-	switch job.Task.Column {
-	case domain.TaskColumnInQA, domain.TaskColumnReadyForQA:
-	default:
+func (r *Runner) qaSkippedTheUI(ctx context.Context, job RunJob, wf domain.Workflow, usage *registry.ToolUsage) bool {
+	if usage == nil || r.projects == nil || !wf.Has(job.Task.Column, domain.BehaviourRequireExecutionEvidence) {
 		return false
 	}
 	if usage.UsedAny(domain.UIObservationTools...) {
@@ -2564,11 +2577,11 @@ var ErrUngroundedQA = errors.New("QA run executed nothing")
 // browser/mobile calls — a run whose entire ledger is list_test_cases,
 // read_file and review_criterion calls has approved criteria from QA's notes
 // and the board alone, never from touching the running product.
-func isUngroundedPMUAT(task domain.BoardTask, resp domain.AgentResponse, usage *registry.ToolUsage) bool {
+func isUngroundedPMUAT(wf domain.Workflow, task domain.BoardTask, resp domain.AgentResponse, usage *registry.ToolUsage) bool {
 	if resp.Clarification != nil || usage == nil {
 		return false
 	}
-	if task.Column != domain.TaskColumnPMUAT {
+	if !wf.Has(task.Column, domain.BehaviourRequireProductCheck) {
 		return false
 	}
 	return !usage.UsedAny(domain.PMUATExecutionTools...)
@@ -2582,13 +2595,13 @@ func isUngroundedPMUAT(task domain.BoardTask, resp domain.AgentResponse, usage *
 // approvals this run itself recorded — run.CreatedAt predates any check this
 // run's own review_criterion calls could have written, so a check timestamped
 // after it is this run's, not a settled earlier one.
-func (r *Runner) pmSkippedCoverageEvidence(ctx context.Context, job RunJob, run domain.TaskAgentRun, usage *registry.ToolUsage) bool {
-	if usage == nil || job.Task.Column != domain.TaskColumnPMUAT {
+func (r *Runner) pmSkippedCoverageEvidence(ctx context.Context, job RunJob, wf domain.Workflow, run domain.TaskAgentRun, usage *registry.ToolUsage) bool {
+	if usage == nil || !wf.Has(job.Task.Column, domain.BehaviourRequireProductCheck) {
 		return false
 	}
 	criteria := r.allCriteria(ctx, job)
 	testCases := r.taskTestCases(ctx, job)
-	return pmApprovedUncoveredCriterion(job.Task, criteria, testCases, usage, run.CreatedAt)
+	return pmApprovedUncoveredCriterion(wf, job.Task, criteria, testCases, usage, run.CreatedAt)
 }
 
 // pmApprovedUncoveredCriterion reports whether this run's PM checks include an
@@ -2606,13 +2619,14 @@ func (r *Runner) pmSkippedCoverageEvidence(ctx context.Context, job RunJob, run 
 // CriterionID and TestCaseStatusPassed — QA's executed round, not PM's verdict
 // about it.
 func pmApprovedUncoveredCriterion(
+	wf domain.Workflow,
 	task domain.BoardTask,
 	criteria []domain.AcceptanceCriterion,
 	testCases []domain.TaskTestCase,
 	usage *registry.ToolUsage,
 	runStartedAt time.Time,
 ) bool {
-	if usage == nil || task.Column != domain.TaskColumnPMUAT {
+	if usage == nil || !wf.Has(task.Column, domain.BehaviourRequireProductCheck) {
 		return false
 	}
 	passedByCriterion := make(map[uuid.UUID]bool, len(testCases))
@@ -2952,8 +2966,8 @@ func (r *Runner) allCriteria(ctx context.Context, job RunJob) []domain.Acceptanc
 // would surface somewhere — restarting a review cycle that had nothing wrong
 // with it. The ids are now in the prompt for exactly the roles that must quote
 // them back.
-func (r *Runner) criteriaForRun(ctx context.Context, job RunJob) []domain.AcceptanceCriterion {
-	if listsEveryCriterion(job.Task) {
+func (r *Runner) criteriaForRun(ctx context.Context, job RunJob, wf domain.Workflow) []domain.AcceptanceCriterion {
+	if listsEveryCriterion(wf, job.Task) {
 		return r.allCriteria(ctx, job)
 	}
 	return r.openCriteria(ctx, job)
@@ -2995,24 +3009,17 @@ func (r *Runner) changedSinceByVerifiedSHA(ctx context.Context, workspacePath st
 }
 
 // listsEveryCriterion reports whether this run's prompt shows every criterion
-// with its ids and its verdicts rather than only the unticked ones.
+// with its ids and its verdicts rather than only the unticked ones — the
+// show_all_criteria stage behaviour.
 //
 // It is deliberately wider than isReviewColumn: ready_for_qa, in_qa and
 // human_uat are not "review columns" for the runner's build/commit decisions,
 // but they are the columns whose run records verdicts, and a verdict needs the
-// id. Analiz tasks are excluded — their criteria are what the analysis must
-// answer, ticked by the run that answers them, and that behaviour is unchanged.
-func listsEveryCriterion(task domain.BoardTask) bool {
-	if task.TaskType == domain.TaskTypeAnaliz {
-		return false
-	}
-	switch task.Column {
-	case domain.TaskColumnCodeReview, domain.TaskColumnReadyForQA, domain.TaskColumnInQA,
-		domain.TaskColumnPMUAT, domain.TaskColumnHumanUAT:
-		return true
-	default:
-		return false
-	}
+// id. show_all_criteria is never on an analiz stage, so an analiz task is
+// excluded automatically — its criteria are what the analysis must answer,
+// ticked by the run that answers them, and that behaviour is unchanged.
+func listsEveryCriterion(wf domain.Workflow, task domain.BoardTask) bool {
+	return wf.Has(task.Column, domain.BehaviourShowAllCriteria)
 }
 
 // standingCriteriaMessage states the criteria every code task carries whether or
@@ -3152,13 +3159,13 @@ func changedSinceNote(sha string, changedSince map[string][]string) string {
 // against. Only implementers are told to tick them: for QA and PM the tick is
 // the developer's claim to verify, not theirs to make — they record their own
 // verdict with review_criterion.
-func criteriaMessage(task domain.BoardTask, criteria []domain.AcceptanceCriterion, changedSince map[string][]string) string {
+func criteriaMessage(wf domain.Workflow, task domain.BoardTask, criteria []domain.AcceptanceCriterion, changedSince map[string][]string) string {
 	var sb strings.Builder
 	sb.WriteString(standingCriteriaMessage(task))
 	if len(criteria) == 0 {
 		return sb.String()
 	}
-	if listsEveryCriterion(task) {
+	if listsEveryCriterion(wf, task) {
 		sb.WriteString(reviewCriteriaHeader(task.Column))
 		for _, c := range criteria {
 			sb.WriteString(criterionStateLine(c, changedSince))
@@ -3188,7 +3195,7 @@ func criteriaMessage(task domain.BoardTask, criteria []domain.AcceptanceCriterio
 	return sb.String()
 }
 
-func buildTriggerMessage(job RunJob, criteria []domain.AcceptanceCriterion, changedSince map[string][]string) string {
+func buildTriggerMessage(job RunJob, wf domain.Workflow, criteria []domain.AcceptanceCriterion, changedSince map[string][]string) string {
 	taskJSON, _ := json.Marshal(map[string]interface{}{
 		"task_id": job.Task.ID.String(),
 		// task_key is the short handle every board tool also accepts. Without it
@@ -3244,7 +3251,7 @@ A run that skips any of 1-3 has its hand-off refused and its finished work parke
 
 Task snapshot:
 %s
-%s`, runInstruction(job), closingStep(job), string(taskJSON), criteriaMessage(job.Task, criteria, changedSince))
+%s`, runInstruction(wf, job), closingStep(wf, job), string(taskJSON), criteriaMessage(wf, job.Task, criteria, changedSince))
 }
 
 // closingStep is step 4 of the pre-finish checklist. For a run whose hand-off
@@ -3255,8 +3262,8 @@ Task snapshot:
 // runner publishes the closing summary itself once the gate passes. Review and
 // analiz runs keep the old instruction: their comment IS the deliverable
 // (a verdict, a hand-off note) and the build gate never judges them.
-func closingStep(job RunJob) string {
-	if job.Task.TaskType == domain.TaskTypeAnaliz || !producesADiff(job.Task.Column) {
+func closingStep(wf domain.Workflow, job RunJob) string {
+	if !wf.Has(job.Task.Column, domain.BehaviourBuildVerify) {
 		return "4. One add_task_comment with what you changed and the command output that verified it."
 	}
 	return "4. Do NOT post an add_task_comment announcing completion. Close with your final message instead — what you changed and the command output that verified it. " +
@@ -3272,7 +3279,7 @@ func closingStep(job RunJob) string {
 // coding without looking at what the reviewer wrote. The card's column is the
 // truth for the board; the column the run was dispatched from is the truth about
 // what the run is for.
-func runInstruction(job RunJob) string {
+func runInstruction(wf domain.Workflow, job RunJob) string {
 	task := job.Task
 	// Only need_revision: the todo -> in_progress move is the one whose old
 	// instruction ("claim it and move it to in_progress") is exactly the
@@ -3280,7 +3287,7 @@ func runInstruction(job RunJob) string {
 	if job.EnteredFrom == domain.TaskColumnNeedRevision {
 		task.Column = domain.TaskColumnNeedRevision
 	}
-	return columnInstruction(task)
+	return columnInstruction(wf, task)
 }
 
 // verifyBeforeFinishing is the step the implementer instruction never named.
@@ -3312,60 +3319,6 @@ const handoffIsAutomatic = verifyBeforeFinishing +
 	"That message is your report to the system, NOT a card comment: a run that went green writes nothing on the task, because the diff, the pull request, the pipeline result and the ticked criteria already say it. " +
 	"Use add_task_comment only for something the next person has to act on — a question you could not answer yourself, a part of the task you did not do and why, a risk or a follow-up somebody must pick up."
 
-// analizProducesDocuments is the closing sentence for every column an analiz
-// task is worked in. It states the deliverable and the two things the run must
-// not do — write to the repo, and hand itself to code_review — because both
-// were what the column-only instruction told it to do.
-const analizProducesDocuments = "Your deliverable is a SPEC and an IMPLEMENTATION PLAN attached to this task with add_task_document, " +
-	"grounded in code you actually read (get_repo_tree, codebase_search, grep_code, get_symbol_skeleton, expand_symbol_context) — " +
-	"a document attached by a run that explored nothing is rejected and the run is failed. " +
-	"If this task already carries a spec or a plan — a revision pass, a need_revision bounce, a change the human asked for — rewrite THAT document with update_task_document instead of attaching another one: the card must end with one current spec and one current plan. " +
-	"Never write, edit, move or delete a file in the repository and never commit: an analysis produces documents, not a diff, " +
-	"and there is no automatic hand-off to code_review for this task type — a run that ends with file edits has done the implementer's job on the wrong task. " +
-	"Finish with a summary comment (approach, the document titles, the task split you intend), then STOP: " +
-	"when this run ends with a document attached, the system moves the task to `analiz_review` for you — do NOT move it yourself and never plan a step for the move — " +
-	"the human approves there, and no implementation task is created before they do."
-
-// taskTypeInstruction states what the run must produce when the task type — not
-// the column — decides it. It returns "" for the types and columns where the
-// column alone is the whole story, so columnInstruction's switch stays the
-// default path for task/bug work.
-//
-// Only analiz differs today: it is the one type whose deliverable is a document
-// rather than a diff, whose exit gate is analiz_review rather than code_review,
-// and whose run has no automatic hand-off behind it (advanceToCodeReview returns
-// early for it, and the post-run commit is skipped) — so an analiz run that
-// followed the implementer instruction produced nothing the board could carry.
-func taskTypeInstruction(task domain.BoardTask) string {
-	if task.TaskType != domain.TaskTypeAnaliz {
-		return ""
-	}
-	switch task.Column {
-	case domain.TaskColumnTodo:
-		return "This is an ANALIZ task (task_type=analiz) in `todo` — an ANALYSIS, not an implementation. If it is not relevant to your role, take no action. " +
-			"If it is: claim it and move it to in_progress as the opening action of the step that does the analysis (never a step of its own), " +
-			"then investigate in this same run — clone/pull every repository the task names, read the relevant code, and decide WHAT is needed and WHERE. " +
-			analizProducesDocuments
-	case domain.TaskColumnInProgress:
-		return "This is an ANALIZ task (task_type=analiz) ALREADY claimed and ALREADY in `in_progress` — an ANALYSIS, not an implementation, " +
-			"and the move you might be tempted to plan first has happened. Continue the investigation from where it stands and finish it in this run. " +
-			analizProducesDocuments
-	case domain.TaskColumnNeedRevision:
-		return "This is an ANALIZ task (task_type=analiz) in `need_revision`: the human rejected the analysis. Their comment is in the task comments in your context. " +
-			"Revise the spec/plan at the ROOT of the concern — re-read the code where you are unsure — and attach the corrected documents. " +
-			"Create no implementation task from a rejected analysis. " + analizProducesDocuments
-	case domain.TaskColumnAnalizReview:
-		return "This is an ANALIZ task (task_type=analiz) in `analiz_review`: it is waiting on a HUMAN to approve or reject the spec/plan. " +
-			"Nothing is yours to do here — do not move it, do not rewrite the documents, and do not create implementation tasks. Take no action."
-	case domain.TaskColumnDone:
-		return "This is an ANALIZ task (task_type=analiz) the human moved to `done` — that move IS the approval of your spec and plan. " +
-			"Now decompose it: one implementation task per repository and per layer, each with its own plan slice, testable acceptance criteria and an assignee " +
-			"(call list_team for the roster; order them by dependency — backend API before the frontend/mobile that consumes it). " +
-			"Write no code yourself. List the created tasks in a comment and move this analiz task to `released` as the last action of the step that created them."
-	default:
-		return ""
-	}
-}
 
 // qaExecutionInstruction is the how of a QA round, shared by both QA columns.
 //
@@ -3405,15 +3358,28 @@ const qaExecutionInstruction = "Test it as a black box, on a RUNNING product. " 
 // first deliverable, and the plan opened with a step to move the task into the
 // column it was already in — which the step then filled with unrelated work
 // because there was nothing else for it to do.
-func columnInstruction(task domain.BoardTask) string {
+func columnInstruction(wf domain.Workflow, task domain.BoardTask) string {
 	// Type before column: the same column means different work for different
 	// task types. `in_progress` on a task/bug is "write the code"; on an analiz
 	// it is "read the code and write the spec". Reading the column alone is what
 	// handed an analysis run the implementer instruction — implement it in this
 	// run, the system will open your PR — and the architect duly edited and
-	// deleted repo files for a deliverable that is a document.
-	if s := taskTypeInstruction(task); s != "" {
-		return s
+	// deleted repo files for a deliverable that is a document. Read off the
+	// stage's own Instructions (what migration 143 seeds for analiz's todo,
+	// in_progress, need_revision, analiz_review and done — see
+	// golden_analiz_instructions_test.go) rather than the taskTypeInstruction
+	// literal switch this used to call.
+	if stage, ok := wf.Stage(task.Column); ok && stage.Instructions != "" {
+		return stage.Instructions
+	}
+	// passTo is where a QA round hands the task on: pm_uat for every type on
+	// the review_verdict_sweep table except technical, which sweeps straight to
+	// human_uat (release-b-plan.md §3). Read off the workflow instead of the
+	// literal "pm_uat" the ready_for_qa/in_qa text used to name, so this text
+	// stays true for a type that skips pm_uat entirely.
+	passTo := "pm_uat"
+	if target, ok := wf.Param(task.Column, domain.BehaviourReviewVerdictSweep, "pass_to"); ok && target != "" {
+		passTo = target
 	}
 	switch task.Column {
 	case domain.TaskColumnTodo:
@@ -3461,7 +3427,7 @@ func columnInstruction(task domain.BoardTask) string {
 			" Record your own verdict on each acceptance criterion with " +
 			"review_criterion as you verify it — approve only what you executed, reject with a note saying what failed. " +
 			"Finish from in_qa: every acceptance criterion passes → " +
-			"move it to pm_uat, with the evidence in the review_criterion notes and NO comment on the card — a pass writes nothing; any criterion fails → move it to need_revision " +
+			"move it to " + passTo + ", with the evidence in the review_criterion notes and NO comment on the card — a pass writes nothing; any criterion fails → move it to need_revision " +
 			"and comment the numbered expected-vs-actual per failure."
 	case domain.TaskColumnInQA:
 		// The normal QA instruction: a task dispatched from ready_for_qa is
@@ -3471,7 +3437,7 @@ func columnInstruction(task domain.BoardTask) string {
 			qaExecutionInstruction +
 			" Continue and finish the scenarios in this run, recording your verdict per acceptance criterion with " +
 			"review_criterion (approve what you executed and observed; reject with an expected-vs-actual note), then " +
-			"leave the column: all criteria pass → pm_uat, evidence in the criterion notes and no comment on the card (a pass is not news); " +
+			"leave the column: all criteria pass → " + passTo + ", evidence in the criterion notes and no comment on the card (a pass is not news); " +
 			"any failure → need_revision with a comment giving expected-vs-actual per failure. Never leave a task parked in in_qa."
 	case domain.TaskColumnPMUAT:
 		return "This task is in `pm_uat`: acceptance control. Compare the original request and every acceptance criterion " +
@@ -3536,28 +3502,6 @@ func columnInstruction(task domain.BoardTask) string {
 // context: the profile is a brief, and past this size it is eating the budget
 // the run needs for actual code.
 const maxInjectedProfileChars = 8000
-
-// profileKindForAgent maps the running agent's role onto the repo area whose
-// profile sections it needs. Only a monorepo narrows: on a single-kind repo
-// every section is already about the one thing the repo is, and dropping
-// sections there would cost context for nothing.
-func profileKindForAgent(agentName, repoKind string) string {
-	if repoKind != domain.RepoKindMonorepo {
-		return ""
-	}
-	name := strings.ToLower(agentName)
-	switch {
-	case strings.Contains(name, "frontend"), strings.Contains(name, "web"):
-		return domain.RepoKindFrontend
-	case strings.Contains(name, "mobile"), strings.Contains(name, "ios"), strings.Contains(name, "android"):
-		return domain.RepoKindMobile
-	case strings.Contains(name, "backend"), strings.Contains(name, "api"):
-		return domain.RepoKindBackend
-	case strings.Contains(name, "worker"):
-		return domain.RepoKindWorker
-	}
-	return ""
-}
 
 func prependProjectContext(history []domain.Message, desc, profile string) []domain.Message {
 	var note string

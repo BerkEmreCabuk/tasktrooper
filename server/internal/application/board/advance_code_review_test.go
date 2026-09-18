@@ -74,7 +74,7 @@ func TestAdvanceToCodeReviewHoldsAnUnverifiedRun(t *testing.T) {
 	usage.Record("edit_file")
 	usage.Record("read_file")
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", usage)
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", usage)
 
 	assert.Empty(t, updater.calls, "an unexecuted diff must stay in the working column")
 	require.Len(t, updater.comments, 1, "the next run has to be told why the card did not move")
@@ -87,7 +87,7 @@ func TestAdvanceToCodeReviewMovesWhenUsageIsUnmeasured(t *testing.T) {
 	updater := &fakeTaskUpdater{task: task}
 	r := handoffRunner(updater, &handoffGit{diff: "diff --git a/app.tsx b/app.tsx"})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", nil)
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", nil)
 
 	require.Len(t, updater.calls, 1)
 	require.NotNil(t, updater.calls[0].Column)
@@ -100,7 +100,7 @@ func TestAdvanceToCodeReviewMovesAFinishedImplementation(t *testing.T) {
 	updater := &fakeTaskUpdater{task: task}
 	r := handoffRunner(updater, &handoffGit{diff: "diff --git a/app.tsx b/app.tsx"})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 
 	require.Len(t, updater.calls, 1)
 	require.NotNil(t, updater.calls[0].Column)
@@ -116,7 +116,7 @@ func TestAdvanceToCodeReviewHandsBackARevision(t *testing.T) {
 	updater := &fakeTaskUpdater{task: task}
 	r := handoffRunner(updater, &handoffGit{diff: "diff"})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 
 	require.Len(t, updater.calls, 1)
 	assert.Equal(t, domain.TaskColumnCodeReview, *updater.calls[0].Column)
@@ -128,7 +128,7 @@ func TestAdvanceToCodeReviewNeedsARealDiff(t *testing.T) {
 	updater := &fakeTaskUpdater{task: task}
 	r := handoffRunner(updater, &handoffGit{diff: "   \n"})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 
 	assert.Empty(t, updater.calls)
 }
@@ -139,7 +139,7 @@ func TestAdvanceToCodeReviewStaysPutWhenTheDiffCannotBeRead(t *testing.T) {
 	updater := &fakeTaskUpdater{task: task}
 	r := handoffRunner(updater, &handoffGit{err: errors.New("not a git repository")})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 
 	assert.Empty(t, updater.calls)
 }
@@ -154,7 +154,7 @@ func TestAdvanceToCodeReviewOnlyActsOnImplementationColumns(t *testing.T) {
 		updater := &fakeTaskUpdater{task: task}
 		r := handoffRunner(updater, &handoffGit{diff: "diff"})
 
-		r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+		r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 
 		assert.Empty(t, updater.calls, "column %s must be left alone", column)
 	}
@@ -166,7 +166,7 @@ func TestAdvanceToCodeReviewSkipsAnalizTasks(t *testing.T) {
 	updater := &fakeTaskUpdater{task: task}
 	r := handoffRunner(updater, &handoffGit{diff: "diff"})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), analizWF, "/w/task-1", verifiedUsage())
 
 	assert.Empty(t, updater.calls)
 }
@@ -180,7 +180,7 @@ func TestAdvanceToCodeReviewRespectsAColumnChangedDuringTheRun(t *testing.T) {
 	}
 	r := handoffRunner(updater, &handoffGit{diff: "diff"})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 
 	assert.Empty(t, updater.calls)
 }
@@ -191,7 +191,7 @@ func TestAdvanceToCodeReviewCommentsWhenTheBoardRefuses(t *testing.T) {
 	updater := &commentingUpdater{fakeTaskUpdater: fakeTaskUpdater{task: task, err: errors.New("2 acceptance criteria incomplete")}}
 	r := handoffRunner(updater, &handoffGit{diff: "diff"})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 
 	require.Len(t, updater.comments, 1)
 	assert.Contains(t, updater.comments[0].Content, "acceptance criteria incomplete")
@@ -214,7 +214,7 @@ func TestAdvanceToCodeReviewSkipsUIGateForDocsOnlyDiffOnFrontendRepo(t *testing.
 	git := &handoffGit{diff: "diff --git a/.ai/architecture.md b/.ai/architecture.md", files: []string{".ai/architecture.md", "scripts/dev.sh"}}
 	r := handoffRunnerWithProjects(updater, git, uiKindRepos{kind: domain.RepoKindFrontend})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 
 	require.Len(t, updater.calls, 1)
 	assert.Equal(t, domain.TaskColumnCodeReview, *updater.calls[0].Column)
@@ -228,7 +228,7 @@ func TestAdvanceToCodeReviewStillBlocksUIGateForRealUIDiffOnFrontendRepo(t *test
 	git := &handoffGit{diff: "diff --git a/src/components/Button.tsx b/src/components/Button.tsx", files: []string{"src/components/Button.tsx"}}
 	r := handoffRunnerWithProjects(updater, git, uiKindRepos{kind: domain.RepoKindFrontend})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 
 	assert.Empty(t, updater.calls)
 	require.Len(t, updater.comments, 1)
@@ -242,7 +242,7 @@ func TestAdvanceToCodeReviewUIGateDefaultsToBlockingWhenChangedFilesUnreadable(t
 	git := &handoffGit{diff: "diff --git a/.ai/architecture.md b/.ai/architecture.md", filesErr: errors.New("not a git repository")}
 	r := handoffRunnerWithProjects(updater, git, uiKindRepos{kind: domain.RepoKindFrontend})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 
 	assert.Empty(t, updater.calls)
 	require.Len(t, updater.comments, 1)
@@ -256,7 +256,7 @@ func TestAdvanceToCodeReviewUIGateNeverFiresOnNonUIRepo(t *testing.T) {
 	git := &handoffGit{diff: "diff --git a/.ai/architecture.md b/.ai/architecture.md", files: []string{".ai/architecture.md"}}
 	r := handoffRunnerWithProjects(updater, git, uiKindRepos{})
 
-	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+	r.advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 
 	require.Len(t, updater.calls, 1)
 	assert.Equal(t, domain.TaskColumnCodeReview, *updater.calls[0].Column)
@@ -268,6 +268,6 @@ func TestAdvanceToCodeReviewIsNilSafe(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress}
 
 	assert.NotPanics(t, func() {
-		(&Runner{}).advanceToCodeReview(context.Background(), runJobFor(task, agentID), "/w/task-1", verifiedUsage())
+		(&Runner{}).advanceToCodeReview(context.Background(), runJobFor(task, agentID), taskWF, "/w/task-1", verifiedUsage())
 	})
 }

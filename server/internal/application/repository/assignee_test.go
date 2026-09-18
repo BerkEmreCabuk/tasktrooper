@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -38,9 +39,12 @@ type assigneeFixture struct {
 func newAssigneeFixture() *assigneeFixture {
 	repoID := uuid.New()
 	tasks := &assigneeTaskStore{fakePackageTaskStore: &fakePackageTaskStore{tasks: map[uuid.UUID]domain.BoardTask{}}}
+	fx := workflowtest.Default()
 	svc := &Service{
-		repos: &fakeReleaseRepoStore{repo: domain.Repository{ID: repoID}},
-		tasks: tasks,
+		repos:     &fakeReleaseRepoStore{repo: domain.Repository{ID: repoID}},
+		tasks:     tasks,
+		workflows: fx.Reader(),
+		roles:     fx.Resolver(),
 	}
 	return &assigneeFixture{svc: svc, repoID: repoID, tasks: tasks}
 }

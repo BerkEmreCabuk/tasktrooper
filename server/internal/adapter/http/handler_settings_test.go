@@ -15,25 +15,20 @@ import (
 )
 
 type fakeSettingsStoreHTTP struct {
-	got             domain.AppSettings
-	updateCalls     int
-	updateBackend   string
-	analizAppliedTo domain.AppSettings
+	got         domain.AppSettings
+	updateCalls int
 }
 
 func (f *fakeSettingsStoreHTTP) Get(context.Context) (domain.AppSettings, error) { return f.got, nil }
 
 func (f *fakeSettingsStoreHTTP) Update(context.Context, domain.UpdateSettingsRequest) (domain.AppSettings, error) {
-	return f.got, nil
-}
-
-func (f *fakeSettingsStoreHTTP) UpdateAnalizAssignment(_ context.Context, backend, _, _ string) (domain.AppSettings, error) {
 	f.updateCalls++
-	f.updateBackend = backend
-	f.got.AnalizAssigneeBackend = backend
 	return f.got, nil
 }
 
+// fakeAgentCatalogHTTP satisfies both application/settings.AgentCatalog and
+// workflow.AgentCatalog — shared with handler_workflow_test.go's
+// role-assignment tool-grant tests.
 type fakeAgentCatalogHTTP struct {
 	agents map[string]domain.Agent
 }
@@ -98,93 +93,24 @@ func putAnalizAssignment(t *testing.T, app *fiber.App, body map[string]any) (int
 	return resp.StatusCode, out
 }
 
-func TestUpdateAnalizAssignmentSavesWhenAgentHasRequiredTools(t *testing.T) {
+// TestUpdateAnalizAssignmentGone pins the retired route's replacement: it
+// answers 410 with a hint pointing at /v1/roles instead of writing anything,
+// regardless of body or whether a settings service is even wired.
+func TestUpdateAnalizAssignmentGone(t *testing.T) {
 	store := &fakeSettingsStoreHTTP{}
 	app, _ := newAnalizAssignmentTestApp(store, nil)
 
-	status, out := putAnalizAssignment(t, app, map[string]any{"backend": domain.AgentSystemArchitect})
+	status, out := putAnalizAssignment(t, app, map[string]any{"backend": "system-architect"})
 
-	if status != fiber.StatusOK {
-		t.Fatalf("expected 200, got %d: %v", status, out)
-	}
-	if saved, _ := out["saved"].(bool); !saved {
-		t.Fatalf("expected saved=true, got %v", out)
-	}
-	if store.updateCalls != 1 {
-		t.Fatalf("expected the setting to be written once, got %d calls", store.updateCalls)
-	}
-}
-
-func TestUpdateAnalizAssignmentRefusesAndDoesNotSaveWhenAgentMissingTools(t *testing.T) {
-	agentID := uuid.New()
-	catalog := &fakeAgentCatalogHTTP{agents: map[string]domain.Agent{
-		domain.AgentBackendDeveloper: {
-			ID:   agentID,
-			Name: domain.AgentBackendDeveloper,
-			ToolPolicy: domain.ToolPolicy{AllowTools: []string{
-				"run_terminal", "codebase_search", "read_file",
-				"claim_board_task", "move_board_task",
-			}},
-		},
-	}}
-	store := &fakeSettingsStoreHTTP{}
-	app, _ := newAnalizAssignmentTestApp(store, catalog)
-
-	status, out := putAnalizAssignment(t, app, map[string]any{"backend": domain.AgentBackendDeveloper})
-
-	if status != fiber.StatusUnprocessableEntity {
-		t.Fatalf("expected 422, got %d: %v", status, out)
-	}
-	if saved, _ := out["saved"].(bool); saved {
-		t.Fatalf("expected saved=false, got %v", out)
-	}
-	missing, _ := out["missing_tools"].(map[string]any)
-	backendMissing, _ := missing["backend"].([]any)
-	if len(backendMissing) == 0 {
-		t.Fatalf("expected missing_tools.backend to list the gap, got %v", out)
+	if status != fiber.StatusGone {
+		t.Fatalf("expected 410, got %d: %v", status, out)
 	}
 	if store.updateCalls != 0 {
-		t.Fatalf("expected the setting to stay unsaved, got %d calls", store.updateCalls)
+		t.Fatalf("expected nothing written, got %d update calls", store.updateCalls)
 	}
-}
-
-func TestUpdateAnalizAssignmentConfirmGrantToolsSavesAndWidensPolicy(t *testing.T) {
-	agentID := uuid.New()
-	catalog := &fakeAgentCatalogHTTP{agents: map[string]domain.Agent{
-		domain.AgentBackendDeveloper: {
-			ID:   agentID,
-			Name: domain.AgentBackendDeveloper,
-			ToolPolicy: domain.ToolPolicy{AllowTools: []string{
-				"run_terminal", "codebase_search", "read_file",
-				"claim_board_task", "move_board_task",
-			}},
-		},
-	}}
-	store := &fakeSettingsStoreHTTP{}
-	app, _ := newAnalizAssignmentTestApp(store, catalog)
-
-	status, out := putAnalizAssignment(t, app, map[string]any{
-		"backend":             domain.AgentBackendDeveloper,
-		"confirm_grant_tools": true,
-	})
-
-	if status != fiber.StatusOK {
-		t.Fatalf("expected 200, got %d: %v", status, out)
-	}
-	if saved, _ := out["saved"].(bool); !saved {
-		t.Fatalf("expected saved=true, got %v", out)
-	}
-	if store.updateCalls != 1 {
-		t.Fatalf("expected the setting to be written once, got %d calls", store.updateCalls)
-	}
-	updated := catalog.agents[domain.AgentBackendDeveloper]
-	found := false
-	for _, tool := range updated.ToolPolicy.AllowTools {
-		if tool == "create_board_task" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatalf("expected create_board_task to be granted to the agent, got %v", updated.ToolPolicy.AllowTools)
+	errBody, _ := out["error"].(map[string]any)
+	message, _ := errBody["message"].(string)
+	if message == "" {
+		t.Fatalf("expected an error message hinting at /v1/roles, got %v", out)
 	}
 }

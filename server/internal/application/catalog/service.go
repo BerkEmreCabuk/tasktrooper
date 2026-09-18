@@ -19,6 +19,7 @@ type Service struct {
 	kpis           port.AgentKPIStore
 	boardConfig    port.BoardConfigStore
 	versions       port.CatalogVersionStore
+	roleAdmin      RoleAdmin
 	seeding        atomic.Bool
 	// hostExecutor answers "can a run on this provider actually be executed
 	// here". Nil means no runner is attached, which is the correct answer on
@@ -84,6 +85,23 @@ func (s *Service) SetKPIStore(store port.AgentKPIStore) {
 
 func (s *Service) SetBoardConfigStore(store port.BoardConfigStore) {
 	s.boardConfig = store
+}
+
+// RoleAdmin is the narrow slice of application/workflow.Service the catalog
+// needs to fill a template's suggested role vacancies (see
+// applySuggestedRoles): read the current role roster and write an
+// assignment back through the checked/reload path, without an import cycle
+// onto application/workflow.
+type RoleAdmin interface {
+	ListRoles(ctx context.Context) ([]domain.AgentRole, error)
+	SetRoleAssignments(ctx context.Context, roleID uuid.UUID, assignments []domain.RoleAssignment) error
+}
+
+// SetRoleAdmin wires the role roster CreateAgentFromTemplate fills a
+// template's suggested role vacancies against. Nil (the pre-wiring default)
+// skips that step, matching every other late-wired collaborator here.
+func (s *Service) SetRoleAdmin(r RoleAdmin) {
+	s.roleAdmin = r
 }
 
 // SetHostExecutorProbe wires the check that decides whether an agent may be

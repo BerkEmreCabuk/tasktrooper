@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -95,26 +96,27 @@ func TestToolsListSeesToolsRegisteredAfterNew(t *testing.T) {
 // contain the two tools a verdict is made of by the time it reaches toolsFrom.
 //
 // The QA role's own allowlist is pinned in application/catalog (see
-// TestQARunPolicyKeepsTheVerdictTools there, which runs the same two narrowings
+// TestQARunPolicyKeepsTheVerdictTools there, which runs the same narrowing
 // over the real role policy); what is pinned HERE is the second half — that a
 // policy which allows them produces a surface that serves them.
 //
-// Both narrowings are in play and both are aimed at writers: an in_qa run loses
-// the file tools and commit_task_changes. Losing the criteria tools with them
-// would leave a QA agent able to test but not to record, which is the exact
-// shape of the failure this test exists for.
+// Both stage behaviours are in play and both are aimed at writers: an in_qa
+// run's strip_writers loses the file tools and commit_task_changes, on top of
+// whatever no_read_file/no_code_reading the stage also carries. Losing the
+// criteria tools with them would leave a QA agent able to test but not to
+// record, which is the exact shape of the failure this test exists for.
 func TestQAVerdictPolicyKeepsTheCriteriaTools(t *testing.T) {
 	qa := domain.ToolPolicy{AllowTools: []string{
 		"run_terminal", "read_file", "grep_code", "get_repo_tree",
 		"list_board_tasks", "move_board_task", "add_task_comment", "list_task_comments",
 		"list_acceptance_criteria", "review_criterion", "get_pipeline_status",
 	}}
-	policy := domain.RestrictToolsForVerdictColumn(
-		domain.RestrictToolsForTaskType(
-			domain.UpliftWorkspaceTools(domain.MergeToolPolicy(domain.ToolPolicy{}, qa)),
-			domain.TaskTypeTask,
-		),
-		domain.TaskColumnInQA,
+	wf := workflowtest.Default().Workflows[domain.TaskType("task")]
+	stage, ok := wf.Stage(domain.TaskColumnInQA)
+	require.True(t, ok)
+	policy := domain.RestrictToolsForStage(
+		domain.UpliftWorkspaceTools(domain.MergeToolPolicy(domain.ToolPolicy{}, qa)),
+		stage, wf.Type,
 	)
 	require.NotEmpty(t, policy.AllowTools, "a QA run's policy must not collapse to unrestricted")
 

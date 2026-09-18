@@ -103,13 +103,13 @@ func TestIsReviewColumn(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnCodeReview, domain.TaskColumnAnalizReview, domain.TaskColumnPMUAT,
 	} {
-		assert.True(t, isReviewColumn(col), "%s judges someone else's change", col)
+		assert.True(t, isReviewColumn(taskWF, col), "%s judges someone else's change", col)
 	}
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
 		domain.TaskColumnInQA, domain.TaskColumnReadyForQA,
 	} {
-		assert.False(t, isReviewColumn(col), "%s is not a review column", col)
+		assert.False(t, isReviewColumn(taskWF, col), "%s is not a review column", col)
 	}
 }
 
@@ -118,8 +118,8 @@ func TestIsReviewColumn(t *testing.T) {
 func TestReviewDiffMessage_ReviewerGetsTheWholeDiff(t *testing.T) {
 	diff := strings.Repeat("+ line of code\n", 1200) // ~18 KB
 
-	reviewer := reviewDiffMessage(domain.TaskColumnCodeReview, diff)
-	implementer := reviewDiffMessage(domain.TaskColumnInProgress, diff)
+	reviewer := reviewDiffMessage(taskWF, domain.TaskColumnCodeReview, diff)
+	implementer := reviewDiffMessage(taskWF, domain.TaskColumnInProgress, diff)
 
 	assert.NotContains(t, reviewer, "(truncated)", "an 18 KB diff must reach the reviewer whole")
 	assert.Contains(t, reviewer, "reviewing")
@@ -130,7 +130,7 @@ func TestReviewDiffMessage_ReviewerGetsTheWholeDiff(t *testing.T) {
 func TestReviewDiffMessage_TruncatesBeyondTheReviewLimit(t *testing.T) {
 	diff := strings.Repeat("+ line of code\n", 4000) // ~60 KB
 
-	got := reviewDiffMessage(domain.TaskColumnCodeReview, diff)
+	got := reviewDiffMessage(taskWF, domain.TaskColumnCodeReview, diff)
 
 	assert.Contains(t, got, "(truncated)")
 	assert.Less(t, len(got), reviewDiffLimit+500)
@@ -140,7 +140,7 @@ func TestReviewDiffMessage_TruncatesBeyondTheReviewLimit(t *testing.T) {
 // asks of your role", which it read as: build it, run it, test it. It spent
 // whole runs reproducing the pipeline instead of reading the diff.
 func TestColumnInstructionCodeReviewReadsTheDiffInsteadOfRunningIt(t *testing.T) {
-	got := columnInstruction(domain.BoardTask{Column: domain.TaskColumnCodeReview})
+	got := columnInstruction(taskWF, domain.BoardTask{Column: domain.TaskColumnCodeReview})
 
 	for _, want := range []string{"pull request", "READ the diff", "get_pipeline_status", "ready_for_qa", "need_revision"} {
 		assert.Contains(t, got, want)

@@ -163,7 +163,9 @@ func (s *Service) EvaluateAgent(ctx context.Context, agentID uuid.UUID, now time
 			continue
 		}
 		from, to := PeriodBounds(k.Period, now)
-		value, err := def.Resolve(ctx, s.deps, agentID, from, to)
+		deps := s.deps
+		deps.Workflows = s.workflows
+		value, err := def.Resolve(ctx, deps, agentID, from, to)
 		if errors.Is(err, ErrInsufficientData) {
 			// Publishing nothing is deliberate: CompositeScore drops KPIs with
 			// no result from the weight sum, so an unmeasured period neither

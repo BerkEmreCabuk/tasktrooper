@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -52,7 +53,7 @@ func TestEnterWorkingColumnMovesTheAssigneesTask(t *testing.T) {
 	agentID := uuid.New()
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnTodo, AssigneeAgentID: &agentID}
 	updater := &fakeTaskUpdater{task: task}
-	r := &Runner{taskUpdater: updater}
+	r := &Runner{taskUpdater: updater, workflows: workflowtest.Default().Reader()}
 
 	out := r.enterWorkingColumn(context.Background(), runJobFor(task, agentID))
 
@@ -66,7 +67,7 @@ func TestEnterWorkingColumnAttributesTheMoveToTheAgent(t *testing.T) {
 	agentID := uuid.New()
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnTodo, AssigneeAgentID: &agentID}
 	updater := &fakeTaskUpdater{task: task}
-	r := &Runner{taskUpdater: updater}
+	r := &Runner{taskUpdater: updater, workflows: workflowtest.Default().Reader()}
 
 	r.enterWorkingColumn(context.Background(), runJobFor(task, agentID))
 
@@ -79,7 +80,7 @@ func TestEnterWorkingColumnAttributesTheMoveToTheAgent(t *testing.T) {
 func TestEnterWorkingColumnLeavesUnassignedTasksAlone(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnTodo}
 	updater := &fakeTaskUpdater{task: task}
-	r := &Runner{taskUpdater: updater}
+	r := &Runner{taskUpdater: updater, workflows: workflowtest.Default().Reader()}
 
 	out := r.enterWorkingColumn(context.Background(), runJobFor(task, uuid.New()))
 
@@ -91,7 +92,7 @@ func TestEnterWorkingColumnLeavesAnotherAgentsTaskAlone(t *testing.T) {
 	assignee := uuid.New()
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnTodo, AssigneeAgentID: &assignee}
 	updater := &fakeTaskUpdater{task: task}
-	r := &Runner{taskUpdater: updater}
+	r := &Runner{taskUpdater: updater, workflows: workflowtest.Default().Reader()}
 
 	out := r.enterWorkingColumn(context.Background(), runJobFor(task, uuid.New()))
 
@@ -110,7 +111,7 @@ func TestEnterWorkingColumnOnlyActsOnTheQueues(t *testing.T) {
 	} {
 		task := domain.BoardTask{ID: uuid.New(), Column: column, AssigneeAgentID: &agentID}
 		updater := &fakeTaskUpdater{task: task}
-		r := &Runner{taskUpdater: updater}
+		r := &Runner{taskUpdater: updater, workflows: workflowtest.Default().Reader()}
 
 		out := r.enterWorkingColumn(context.Background(), runJobFor(task, agentID))
 
@@ -123,7 +124,7 @@ func TestEnterWorkingColumnMovesNeedRevisionIntoProgress(t *testing.T) {
 	agentID := uuid.New()
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnNeedRevision, AssigneeAgentID: &agentID}
 	updater := &fakeTaskUpdater{task: task}
-	r := &Runner{taskUpdater: updater}
+	r := &Runner{taskUpdater: updater, workflows: workflowtest.Default().Reader()}
 
 	out := r.enterWorkingColumn(context.Background(), runJobFor(task, agentID))
 
@@ -133,7 +134,7 @@ func TestEnterWorkingColumnMovesNeedRevisionIntoProgress(t *testing.T) {
 	other := uuid.New()
 	foreign := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnNeedRevision, AssigneeAgentID: &other}
 	foreignUpdater := &fakeTaskUpdater{task: foreign}
-	r = &Runner{taskUpdater: foreignUpdater}
+	r = &Runner{taskUpdater: foreignUpdater, workflows: workflowtest.Default().Reader()}
 
 	out = r.enterWorkingColumn(context.Background(), runJobFor(foreign, agentID))
 
@@ -145,17 +146,17 @@ func TestRunInstructionKeepsTheRevisionFraming(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress}
 	job := RunJob{Task: task, EnteredFrom: domain.TaskColumnNeedRevision}
 
-	assert.Contains(t, runInstruction(job), "came back from review")
+	assert.Contains(t, runInstruction(taskWF, job), "came back from review")
 
 	job = RunJob{Task: task, EnteredFrom: domain.TaskColumnTodo}
-	assert.NotContains(t, runInstruction(job), "came back from review")
+	assert.NotContains(t, runInstruction(taskWF, job), "came back from review")
 }
 
 func TestEnterWorkingColumnSurvivesAFailedUpdate(t *testing.T) {
 	agentID := uuid.New()
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnTodo, AssigneeAgentID: &agentID}
 	updater := &fakeTaskUpdater{task: task, err: errors.New("pool closed")}
-	r := &Runner{taskUpdater: updater}
+	r := &Runner{taskUpdater: updater, workflows: workflowtest.Default().Reader()}
 
 	out := r.enterWorkingColumn(context.Background(), runJobFor(task, agentID))
 
@@ -174,12 +175,12 @@ func TestEnterWorkingColumnIsNilSafe(t *testing.T) {
 func TestColumnInstructionFollowsTheAutomaticMove(t *testing.T) {
 	agentID := uuid.New()
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnTodo, AssigneeAgentID: &agentID}
-	r := &Runner{taskUpdater: &fakeTaskUpdater{task: task}}
+	r := &Runner{taskUpdater: &fakeTaskUpdater{task: task}, workflows: workflowtest.Default().Reader()}
 
 	moved := r.enterWorkingColumn(context.Background(), runJobFor(task, agentID))
 
-	assert.Contains(t, columnInstruction(moved), "ALREADY in `in_progress`")
-	assert.NotContains(t, columnInstruction(moved), "move it to in_progress")
+	assert.Contains(t, columnInstruction(taskWF, moved), "ALREADY in `in_progress`")
+	assert.NotContains(t, columnInstruction(taskWF, moved), "move it to in_progress")
 }
 
 func TestEnterWorkingColumnTakesAQATaskIntoInQA(t *testing.T) {
@@ -188,7 +189,7 @@ func TestEnterWorkingColumnTakesAQATaskIntoInQA(t *testing.T) {
 
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnReadyForQA, AssigneeAgentID: &developer}
 	updater := &fakeTaskUpdater{task: task}
-	r := &Runner{taskUpdater: updater}
+	r := &Runner{taskUpdater: updater, workflows: workflowtest.Default().Reader()}
 
 	out := r.enterWorkingColumn(context.Background(), runJobFor(task, agentID))
 
@@ -206,7 +207,7 @@ func TestEnterWorkingColumnLeavesAnalizOutOfInQA(t *testing.T) {
 	agentID := uuid.New()
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnReadyForQA, TaskType: domain.TaskTypeAnaliz}
 	updater := &fakeTaskUpdater{task: task}
-	r := &Runner{taskUpdater: updater}
+	r := &Runner{taskUpdater: updater, workflows: workflowtest.Default().Reader()}
 
 	out := r.enterWorkingColumn(context.Background(), runJobFor(task, agentID))
 
@@ -217,21 +218,21 @@ func TestEnterWorkingColumnLeavesAnalizOutOfInQA(t *testing.T) {
 func TestColumnInstructionFollowsTheAutomaticQAMove(t *testing.T) {
 	agentID := uuid.New()
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnReadyForQA}
-	r := &Runner{taskUpdater: &fakeTaskUpdater{task: task}}
+	r := &Runner{taskUpdater: &fakeTaskUpdater{task: task}, workflows: workflowtest.Default().Reader()}
 
 	moved := r.enterWorkingColumn(context.Background(), runJobFor(task, agentID))
 
-	assert.Contains(t, columnInstruction(moved), "ALREADY in `in_qa`")
-	assert.NotContains(t, columnInstruction(moved), "Move it to in_qa")
+	assert.Contains(t, columnInstruction(taskWF, moved), "ALREADY in `in_qa`")
+	assert.NotContains(t, columnInstruction(taskWF, moved), "Move it to in_qa")
 }
 
 func TestColumnInstructionAsksForTheMoveWhenItWasRefused(t *testing.T) {
 	agentID := uuid.New()
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnReadyForQA}
-	r := &Runner{taskUpdater: &fakeTaskUpdater{task: task, err: errors.New("pool closed")}}
+	r := &Runner{taskUpdater: &fakeTaskUpdater{task: task, err: errors.New("pool closed")}, workflows: workflowtest.Default().Reader()}
 
 	stuck := r.enterWorkingColumn(context.Background(), runJobFor(task, agentID))
 
 	assert.Equal(t, domain.TaskColumnReadyForQA, stuck.Column)
-	assert.Contains(t, columnInstruction(stuck), "Move it to in_qa yourself")
+	assert.Contains(t, columnInstruction(taskWF, stuck), "Move it to in_qa yourself")
 }

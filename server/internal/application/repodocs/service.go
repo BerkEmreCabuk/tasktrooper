@@ -46,7 +46,6 @@ type Service struct {
 	repos  RepositoryStore
 	tasks  TaskCreator
 	merger TaskPRMerger
-	agents func(ctx context.Context) ([]domain.Agent, error)
 	// workflows/roles: see board.Dispatcher's own fields of the same name.
 	workflows port.WorkflowReader
 	roles     port.RoleResolver
@@ -66,12 +65,6 @@ func (s *Service) SetTaskCreator(tasks TaskCreator) { s.tasks = tasks }
 // SetTaskPRMerger enables MergeDocsTask. Left unset on a deployment with no
 // GitHub access, where the merge could only ever refuse.
 func (s *Service) SetTaskPRMerger(m TaskPRMerger) { s.merger = m }
-
-// SetAgentLister lets the doc-authoring task be assigned to the role that
-// owns the repo (or sub-project) kind instead of landing unassigned.
-func (s *Service) SetAgentLister(fn func(ctx context.Context) ([]domain.Agent, error)) {
-	s.agents = fn
-}
 
 // CreateDocTask opens the board task that writes the missing doc — and, for
 // local_run, a run script alongside it — at path, or at the kind's
@@ -113,7 +106,7 @@ func (s *Service) CreateDocTask(ctx context.Context, repositoryID uuid.UUID, sub
 		Priority:        domain.TaskPriorityMedium,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
-		AssigneeAgentID: s.roleAgent(ctx, domain.DeveloperAgentForKind(doc.kindLabel, repo.SubProjects)),
+		AssigneeAgentID: s.systemTaskAssignee(ctx, doc.kindLabel, repo.SubProjects),
 	})
 }
 
@@ -252,7 +245,7 @@ func (s *Service) CreateDocsBundleTask(ctx context.Context, repositoryID uuid.UU
 		Priority:        domain.TaskPriorityMedium,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
-		AssigneeAgentID: s.roleAgent(ctx, bundleRole(repo, docs)),
+		AssigneeAgentID: s.systemTaskAssigneeForArea(ctx, bundleArea(repo, docs)),
 	})
 	if err != nil {
 		return domain.BoardTask{}, err
@@ -467,33 +460,30 @@ func setDocKind(docs *domain.RepositoryDocs, kind, path string) {
 	}
 }
 
-// roleAgent resolves the agent that owns doc-authoring work for a repo kind.
-// Doc work is repo-wide, so a monorepo goes to the architect rather than to
-// one of its sub-project developers — same rule as deploy.Service.roleAgent.
-func (s *Service) roleAgent(ctx context.Context, role string) *uuid.UUID {
-	if s.agents == nil {
+// systemTaskAssignee resolves who a system-opened doc-authoring task goes to:
+// the developer role's agent for kind/subProjects' area.
+func (s *Service) systemTaskAssignee(ctx context.Context, kind string, subProjects []domain.RepoSubProject) *uuid.UUID {
+	return s.systemTaskAssigneeForArea(ctx, domain.RepoArea(kind, subProjects))
+}
+
+func (s *Service) systemTaskAssigneeForArea(ctx context.Context, area string) *uuid.UUID {
+	if s.roles == nil {
 		return nil
 	}
-	agents, err := s.agents(ctx)
+	id, err := s.roles.AgentForPurpose(ctx, domain.PurposeSystemTaskAssignee, area)
 	if err != nil {
 		return nil
 	}
-	want := role
-	for i := range agents {
-		if agents[i].Name == want {
-			id := agents[i].ID
-			return &id
-		}
-	}
-	return nil
+	return id
 }
 
-// bundleRole picks who authors a docs bundle: the developer owning most of the
-// docs in it. A sub-project doc counts as that sub-project's kind and a
-// monorepo-level doc counts as every sub-project, so a bundle of backend docs
-// goes to backend-developer. It used to go to the system architect for any
-// monorepo, and the architect refuses to author files into a branch.
-func bundleRole(repo domain.Repository, docs []resolvedDoc) string {
+// bundleArea picks who authors a docs bundle: the developer role's area
+// owning most of the docs in it. A sub-project doc counts as that
+// sub-project's kind and a monorepo-level doc counts as every sub-project, so
+// a bundle of mostly-backend docs resolves to the backend area. Doc work used
+// to go to the system architect for any monorepo, and the architect refuses
+// to author files into a branch.
+func bundleArea(repo domain.Repository, docs []resolvedDoc) string {
 	owners := make([]domain.RepoSubProject, 0, len(docs))
 	for _, doc := range docs {
 		if doc.kindLabel == domain.RepoKindMonorepo {
@@ -502,5 +492,5 @@ func bundleRole(repo domain.Repository, docs []resolvedDoc) string {
 		}
 		owners = append(owners, domain.RepoSubProject{Kind: doc.kindLabel})
 	}
-	return domain.DeveloperAgentForKind(domain.RepoKindMonorepo, owners)
+	return domain.RepoArea(domain.RepoKindMonorepo, owners)
 }

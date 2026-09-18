@@ -74,6 +74,11 @@ type roleAgentDef struct {
 	skills     []skillSeed
 	rules      []domain.CreateOrchestratorRuleRequest
 	kpis       []domain.CreateKPIRequest
+	// roles/subscriptions are what CreateAgentFromTemplate fills for an
+	// agent created from this built-in template — into a vacant seat only,
+	// see catalog.Service.applySuggestedRoles/applySuggestedSubscriptions.
+	roles         []domain.TemplateRoleSuggestion
+	subscriptions []domain.TaskColumn
 }
 
 func roleAgentDefinitions() []roleAgentDef {

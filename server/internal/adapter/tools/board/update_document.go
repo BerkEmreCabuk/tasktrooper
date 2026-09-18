@@ -104,7 +104,7 @@ func (t *updateDocumentTool) Execute(ctx context.Context, arguments string) doma
 	// An analysis document is subject to the same grounding gate whether it is
 	// written for the first time or rewritten — otherwise the gate is one tool
 	// call away from being bypassed.
-	if task, ok := t.kit.findTask(ctx, taskID); ok && task.TaskType == domain.TaskTypeAnaliz {
+	if task, ok := t.kit.findTask(ctx, taskID); ok && t.kit.requiresRepoGrounding(ctx, task.TaskType) {
 		if msg := ungroundedAnalysisReason(ctx); msg != "" {
 			return toolError(updateTaskDocumentToolName, msg)
 		}

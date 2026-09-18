@@ -49,7 +49,6 @@ type Deps struct {
 	Repos     RepositoryResolver
 	Tasks     TaskBoard
 	Deploys   DeployHistory
-	Agents    func(ctx context.Context) ([]domain.Agent, error)
 	Notifier  Notifier
 }
 
@@ -59,7 +58,6 @@ type Service struct {
 	repos     RepositoryResolver
 	tasks     TaskBoard
 	deploys   DeployHistory
-	agents    func(ctx context.Context) ([]domain.Agent, error)
 	notifier  Notifier
 
 	// attributor / rollbacks are the release-loop half: which task's commit
@@ -91,7 +89,6 @@ func NewService(deps Deps) *Service {
 		repos:     deps.Repos,
 		tasks:     deps.Tasks,
 		deploys:   deps.Deploys,
-		agents:    deps.Agents,
 		notifier:  deps.Notifier,
 	}
 }
@@ -351,7 +348,7 @@ func (s *Service) openRemediationTask(ctx context.Context, incident domain.Incid
 		Priority:        priority,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
-		AssigneeAgentID: s.roleAgent(ctx, incident.RepositoryID),
+		AssigneeAgentID: s.systemTaskAssignee(ctx, incident.RepositoryID),
 	})
 	if err != nil {
 		return incident, err
@@ -477,27 +474,22 @@ func (s *Service) policy(ctx context.Context, repositoryID uuid.UUID) domain.Inc
 	return repo.IncidentPolicy
 }
 
-// roleAgent picks the agent that owns incidents for the repo kind.
-func (s *Service) roleAgent(ctx context.Context, repositoryID uuid.UUID) *uuid.UUID {
-	if s.agents == nil || s.repos == nil {
+// systemTaskAssignee picks the developer role's agent for the repo's area —
+// who owns incidents for that repo kind.
+func (s *Service) systemTaskAssignee(ctx context.Context, repositoryID uuid.UUID) *uuid.UUID {
+	if s.roles == nil || s.repos == nil {
 		return nil
 	}
 	repo, err := s.repos.Get(ctx, repositoryID)
 	if err != nil {
 		return nil
 	}
-	agents, err := s.agents(ctx)
+	area := domain.RepoArea(repo.Kind, repo.SubProjects)
+	id, err := s.roles.AgentForPurpose(ctx, domain.PurposeSystemTaskAssignee, area)
 	if err != nil {
 		return nil
 	}
-	want := domain.DeveloperAgentForKind(repo.Kind, repo.SubProjects)
-	for i := range agents {
-		if agents[i].Name == want {
-			id := agents[i].ID
-			return &id
-		}
-	}
-	return nil
+	return id
 }
 
 func (s *Service) event(ctx context.Context, incidentID uuid.UUID, kind, message string) {

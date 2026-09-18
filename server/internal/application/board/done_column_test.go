@@ -9,7 +9,7 @@ import (
 )
 
 func TestDoneRunNeverCommitsTheWorkspace(t *testing.T) {
-	assert.False(t, producesADiff(domain.TaskColumnDone),
+	assert.False(t, producesADiff(taskWF, domain.TaskColumnDone),
 		"a run in done merges a finished change; committing its workspace would re-create the merged branch")
 
 	for _, column := range []domain.TaskColumn{
@@ -18,7 +18,7 @@ func TestDoneRunNeverCommitsTheWorkspace(t *testing.T) {
 		domain.TaskColumnTodo,
 		domain.TaskColumnInQA,
 	} {
-		assert.True(t, producesADiff(column), "%s must still commit and push", column)
+		assert.True(t, producesADiff(taskWF, column), "%s must still commit and push", column)
 	}
 
 	for _, column := range []domain.TaskColumn{
@@ -26,12 +26,12 @@ func TestDoneRunNeverCommitsTheWorkspace(t *testing.T) {
 		domain.TaskColumnAnalizReview,
 		domain.TaskColumnPMUAT,
 	} {
-		assert.False(t, producesADiff(column))
+		assert.False(t, producesADiff(taskWF, column))
 	}
 }
 
 func TestDoneInstructionIsAboutMergingAndNeverAboutReleasing(t *testing.T) {
-	instruction := columnInstruction(domain.BoardTask{
+	instruction := columnInstruction(taskWF, domain.BoardTask{
 		Column:   domain.TaskColumnDone,
 		TaskType: domain.TaskTypeTask,
 	})
@@ -42,7 +42,7 @@ func TestDoneInstructionIsAboutMergingAndNeverAboutReleasing(t *testing.T) {
 }
 
 func TestDoneInstructionForAnalizIsUnchanged(t *testing.T) {
-	instruction := columnInstruction(domain.BoardTask{
+	instruction := columnInstruction(analizWF, domain.BoardTask{
 		Column:   domain.TaskColumnDone,
 		TaskType: domain.TaskTypeAnaliz,
 	})

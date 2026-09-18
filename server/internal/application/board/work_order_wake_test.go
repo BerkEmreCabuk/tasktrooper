@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/board"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -90,7 +91,7 @@ func TestWakeDependentsOfDispatchesTheClearDependentAndLeavesTheStillBlockedOneP
 		stillBlockedDependent.ID: {{ID: otherBlockerID, Key: "T-C", Column: domain.TaskColumnInProgress}},
 	}}
 	resources := &fakeWakeResourceLister{byID: map[uuid.UUID]domain.BoardTask{
-		clearDependent.ID:         clearDependent,
+		clearDependent.ID:        clearDependent,
 		stillBlockedDependent.ID: stillBlockedDependent,
 	}}
 
@@ -99,6 +100,7 @@ func TestWakeDependentsOfDispatchesTheClearDependentAndLeavesTheStillBlockedOneP
 	runs := &fakeRunStore{}
 	runner := &fakeRunner{}
 	disp := board.NewDispatcher(boardCfg, events, runs, runner, true)
+	disp.SetWorkflows(workflowtest.Default().Reader())
 
 	sweeper := board.NewWorkOrderSweeper(resources, blockers, disp)
 	sweeper.SetDependents(dependents)
@@ -121,6 +123,7 @@ func TestWakeDependentsOfIsANoOpWithoutDependentsWired(t *testing.T) {
 	runs := &fakeRunStore{}
 	runner := &fakeRunner{}
 	disp := board.NewDispatcher(boardCfg, events, runs, runner, true)
+	disp.SetWorkflows(workflowtest.Default().Reader())
 	sweeper := board.NewWorkOrderSweeper(&fakeWakeResourceLister{}, &fakeWakeBlockerReader{}, disp)
 
 	sweeper.WakeDependentsOf(context.Background(), uuid.New())

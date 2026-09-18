@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -69,6 +70,7 @@ func TestSweepOpenCriteriaKeepsAskingUntilTheCriteriaAreSettled(t *testing.T) {
 	}
 	r := NewRunner(RunnerDeps{AgentLoop: router})
 	r.SetTaskUpdater(updater)
+	r.SetWorkflows(workflowtest.Default().Reader())
 
 	ctx := registry.ContextWithWorkspaceDir(context.Background(), t.TempDir())
 	r.sweepOpenCriteria(ctx, sweepJob(), claudeCodeAgent(),
@@ -94,6 +96,7 @@ func TestSweepOpenCriteriaStopsOnACancelledCriterion(t *testing.T) {
 	}
 	r := NewRunner(RunnerDeps{AgentLoop: router})
 	r.SetTaskUpdater(updater)
+	r.SetWorkflows(workflowtest.Default().Reader())
 
 	ctx := registry.ContextWithWorkspaceDir(context.Background(), t.TempDir())
 	r.sweepOpenCriteria(ctx, sweepJob(), claudeCodeAgent(),
@@ -116,6 +119,7 @@ func TestSweepOpenCriteriaStopsAtTheRoundCapAndSaysSo(t *testing.T) {
 	}
 	r := NewRunner(RunnerDeps{AgentLoop: router})
 	r.SetTaskUpdater(updater)
+	r.SetWorkflows(workflowtest.Default().Reader())
 
 	ctx := registry.ContextWithWorkspaceDir(context.Background(), t.TempDir())
 	r.sweepOpenCriteria(ctx, sweepJob(), claudeCodeAgent(),

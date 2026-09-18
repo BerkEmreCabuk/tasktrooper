@@ -23,6 +23,10 @@ type MetricDeps struct {
 	Runs  port.TaskAgentRunStore
 	Tasks port.BoardTaskStore
 	Spans SpanHoursReader
+	// Workflows answers "is this task's type a defect type" (resolveBugsAssigned)
+	// without the registry knowing any task type is called "bug". Nil skips
+	// that check, matching every other optional MetricDeps field.
+	Workflows port.WorkflowReader
 }
 
 // ErrInsufficientData means the period holds too few measurements to score.
@@ -361,12 +365,28 @@ func resolveBugsAssigned(ctx context.Context, deps MetricDeps, agentID uuid.UUID
 	}
 	count := 0
 	for _, t := range tasks {
-		if t.TaskType == domain.TaskTypeBug && t.AssigneeAgentID != nil && *t.AssigneeAgentID == agentID &&
+		if !isDefectType(ctx, deps, t.TaskType) {
+			continue
+		}
+		if t.AssigneeAgentID != nil && *t.AssigneeAgentID == agentID &&
 			!t.CreatedAt.Before(from) && t.CreatedAt.Before(to) {
 			count++
 		}
 	}
 	return float64(count), nil
+}
+
+// isDefectType asks the workflow snapshot whether t's task type carries
+// is_defect — bugs_assigned no longer knows any task type is literally
+// called "bug" (see release-b-plan.md §1 "Type flags"). Deps.Workflows unset
+// or an unresolvable type reads as "not a defect", matching the metric's
+// pre-B2c behaviour when the type in question could not be found either.
+func isDefectType(ctx context.Context, deps MetricDeps, t domain.TaskType) bool {
+	if deps.Workflows == nil {
+		return false
+	}
+	wf, err := deps.Workflows.Workflow(ctx, t)
+	return err == nil && wf.Type.IsDefect
 }
 
 func resolveFirstPassRate(ctx context.Context, deps MetricDeps, agentID uuid.UUID, from, to time.Time) (float64, error) {

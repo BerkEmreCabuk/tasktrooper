@@ -242,14 +242,18 @@ func mergeTestCase(existing domain.TaskTestCase, in domain.TaskTestCaseInput) do
 // A `failed` case is deliberately not refused here. Failing is a legitimate
 // outcome and its exit is need_revision, which is not a forward move; blocking
 // on it would strand the round that found the bug.
-func (s *Service) testCaseGate(ctx context.Context, taskID uuid.UUID, prev, target domain.TaskColumn) error {
+func (s *Service) testCaseGate(ctx context.Context, taskID uuid.UUID, taskType domain.TaskType, prev, target domain.TaskColumn) error {
 	if !s.requireCriteria || s.testCases == nil {
 		return nil
 	}
-	if prev != domain.TaskColumnInQA && prev != domain.TaskColumnReadyForQA {
+	wf, err := s.workflow(ctx, taskType)
+	if err != nil {
+		return fmt.Errorf("test case gate: workflow unavailable for %s (%w)", target, err)
+	}
+	if !wf.Has(prev, domain.BehaviourRequireTestCases) {
 		return nil
 	}
-	if !isForwardReviewExit(target) {
+	if !wf.Has(target, domain.BehaviourForwardExit) {
 		return nil
 	}
 	items, err := s.testCases.ListByTask(ctx, taskID)

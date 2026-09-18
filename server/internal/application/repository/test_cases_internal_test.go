@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -118,8 +119,12 @@ func TestTestCaseGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &Service{testCases: &fakeTestCaseStore{items: tc.items}, requireCriteria: tc.require}
-			err := svc.testCaseGate(context.Background(), taskID, tc.prev, tc.target)
+			svc := &Service{
+				testCases:       &fakeTestCaseStore{items: tc.items},
+				requireCriteria: tc.require,
+				workflows:       workflowtest.Default().Reader(),
+			}
+			err := svc.testCaseGate(context.Background(), taskID, domain.TaskTypeTask, tc.prev, tc.target)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("expected pass, got %v", err)

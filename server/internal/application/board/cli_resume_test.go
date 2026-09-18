@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -155,6 +156,7 @@ func TestHTTPLoopRunRespectsTheAgentRecordsSessionLimits(t *testing.T) {
 		Catalog:      &agentCatalog{agent: agentRec},
 		Repositories: oneRepoResolver{root: t.TempDir()},
 	})
+	r.SetWorkflows(workflowtest.Default().Reader())
 	taskID := uuid.New()
 	job := RunJob{
 		Run:  domain.TaskAgentRun{ID: uuid.New(), TaskID: taskID, AgentID: agentRec.ID},

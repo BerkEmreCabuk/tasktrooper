@@ -23,7 +23,7 @@ func qaUsage(tools ...string) *registry.ToolUsage {
 func TestUngroundedQARejectsARunThatExecutedNothing(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInQA}
 
-	assert.True(t, isUngroundedQA(task, domain.AgentResponse{}, qaUsage("move_board_task")))
+	assert.True(t, isUngroundedQA(taskWF, task, domain.AgentResponse{}, qaUsage("move_board_task")))
 }
 
 // A verdict is the claim under test, never its own proof. Approving every
@@ -33,14 +33,14 @@ func TestUngroundedQADoesNotAcceptVerdictsAsEvidence(t *testing.T) {
 
 	usage := qaUsage("review_criterion", "add_task_comment", "list_acceptance_criteria", "get_pipeline_status")
 
-	assert.True(t, isUngroundedQA(task, domain.AgentResponse{}, usage))
+	assert.True(t, isUngroundedQA(taskWF, task, domain.AgentResponse{}, usage))
 }
 
 func TestUngroundedQAAcceptsAnExecutedRound(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInQA}
 
 	for _, tool := range []string{"run_terminal", "browser_navigate", "browser_screenshot"} {
-		assert.False(t, isUngroundedQA(task, domain.AgentResponse{}, qaUsage(tool, "review_criterion")),
+		assert.False(t, isUngroundedQA(taskWF, task, domain.AgentResponse{}, qaUsage(tool, "review_criterion")),
 			"%s is an executed test", tool)
 	}
 }
@@ -50,7 +50,7 @@ func TestUngroundedQAAcceptsAnExecutedRound(t *testing.T) {
 func TestUngroundedQACoversTheQueueColumn(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnReadyForQA}
 
-	assert.True(t, isUngroundedQA(task, domain.AgentResponse{}, qaUsage("move_board_task")))
+	assert.True(t, isUngroundedQA(taskWF, task, domain.AgentResponse{}, qaUsage("move_board_task")))
 }
 
 // Everything that is not a QA run passes untouched — the implementer's own
@@ -63,12 +63,12 @@ func TestUngroundedQAIgnoresEveryOtherRun(t *testing.T) {
 		domain.TaskColumnNeedRevision,
 	} {
 		task := domain.BoardTask{ID: uuid.New(), Column: column}
-		assert.False(t, isUngroundedQA(task, domain.AgentResponse{}, qaUsage("add_task_comment")),
+		assert.False(t, isUngroundedQA(taskWF, task, domain.AgentResponse{}, qaUsage("add_task_comment")),
 			"column %s is not a QA round", column)
 	}
 
 	analiz := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInQA, TaskType: domain.TaskTypeAnaliz}
-	assert.False(t, isUngroundedQA(analiz, domain.AgentResponse{}, qaUsage("add_task_comment")))
+	assert.False(t, isUngroundedQA(analizWF, analiz, domain.AgentResponse{}, qaUsage("add_task_comment")))
 }
 
 // Asking IS the answer, exactly as in the analiz gate: a run that stopped on a
@@ -77,12 +77,12 @@ func TestUngroundedQAExemptsAQuestion(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInQA}
 	resp := domain.AgentResponse{Clarification: &domain.ClarificationRequest{Context: "which stage url?"}}
 
-	assert.False(t, isUngroundedQA(task, resp, qaUsage("move_board_task")))
+	assert.False(t, isUngroundedQA(taskWF, task, resp, qaUsage("move_board_task")))
 }
 
 // An unmeasured run (chat, trimmed wiring) has no ledger to judge.
 func TestUngroundedQAIsNilSafe(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInQA}
 
-	assert.False(t, isUngroundedQA(task, domain.AgentResponse{}, nil))
+	assert.False(t, isUngroundedQA(taskWF, task, domain.AgentResponse{}, nil))
 }

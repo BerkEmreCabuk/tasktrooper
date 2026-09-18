@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -133,9 +134,10 @@ func TestDeployWatchWakeOnlyFiresForTheSweepersResumePayload(t *testing.T) {
 		{"the device park's resume", deployParkedTask(domain.TaskColumnDone), domain.BoardEventTaskMoved,
 			map[string]interface{}{domain.EventPayloadResumedResource: domain.ResourceMobileDevice}, false},
 	}
+	taskWF := workflowtest.Default().Workflows[domain.TaskTypeTask]
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := deployWatchWake(DispatchInput{Task: tc.task, EventType: tc.event, Payload: tc.payload})
+			got := deployWatchWake(taskWF, true, DispatchInput{Task: tc.task, EventType: tc.event, Payload: tc.payload})
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -144,7 +146,8 @@ func TestDeployWatchWakeOnlyFiresForTheSweepersResumePayload(t *testing.T) {
 func TestDeployWatchWakeSkipsNonCodeTasks(t *testing.T) {
 	task := deployParkedTask(domain.TaskColumnDone)
 	task.TaskType = domain.TaskTypeAnaliz
-	got := deployWatchWake(DispatchInput{
+	analizWF := workflowtest.Default().Workflows[domain.TaskTypeAnaliz]
+	got := deployWatchWake(analizWF, true, DispatchInput{
 		Task:      task,
 		EventType: domain.BoardEventTaskMoved,
 		Payload:   map[string]interface{}{domain.EventPayloadResumedResource: domain.ResourceDeployWatch},

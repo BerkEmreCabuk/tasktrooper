@@ -39,11 +39,28 @@ type Dispatcher struct {
 	workOrder    *WorkOrder
 	gatePolicy   PipelineGatePolicy
 	reviewLoop   *ReviewLoopGuard
-	// workflows/roles are wired but not yet read anywhere in B1 — see
-	// release-b-plan.md WP-B2a, which replaces this package's hardcoded
-	// column/type branches with wf.Has(...) reads.
+	// workflows/roles back every mid-lifecycle-column/task-type decision in
+	// this file (see workflowFor). roles is not read directly here yet.
 	workflows port.WorkflowReader
 	roles     port.RoleResolver
+}
+
+// workflowFor resolves the workflow a dispatch decision for this task type
+// should read. False means "treat every workflow-gated behaviour as closed":
+// either the reader was never wired, or Workflow() itself errored (empty/not-
+// yet-loaded snapshot) — an unreadable workflow must never read the same as
+// an absent behaviour, so callers suspend rather than guess.
+func (d *Dispatcher) workflowFor(ctx context.Context, taskType domain.TaskType) (domain.Workflow, bool) {
+	if d.workflows == nil {
+		return domain.Workflow{}, false
+	}
+	wf, err := d.workflows.Workflow(ctx, taskType)
+	if err != nil {
+		log.Warn().Err(err).Str("task_type", string(taskType)).
+			Msg("dispatcher: workflow lookup failed, failing closed")
+		return domain.Workflow{}, false
+	}
+	return wf, true
 }
 
 func (d *Dispatcher) SetWorkflows(w port.WorkflowReader)  { d.workflows = w }
@@ -105,7 +122,8 @@ func (d *Dispatcher) Dispatch(ctx context.Context, input DispatchInput) error {
 		payload["assignee_agent_id"] = input.Task.AssigneeAgentID.String()
 	}
 
-	gateDefers, gateSkipReason := d.pipelineGateDecision(ctx, input)
+	wf, wfOK := d.workflowFor(ctx, input.Task.TaskType)
+	gateDefers, gateSkipReason := d.pipelineGateDecision(ctx, wf, wfOK, input)
 	if gateSkipReason != "" {
 		payload[domain.EventPayloadPipelineGate] = gateSkipReason
 	}
@@ -143,13 +161,13 @@ func (d *Dispatcher) Dispatch(ctx context.Context, input DispatchInput) error {
 		}
 	}
 
-	mergeWake := doneMergeWake(input)
-	watchWake := deployWatchWake(input)
-	if isDispatchSuspendedTask(input.Task) && !mergeWake && !watchWake {
+	mergeWake := doneMergeWake(wf, wfOK, input)
+	watchWake := deployWatchWake(wf, wfOK, input)
+	if isDispatchSuspendedTask(wf, wfOK, input.Task) && !mergeWake && !watchWake {
 		return nil
 	}
 
-	if d.workOrder != nil && workOrderGateApplies(input) {
+	if d.workOrder != nil && workOrderGateApplies(wf, wfOK, input) {
 		blockers, berr := d.workOrder.Blockers(ctx, input.Task.ID)
 		if berr != nil {
 
@@ -181,7 +199,7 @@ func (d *Dispatcher) Dispatch(ctx context.Context, input DispatchInput) error {
 
 		agentIDs, err = d.board.AgentsForColumn(ctx, string(domain.TaskColumnDone), string(input.Task.TaskType))
 	} else {
-		agentIDs, err = d.resolveAgents(ctx, input)
+		agentIDs, err = d.resolveAgents(ctx, wf, wfOK, input)
 	}
 	if err != nil {
 		return err
@@ -248,23 +266,31 @@ func (d *Dispatcher) alreadyWorkingOn(ctx context.Context, eventType domain.Boar
 	}
 }
 
-func isDispatchSuspendedTask(task domain.BoardTask) bool {
+// isDispatchSuspendedTask reports whether a task must never be dispatched
+// from its own event. blocked/backlog/released are system columns every task
+// type parks in the same way, so they stay literal; done is the one column
+// whose suspension used to turn on the task's TYPE (an analiz task keeps
+// working in done, decomposing itself, while task/bug/technical stop there) —
+// that is now the presence of dispatch_suspended on the type's own done stage,
+// read off the type's workflow instead of compared against TaskTypeAnaliz.
+// !wfOK fails closed: an unreadable workflow suspends rather than guesses.
+func isDispatchSuspendedTask(wf domain.Workflow, wfOK bool, task domain.BoardTask) bool {
 	switch task.Column {
 	case domain.TaskColumnBlocked, domain.TaskColumnBacklog, domain.TaskColumnReleased:
 		return true
 	case domain.TaskColumnDone:
-		return task.TaskType != domain.TaskTypeAnaliz
+		return !wfOK || wf.Has(domain.TaskColumnDone, domain.BehaviourDispatchSuspended)
 	default:
 		return false
 	}
 }
 
-func doneMergeWake(input DispatchInput) bool {
+func doneMergeWake(wf domain.Workflow, wfOK bool, input DispatchInput) bool {
 	task := input.Task
 	if task.Column != domain.TaskColumnDone {
 		return false
 	}
-	if !domain.TaskTypeShipsCode(task.TaskType) {
+	if !wfOK || !wf.Has(domain.TaskColumnDone, domain.BehaviourMergePROnEnter) {
 		return false
 	}
 	switch input.EventType {
@@ -278,12 +304,12 @@ func doneMergeWake(input DispatchInput) bool {
 	return strings.TrimSpace(task.MergeCommitSHA) == ""
 }
 
-func deployWatchWake(input DispatchInput) bool {
+func deployWatchWake(wf domain.Workflow, wfOK bool, input DispatchInput) bool {
 	task := input.Task
 	if task.Column != domain.TaskColumnDone && task.Column != domain.TaskColumnReleased {
 		return false
 	}
-	if !domain.TaskTypeShipsCode(task.TaskType) {
+	if !wfOK || !wf.Has(task.Column, domain.BehaviourWatchDeployOnResume) {
 		return false
 	}
 	if input.EventType != domain.BoardEventTaskMoved {
@@ -327,24 +353,26 @@ func actorAgentIDFromPayload(payload map[string]interface{}) uuid.UUID {
 	return id
 }
 
-func isHandoffGateColumn(col domain.TaskColumn) bool {
-	switch col {
-	case domain.TaskColumnCodeReview, domain.TaskColumnReadyForQA,
-		domain.TaskColumnInQA, domain.TaskColumnPMUAT,
-		domain.TaskColumnAnalizReview, domain.TaskColumnHumanUAT:
+// isHandoffGateColumn reports whether this column's move wakes every
+// subscriber instead of only the task's assignee — route_to_subscribers, on
+// every column that behaviour carries (the same set for every type, since
+// it is a type-uniform "all types" behaviour, not a per-type one). !wfOK
+// fails to the wider net (true): an unreadable workflow must not silently
+// narrow a handoff gate down to a single, possibly-nil assignee.
+func isHandoffGateColumn(wf domain.Workflow, wfOK bool, col domain.TaskColumn) bool {
+	if !wfOK {
 		return true
-	default:
-		return false
 	}
+	return wf.Has(col, domain.BehaviourRouteToSubscribers)
 }
 
-func (d *Dispatcher) resolveAgents(ctx context.Context, input DispatchInput) ([]uuid.UUID, error) {
+func (d *Dispatcher) resolveAgents(ctx context.Context, wf domain.Workflow, wfOK bool, input DispatchInput) ([]uuid.UUID, error) {
 	task := input.Task
 	taskType := string(task.TaskType)
 
 	switch input.EventType {
 	case domain.BoardEventTaskCommented:
-		if isHandoffGateColumn(task.Column) {
+		if isHandoffGateColumn(wf, wfOK, task.Column) {
 			return d.board.AgentsForColumn(ctx, string(task.Column), taskType)
 		}
 		if task.AssigneeAgentID != nil {
@@ -357,7 +385,7 @@ func (d *Dispatcher) resolveAgents(ctx context.Context, input DispatchInput) ([]
 		}
 		return []uuid.UUID{*task.AssigneeAgentID}, nil
 	case domain.BoardEventTaskCreated, domain.BoardEventTaskMoved:
-		if isHandoffGateColumn(task.Column) {
+		if isHandoffGateColumn(wf, wfOK, task.Column) {
 			return d.board.AgentsForColumn(ctx, string(task.Column), taskType)
 		}
 		if task.AssigneeAgentID != nil {
@@ -369,10 +397,20 @@ func (d *Dispatcher) resolveAgents(ctx context.Context, input DispatchInput) ([]
 	}
 }
 
-func (d *Dispatcher) pipelineGateDecision(ctx context.Context, input DispatchInput) (defers bool, skipReason string) {
+// pipelineGateDecision answers whether a move into code_review defers
+// dispatch for the CI gate. wait_for_ci is a type-uniform "all types"
+// behaviour (the pipeline gate applies the same way whatever the task type),
+// so !wfOK fails closed to "defer" — an unreadable workflow must not open a
+// gate it cannot actually evaluate.
+func (d *Dispatcher) pipelineGateDecision(ctx context.Context, wf domain.Workflow, wfOK bool, input DispatchInput) (defers bool, skipReason string) {
 	if !d.pipelineGate || input.SkipPipelineGate ||
-		input.EventType != domain.BoardEventTaskMoved ||
-		input.Task.Column != domain.TaskColumnCodeReview {
+		input.EventType != domain.BoardEventTaskMoved {
+		return false, ""
+	}
+	if !wfOK {
+		return true, ""
+	}
+	if !wf.Has(input.Task.Column, domain.BehaviourWaitForCI) {
 		return false, ""
 	}
 	if d.gatePolicy == nil || d.gatePolicy.RequirePipelineForReview(ctx, input.RepositoryID) {

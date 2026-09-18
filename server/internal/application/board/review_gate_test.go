@@ -6,9 +6,21 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/board"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/stretchr/testify/suite"
 )
+
+// newReviewGate builds a ReviewGate wired against the default workflow
+// fixture — InterceptAgentMove now reads hold_for_human_approval off the
+// task's workflow (task.TaskType is "" in every test below, which the fixture
+// resolves to the default "task" type), rather than a hardcoded column
+// compare.
+func newReviewGate(spans board.VerdictStore, escapes board.EscapeCharger) *board.ReviewGate {
+	gate := board.NewReviewGate(spans, escapes)
+	gate.SetWorkflows(workflowtest.Default().Reader())
+	return gate
+}
 
 type verdictSpans struct {
 	set     map[string]string // column -> verdict
@@ -40,7 +52,7 @@ func TestReviewGateSuite(t *testing.T) { suite.Run(t, new(ReviewGateSuite)) }
 
 func (s *ReviewGateSuite) TestAgentApprovalIsHeldAsVerdict() {
 	spans := &verdictSpans{}
-	gate := board.NewReviewGate(spans, &escapeRecorder{})
+	gate := newReviewGate(spans, &escapeRecorder{})
 
 	allow := gate.InterceptAgentMove(context.Background(), domain.BoardTask{ID: uuid.New()},
 		domain.TaskColumnCodeReview, domain.TaskColumnReadyForQA, domain.TaskActorAgent,
@@ -52,7 +64,7 @@ func (s *ReviewGateSuite) TestAgentApprovalIsHeldAsVerdict() {
 
 func (s *ReviewGateSuite) TestAgentRejectionMovesImmediately() {
 	spans := &verdictSpans{}
-	gate := board.NewReviewGate(spans, &escapeRecorder{})
+	gate := newReviewGate(spans, &escapeRecorder{})
 
 	allow := gate.InterceptAgentMove(context.Background(), domain.BoardTask{ID: uuid.New()},
 		domain.TaskColumnCodeReview, domain.TaskColumnNeedRevision, domain.TaskActorAgent,
@@ -68,7 +80,7 @@ func (s *ReviewGateSuite) TestAgentRejectionMovesImmediately() {
 // about to ask for anyway.
 func (s *ReviewGateSuite) TestPMApprovalIsNotHeldBecauseHumanUATIsTheHumanGate() {
 	spans := &verdictSpans{}
-	gate := board.NewReviewGate(spans, &escapeRecorder{})
+	gate := newReviewGate(spans, &escapeRecorder{})
 
 	allow := gate.InterceptAgentMove(context.Background(), domain.BoardTask{ID: uuid.New()},
 		domain.TaskColumnPMUAT, domain.TaskColumnHumanUAT, domain.TaskActorAgent,
@@ -80,7 +92,7 @@ func (s *ReviewGateSuite) TestPMApprovalIsNotHeldBecauseHumanUATIsTheHumanGate()
 
 func (s *ReviewGateSuite) TestHumanMoveIsNeverIntercepted() {
 	spans := &verdictSpans{}
-	gate := board.NewReviewGate(spans, &escapeRecorder{})
+	gate := newReviewGate(spans, &escapeRecorder{})
 
 	allow := gate.InterceptAgentMove(context.Background(), domain.BoardTask{ID: uuid.New()},
 		domain.TaskColumnCodeReview, domain.TaskColumnReadyForQA, domain.TaskActorHuman,
@@ -92,7 +104,7 @@ func (s *ReviewGateSuite) TestHumanMoveIsNeverIntercepted() {
 
 func (s *ReviewGateSuite) TestNoInterceptionWhenHumanReviewIsOff() {
 	spans := &verdictSpans{}
-	gate := board.NewReviewGate(spans, &escapeRecorder{})
+	gate := newReviewGate(spans, &escapeRecorder{})
 
 	allow := gate.InterceptAgentMove(context.Background(), domain.BoardTask{ID: uuid.New()},
 		domain.TaskColumnCodeReview, domain.TaskColumnReadyForQA, domain.TaskActorAgent,
@@ -104,7 +116,7 @@ func (s *ReviewGateSuite) TestNoInterceptionWhenHumanReviewIsOff() {
 
 func (s *ReviewGateSuite) TestNonReviewColumnIsNeverIntercepted() {
 	spans := &verdictSpans{}
-	gate := board.NewReviewGate(spans, &escapeRecorder{})
+	gate := newReviewGate(spans, &escapeRecorder{})
 
 	allow := gate.InterceptAgentMove(context.Background(), domain.BoardTask{ID: uuid.New()},
 		domain.TaskColumnInProgress, domain.TaskColumnCodeReview, domain.TaskActorAgent,
@@ -125,7 +137,7 @@ func (s *ReviewGateSuite) TestHumanRejectionOfApprovedSpanChargesTheReviewer() {
 		hasOpen: true,
 	}
 	escapes := &escapeRecorder{}
-	gate := board.NewReviewGate(spans, escapes)
+	gate := newReviewGate(spans, escapes)
 
 	gate.OnHumanRejection(context.Background(), domain.BoardTask{ID: uuid.New()}, domain.TaskColumnCodeReview)
 
@@ -143,7 +155,7 @@ func (s *ReviewGateSuite) TestHumanRejectionOfRejectedSpanChargesNobody() {
 		hasOpen: true,
 	}
 	escapes := &escapeRecorder{}
-	gate := board.NewReviewGate(spans, escapes)
+	gate := newReviewGate(spans, escapes)
 
 	gate.OnHumanRejection(context.Background(), domain.BoardTask{ID: uuid.New()}, domain.TaskColumnCodeReview)
 
@@ -156,7 +168,7 @@ func (s *ReviewGateSuite) TestHumanRejectionWithNoReviewerChargesNobody() {
 		hasOpen: true,
 	}
 	escapes := &escapeRecorder{}
-	gate := board.NewReviewGate(spans, escapes)
+	gate := newReviewGate(spans, escapes)
 
 	gate.OnHumanRejection(context.Background(), domain.BoardTask{ID: uuid.New()}, domain.TaskColumnCodeReview)
 

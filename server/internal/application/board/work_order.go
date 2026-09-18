@@ -133,10 +133,14 @@ func blockerLabels(blockers []domain.BoardTask) []string {
 // workOrderGateApplies reports whether this dispatch is one the work order has
 // anything to say about.
 //
-// Only the two columns where work STARTS. A blocks relation is a statement
-// about who writes code first; once a task has reached code_review its code is
-// written, and parking it there would strand a finished change behind a
-// dependency the change no longer has. Both are gated here even though
+// Only the columns where work STARTS — today todo and in_progress, read off
+// wf.Has(col, block_on_dependencies) instead of a hardcoded {todo,
+// in_progress} switch, so a customised workflow's own choice of "where does
+// work start" governs the park too. A blocks relation is a statement about
+// who writes code first; once a task has reached a stage without that
+// behaviour (code_review, by default) its code is written, and parking it
+// there would strand a finished change behind a dependency the change no
+// longer has. Both are gated here even though
 // repository.Service.validateMoveAllowed only refuses a manual move into
 // in_progress: a manual move into todo is allowed (queueing, not starting) and
 // this is what actually keeps an agent from picking the work up early once it
@@ -147,10 +151,11 @@ func blockerLabels(blockers []domain.BoardTask) []string {
 // re-parked before its dispatch reaches an agent: the sweeper only releases a
 // task whose blockers have landed, and re-reading the graph in the same instant
 // would at best confirm that and at worst re-park it on a stale read.
-func workOrderGateApplies(input DispatchInput) bool {
-	switch input.Task.Column {
-	case domain.TaskColumnTodo, domain.TaskColumnInProgress:
-	default:
+//
+// !wfOK fails closed (the gate still applies): an unreadable workflow must
+// not let a task slip past its work order rather than merely park it late.
+func workOrderGateApplies(wf domain.Workflow, wfOK bool, input DispatchInput) bool {
+	if wfOK && !wf.Has(input.Task.Column, domain.BehaviourBlockOnDependencies) {
 		return false
 	}
 	if input.Payload != nil {

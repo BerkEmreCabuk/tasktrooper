@@ -93,7 +93,7 @@ type Repository struct {
 	// RequireReviewChain, when true, refuses to let a task enter done (or
 	// released) until it has passed every review stage its type requires —
 	// code review, QA and UAT for a task/bug, analiz review for an analiz.
-	// See ReviewChainForType.
+	// See Workflow.ReviewChain.
 	//
 	// Opt-in, and off by default, because the requirement is only honest on a
 	// board that is actually wired for it: a repo with no QA agent subscribed,

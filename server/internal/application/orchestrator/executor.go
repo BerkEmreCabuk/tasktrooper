@@ -675,7 +675,7 @@ func (e *Executor) buildTaskMessages(ctx context.Context, sessionID uuid.UUID, h
 	mu.Lock()
 	for _, dep := range tc.plannerTask.DependsOn {
 		if r, ok := priorResults[dep]; ok {
-			if agentRec.SubagentType == "generalPurpose" || agentRec.Name == "general-coder" {
+			if agentRec.SubagentType == "generalPurpose" {
 				if e.contextBuilder != nil {
 					taskPrompt.WriteString("\n\n")
 					taskPrompt.WriteString(e.contextBuilder.FormatExplorerFindings(dep, dep, truncateDependencyOutput(r, e.cfg.DependencyOutputMaxChars)))
@@ -706,7 +706,7 @@ func (e *Executor) buildTaskMessages(ctx context.Context, sessionID uuid.UUID, h
 	messages = append(messages, domain.Message{Role: domain.RoleSystem, Content: systemContent})
 
 	if e.contextBuilder != nil && sessionID != uuid.Nil {
-		if agentRec.SubagentType == "explore" || agentRec.Name == "code-explorer" {
+		if agentRec.SubagentType == "explore" {
 			if ctxMsgs, err := e.contextBuilder.BuildExplorerContext(ctx, sessionID, tc.plannerTask.Description); err == nil {
 				for _, m := range ctxMsgs {
 					if m.Role == domain.RoleSystem {

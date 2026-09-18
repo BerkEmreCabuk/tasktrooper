@@ -17,7 +17,7 @@ import (
 func TestTriggerMessageDoesNotAskForAMoveIntoTheCurrentColumn(t *testing.T) {
 	job := RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnInProgress}}
 
-	msg := buildTriggerMessage(job, nil, nil)
+	msg := buildTriggerMessage(job, taskWF, nil, nil)
 
 	if strings.Contains(msg, "move it to in_progress") {
 		t.Fatalf("in_progress task is still told to move itself to in_progress:\n%s", msg)
@@ -30,7 +30,7 @@ func TestTriggerMessageDoesNotAskForAMoveIntoTheCurrentColumn(t *testing.T) {
 func TestTriggerMessageKeepsTheClaimAndMoveForATodoTask(t *testing.T) {
 	job := RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnTodo}}
 
-	msg := buildTriggerMessage(job, nil, nil)
+	msg := buildTriggerMessage(job, taskWF, nil, nil)
 
 	if !strings.Contains(msg, "move it to in_progress") {
 		t.Fatalf("a todo task must still be told to claim and move:\n%s", msg)
@@ -44,7 +44,7 @@ func TestTriggerMessageRulesOutBookkeepingAsAStep(t *testing.T) {
 		domain.TaskColumnTodo, domain.TaskColumnInProgress,
 		domain.TaskColumnNeedRevision, domain.TaskColumnCodeReview,
 	} {
-		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, nil, nil)
+		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, taskWF, nil, nil)
 		if !strings.Contains(msg, "never a step of its own") {
 			t.Errorf("column %s: trigger message allows bookkeeping to become its own step:\n%s", col, msg)
 		}
@@ -58,7 +58,7 @@ func TestTriggerMessageStatesStandingCriteriaForImplementers(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
 	} {
-		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, nil, nil)
+		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, taskWF, nil, nil)
 		for _, want := range []string{
 			"Standing acceptance criteria",
 			"The project builds.",
@@ -77,7 +77,7 @@ func TestTriggerMessageStatesStandingCriteriaForImplementers(t *testing.T) {
 func TestTriggerMessageOmitsStandingCriteriaForAnaliz(t *testing.T) {
 	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{
 		Title: "t", Column: domain.TaskColumnInProgress, TaskType: domain.TaskTypeAnaliz,
-	}}, nil, nil)
+	}}, analizWF, nil, nil)
 	if strings.Contains(msg, "Standing acceptance criteria") {
 		t.Errorf("analiz run was handed the implementer's build criteria:\n%s", msg)
 	}
@@ -94,7 +94,7 @@ func TestTriggerMessageListsOpenCriteriaForImplementers(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
 	} {
-		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, open, nil)
+		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, taskWF, open, nil)
 		if !strings.Contains(msg, open[0].Text) {
 			t.Errorf("column %s: open criterion is not in the trigger message:\n%s", col, msg)
 		}
@@ -115,7 +115,7 @@ func TestTriggerMessageDoesNotTellReviewersToTickCriteria(t *testing.T) {
 		domain.TaskColumnCodeReview, domain.TaskColumnReadyForQA,
 		domain.TaskColumnInQA, domain.TaskColumnPMUAT,
 	} {
-		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, open, nil)
+		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, taskWF, open, nil)
 		if !strings.Contains(msg, open[0].Text) {
 			t.Errorf("column %s: reviewer should still see the criteria:\n%s", col, msg)
 		}
@@ -126,7 +126,7 @@ func TestTriggerMessageDoesNotTellReviewersToTickCriteria(t *testing.T) {
 }
 
 func TestTriggerMessageOmitsTheCriteriaBlockWhenNoneAreOpen(t *testing.T) {
-	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnInProgress}}, nil, nil)
+	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnInProgress}}, taskWF, nil, nil)
 	if strings.Contains(msg, "Open acceptance criteria") {
 		t.Fatalf("a task with nothing open still gets a criteria block:\n%s", msg)
 	}
@@ -141,7 +141,7 @@ func TestTriggerMessageOmitsTheCriteriaBlockWhenNoneAreOpen(t *testing.T) {
 func TestTriggerMessageCarriesTheTaskType(t *testing.T) {
 	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{
 		Title: "t", Column: domain.TaskColumnTodo, TaskType: domain.TaskTypeAnaliz,
-	}}, nil, nil)
+	}}, analizWF, nil, nil)
 
 	if !strings.Contains(msg, `"task_type":"analiz"`) {
 		t.Fatalf("task snapshot does not carry the task type:\n%s", msg)
@@ -152,7 +152,7 @@ func TestAnalizInstructionDoesNotAskForCodeOrACodeReviewHandoff(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
 	} {
-		instruction := columnInstruction(domain.BoardTask{Column: col, TaskType: domain.TaskTypeAnaliz})
+		instruction := columnInstruction(analizWF, domain.BoardTask{Column: col, TaskType: domain.TaskTypeAnaliz})
 		if strings.Contains(instruction, "the system moves the task to code_review") {
 			t.Errorf("column %s: an analiz run is promised a code_review hand-off it never gets:\n%s", col, instruction)
 		}
@@ -174,11 +174,11 @@ func TestAnalizInstructionDoesNotAskForCodeOrACodeReviewHandoff(t *testing.T) {
 // analiz_review and done are human moves; the run dispatched after them has a
 // different job in each, and neither is implementation.
 func TestAnalizInstructionSplitsTheHumanGateFromTheApproval(t *testing.T) {
-	waiting := columnInstruction(domain.BoardTask{Column: domain.TaskColumnAnalizReview, TaskType: domain.TaskTypeAnaliz})
+	waiting := columnInstruction(analizWF, domain.BoardTask{Column: domain.TaskColumnAnalizReview, TaskType: domain.TaskTypeAnaliz})
 	if !strings.Contains(waiting, "Take no action") {
 		t.Errorf("analiz_review is a human gate; the agent must stand down:\n%s", waiting)
 	}
-	approved := columnInstruction(domain.BoardTask{Column: domain.TaskColumnDone, TaskType: domain.TaskTypeAnaliz})
+	approved := columnInstruction(analizWF, domain.BoardTask{Column: domain.TaskColumnDone, TaskType: domain.TaskTypeAnaliz})
 	if !strings.Contains(approved, "released") || !strings.Contains(approved, "list_team") {
 		t.Errorf("an approved analiz must be decomposed and released:\n%s", approved)
 	}
@@ -188,7 +188,7 @@ func TestAnalizInstructionSplitsTheHumanGateFromTheApproval(t *testing.T) {
 // implementer instruction exactly as it was.
 func TestImplementationTasksKeepTheColumnInstruction(t *testing.T) {
 	for _, typ := range []domain.TaskType{domain.TaskTypeTask, domain.TaskTypeBug, ""} {
-		instruction := columnInstruction(domain.BoardTask{Column: domain.TaskColumnInProgress, TaskType: typ})
+		instruction := columnInstruction(taskWF, domain.BoardTask{Column: domain.TaskColumnInProgress, TaskType: typ})
 		if !strings.Contains(instruction, "code_review") {
 			t.Errorf("task type %q lost the implementer hand-off:\n%s", typ, instruction)
 		}
@@ -201,7 +201,7 @@ func TestImplementerInstructionNamesTheCriteriaGate(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
 	} {
-		instruction := columnInstruction(domain.BoardTask{Column: col})
+		instruction := columnInstruction(taskWF, domain.BoardTask{Column: col})
 		if !strings.Contains(instruction, "set_criterion_completed") {
 			t.Errorf("column %s: instruction does not mention ticking criteria:\n%s", col, instruction)
 		}

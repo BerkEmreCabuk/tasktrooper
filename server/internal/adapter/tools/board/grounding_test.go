@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -33,7 +34,7 @@ func newDocumentKit(taskType domain.TaskType) (*ToolKit, *documentTaskManager, u
 		fakeTaskManager: &fakeTaskManager{taskRepoID: repoID},
 		task:            domain.BoardTask{ID: taskID, RepositoryID: repoID, TaskType: taskType},
 	}
-	return &ToolKit{Tasks: tasks}, tasks, taskID
+	return &ToolKit{Tasks: tasks, Workflows: workflowtest.Default().Reader()}, tasks, taskID
 }
 
 func documentArgs(taskID uuid.UUID) string {

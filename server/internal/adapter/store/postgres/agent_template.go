@@ -19,7 +19,7 @@ func NewAgentTemplateStore(pool *DB) *AgentTemplateStore {
 	return &AgentTemplateStore{pool: pool}
 }
 
-const agentTemplateColumns = "id, name, description, subagent_type, system_prompt, provider_type, model, tool_policy, skills, rules, kpis, self_evolution_enabled, built_in, created_at, updated_at"
+const agentTemplateColumns = "id, name, description, subagent_type, system_prompt, provider_type, model, tool_policy, skills, rules, kpis, roles, subscriptions, self_evolution_enabled, built_in, created_at, updated_at"
 
 func (s *AgentTemplateStore) List(ctx context.Context) ([]domain.AgentTemplate, error) {
 	rows, err := s.pool.Query(ctx, `SELECT `+agentTemplateColumns+` FROM agent_templates ORDER BY built_in DESC, name`)
@@ -67,9 +67,17 @@ func (s *AgentTemplateStore) UpsertByName(ctx context.Context, tpl domain.AgentT
 	if err != nil {
 		return domain.AgentTemplate{}, err
 	}
+	rolesJSON, err := json.Marshal(orEmptyRoleSuggestions(tpl.Roles))
+	if err != nil {
+		return domain.AgentTemplate{}, err
+	}
+	subscriptionsJSON, err := json.Marshal(orEmptyColumns(tpl.Subscriptions))
+	if err != nil {
+		return domain.AgentTemplate{}, err
+	}
 	row := s.pool.QueryRow(ctx, `
-		INSERT INTO agent_templates (name, description, subagent_type, system_prompt, provider_type, model, tool_policy, skills, rules, kpis, self_evolution_enabled, built_in)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		INSERT INTO agent_templates (name, description, subagent_type, system_prompt, provider_type, model, tool_policy, skills, rules, kpis, roles, subscriptions, self_evolution_enabled, built_in)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		ON CONFLICT (name) DO UPDATE SET
 			description = EXCLUDED.description,
 			subagent_type = EXCLUDED.subagent_type,
@@ -80,11 +88,13 @@ func (s *AgentTemplateStore) UpsertByName(ctx context.Context, tpl domain.AgentT
 			skills = EXCLUDED.skills,
 			rules = EXCLUDED.rules,
 			kpis = EXCLUDED.kpis,
+			roles = EXCLUDED.roles,
+			subscriptions = EXCLUDED.subscriptions,
 			self_evolution_enabled = EXCLUDED.self_evolution_enabled,
 			built_in = EXCLUDED.built_in,
 			updated_at = now()
 		RETURNING `+agentTemplateColumns,
-		tpl.Name, tpl.Description, tpl.SubagentType, tpl.SystemPrompt, tpl.ProviderType, tpl.Model, policyJSON, skillsJSON, rulesJSON, kpisJSON, tpl.SelfEvolutionEnabled, tpl.BuiltIn)
+		tpl.Name, tpl.Description, tpl.SubagentType, tpl.SystemPrompt, tpl.ProviderType, tpl.Model, policyJSON, skillsJSON, rulesJSON, kpisJSON, rolesJSON, subscriptionsJSON, tpl.SelfEvolutionEnabled, tpl.BuiltIn)
 	out, err := scanAgentTemplate(row)
 	if err != nil {
 		return domain.AgentTemplate{}, fmt.Errorf("upsert agent template: %w", err)
@@ -105,10 +115,11 @@ func (s *AgentTemplateStore) Delete(ctx context.Context, id uuid.UUID) error {
 
 func scanAgentTemplate(row pgx.Row) (domain.AgentTemplate, error) {
 	var tpl domain.AgentTemplate
-	var policyJSON, skillsJSON, rulesJSON, kpisJSON []byte
+	var policyJSON, skillsJSON, rulesJSON, kpisJSON, rolesJSON, subscriptionsJSON []byte
 	if err := row.Scan(
 		&tpl.ID, &tpl.Name, &tpl.Description, &tpl.SubagentType, &tpl.SystemPrompt,
-		&tpl.ProviderType, &tpl.Model, &policyJSON, &skillsJSON, &rulesJSON, &kpisJSON, &tpl.SelfEvolutionEnabled, &tpl.BuiltIn, &tpl.CreatedAt, &tpl.UpdatedAt,
+		&tpl.ProviderType, &tpl.Model, &policyJSON, &skillsJSON, &rulesJSON, &kpisJSON, &rolesJSON, &subscriptionsJSON,
+		&tpl.SelfEvolutionEnabled, &tpl.BuiltIn, &tpl.CreatedAt, &tpl.UpdatedAt,
 	); err != nil {
 		return domain.AgentTemplate{}, err
 	}
@@ -116,6 +127,8 @@ func scanAgentTemplate(row pgx.Row) (domain.AgentTemplate, error) {
 	decodeTemplateCatalog(skillsJSON, &tpl)
 	_ = json.Unmarshal(rulesJSON, &tpl.Rules)
 	_ = json.Unmarshal(kpisJSON, &tpl.KPIs)
+	_ = json.Unmarshal(rolesJSON, &tpl.Roles)
+	_ = json.Unmarshal(subscriptionsJSON, &tpl.Subscriptions)
 	return tpl, nil
 }
 
@@ -170,6 +183,20 @@ func orEmptyRules(in []domain.CreateOrchestratorRuleRequest) []domain.CreateOrch
 func orEmptyKPIs(in []domain.CreateKPIRequest) []domain.CreateKPIRequest {
 	if in == nil {
 		return []domain.CreateKPIRequest{}
+	}
+	return in
+}
+
+func orEmptyRoleSuggestions(in []domain.TemplateRoleSuggestion) []domain.TemplateRoleSuggestion {
+	if in == nil {
+		return []domain.TemplateRoleSuggestion{}
+	}
+	return in
+}
+
+func orEmptyColumns(in []domain.TaskColumn) []domain.TaskColumn {
+	if in == nil {
+		return []domain.TaskColumn{}
 	}
 	return in
 }

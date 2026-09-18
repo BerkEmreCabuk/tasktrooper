@@ -50,12 +50,15 @@ func (g *ReviewGate) InterceptAgentMove(ctx context.Context, task domain.BoardTa
 	if g == nil || g.spans == nil || actor != domain.TaskActorAgent || !repo.RequireHumanReview {
 		return true
 	}
-	// code_review only. pm_uat used to be held here too, which made a human
-	// approve the same task twice: once to let it out of pm_uat and again in
-	// human_uat, the column that exists for exactly that signature. The
-	// duplicate bought nothing — the PM's agent verdict is already recorded,
-	// and human_uat is where a person accepts the product.
-	if from != domain.TaskColumnCodeReview {
+	// code_review only, by default. pm_uat used to be held here too, which made
+	// a human approve the same task twice: once to let it out of pm_uat and
+	// again in human_uat, the column that exists for exactly that signature.
+	// The duplicate bought nothing — the PM's agent verdict is already
+	// recorded, and human_uat is where a person accepts the product. Which
+	// stage that is is now hold_for_human_approval on the task's own workflow
+	// rather than a literal TaskColumnCodeReview compare; an unreadable
+	// workflow holds (fails closed) rather than waving the move through.
+	if !g.holdsForHumanApproval(ctx, task.TaskType, from) {
 		return true
 	}
 	verdict := domain.ReviewVerdictApprove
@@ -68,6 +71,22 @@ func (g *ReviewGate) InterceptAgentMove(ctx context.Context, task domain.BoardTa
 		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("set review verdict failed")
 	}
 	return verdict == domain.ReviewVerdictReject
+}
+
+// holdsForHumanApproval reports whether a review-column exit at from is held
+// for a human under this task's workflow. !ok (workflow unreadable) holds —
+// the same fail-closed direction as every other gate here.
+func (g *ReviewGate) holdsForHumanApproval(ctx context.Context, taskType domain.TaskType, from domain.TaskColumn) bool {
+	if g.workflows == nil {
+		return true
+	}
+	wf, err := g.workflows.Workflow(ctx, taskType)
+	if err != nil {
+		log.Warn().Err(err).Str("task_type", string(taskType)).
+			Msg("review gate: workflow lookup failed, holding for human approval")
+		return true
+	}
+	return wf.Has(from, domain.BehaviourHoldForHumanApproval)
 }
 
 // OnHumanRejection charges the reviewing agent when a human sends back

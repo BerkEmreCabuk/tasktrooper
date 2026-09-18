@@ -84,6 +84,69 @@ func (f *fakeMerger) MergeTaskPullRequest(_ context.Context, _, taskID uuid.UUID
 	return f.result, f.err
 }
 
+// fakeRoleResolver is a fixed-response port.RoleResolver: it answers
+// AgentForPurpose(system_task_assignee) with one agent id and everything else
+// with "nobody".
+type fakeRoleResolver struct {
+	agentID uuid.UUID
+}
+
+func (f fakeRoleResolver) AgentForRole(context.Context, uuid.UUID, string) (*uuid.UUID, error) {
+	return nil, nil
+}
+
+func (f fakeRoleResolver) AgentForPurpose(_ context.Context, purpose domain.RolePurposeKey, _ string) (*uuid.UUID, error) {
+	if purpose != domain.PurposeSystemTaskAssignee {
+		return nil, nil
+	}
+	id := f.agentID
+	return &id, nil
+}
+
+func (f fakeRoleResolver) AgentArea(context.Context, uuid.UUID) string { return "" }
+
+func (f fakeRoleResolver) AssigneeForNewTask(_ context.Context, _ domain.TaskType, _ string, requested *uuid.UUID) (*uuid.UUID, error) {
+	return requested, nil
+}
+
+// A doc-authoring task's assignee comes from the developer role's
+// system_task_assignee purpose now, not a hardcoded agent-name lookup.
+func TestCreateDocTaskAssignsThroughRoleResolver(t *testing.T) {
+	svc, repos, tasks := newFixture(t, domain.Repository{Kind: domain.RepoKindBackend})
+	resolver := fakeRoleResolver{agentID: uuid.New()}
+	svc.SetRoleResolver(resolver)
+
+	_, err := svc.CreateDocTask(context.Background(), repos.repo.ID, "", domain.RepoDocCodingStandards, "")
+	require.NoError(t, err)
+	require.Len(t, tasks.created, 1)
+	require.NotNil(t, tasks.created[0].AssigneeAgentID)
+	require.Equal(t, resolver.agentID, *tasks.created[0].AssigneeAgentID)
+}
+
+// A docs bundle spanning several sub-projects is assigned to the developer
+// covering most of the areas in it (bundleArea), still resolved through the
+// role rather than a hardcoded name.
+func TestCreateDocsBundleTaskAssignsThroughBundleArea(t *testing.T) {
+	svc, repos, tasks := newFixture(t, domain.Repository{
+		Kind: domain.RepoKindMonorepo,
+		SubProjects: []domain.RepoSubProject{
+			{Path: "api", Kind: domain.RepoKindBackend},
+			{Path: "worker", Kind: domain.RepoKindBackend},
+			{Path: "web", Kind: domain.RepoKindFrontend},
+		},
+	})
+	resolver := fakeRoleResolver{agentID: uuid.New()}
+	svc.SetRoleResolver(resolver)
+
+	_, err := svc.CreateDocsBundleTask(context.Background(), repos.repo.ID, []repodocs.DocItem{
+		{Kind: domain.RepoDocCodingStandards},
+	})
+	require.NoError(t, err)
+	require.Len(t, tasks.created, 1)
+	require.NotNil(t, tasks.created[0].AssigneeAgentID)
+	require.Equal(t, resolver.agentID, *tasks.created[0].AssigneeAgentID)
+}
+
 func newFixture(t *testing.T, repo domain.Repository) (*repodocs.Service, *fakeRepos, *fakeTasks) {
 	t.Helper()
 	if repo.ID == uuid.Nil {

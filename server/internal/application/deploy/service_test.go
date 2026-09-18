@@ -71,6 +71,78 @@ func (r *onboardRecorder) fn(ctx context.Context, repositoryID uuid.UUID, provid
 	return r.err
 }
 
+// fakeTaskCreator records the last CreateTask call, for asserting what a
+// system-opened setup task was assigned to.
+type fakeTaskCreator struct {
+	lastReq domain.CreateBoardTaskRequest
+}
+
+func (f *fakeTaskCreator) CreateTask(ctx context.Context, repositoryID uuid.UUID, req domain.CreateBoardTaskRequest) (domain.BoardTask, error) {
+	f.lastReq = req
+	return domain.BoardTask{}, nil
+}
+
+// fakeRoleResolver is a fixed-response port.RoleResolver: it answers
+// AgentForPurpose(system_task_assignee) with one agent id and everything else
+// with "nobody".
+type fakeRoleResolver struct {
+	agentID uuid.UUID
+}
+
+func (f fakeRoleResolver) AgentForRole(context.Context, uuid.UUID, string) (*uuid.UUID, error) {
+	return nil, nil
+}
+
+func (f fakeRoleResolver) AgentForPurpose(_ context.Context, purpose domain.RolePurposeKey, _ string) (*uuid.UUID, error) {
+	if purpose != domain.PurposeSystemTaskAssignee {
+		return nil, nil
+	}
+	id := f.agentID
+	return &id, nil
+}
+
+func (f fakeRoleResolver) AgentArea(context.Context, uuid.UUID) string { return "" }
+
+func (f fakeRoleResolver) AssigneeForNewTask(_ context.Context, _ domain.TaskType, _ string, requested *uuid.UUID) (*uuid.UUID, error) {
+	return requested, nil
+}
+
+// The setup task's assignee comes from the developer role's
+// system_task_assignee purpose now, not a hardcoded agent name lookup.
+func TestCreateLocalSetupTaskAssignsThroughRoleResolver(t *testing.T) {
+	repo := domain.Repository{ID: uuid.New(), Kind: domain.RepoKindBackend}
+	resolver := fakeRoleResolver{agentID: uuid.New()}
+	svc := deploy.NewService(&fakeTargetStore{}, &fakeRepoResolver{repo: repo})
+	svc.SetRoleResolver(resolver)
+	tasks := &fakeTaskCreator{}
+	svc.SetTaskCreator(tasks)
+
+	if _, err := svc.CreateLocalSetupTask(context.Background(), repo.ID, ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if tasks.lastReq.AssigneeAgentID == nil || *tasks.lastReq.AssigneeAgentID != resolver.agentID {
+		t.Fatalf("assignee = %v, want %s", tasks.lastReq.AssigneeAgentID, resolver.agentID)
+	}
+}
+
+// Without a role resolver wired, the task is simply left unassigned — never
+// a hardcoded fallback name.
+func TestCreateLocalSetupTaskLeavesUnassignedWithoutRoleResolver(t *testing.T) {
+	repo := domain.Repository{ID: uuid.New(), Kind: domain.RepoKindBackend}
+	svc := deploy.NewService(&fakeTargetStore{}, &fakeRepoResolver{repo: repo})
+	tasks := &fakeTaskCreator{}
+	svc.SetTaskCreator(tasks)
+
+	if _, err := svc.CreateLocalSetupTask(context.Background(), repo.ID, ""); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if tasks.lastReq.AssigneeAgentID != nil {
+		t.Fatalf("expected no assignee, got %v", tasks.lastReq.AssigneeAgentID)
+	}
+}
+
 func TestSaveTargetOnboardsStoreProviderWithPackageName(t *testing.T) {
 	targets := &fakeTargetStore{}
 	svc := deploy.NewService(targets, &fakeRepoResolver{})

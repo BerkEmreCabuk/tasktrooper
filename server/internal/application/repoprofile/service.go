@@ -61,10 +61,6 @@ const refreshTimeout = 15 * time.Minute
 // be able to eat the whole refresh budget.
 const factsTimeout = 90 * time.Second
 
-// architectAgentName is the catalog row whose model/provider the refresh run
-// borrows. The profile prompt itself is fixed (below), not the agent's.
-const architectAgentName = "system-architect"
-
 // ErrRefreshInFlight reports that this repository's profile is already being
 // rebuilt; the caller's request is a no-op.
 var ErrRefreshInFlight = errors.New("a profile refresh is already running for this repository")
@@ -98,7 +94,7 @@ type Service struct {
 	repos     RepositoryStore
 	profiles  port.RepositoryProfileStore
 	loop      AgentLoop
-	agents    func(ctx context.Context) ([]domain.Agent, error)
+	agents    AgentGetter
 	pipelines PipelineJobStore
 
 	mu       sync.Mutex
@@ -128,10 +124,17 @@ func NewService(repos RepositoryStore, profiles port.RepositoryProfileStore, loo
 	}
 }
 
-// SetAgentLister wires the catalog lookup used to borrow the
-// system-architect's model/provider.
-func (s *Service) SetAgentLister(f func(ctx context.Context) ([]domain.Agent, error)) {
-	s.agents = f
+// AgentGetter is the narrow catalog lookup the refresh run borrows the
+// architect's model/provider from: fetch one agent by id, resolved through
+// RoleResolver.AgentForPurpose rather than a hardcoded name.
+type AgentGetter interface {
+	GetAgent(ctx context.Context, id uuid.UUID) (domain.Agent, error)
+}
+
+// SetAgentGetter wires the catalog lookup used to borrow the architect's
+// model/provider.
+func (s *Service) SetAgentGetter(g AgentGetter) {
+	s.agents = g
 }
 
 // SetPipelineJobs wires the pipeline mapping store so a deploy-workflow
@@ -555,25 +558,28 @@ func (s *Service) collectFacts(ctx context.Context, repo domain.Repository) repo
 	return facts
 }
 
-// architect resolves the system-architect catalog row; a zero Agent (default
+// architect resolves the repo_profiler role's agent; a zero Agent (default
 // model/provider, no agent context) keeps the refresh alive when the catalog
-// is unavailable or the role was renamed.
+// is unavailable or the purpose has no role/assignment.
 func (s *Service) architect(ctx context.Context) domain.Agent {
-	if s.agents == nil {
+	if s.agents == nil || s.roles == nil {
 		return domain.Agent{}
 	}
-	agents, err := s.agents(ctx)
+	id, err := s.roles.AgentForPurpose(ctx, domain.PurposeRepoProfiler, "")
+	if err != nil || id == nil {
+		if err != nil {
+			log.Warn().Err(err).Msg("profile refresh: role resolver lookup failed, using default model")
+		} else {
+			log.Warn().Msg("profile refresh: repo_profiler purpose has no role/assignment, using default model")
+		}
+		return domain.Agent{}
+	}
+	agent, err := s.agents.GetAgent(ctx, *id)
 	if err != nil {
 		log.Warn().Err(err).Msg("profile refresh: agent catalog lookup failed, using default model")
 		return domain.Agent{}
 	}
-	for _, a := range agents {
-		if a.Name == architectAgentName {
-			return a
-		}
-	}
-	log.Warn().Str("agent", architectAgentName).Msg("profile refresh: architect agent not found, using default model")
-	return domain.Agent{}
+	return agent
 }
 
 // refreshToolPolicy is the refresh run's allowlist: the read-only exploration

@@ -5,9 +5,39 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
+
+// fakeArchitectRoles resolves PurposeRepoProfiler to one fixed agent id,
+// standing in for application/workflow.Service's RoleResolver.
+type fakeArchitectRoles struct{ agentID uuid.UUID }
+
+func (f fakeArchitectRoles) AgentForRole(context.Context, uuid.UUID, string) (*uuid.UUID, error) {
+	return nil, nil
+}
+
+func (f fakeArchitectRoles) AgentForPurpose(_ context.Context, purpose domain.RolePurposeKey, _ string) (*uuid.UUID, error) {
+	if purpose != domain.PurposeRepoProfiler {
+		return nil, nil
+	}
+	id := f.agentID
+	return &id, nil
+}
+
+func (f fakeArchitectRoles) AgentArea(context.Context, uuid.UUID) string { return "" }
+
+func (f fakeArchitectRoles) AssigneeForNewTask(_ context.Context, _ domain.TaskType, _ string, requested *uuid.UUID) (*uuid.UUID, error) {
+	return requested, nil
+}
+
+// fakeArchitectGetter is the AgentGetter side: one agent row keyed by id.
+type fakeArchitectGetter struct{ agent domain.Agent }
+
+func (f fakeArchitectGetter) GetAgent(context.Context, uuid.UUID) (domain.Agent, error) {
+	return f.agent, nil
+}
 
 // refusingLoop is an HTTP loop that fails the test if it is ever asked. The
 // point of these tests is that a host-executed architect never reaches it.
@@ -72,12 +102,12 @@ func TestRefreshRunsOnTheHostExecutor(t *testing.T) {
 	router := agent.NewRouter(refusingLoop{t: t})
 	router.SetTaskExecutor(ex)
 
+	architectID := uuid.New()
 	svc = NewService(store, profiles, router)
-	svc.SetAgentLister(func(context.Context) ([]domain.Agent, error) {
-		return []domain.Agent{{
-			Name: architectAgentName, ProviderType: domain.LLMProviderClaudeCode, Model: "opus",
-		}}, nil
-	})
+	svc.SetRoleResolver(fakeArchitectRoles{agentID: architectID})
+	svc.SetAgentGetter(fakeArchitectGetter{agent: domain.Agent{
+		ID: architectID, Name: "system-architect", ProviderType: domain.LLMProviderClaudeCode, Model: "opus",
+	}})
 
 	if err := svc.Refresh(context.Background(), id, "manual"); err != nil {
 		t.Fatalf("refresh failed: %v", err)
@@ -107,12 +137,12 @@ func TestRefreshFailsHonestlyWithNoRunner(t *testing.T) {
 	store, profiles, id := newFixture(t, "", nil)
 	router := agent.NewRouter(refusingLoop{t: t})
 
+	architectID := uuid.New()
 	svc := NewService(store, profiles, router)
-	svc.SetAgentLister(func(context.Context) ([]domain.Agent, error) {
-		return []domain.Agent{{
-			Name: architectAgentName, ProviderType: domain.LLMProviderClaudeCode, Model: "opus",
-		}}, nil
-	})
+	svc.SetRoleResolver(fakeArchitectRoles{agentID: architectID})
+	svc.SetAgentGetter(fakeArchitectGetter{agent: domain.Agent{
+		ID: architectID, Name: "system-architect", ProviderType: domain.LLMProviderClaudeCode, Model: "opus",
+	}})
 
 	if err := svc.Refresh(context.Background(), id, "manual"); err == nil {
 		t.Fatal("a refresh with no engine to run on must not report success")

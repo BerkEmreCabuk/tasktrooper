@@ -60,6 +60,24 @@ func (t *addDocumentTool) Definition() domain.ToolDefinition {
 	}
 }
 
+// requiresRepoGrounding reports whether taskType carries the
+// require_repo_grounding type behaviour — what used to be a literal
+// TaskTypeAnaliz check here and in update_task_document. Nil-safe and
+// permissive on an unreadable snapshot: kit.Workflows is only unset in tests
+// that predate B1's wiring, and this gate exists to catch a fabricated
+// analysis, not to block every document write over a transient read error the
+// board's own dispatch would already have refused to run on.
+func (kit *ToolKit) requiresRepoGrounding(ctx context.Context, taskType domain.TaskType) bool {
+	if kit.Workflows == nil {
+		return false
+	}
+	wf, err := kit.Workflows.Workflow(ctx, taskType)
+	if err != nil {
+		return false
+	}
+	return wf.TypeHas(domain.BehaviourRequireRepoGrounding)
+}
+
 func (t *addDocumentTool) Execute(ctx context.Context, arguments string) domain.ToolResult {
 	var args addDocumentArgs
 	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
@@ -80,7 +98,7 @@ func (t *addDocumentTool) Execute(ctx context.Context, arguments string) domain.
 	if err != nil {
 		return toolError(addTaskDocumentToolName, err.Error())
 	}
-	if task, ok := t.kit.findTask(ctx, taskID); ok && task.TaskType == domain.TaskTypeAnaliz {
+	if task, ok := t.kit.findTask(ctx, taskID); ok && t.kit.requiresRepoGrounding(ctx, task.TaskType) {
 		if msg := ungroundedAnalysisReason(ctx); msg != "" {
 			return toolError(addTaskDocumentToolName, msg)
 		}

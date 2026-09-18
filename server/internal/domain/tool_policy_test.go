@@ -3,6 +3,7 @@ package domain_test
 import (
 	"testing"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/stretchr/testify/assert"
 )
@@ -344,5 +345,144 @@ func TestRestrictCodeToolsForVerification_QAColumnsStripOnlyReadFile(t *testing.
 
 func TestRestrictCodeToolsForVerification_UnrestrictedPolicyUntouched(t *testing.T) {
 	got := domain.RestrictCodeToolsForVerification(domain.ToolPolicy{}, domain.TaskColumnPMUAT)
+	assert.Empty(t, got.AllowTools)
+}
+
+// wfStage looks up one stage of the named workflowtest task type — a real
+// migration-143 fixture rather than a hand-built WorkflowStage, so these
+// tests exercise RestrictToolsForStage against the exact behaviour
+// combinations migration 143 seeds.
+func wfStage(t *testing.T, taskType domain.TaskType, col domain.TaskColumn) (domain.WorkflowStage, domain.TaskTypeDef) {
+	t.Helper()
+	wf, ok := workflowtest.Default().Workflows[taskType]
+	if !ok {
+		t.Fatalf("workflowtest.Default() has no workflow for type %q", taskType)
+	}
+	stage, ok := wf.Stage(col)
+	if !ok {
+		t.Fatalf("workflow %q has no stage for column %s", taskType, col)
+	}
+	return stage, wf.Type
+}
+
+// RestrictToolsForStage replaces the three functions above end to end: the
+// architect held the file writers for its other columns, and on an analiz
+// task (no_workspace_writes, a TYPE behaviour) it used them on a run whose
+// deliverable was never committed.
+func TestRestrictToolsForStage_TypeNoWorkspaceWritesStripsFileWriters(t *testing.T) {
+	stage, typeDef := wfStage(t, "analiz", domain.TaskColumnInProgress)
+	policy := domain.ToolPolicy{AllowTools: append([]string{
+		"run_terminal", "grep_code", "add_task_document", "move_board_task",
+	}, domain.WorkspaceWriteTools...)}
+
+	got := domain.RestrictToolsForStage(policy, stage, typeDef)
+
+	for _, tool := range domain.WorkspaceWriteTools {
+		assert.NotContains(t, got.AllowTools, tool)
+	}
+	assert.Contains(t, got.AllowTools, "run_terminal")
+	assert.Contains(t, got.AllowTools, "grep_code")
+	assert.Contains(t, got.AllowTools, "add_task_document")
+}
+
+func TestRestrictToolsForStage_ImplementationStagesKeepEverything(t *testing.T) {
+	policy := domain.ToolPolicy{AllowTools: append([]string{"run_terminal"}, domain.WorkspaceWriteTools...)}
+
+	for _, typeKey := range []domain.TaskType{"task", "bug", "technical"} {
+		stage, typeDef := wfStage(t, typeKey, domain.TaskColumnInProgress)
+		got := domain.RestrictToolsForStage(policy, stage, typeDef)
+		for _, tool := range domain.WorkspaceWriteTools {
+			assert.Contains(t, got.AllowTools, tool, "task type %q lost %s", typeKey, tool)
+		}
+	}
+}
+
+// code_review carries strip_writers with no "allow" — every writer, the
+// commit and the merge tool must go, mirroring RestrictToolsForVerdictColumn.
+func TestRestrictToolsForStage_StripWritersOnCodeReview(t *testing.T) {
+	stage, typeDef := wfStage(t, "task", domain.TaskColumnCodeReview)
+	policy := domain.ToolPolicy{AllowTools: append([]string{
+		"run_terminal", "commit_task_changes", domain.MergePullRequestToolName, "rollback_task_release", "get_task_pull_request",
+	}, domain.WorkspaceWriteTools...)}
+
+	got := domain.RestrictToolsForStage(policy, stage, typeDef)
+
+	for _, tool := range domain.WorkspaceWriteTools {
+		assert.NotContains(t, got.AllowTools, tool)
+	}
+	assert.NotContains(t, got.AllowTools, "commit_task_changes")
+	assert.NotContains(t, got.AllowTools, domain.MergePullRequestToolName, "a reviewer must not be able to land the change it is judging")
+	assert.NotContains(t, got.AllowTools, "rollback_task_release")
+	assert.Contains(t, got.AllowTools, "run_terminal")
+	assert.Contains(t, got.AllowTools, "get_task_pull_request")
+}
+
+// done's strip_writers carries allow=merge_task_pull_request,release_control —
+// the one column where landing the change and acting on its release are the
+// point of the run.
+func TestRestrictToolsForStage_DoneAllowsMergeAndReleaseControl(t *testing.T) {
+	stage, typeDef := wfStage(t, "task", domain.TaskColumnDone)
+	policy := domain.ToolPolicy{AllowTools: append([]string{
+		"run_terminal", "commit_task_changes", domain.MergePullRequestToolName, "rollback_task_release",
+	}, domain.WorkspaceWriteTools...)}
+
+	got := domain.RestrictToolsForStage(policy, stage, typeDef)
+
+	for _, tool := range domain.WorkspaceWriteTools {
+		assert.NotContains(t, got.AllowTools, tool, "done never writes to the workspace")
+	}
+	assert.NotContains(t, got.AllowTools, "commit_task_changes")
+	assert.Contains(t, got.AllowTools, domain.MergePullRequestToolName, "done is the one column dispatched to land the change")
+	assert.Contains(t, got.AllowTools, "rollback_task_release", "done is on the merge -> watch -> rollback sequence")
+}
+
+// pm_uat/human_uat carry no_code_reading: PM's verdict must come from the
+// running product, never from reading the implementation.
+func TestRestrictToolsForStage_NoCodeReadingOnPMUATAndHumanUAT(t *testing.T) {
+	for _, col := range []domain.TaskColumn{domain.TaskColumnPMUAT, domain.TaskColumnHumanUAT} {
+		t.Run(string(col), func(t *testing.T) {
+			stage, typeDef := wfStage(t, "task", col)
+			got := domain.RestrictToolsForStage(fullCodeToolsPolicy(), stage, typeDef)
+			for _, name := range domain.CodeExplorationTools {
+				assert.NotContains(t, got.AllowTools, name)
+			}
+			assert.Contains(t, got.AllowTools, "browser_navigate")
+			assert.Contains(t, got.AllowTools, "run_terminal")
+		})
+	}
+}
+
+// ready_for_qa/in_qa carry no_read_file only: QA keeps the tree/diff-level
+// code tools, it just loses read_file.
+func TestRestrictToolsForStage_NoReadFileOnQAColumns(t *testing.T) {
+	for _, col := range []domain.TaskColumn{domain.TaskColumnReadyForQA, domain.TaskColumnInQA} {
+		t.Run(string(col), func(t *testing.T) {
+			stage, typeDef := wfStage(t, "task", col)
+			got := domain.RestrictToolsForStage(fullCodeToolsPolicy(), stage, typeDef)
+			assert.NotContains(t, got.AllowTools, "read_file")
+			assert.Contains(t, got.AllowTools, "get_repo_tree")
+			assert.Contains(t, got.AllowTools, "grep_code")
+			assert.Contains(t, got.AllowTools, "get_task_pull_request")
+		})
+	}
+}
+
+// Columns with no restricting behaviour at all (todo, in_progress on a coding
+// type) keep every code tool.
+func TestRestrictToolsForStage_OtherStagesKeepAllCodeTools(t *testing.T) {
+	for _, col := range []domain.TaskColumn{domain.TaskColumnTodo, domain.TaskColumnInProgress} {
+		t.Run(string(col), func(t *testing.T) {
+			stage, typeDef := wfStage(t, "task", col)
+			got := domain.RestrictToolsForStage(fullCodeToolsPolicy(), stage, typeDef)
+			for _, name := range domain.CodeExplorationTools {
+				assert.Contains(t, got.AllowTools, name)
+			}
+		})
+	}
+}
+
+func TestRestrictToolsForStage_UnrestrictedPolicyUntouched(t *testing.T) {
+	stage, typeDef := wfStage(t, "analiz", domain.TaskColumnPMUAT)
+	got := domain.RestrictToolsForStage(domain.ToolPolicy{}, stage, typeDef)
 	assert.Empty(t, got.AllowTools)
 }

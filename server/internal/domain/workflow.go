@@ -256,9 +256,9 @@ func (w Workflow) WorkColumn() (TaskColumn, bool) {
 }
 
 // ReviewChain is the ordered list of stages this type's review_chain_stage
-// behaviour marks mandatory — what domain.ReviewChainForType used to return
-// as a hardcoded per-type slice. Ordered by the stage's on-path position so a
-// block message lists them in lifecycle order.
+// behaviour marks mandatory — what a hardcoded per-type ReviewChainForType
+// slice used to return before Release B. Ordered by the stage's on-path
+// position so a block message lists them in lifecycle order.
 func (w Workflow) ReviewChain() []ReviewStage {
 	path := w.sortedOnPath()
 	order := make(map[TaskColumn]int, len(path))

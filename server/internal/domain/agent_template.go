@@ -7,22 +7,38 @@ import (
 )
 
 type AgentTemplate struct {
-	ID                   uuid.UUID                       `json:"id"`
-	Name                 string                          `json:"name"`
-	Description          string                          `json:"description"`
-	SubagentType         string                          `json:"subagent_type"`
-	SystemPrompt         string                          `json:"system_prompt"`
-	ProviderType         LLMProviderType                 `json:"provider_type"`
-	Model                string                          `json:"model"`
-	ToolPolicy           ToolPolicy                      `json:"tool_policy"`
-	TechStacks           []CreateTechStackRequest        `json:"tech_stacks"`
-	Skills               []TemplateSkill                 `json:"skills"`
-	Rules                []CreateOrchestratorRuleRequest `json:"rules"`
-	KPIs                 []CreateKPIRequest              `json:"kpis"`
-	SelfEvolutionEnabled bool                            `json:"self_evolution_enabled"`
-	BuiltIn              bool                            `json:"built_in"`
-	CreatedAt            time.Time                       `json:"created_at"`
-	UpdatedAt            time.Time                       `json:"updated_at"`
+	ID           uuid.UUID                       `json:"id"`
+	Name         string                          `json:"name"`
+	Description  string                          `json:"description"`
+	SubagentType string                          `json:"subagent_type"`
+	SystemPrompt string                          `json:"system_prompt"`
+	ProviderType LLMProviderType                 `json:"provider_type"`
+	Model        string                          `json:"model"`
+	ToolPolicy   ToolPolicy                      `json:"tool_policy"`
+	TechStacks   []CreateTechStackRequest        `json:"tech_stacks"`
+	Skills       []TemplateSkill                 `json:"skills"`
+	Rules        []CreateOrchestratorRuleRequest `json:"rules"`
+	KPIs         []CreateKPIRequest              `json:"kpis"`
+	// Roles/Subscriptions are what CreateAgentFromTemplate fills for the new
+	// agent, but only into a genuinely open seat — see
+	// catalog.Service.applySuggestedRoles/applySuggestedSubscriptions. Naming
+	// a role key here is data, not routing: the engine never reads a
+	// template, and a key that does not (or no longer) exist is simply
+	// skipped.
+	Roles                []TemplateRoleSuggestion `json:"roles"`
+	Subscriptions        []TaskColumn             `json:"subscriptions"`
+	SelfEvolutionEnabled bool                     `json:"self_evolution_enabled"`
+	BuiltIn              bool                     `json:"built_in"`
+	CreatedAt            time.Time                `json:"created_at"`
+	UpdatedAt            time.Time                `json:"updated_at"`
+}
+
+// TemplateRoleSuggestion is one role a template proposes its agent for when
+// created from it — Key names a roles.key row (e.g. "developer", "qa"), and
+// nil Areas means the same "any area" a RoleAssignment with nil Areas does.
+type TemplateRoleSuggestion struct {
+	Key   string   `json:"key"`
+	Areas []string `json:"areas,omitempty"`
 }
 
 // TemplateSkill is a skill as a template carries it. It names its tech stack

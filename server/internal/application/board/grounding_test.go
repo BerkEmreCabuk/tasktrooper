@@ -65,7 +65,11 @@ func TestIsUngroundedAnalysis(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isUngroundedAnalysis(tc.task, tc.resp, tc.usage); got != tc.want {
+			wf := taskWF
+			if tc.task.TaskType == domain.TaskTypeAnaliz {
+				wf = analizWF
+			}
+			if got := isUngroundedAnalysis(wf, tc.task, tc.resp, tc.usage); got != tc.want {
 				t.Fatalf("isUngroundedAnalysis = %v, want %v", got, tc.want)
 			}
 		})

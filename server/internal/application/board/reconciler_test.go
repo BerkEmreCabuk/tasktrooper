@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/board"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/stretchr/testify/suite"
 )
@@ -120,6 +121,7 @@ func (s *ReconcilerSuite) SetupTest() {
 	s.runner = &fakeRunner{}
 	s.tasks = &fakeBoardTaskStore{}
 	s.disp = board.NewDispatcher(s.board, s.events, s.runs, s.runner, true)
+	s.disp.SetWorkflows(workflowtest.Default().Reader())
 	s.rec = board.NewReconciler(s.runs, s.tasks, s.disp, 0)
 }
 

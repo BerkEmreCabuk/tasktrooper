@@ -32,11 +32,10 @@ type Service struct {
 	targets port.DeployTargetStore
 	repos   RepositoryResolver
 	tasks   TaskCreator
-	agents  func(ctx context.Context) ([]domain.Agent, error)
 	// storeOnboarder kicks off (or continues) storeops' onboarding lifecycle
 	// once a store-shipped target (App Store / Google Play) is saved. Late-set
-	// like SetTaskCreator/SetAgentLister to avoid an import cycle: storeops
-	// depends on deploy's domain types, not the other way around.
+	// like SetTaskCreator to avoid an import cycle: storeops depends on
+	// deploy's domain types, not the other way around.
 	storeOnboarder func(ctx context.Context, repositoryID uuid.UUID, provider, identifier, appName string) error
 	// storeIdentifierGuard vets a store target's bundle ID / package name
 	// BEFORE it is persisted. It is deliberately separate from
@@ -59,10 +58,6 @@ func NewService(targets port.DeployTargetStore, repos RepositoryResolver) *Servi
 // SetTaskCreator enables the "scaffold this deploy" task; without it the
 // service still serves templates and targets.
 func (s *Service) SetTaskCreator(tasks TaskCreator) { s.tasks = tasks }
-
-// SetAgentLister lets the setup task be assigned to the role that owns the
-// repo kind instead of landing unassigned.
-func (s *Service) SetAgentLister(fn func(ctx context.Context) ([]domain.Agent, error)) { s.agents = fn }
 
 // SetStoreOnboarder wires storeops.Service.Onboard behind SaveTarget: saving a
 // store-shipped target (App Store / Google Play) starts the app's onboarding
@@ -475,7 +470,7 @@ func (s *Service) CreateSetupTask(ctx context.Context, repositoryID uuid.UUID, e
 		Priority:        domain.TaskPriorityHigh,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
-		AssigneeAgentID: s.roleAgent(ctx, domain.DeveloperAgentForKind(repo.Kind, repo.SubProjects)),
+		AssigneeAgentID: s.systemTaskAssignee(ctx, repo.Kind, repo.SubProjects),
 	})
 }
 
@@ -537,29 +532,25 @@ func (s *Service) CreateLocalSetupTask(ctx context.Context, repositoryID uuid.UU
 		Priority:        domain.TaskPriorityMedium,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
-		AssigneeAgentID: s.roleAgent(ctx, domain.DeveloperAgentForKind(kind, repo.SubProjects)),
+		AssigneeAgentID: s.systemTaskAssignee(ctx, kind, repo.SubProjects),
 	})
 }
 
-// roleAgent resolves the named role agent (see domain.DeveloperAgentForKind).
-// Deploy setup writes workflow files into a branch, so even a monorepo's goes
-// to a developer: the system architect refuses to author files.
-func (s *Service) roleAgent(ctx context.Context, role string) *uuid.UUID {
-	if s.agents == nil {
+// systemTaskAssignee resolves who a system-opened deploy-setup task goes to:
+// the developer role's agent for the repo/sub-project's area. Deploy setup
+// writes workflow files into a branch, so even a monorepo's goes to a
+// developer (RepoArea's per-kind resolution), never to the system architect,
+// which refuses to author files.
+func (s *Service) systemTaskAssignee(ctx context.Context, kind string, subProjects []domain.RepoSubProject) *uuid.UUID {
+	if s.roles == nil {
 		return nil
 	}
-	agents, err := s.agents(ctx)
+	area := domain.RepoArea(kind, subProjects)
+	id, err := s.roles.AgentForPurpose(ctx, domain.PurposeSystemTaskAssignee, area)
 	if err != nil {
 		return nil
 	}
-	want := role
-	for i := range agents {
-		if agents[i].Name == want {
-			id := agents[i].ID
-			return &id
-		}
-	}
-	return nil
+	return id
 }
 
 // firstNonEmpty returns the first value that is not blank, or "".

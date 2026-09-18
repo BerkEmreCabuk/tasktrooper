@@ -26,6 +26,10 @@ type createTaskArgs struct {
 	Column             string   `json:"column"`
 	Priority           string   `json:"priority"`
 	Assignee           string   `json:"assignee"`
+	// AssigneeRole is the optional role-key alternative to Assignee: resolved
+	// through RoleResolver.AgentForRole against the task's repository area.
+	// Ignored when Assignee is also set.
+	AssigneeRole string `json:"assignee_role"`
 	// Repository and Project accept a name or a UUID. RepositoryID and
 	// InitiativeProjectID are the original UUID-only spellings, kept so existing
 	// callers and stored plans keep working.
@@ -98,8 +102,11 @@ func (t *createTaskTool) Definition() domain.ToolDefinition {
 					},
 					"task_type": map[string]interface{}{
 						"type":        "string",
-						"enum":        []string{"task", "analiz", "bug", "technical"},
-						"description": "Task type. \"technical\" is for pure backend/infra work with no UI-facing behaviour: it skips pm_uat and goes straight from QA to human_uat.",
+						"description": "Task type key (see list_team or GET /v1/task-types for the configured types — e.g. \"task\", \"analiz\", \"bug\"). Omit to use the workspace default type.",
+					},
+					"assignee_role": map[string]interface{}{
+						"type":        "string",
+						"description": "Assign by ROLE instead of by agent name: the role key (e.g. \"developer\", \"qa\") whose agent for this task's repository area should be assigned. Ignored when assignee is also set — assignee wins. Use list_team to see role keys and which areas they cover.",
 					},
 					"description": map[string]interface{}{
 						"type":        "string",
@@ -228,7 +235,13 @@ func (t *createTaskTool) Execute(ctx context.Context, arguments string) domain.T
 		CreatedBy:            "agent",
 	}
 	if args.TaskType != "" {
-		req.TaskType = domain.TaskType(args.TaskType)
+		taskType := domain.TaskType(args.TaskType)
+		if t.kit.Workflows != nil {
+			if exists, terr := t.kit.Workflows.TaskTypeExists(ctx, taskType); terr == nil && !exists {
+				return toolError(createBoardTaskToolName, fmt.Sprintf("unknown task_type %q", args.TaskType))
+			}
+		}
+		req.TaskType = taskType
 	}
 	if args.Priority != "" {
 		req.Priority = domain.TaskPriority(args.Priority)
@@ -246,6 +259,14 @@ func (t *createTaskTool) Execute(ctx context.Context, arguments string) domain.T
 			return toolError(createBoardTaskToolName, err.Error())
 		}
 		req.AssigneeAgentID = &assigneeID
+	} else if args.AssigneeRole != "" {
+		roleAssignee, err := t.resolveAssigneeRole(ctx, args.AssigneeRole, repositoryID)
+		if err != nil {
+			return toolError(createBoardTaskToolName, err.Error())
+		}
+		if roleAssignee != nil {
+			req.AssigneeAgentID = roleAssignee
+		}
 	}
 	if args.BeforeDeploy != "" {
 		req.BeforeDeploy = &args.BeforeDeploy
@@ -339,4 +360,53 @@ func (t *createTaskTool) resolveAssignee(ctx context.Context, assignee string) (
 		names = append(names, a.Name)
 	}
 	return uuid.Nil, fmt.Errorf("unknown assignee %q; valid agents: %s", assignee, strings.Join(names, ", "))
+}
+
+// roleByKeyLookup is the narrow extra surface application/workflow.Service
+// offers beyond port.RoleResolver — resolving a role's key (what an agent
+// types) to its id (what AgentForRole needs). Asserted against t.kit.Roles
+// rather than added to port.RoleResolver, since every other RoleResolver
+// caller is the hot dispatch path and has no key to resolve from.
+type roleByKeyLookup interface {
+	RoleByKey(ctx context.Context, key string) (domain.AgentRole, error)
+}
+
+// resolveAssigneeRole resolves the optional assignee_role argument: the named
+// role's agent for repositoryID's area, or nil (leave the caller's assignee —
+// none, here — alone) when roles are unavailable, the role is unknown, or it
+// has nobody assigned for that area.
+func (t *createTaskTool) resolveAssigneeRole(ctx context.Context, roleKey string, repositoryID uuid.UUID) (*uuid.UUID, error) {
+	if t.kit.Roles == nil {
+		return nil, fmt.Errorf("assignee_role %q was given but roles are not available on this deployment", roleKey)
+	}
+	lookup, ok := t.kit.Roles.(roleByKeyLookup)
+	if !ok {
+		return nil, fmt.Errorf("assignee_role %q was given but role lookup is not available on this deployment", roleKey)
+	}
+	role, err := lookup.RoleByKey(ctx, roleKey)
+	if err != nil {
+		return nil, fmt.Errorf("unknown assignee_role %q", roleKey)
+	}
+	return t.kit.Roles.AgentForRole(ctx, role.ID, t.kit.repoArea(ctx, repositoryID))
+}
+
+// repoArea resolves a repository's backend/frontend/mobile area for role
+// routing. "" (any-area fallback) when the workspace lister is unavailable or
+// the repository cannot be found in it — a role assignment scoped to a
+// specific area then simply does not match, which AgentForRole already
+// handles as "no assignment here".
+func (kit *ToolKit) repoArea(ctx context.Context, repositoryID uuid.UUID) string {
+	if kit.Workspace == nil {
+		return ""
+	}
+	repos, err := kit.Workspace.ListRepositories(ctx)
+	if err != nil {
+		return ""
+	}
+	for _, r := range repos {
+		if r.ID == repositoryID {
+			return domain.RepoArea(r.Kind, r.SubProjects)
+		}
+	}
+	return ""
 }

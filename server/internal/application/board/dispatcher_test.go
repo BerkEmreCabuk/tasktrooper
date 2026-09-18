@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/board"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/stretchr/testify/suite"
@@ -277,6 +278,7 @@ func (s *DispatcherSuite) SetupTest() {
 	s.runs = &fakeRunStore{}
 	s.runner = &fakeRunner{}
 	s.disp = board.NewDispatcher(s.board, s.events, s.runs, s.runner, true)
+	s.disp.SetWorkflows(workflowtest.Default().Reader())
 }
 
 func (s *DispatcherSuite) TestDispatchTodoColumn() {

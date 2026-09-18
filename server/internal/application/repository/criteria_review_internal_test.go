@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -165,8 +166,12 @@ func TestCriteriaReviewGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &Service{criteria: &fakeCriteriaStore{items: tc.items}, requireCriteria: tc.require}
-			err := svc.criteriaReviewGate(context.Background(), taskID, tc.prev, tc.target)
+			svc := &Service{
+				criteria:        &fakeCriteriaStore{items: tc.items},
+				requireCriteria: tc.require,
+				workflows:       workflowtest.Default().Reader(),
+			}
+			err := svc.criteriaReviewGate(context.Background(), taskID, domain.TaskTypeTask, tc.prev, tc.target)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("expected pass, got %v", err)
@@ -235,8 +240,12 @@ func TestCriteriaGateAcceptsAReviewerApprovalInPlaceOfTheImplementerTick(t *test
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &Service{criteria: &fakeCriteriaStore{items: tc.items}, requireCriteria: true}
-			err := svc.criteriaGate(context.Background(), taskID, tc.target)
+			svc := &Service{
+				criteria:        &fakeCriteriaStore{items: tc.items},
+				requireCriteria: true,
+				workflows:       workflowtest.Default().Reader(),
+			}
+			err := svc.criteriaGate(context.Background(), taskID, domain.TaskTypeTask, tc.target)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("expected pass, got %v", err)
@@ -293,9 +302,13 @@ func TestCriteriaRefusalsCarryCriterionIDs(t *testing.T) {
 
 	t.Run("criteriaGate", func(t *testing.T) {
 		item := untickedCriterion("android link is on the page")
-		svc := &Service{criteria: &fakeCriteriaStore{items: []domain.AcceptanceCriterion{item}}, requireCriteria: true}
+		svc := &Service{
+			criteria:        &fakeCriteriaStore{items: []domain.AcceptanceCriterion{item}},
+			requireCriteria: true,
+			workflows:       workflowtest.Default().Reader(),
+		}
 
-		err := svc.criteriaGate(context.Background(), taskID, domain.TaskColumnReadyForQA)
+		err := svc.criteriaGate(context.Background(), taskID, domain.TaskTypeTask, domain.TaskColumnReadyForQA)
 
 		if err == nil {
 			t.Fatal("expected the gate to block")
@@ -307,9 +320,13 @@ func TestCriteriaRefusalsCarryCriterionIDs(t *testing.T) {
 
 	t.Run("awaiting verdicts names the ids and the next call", func(t *testing.T) {
 		item := criterion("android link is on the page")
-		svc := &Service{criteria: &fakeCriteriaStore{items: []domain.AcceptanceCriterion{item}}, requireCriteria: true}
+		svc := &Service{
+			criteria:        &fakeCriteriaStore{items: []domain.AcceptanceCriterion{item}},
+			requireCriteria: true,
+			workflows:       workflowtest.Default().Reader(),
+		}
 
-		err := svc.criteriaReviewGate(context.Background(), taskID, domain.TaskColumnInQA, domain.TaskColumnDone)
+		err := svc.criteriaReviewGate(context.Background(), taskID, domain.TaskTypeTask, domain.TaskColumnInQA, domain.TaskColumnDone)
 
 		if err == nil {
 			t.Fatal("expected the gate to block")
@@ -325,9 +342,13 @@ func TestCriteriaRefusalsCarryCriterionIDs(t *testing.T) {
 
 	t.Run("rejected criteria are named by id too", func(t *testing.T) {
 		item := criterion("login works", rejected(domain.CriterionReviewRoleQA, "500 on submit"))
-		svc := &Service{criteria: &fakeCriteriaStore{items: []domain.AcceptanceCriterion{item}}, requireCriteria: true}
+		svc := &Service{
+			criteria:        &fakeCriteriaStore{items: []domain.AcceptanceCriterion{item}},
+			requireCriteria: true,
+			workflows:       workflowtest.Default().Reader(),
+		}
 
-		err := svc.criteriaReviewGate(context.Background(), taskID, domain.TaskColumnInQA, domain.TaskColumnPMUAT)
+		err := svc.criteriaReviewGate(context.Background(), taskID, domain.TaskTypeTask, domain.TaskColumnInQA, domain.TaskColumnPMUAT)
 
 		if err == nil {
 			t.Fatal("expected the gate to block")
@@ -350,6 +371,7 @@ func TestReviewTaskCriterionStampsTheCurrentHeadSHA(t *testing.T) {
 		tasks:         &criterionTaskStore{fakeReleaseTaskStore: &fakeReleaseTaskStore{task: task}},
 		git:           &fakeReleaseGit{hasGit: true, headSHA: "abc123"},
 		workspaceRoot: t.TempDir(),
+		workflows:     workflowtest.Default().Reader(),
 	}
 
 	check, err := svc.ReviewTaskCriterion(context.Background(), criteria.criterion.ID, uuid.New(), true, "")
@@ -367,8 +389,9 @@ func TestReviewTaskCriterionToleratesNoGitClient(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), RepositoryID: uuid.New(), Key: "T-9", Column: domain.TaskColumnReadyForQA}
 	criteria := &fakeCriteriaStore{criterion: domain.AcceptanceCriterion{ID: uuid.New(), TaskID: task.ID, Text: "a"}}
 	svc := &Service{
-		criteria: criteria,
-		tasks:    &criterionTaskStore{fakeReleaseTaskStore: &fakeReleaseTaskStore{task: task}},
+		criteria:  criteria,
+		tasks:     &criterionTaskStore{fakeReleaseTaskStore: &fakeReleaseTaskStore{task: task}},
+		workflows: workflowtest.Default().Reader(),
 	}
 
 	check, err := svc.ReviewTaskCriterion(context.Background(), criteria.criterion.ID, uuid.New(), true, "")
@@ -388,8 +411,9 @@ func TestReviewTaskCriterionRefusalForbidsMovingTheTaskToReachIt(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), RepositoryID: uuid.New(), Key: "T-4", Column: domain.TaskColumnInProgress}
 	criteria := &fakeCriteriaStore{criterion: domain.AcceptanceCriterion{ID: uuid.New(), TaskID: task.ID, Text: "a"}}
 	svc := &Service{
-		criteria: criteria,
-		tasks:    &criterionTaskStore{fakeReleaseTaskStore: &fakeReleaseTaskStore{task: task}},
+		criteria:  criteria,
+		tasks:     &criterionTaskStore{fakeReleaseTaskStore: &fakeReleaseTaskStore{task: task}},
+		workflows: workflowtest.Default().Reader(),
 	}
 
 	_, err := svc.ReviewTaskCriterion(context.Background(), criteria.criterion.ID, uuid.New(), true, "")

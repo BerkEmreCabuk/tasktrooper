@@ -1,8 +1,6 @@
 package http
 
 import (
-	"errors"
-
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -52,27 +50,15 @@ func (h *Handler) UpdateSettings(c *fiber.Ctx) error {
 	return c.JSON(out)
 }
 
+// UpdateAnalizAssignment is gone: which agent an analiz task is assigned to
+// is now the "analyst" role's job, configured at /v1/roles rather than a
+// backend/frontend/mobile app_settings triple. The route stays registered so
+// an old client gets a clear redirect instead of a generic 404.
 func (h *Handler) UpdateAnalizAssignment(c *fiber.Ctx) error {
-	if h.settingsSvc == nil {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(errorResponse{
-			Error: errorDetail{Message: "settings not enabled", Type: "service_unavailable"},
-		})
-	}
-	var req domain.UpdateAnalizAssignmentRequest
-	if err := c.BodyParser(&req); err != nil {
-		return badRequest(c, "invalid request body")
-	}
-	result, err := h.settingsSvc.UpdateAnalizAssignment(h.enrichContext(c), req)
-	if err != nil {
-		var missingErr *domain.MissingAnalizToolsError
-		if errors.As(err, &missingErr) {
-			return c.Status(fiber.StatusUnprocessableEntity).JSON(domain.AnalizAssignmentResult{
-				Saved:        false,
-				MissingTools: missingErr.Missing,
-				Hint:         "Resend with confirm_grant_tools=true to grant the missing tools and save the assignment.",
-			})
-		}
-		return internalError(c, err)
-	}
-	return c.JSON(result)
+	return c.Status(fiber.StatusGone).JSON(errorResponse{
+		Error: errorDetail{
+			Message: "analiz assignment moved to roles: configure the \"analyst\" role's agent assignments at /v1/roles instead.",
+			Type:    "gone",
+		},
+	})
 }

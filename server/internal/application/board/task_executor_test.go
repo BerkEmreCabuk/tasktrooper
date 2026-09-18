@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -162,6 +163,7 @@ func executorRunner(t *testing.T, agent domain.Agent, runs *recordingRunStore, e
 		Catalog:      &agentCatalog{agent: agent},
 		Repositories: oneRepoResolver{root: t.TempDir()},
 	})
+	r.SetWorkflows(workflowtest.Default().Reader())
 	if ex != nil {
 		r.SetTaskExecutor(ex)
 	}
@@ -218,6 +220,7 @@ func criteriaSweepRunner(t *testing.T, runs *recordingRunStore, ex port.TaskExec
 		Catalog:      &agentCatalog{agent: agentRec},
 		Repositories: oneRepoResolver{root: t.TempDir()},
 	})
+	r.SetWorkflows(workflowtest.Default().Reader())
 	r.SetTaskExecutor(ex)
 	r.SetTaskUpdater(updater)
 	taskID := uuid.New()

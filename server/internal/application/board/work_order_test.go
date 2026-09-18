@@ -20,8 +20,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
+
+// workOrderGateWorkflow is the "task" type's workflow from the same default
+// fixture the migration seeds — block_on_dependencies lives on todo/
+// in_progress there, which is the boundary these tests pin.
+func workOrderGateWorkflow() domain.Workflow {
+	return workflowtest.Default().Workflows[domain.TaskTypeTask]
+}
 
 type stubBlockerReader struct {
 	byTask map[uuid.UUID][]domain.BoardTask
@@ -158,9 +166,10 @@ func TestWorkOrderGateAppliesOnlyWhereWorkStarts(t *testing.T) {
 		{domain.TaskColumnReadyForQA, false},
 		{domain.TaskColumnDone, false},
 	}
+	wf := workOrderGateWorkflow()
 	for _, tc := range cases {
 		t.Run(string(tc.column), func(t *testing.T) {
-			got := workOrderGateApplies(DispatchInput{Task: workOrderTask(tc.column)})
+			got := workOrderGateApplies(wf, true, DispatchInput{Task: workOrderTask(tc.column)})
 			assert.Equal(t, tc.want, got)
 		})
 	}
@@ -170,18 +179,19 @@ func TestWorkOrderGateAppliesOnlyWhereWorkStarts(t *testing.T) {
 // sweep just answered would, at best, confirm it and, at worst, re-park the task
 // on a read that raced the blocker's own update.
 func TestWorkOrderGateSkipsTheSweepersResume(t *testing.T) {
+	wf := workOrderGateWorkflow()
 	input := DispatchInput{
 		Task: workOrderTask(domain.TaskColumnTodo),
 		Payload: map[string]interface{}{
 			domain.EventPayloadResumedResource: domain.ResourceWorkOrder,
 		},
 	}
-	assert.False(t, workOrderGateApplies(input))
+	assert.False(t, workOrderGateApplies(wf, true, input))
 
 	// Another park's resume is not this one's: a task handed back by the device
 	// sweeper is still subject to its work order.
 	input.Payload[domain.EventPayloadResumedResource] = domain.ResourceMobileDevice
-	assert.True(t, workOrderGateApplies(input))
+	assert.True(t, workOrderGateApplies(wf, true, input))
 }
 
 // ----------------------------------------------------------------- the sweeper

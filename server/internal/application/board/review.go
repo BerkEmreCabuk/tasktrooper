@@ -23,19 +23,17 @@ const reviewDiffLimit = 24000
 var ErrReviewPRMissing = errors.New("code review has no pull request for the task branch")
 
 // isReviewColumn reports whether a column's work is judging someone else's
-// change rather than producing one.
+// change rather than producing one — the review_only stage behaviour, read off
+// the task's own workflow rather than a fixed column list, so a custom stage
+// that carries review_only behaves the same way without a line of code naming
+// it.
 //
 // The runner treats these runs differently in three places — no post-run build
 // gate, no commit/push, a bigger diff budget — because a reviewer that builds,
 // fixes and pushes has stopped reviewing and started implementing, and then
 // signs off on its own code at the same gate.
-func isReviewColumn(column domain.TaskColumn) bool {
-	switch column {
-	case domain.TaskColumnCodeReview, domain.TaskColumnAnalizReview, domain.TaskColumnPMUAT:
-		return true
-	default:
-		return false
-	}
+func isReviewColumn(wf domain.Workflow, column domain.TaskColumn) bool {
+	return wf.Has(column, domain.BehaviourReviewOnly)
 }
 
 // producesADiff reports whether a run in this column may have its workspace
@@ -49,8 +47,11 @@ func isReviewColumn(column domain.TaskColumn) bool {
 // it. The build gate is skipped for the same reason it is skipped for a
 // reviewer: nothing was written, so there is nothing to verify, and a fix round
 // on a merged task would be an agent editing code that has already shipped.
-func producesADiff(column domain.TaskColumn) bool {
-	return !isReviewColumn(column) && column != domain.TaskColumnDone
+// done itself stays a literal: it is one of the system columns the engine
+// itself moves tasks into/out of (release-b-plan.md §0 scope rule), not a
+// per-type/per-workflow choice.
+func producesADiff(wf domain.Workflow, column domain.TaskColumn) bool {
+	return !isReviewColumn(wf, column) && column != domain.TaskColumnDone
 }
 
 // ensureReviewPR guarantees the task branch has a pull request before the
@@ -199,10 +200,10 @@ func (r *Runner) failRunNoPR(ctx context.Context, job RunJob, run domain.TaskAge
 // heading differs by audience on purpose: the reviewer is told this is the
 // complete change under review, the implementer that it is their own work so
 // far.
-func reviewDiffMessage(column domain.TaskColumn, diff string) string {
+func reviewDiffMessage(wf domain.Workflow, column domain.TaskColumn, diff string) string {
 	limit := 8000
 	heading := "## Task branch diff (changes made for this task so far)"
-	if isReviewColumn(column) {
+	if isReviewColumn(wf, column) {
 		limit = reviewDiffLimit
 		heading = "## Pull request diff — the complete change you are reviewing (task branch vs its base)"
 	}

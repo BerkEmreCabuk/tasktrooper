@@ -497,6 +497,85 @@ func RestrictToolsForTaskType(p ToolPolicy, t TaskType) ToolPolicy {
 	return restricted
 }
 
+// RestrictToolsForStage is RestrictToolsForTaskType, RestrictToolsForVerdictColumn
+// and RestrictCodeToolsForVerification collapsed into the workflow-driven
+// replacement release-b-plan.md calls for: the three literal type/column
+// switches below read off a WorkflowStage/TaskTypeDef instead, so a custom
+// task type or a custom stage narrows a policy exactly like task/analiz/bug do
+// today, without a line of engine code naming it.
+//
+// The three narrowings still apply in the same order the old call chain
+// applied them — type first (no_workspace_writes), then the stage's own
+// (strip_writers, then no_code_reading/no_read_file) — because they are
+// cumulative, not exclusive: a stage could in principle carry more than one.
+//
+// RestrictToolsForTaskType/RestrictToolsForVerdictColumn/
+// RestrictCodeToolsForVerification are kept below, unchanged, only because
+// application/catalog/role_tools_qa_test.go (outside WP-B2b's ownership)
+// still calls them directly; nothing in this package's own call path uses them
+// any more. See release-b-plan.md WP-B4 for retiring them once that test is
+// migrated.
+func RestrictToolsForStage(p ToolPolicy, stage WorkflowStage, typeDef TaskTypeDef) ToolPolicy {
+	if len(p.AllowTools) == 0 {
+		return p
+	}
+	out := p
+	if typeDef.Has(BehaviourNoWorkspaceWrites) {
+		out = dropTools(out, isWorkspaceWriteTool)
+	}
+	if stage.Has(BehaviourStripWriters) {
+		allow, _ := stage.Param(BehaviourStripWriters, "allow")
+		keepMerge := allowListNames(allow)["merge_task_pull_request"]
+		keepRelease := allowListNames(allow)["release_control"]
+		out = dropTools(out, func(name string) bool {
+			if isWorkspaceWriteTool(name) || name == "commit_task_changes" {
+				return true
+			}
+			if name == MergePullRequestToolName && !keepMerge {
+				return true
+			}
+			if IsReleaseControlTool(name) && !keepRelease {
+				return true
+			}
+			return false
+		})
+	}
+	if stage.Has(BehaviourNoCodeReading) {
+		out = dropTools(out, func(name string) bool { return containsToolName(CodeExplorationTools, name) })
+	}
+	if stage.Has(BehaviourNoReadFile) {
+		out = dropTools(out, func(name string) bool { return name == "read_file" })
+	}
+	return out
+}
+
+// dropTools filters a policy's allow list by a predicate, the shared shape
+// every narrowing in RestrictToolsForStage uses.
+func dropTools(p ToolPolicy, drop func(name string) bool) ToolPolicy {
+	kept := make([]string, 0, len(p.AllowTools))
+	for _, name := range p.AllowTools {
+		if drop(name) {
+			continue
+		}
+		kept = append(kept, name)
+	}
+	out := p
+	out.AllowTools = kept
+	return out
+}
+
+// allowListNames parses a strip_writers "allow" param — a csv of tool/category
+// names such as "merge_task_pull_request,release_control" — into a set.
+func allowListNames(csv string) map[string]bool {
+	out := map[string]bool{}
+	for _, part := range strings.Split(csv, ",") {
+		if name := strings.TrimSpace(part); name != "" {
+			out[name] = true
+		}
+	}
+	return out
+}
+
 // verdictColumns are the columns whose deliverable is a judgement about someone
 // else's work, not a change to it: review, QA and UAT — plus done, whose run
 // makes no judgement at all.

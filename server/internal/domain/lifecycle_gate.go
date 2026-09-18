@@ -49,60 +49,8 @@ type ReviewStage struct {
 	Remedy string
 }
 
-// ReviewChainForType returns the stages a task of this type must have passed
-// before it may enter done (or released).
-//
-// The chains are derived from how the board is actually wired, not from an
-// idealised lifecycle:
-//
-//	task / bug — code_review (system-architect reviews the diff), in_qa (the
-//	  column the QA agent tests in; ready_for_qa is only its inbox), pm_uat
-//	  (product-manager verifies each acceptance criterion against QA's evidence).
-//
-//	analiz — analiz_review only. It produces a spec and a plan, there is nothing
-//	  to test or accept; the human approving in analiz_review IS the review.
-//
-// human_uat is deliberately NOT required. It is a human approval gate with no
-// subscriber, and whether a task passes through it depends on a repo setting:
-// with require_human_review off the PM moves pm_uat → human_uat, but with it on
-// the PM's move is intercepted and held, so the human moves the task out of
-// pm_uat directly — often straight to done. Requiring human_uat would strand
-// every task on a repo using that setting.
-//
-// An unrecognised (or empty, i.e. pre-typing) task type is treated as coding
-// work: that is what CreateTask defaults to, and it is the fail-closed
-// direction.
-func ReviewChainForType(t TaskType) []ReviewStage {
-	if t == TaskTypeAnaliz {
-		return []ReviewStage{{
-			Column: TaskColumnAnalizReview,
-			Label:  "analiz review",
-			Remedy: "move it to analiz_review and approve the spec/plan there",
-		}}
-	}
-	return []ReviewStage{
-		{
-			Column: TaskColumnCodeReview,
-			Label:  "code review",
-			Remedy: "move it to code_review so the diff is reviewed",
-		},
-		{
-			Column: TaskColumnInQA,
-			Label:  "QA",
-			Remedy: "move it to ready_for_qa; QA takes it into in_qa and tests it there",
-		},
-		{
-			Column: TaskColumnPMUAT,
-			Label:  "UAT",
-			Remedy: "move it to pm_uat so every acceptance criterion is verified against QA's evidence",
-		},
-	}
-}
-
-// TaskTypeShipsCode reports whether a task of this type is expected to reach
-// production through a deploy. An analiz task ships nothing: its own workflow
-// moves it done → released once the implementation tasks it produced have been
-// created, so gating that move on a deploy would park every analysis forever.
-func TaskTypeShipsCode(t TaskType) bool {
-	return t != TaskTypeAnaliz
-}
+// ReviewChainForType and TaskTypeShipsCode are gone: a type's review chain is
+// now Workflow.ReviewChain() (built from each stage's review_chain_stage
+// behaviour) and "ships code" is whether the released stage carries
+// require_release_deploy — see application/repository.Service.reviewChainGate
+// and releaseDeployGate.

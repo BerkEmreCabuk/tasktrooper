@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/board"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -85,6 +86,7 @@ func newWakeFixture(t *testing.T) *wakeFixture {
 		repos:     &fakeReleaseRepoStore{repo: domain.Repository{ID: repoID}},
 		tasks:     tasks,
 		relations: relation,
+		workflows: workflowtest.Default().Reader(),
 	}
 	svc.SetWorkOrderSweeper(sweeper)
 	return &wakeFixture{svc: svc, tasks: tasks, relation: relation, repoID: repoID}

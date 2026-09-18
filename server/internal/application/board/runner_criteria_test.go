@@ -32,10 +32,10 @@ func TestCriteriaForRunListsEveryCriterionForReviewColumns(t *testing.T) {
 		r.SetTaskUpdater(&criteriaUpdater{criteria: ticked})
 		job := RunJob{Task: domain.BoardTask{ID: uuid.New(), Title: "t", Column: col}, RepositoryID: uuid.New()}
 
-		got := r.criteriaForRun(context.Background(), job)
+		got := r.criteriaForRun(context.Background(), job, taskWF)
 		require.Len(t, got, len(ticked), "column %s: a reviewing run must see every criterion, ticked or not", col)
 
-		msg := buildTriggerMessage(job, got, nil)
+		msg := buildTriggerMessage(job, taskWF, got, nil)
 		for _, c := range ticked {
 			if !strings.Contains(msg, c.ID.String()) {
 				t.Errorf("column %s: criterion id %s is missing, so review_criterion cannot be called:\n%s", col, c.ID, msg)
@@ -55,7 +55,7 @@ func TestTriggerMessageTellsReviewersToRecordAVerdictOnEachID(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnReadyForQA, domain.TaskColumnInQA, domain.TaskColumnPMUAT,
 	} {
-		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, criteria, nil)
+		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, taskWF, criteria, nil)
 		for _, want := range []string{
 			"review_criterion",
 			"The forward move is refused while any id lacks your verdict on repositories that require criteria.",
@@ -74,7 +74,7 @@ func TestTriggerMessageTellsReviewersToRecordAVerdictOnEachID(t *testing.T) {
 
 func TestTriggerMessageNamesTheCriteriaAsTheDiffsTargetInCodeReview(t *testing.T) {
 	criteria := []domain.AcceptanceCriterion{{ID: uuid.New(), Text: "criterion", Completed: true}}
-	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnCodeReview}}, criteria, nil)
+	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnCodeReview}}, taskWF, criteria, nil)
 
 	require.Contains(t, msg, "Acceptance criteria the diff must satisfy (ids for reference)")
 	require.NotContains(t, msg, "call set_criterion_completed", "the reviewer does not tick the developer's boxes")
@@ -87,7 +87,7 @@ func TestTriggerMessageShowsWhoHasSaidWhatAboutEachCriterion(t *testing.T) {
 		ID: uuid.New(), Text: "the banner appears", Completed: true,
 		Checks: []domain.CriterionCheck{{Role: domain.CriterionReviewRoleQA, Approved: true}},
 	}
-	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnPMUAT}},
+	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnPMUAT}}, taskWF,
 		[]domain.AcceptanceCriterion{c}, nil)
 
 	want := "- [" + c.ID.String() + "] the banner appears — implementer: ticked; qa: approved; pm: —"
@@ -101,7 +101,7 @@ func TestTriggerMessageShowsARejectionWithItsNote(t *testing.T) {
 		ID: uuid.New(), Text: "the banner appears", Completed: true,
 		Checks: []domain.CriterionCheck{{Role: domain.CriterionReviewRoleQA, Approved: false, Note: "banner never rendered"}},
 	}
-	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnPMUAT}},
+	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnPMUAT}}, taskWF,
 		[]domain.AcceptanceCriterion{c}, nil)
 
 	require.Contains(t, msg, "qa: rejected (banner never rendered)")
@@ -119,11 +119,11 @@ func TestCriteriaForRunListsOnlyOpenCriteriaForImplementers(t *testing.T) {
 		r.SetTaskUpdater(&criteriaUpdater{criteria: []domain.AcceptanceCriterion{done, open}})
 		job := RunJob{Task: domain.BoardTask{ID: uuid.New(), Title: "t", Column: col}, RepositoryID: uuid.New()}
 
-		got := r.criteriaForRun(context.Background(), job)
+		got := r.criteriaForRun(context.Background(), job, taskWF)
 		require.Len(t, got, 1, "column %s: an implementer sees only what is still open", col)
 		require.Equal(t, open.ID, got[0].ID)
 
-		msg := buildTriggerMessage(job, got, nil)
+		msg := buildTriggerMessage(job, taskWF, got, nil)
 		if !strings.Contains(msg, "Open acceptance criteria") {
 			t.Errorf("column %s: implementer lost the open-criteria checklist:\n%s", col, msg)
 		}
@@ -152,14 +152,14 @@ func TestCriteriaForRunKeepsAnalizBehaviourUnchanged(t *testing.T) {
 		ID: uuid.New(), Title: "t", Column: domain.TaskColumnCodeReview, TaskType: domain.TaskTypeAnaliz,
 	}, RepositoryID: uuid.New()}
 
-	require.False(t, listsEveryCriterion(job.Task),
+	require.False(t, listsEveryCriterion(analizWF, job.Task),
 		"code_review is listed, so only the analiz guard can hold this false")
 
-	got := r.criteriaForRun(context.Background(), job)
+	got := r.criteriaForRun(context.Background(), job, analizWF)
 	require.Len(t, got, 1)
 	require.Equal(t, open.ID, got[0].ID)
 
-	msg := buildTriggerMessage(job, got, nil)
+	msg := buildTriggerMessage(job, analizWF, got, nil)
 	require.Contains(t, msg, "Open acceptance criteria", "an analiz run keeps the implementer's open-only checklist")
 	require.NotContains(t, msg, done.ID.String())
 	require.NotContains(t, msg, "Acceptance criteria the diff must satisfy")
@@ -245,7 +245,7 @@ func TestTriggerMessageSnapshotCarriesTheRepositoryID(t *testing.T) {
 	msg := buildTriggerMessage(RunJob{
 		Task:         domain.BoardTask{Title: "t", Column: domain.TaskColumnInProgress},
 		RepositoryID: repoID,
-	}, nil, nil)
+	}, taskWF, nil, nil)
 
 	if !strings.Contains(msg, `"repository_id":"`+repoID.String()+`"`) {
 		t.Fatalf("task snapshot does not carry the repository id:\n%s", msg)

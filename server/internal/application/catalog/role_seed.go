@@ -102,6 +102,7 @@ func backendDeveloperAgent() roleAgentDef {
 	return roleAgentDef{
 		agent:      withEffort(roleAgent("backend-developer", "backend-engineer", developerToolPolicy()), "high"),
 		techStacks: backendDeveloperTechStacks(),
+		roles:      []domain.TemplateRoleSuggestion{{Key: "developer", Areas: []string{domain.RepoKindBackend}}},
 		skills: append(sharedDeveloperSkills(),
 			mdSkill("backend-developer", "java-vs-go-decision"),
 			mdSkill("backend-developer", "go-hexagonal-architecture"),
@@ -150,6 +151,7 @@ func frontendDeveloperAgent() roleAgentDef {
 	return roleAgentDef{
 		agent:      withEffort(roleAgent("frontend-developer", "frontend-engineer", developerToolPolicy()), "high"),
 		techStacks: frontendDeveloperTechStacks(),
+		roles:      []domain.TemplateRoleSuggestion{{Key: "developer", Areas: []string{domain.RepoKindFrontend}}},
 		skills: append(sharedDeveloperSkills(),
 			mdSkill("frontend-developer", "react-typescript-patterns"),
 			mdSkill("frontend-developer", "vite-tailwind-radix"),
@@ -191,6 +193,7 @@ func mobileDeveloperAgent() roleAgentDef {
 	return roleAgentDef{
 		agent:      withEffort(roleAgent("mobile-developer", "mobile-dev-engineer", mobileDeveloperToolPolicy()), "high"),
 		techStacks: mobileDeveloperTechStacks(),
+		roles:      []domain.TemplateRoleSuggestion{{Key: "developer", Areas: []string{domain.RepoKindMobile}}},
 		skills: append(sharedDeveloperSkills(),
 			mdSkill("mobile-developer", "native-vs-flutter-decision"),
 			mdSkill("mobile-developer", "flutter-widget-architecture"),
@@ -221,7 +224,9 @@ func mobileDeveloperAgent() roleAgentDef {
 
 func productManagerAgent() roleAgentDef {
 	return roleAgentDef{
-		agent: withEffort(roleAgent("product-manager", "generalPurpose", productManagerToolPolicy()), "medium"),
+		agent:         withEffort(roleAgent("product-manager", "generalPurpose", productManagerToolPolicy()), "medium"),
+		roles:         []domain.TemplateRoleSuggestion{{Key: "product_manager"}},
+		subscriptions: []domain.TaskColumn{domain.TaskColumnPMUAT},
 		skills: []skillSeed{
 			mdSkill("shared", "board-comment-style"),
 			mdSkill("shared", "performance-awareness"),
@@ -274,6 +279,14 @@ func productManagerAgent() roleAgentDef {
 func qaAgent() roleAgentDef {
 	return roleAgentDef{
 		agent: withEffort(roleAgent("qa-agent", "generalPurpose", qaToolPolicy()), "medium"),
+		roles: []domain.TemplateRoleSuggestion{{Key: "qa"}},
+		// released, alongside the three testing/merge columns: migration 105
+		// backfilled it for installs seeded before this template did (see
+		// release-b-plan.md §0), and the template now carries the same set so
+		// a fresh QA agent starts with parity instead of a 105-shaped gap.
+		subscriptions: []domain.TaskColumn{
+			domain.TaskColumnReadyForQA, domain.TaskColumnInQA, domain.TaskColumnDone, domain.TaskColumnReleased,
+		},
 		skills: []skillSeed{
 			mdSkill("shared", "board-comment-style"),
 			mdSkill("shared", "performance-awareness"),
@@ -326,6 +339,12 @@ func qaAgent() roleAgentDef {
 func systemArchitectAgent() roleAgentDef {
 	return roleAgentDef{
 		agent: withEffort(roleAgent("system-architect", "system-architect", architectToolPolicy()), "high"),
+		// The architect also holds the analyst role by default: it is the
+		// only role whose tool policy is guaranteed to carry every tool
+		// RequiredAnalizTools names, so routing an analiz task to it never
+		// needs a tool-grant confirmation (see migration 143 §3).
+		roles:         []domain.TemplateRoleSuggestion{{Key: "architect"}, {Key: "analyst"}},
+		subscriptions: []domain.TaskColumn{domain.TaskColumnCodeReview},
 		skills: []skillSeed{
 			mdSkill("shared", "board-comment-style"),
 			mdSkill("shared", "performance-awareness"),

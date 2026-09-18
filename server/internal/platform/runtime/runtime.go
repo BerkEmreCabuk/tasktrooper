@@ -1087,6 +1087,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if catalogVersionStore != nil {
 			catalogSvc.SetVersionStore(catalogVersionStore)
 		}
+		if workflowSvc != nil {
+			catalogSvc.SetRoleAdmin(workflowSvc)
+		}
 		for _, tool := range skilltools.NewExecutors(&skilltools.ToolKit{
 			Catalog: catalogStore,
 			Creator: catalogSvc,
@@ -1671,7 +1674,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			profileSvc.SetRoleResolver(workflowSvc)
 		}
 		if catalogStore != nil {
-			profileSvc.SetAgentLister(catalogStore.ListAgents)
+			profileSvc.SetAgentGetter(catalogStore)
 		}
 		if e.pgDB != nil {
 			// Pipeline slots are one of the settings a profiling pass can fill
@@ -1697,6 +1700,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}
 		if catalogStore != nil {
 			boardKit.Team = catalogStore
+		}
+		if boardConfigStore != nil {
+			boardKit.Subscriptions = boardConfigStore
 		}
 		if attachmentSvc != nil {
 			boardKit.Attachments = attachmentSvc
@@ -1905,24 +1911,18 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			}
 			deploySvc.SetTaskCreator(repositorySvc)
 			repositorySvc.SetDeployTargets(deployTargetStore)
-			if catalogStore != nil {
-				deploySvc.SetAgentLister(catalogStore.ListAgents)
-			}
 			e.deploySvc = deploySvc
 
 			// Reference docs (coding standards / test standards /
 			// architecture / local run): the same "a human names where it
 			// lives, an agent can be asked to write it" idea as deploySvc
-			// above, so it shares its TaskCreator/AgentLister wiring.
+			// above, so it shares its TaskCreator/role-resolver wiring.
 			repoDocsSvc := repodocs.NewService(repositorySvc)
 			if workflowSvc != nil {
 				repoDocsSvc.SetWorkflows(workflowSvc)
 				repoDocsSvc.SetRoleResolver(workflowSvc)
 			}
 			repoDocsSvc.SetTaskCreator(repositorySvc)
-			if catalogStore != nil {
-				repoDocsSvc.SetAgentLister(catalogStore.ListAgents)
-			}
 			// The docs bundle lands as one pull request, and the screen that
 			// asked for it offers to merge that PR — through the same use case
 			// (and the same refusals) every other task's merge goes through.
@@ -2104,9 +2104,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				Repos:     repositoryStore,
 				Tasks:     repositorySvc,
 				Deploys:   pipelineStore,
-			}
-			if catalogStore != nil {
-				prodOpsDeps.Agents = catalogStore.ListAgents
 			}
 			prodOpsSvc := prodops.NewService(prodOpsDeps)
 			if workflowSvc != nil {
@@ -2483,9 +2480,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			if workflowSvc != nil {
 				workflowSvc.SetAgentCatalog(catalogSvc)
 			}
-		}
-		if repositorySvc != nil {
-			repositorySvc.SetAnalizAssignmentSource(settingsSvc)
 		}
 	}
 

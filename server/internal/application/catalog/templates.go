@@ -66,10 +66,11 @@ func (s *Service) CreateAgentFromTemplate(ctx context.Context, templateID uuid.U
 	if err != nil {
 		return domain.Agent{}, err
 	}
-	if tpl.BuiltIn {
-		if err := s.setRoleSubscriptionsIfDefault(ctx, agent); err != nil {
-			return domain.Agent{}, fmt.Errorf("subscribe %s: %w", agent.Name, err)
-		}
+	if err := s.applySuggestedSubscriptions(ctx, agent, tpl.Subscriptions); err != nil {
+		return domain.Agent{}, fmt.Errorf("apply suggested subscriptions for %s: %w", agent.Name, err)
+	}
+	if err := s.applySuggestedRoles(ctx, agent, tpl.Roles); err != nil {
+		return domain.Agent{}, fmt.Errorf("apply suggested roles for %s: %w", agent.Name, err)
 	}
 	stackIDs, err := s.recreateTechStacks(ctx, agent.ID, tpl)
 	if err != nil {
@@ -140,6 +141,8 @@ func (s *Service) SaveAgentAsTemplate(ctx context.Context, agentID uuid.UUID) (d
 		TechStacks:           make([]domain.CreateTechStackRequest, 0, len(stacks)),
 		Skills:               make([]domain.TemplateSkill, 0, len(skills)),
 		Rules:                make([]domain.CreateOrchestratorRuleRequest, 0, len(rules)),
+		Roles:                s.agentRoleSuggestions(ctx, agentID),
+		Subscriptions:        s.agentSubscriptionColumns(ctx, agentID),
 	}
 	for _, st := range stacks {
 		tpl.TechStacks = append(tpl.TechStacks, domain.CreateTechStackRequest{
@@ -186,18 +189,20 @@ func (s *Service) EnsureRoleTemplates(ctx context.Context) error {
 	defer s.seeding.Store(false)
 	for _, def := range roleAgentDefinitions() {
 		tpl := domain.AgentTemplate{
-			Name:         def.agent.Name,
-			Description:  def.agent.Description,
-			SubagentType: def.agent.SubagentType,
-			SystemPrompt: def.agent.SystemPrompt,
-			ProviderType: def.agent.ProviderType,
-			Model:        def.agent.Model,
-			ToolPolicy:   def.agent.ToolPolicy,
-			TechStacks:   def.techStacks,
-			Skills:       templateSkillsFromSeeds(def.skills),
-			Rules:        def.rules,
-			KPIs:         def.kpis,
-			BuiltIn:      true,
+			Name:          def.agent.Name,
+			Description:   def.agent.Description,
+			SubagentType:  def.agent.SubagentType,
+			SystemPrompt:  def.agent.SystemPrompt,
+			ProviderType:  def.agent.ProviderType,
+			Model:         def.agent.Model,
+			ToolPolicy:    def.agent.ToolPolicy,
+			TechStacks:    def.techStacks,
+			Skills:        templateSkillsFromSeeds(def.skills),
+			Rules:         def.rules,
+			KPIs:          def.kpis,
+			Roles:         def.roles,
+			Subscriptions: def.subscriptions,
+			BuiltIn:       true,
 		}
 		if _, err := s.templates.UpsertByName(ctx, tpl); err != nil {
 			return fmt.Errorf("template %s: %w", def.agent.Name, err)
@@ -299,62 +304,144 @@ func (s *Service) claudeCodeRunnable() bool {
 	return s.hostExecutor != nil && s.hostExecutor(roleAgentProvider)
 }
 
-// setRoleSubscriptionsIfDefault subscribes each reviewing role, the moment it
-// is created from its built-in template under its own name, to the hand-off
-// column it owns, so tasks flow to the next stage's agent automatically
-// instead of back to the implementer-assignee:
-//
-//	system-architect -> code_review                    (reviews the diff)
-//	qa-agent         -> ready_for_qa, in_qa, done      (picks it up, tests it, merges its PR)
-//	product-manager  -> pm_uat                         (reviews against acceptance criteria)
-//
-// (analiz_review and human_uat have no subscriber by design — they are the
-// human approval gates.)
-//
-// QA owns both of its testing columns: ready_for_qa is the queue it is handed,
-// in_qa is where it tests. Subscribing it to ready_for_qa alone left in_qa
-// unowned, so a task moved there resolved back to the implementer-assignee.
-//
-// done is the third, and it is not a testing column: it is where the task's
-// pull request gets merged. It had no subscriber and dispatched nobody, so a
-// signed-off task's change sat on a branch until a human pressed Merge. The
-// dispatcher wakes this subscription ONLY for a task whose PR is still
-// unmerged and only on a move into done (Dispatcher.doneMergeWake), so the
-// column cannot go back to what it did before — dispatching the implementer
-// onto its own finished task, which is how done tasks drifted into released.
-//
-// Only fires when the created agent's name is exactly the role name: routing
-// looks these agents up by that exact name (domain/role_agent.go,
-// repoprofile.architectAgentName, the analiz-assignment settings), so an
-// agent renamed on create (a second "qa-agent" copy, say) is not the one
-// those lookups find, and a subscription on it would just be a second desk
-// nobody is dispatched to. It is additive besides: only set when the agent
-// currently has none, so a later admin customization survives.
-func (s *Service) setRoleSubscriptionsIfDefault(ctx context.Context, agent domain.Agent) error {
-	if s.boardConfig == nil {
+// applySuggestedSubscriptions subscribes a newly created agent to its
+// template's suggested hand-off columns, but only into a genuinely open
+// seat: only when the agent itself has no subscriptions yet (an admin who
+// customized before this ran keeps their choice), and only the suggested
+// columns nobody else already subscribes to (two agents both dispatched on
+// the same column's arrival is a bug, not a feature). It replaces the old
+// setRoleSubscriptionsIfDefault, which only ever fired for a built-in agent
+// kept under its exact seeded name; this generalizes to every template,
+// built-in or not.
+func (s *Service) applySuggestedSubscriptions(ctx context.Context, agent domain.Agent, suggested []domain.TaskColumn) error {
+	if s.boardConfig == nil || len(suggested) == 0 {
 		return nil
 	}
-	roleColumns := map[string][]domain.TaskColumn{
-		"system-architect": {domain.TaskColumnCodeReview},
-		"qa-agent":         {domain.TaskColumnReadyForQA, domain.TaskColumnInQA, domain.TaskColumnDone},
-		"product-manager":  {domain.TaskColumnPMUAT},
-	}
-	columns, ok := roleColumns[agent.Name]
-	if !ok {
-		return nil
-	}
-	subs, err := s.boardConfig.ListAgentSubscriptions(ctx, agent.ID)
+	existing, err := s.boardConfig.ListAgentSubscriptions(ctx, agent.ID)
 	if err != nil {
 		return err
 	}
-	if len(subs) > 0 {
+	if len(existing) > 0 {
 		return nil
 	}
-	slugs := make([]string, 0, len(columns))
-	for _, col := range columns {
+	all, err := s.boardConfig.ListSubscriptions(ctx)
+	if err != nil {
+		return err
+	}
+	occupied := make(map[string]bool, len(all))
+	for _, sub := range all {
+		occupied[sub.ColumnSlug] = true
+	}
+	slugs := make([]string, 0, len(suggested))
+	for _, col := range suggested {
+		if occupied[string(col)] {
+			continue
+		}
 		slugs = append(slugs, string(col))
 	}
+	if len(slugs) == 0 {
+		return nil
+	}
 	return s.boardConfig.SetAgentSubscriptions(ctx, agent.ID, slugs)
+}
+
+// applySuggestedRoles assigns a newly created agent to its template's
+// suggested roles, but only into a vacancy: the role has to exist (an admin
+// may have deleted or renamed it), and no existing assignment on that role
+// may already cover every one of the suggested Areas (nil Areas means "any
+// area", the broadest possible coverage).
+func (s *Service) applySuggestedRoles(ctx context.Context, agent domain.Agent, suggested []domain.TemplateRoleSuggestion) error {
+	if s.roleAdmin == nil || len(suggested) == 0 {
+		return nil
+	}
+	roles, err := s.roleAdmin.ListRoles(ctx)
+	if err != nil {
+		return err
+	}
+	byKey := make(map[string]domain.AgentRole, len(roles))
+	for _, r := range roles {
+		byKey[r.Key] = r
+	}
+	for _, sug := range suggested {
+		role, ok := byKey[sug.Key]
+		if !ok || !roleHasVacancyFor(role, sug.Areas) {
+			continue
+		}
+		assignments := append(append([]domain.RoleAssignment{}, role.Assignments...), domain.RoleAssignment{
+			AgentID: agent.ID, Areas: sug.Areas,
+		})
+		if err := s.roleAdmin.SetRoleAssignments(ctx, role.ID, assignments); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// roleHasVacancyFor reports whether role has no assignment already covering
+// areas. A nil (any-area) request is vacant only when the role has no
+// assignment at all; an area-scoped request is vacant unless some existing
+// assignment is itself any-area, or shares one of the requested areas.
+func roleHasVacancyFor(role domain.AgentRole, areas []string) bool {
+	if len(areas) == 0 {
+		return len(role.Assignments) == 0
+	}
+	for _, a := range role.Assignments {
+		if a.Areas == nil {
+			return false
+		}
+		for _, want := range areas {
+			for _, have := range a.Areas {
+				if have == want {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+// agentRoleSuggestions reads an agent's current role memberships back as
+// template suggestions, for SaveAgentAsTemplate.
+func (s *Service) agentRoleSuggestions(ctx context.Context, agentID uuid.UUID) []domain.TemplateRoleSuggestion {
+	if s.roleAdmin == nil {
+		return nil
+	}
+	lister, ok := s.roleAdmin.(interface {
+		ListAssignmentsByAgent(ctx context.Context, agentID uuid.UUID) ([]domain.AgentRole, error)
+	})
+	if !ok {
+		return nil
+	}
+	roles, err := lister.ListAssignmentsByAgent(ctx, agentID)
+	if err != nil {
+		return nil
+	}
+	out := make([]domain.TemplateRoleSuggestion, 0, len(roles))
+	for _, r := range roles {
+		var areas []string
+		if len(r.Assignments) > 0 {
+			areas = r.Assignments[0].Areas
+		}
+		out = append(out, domain.TemplateRoleSuggestion{Key: r.Key, Areas: areas})
+	}
+	return out
+}
+
+// agentSubscriptionColumns reads an agent's current column subscriptions
+// back as template suggestions, for SaveAgentAsTemplate.
+func (s *Service) agentSubscriptionColumns(ctx context.Context, agentID uuid.UUID) []domain.TaskColumn {
+	if s.boardConfig == nil {
+		return nil
+	}
+	slugs, err := s.boardConfig.ListAgentSubscriptions(ctx, agentID)
+	if err != nil {
+		return nil
+	}
+	out := make([]domain.TaskColumn, 0, len(slugs))
+	for _, slug := range slugs {
+		out = append(out, domain.TaskColumn(slug))
+	}
+	return out
 }
 
 func (s *Service) uniqueAgentName(ctx context.Context, base string) string {

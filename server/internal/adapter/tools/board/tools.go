@@ -82,11 +82,20 @@ type ToolKit struct {
 	// for the same reasons PullRequests is nil — it needs GitHub — and the
 	// three deploy tools are registered on the same condition.
 	DeployWatch DeployWatch
-	// Workflows/Roles: wired but not yet read by any tool in B1 — see
-	// release-b-plan.md WP-B2c (create_task.go's type enum, list_team.go's
-	// roles/subscribed_columns).
+	// Workflows/Roles back create_task.go's task_type validation and
+	// assignee_role, and list_team.go's roles/subscribed_columns.
 	Workflows port.WorkflowReader
 	Roles     port.RoleResolver
+	// Subscriptions answers list_team's subscribed_columns per agent. Narrow
+	// on purpose (not the whole port.BoardConfigStore) since that is all this
+	// package reads from it.
+	Subscriptions SubscriptionLister
+}
+
+// SubscriptionLister is the read-only slice of port.BoardConfigStore
+// list_team's subscribed_columns needs.
+type SubscriptionLister interface {
+	ListAgentSubscriptions(ctx context.Context, agentID uuid.UUID) ([]string, error)
 }
 
 func NewExecutors(kit *ToolKit) []port.ToolExecutor {

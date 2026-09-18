@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -260,7 +261,7 @@ func TestReviewChainGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &Service{spans: tc.spans}
+			svc := &Service{spans: tc.spans, workflows: workflowtest.Default().Reader()}
 			repo := domain.Repository{ID: uuid.New(), RequireReviewChain: !tc.off}
 			task := domain.BoardTask{ID: uuid.New(), Key: "APP-7", TaskType: tc.taskType}
 
@@ -306,16 +307,18 @@ func TestReviewChainGateSkipsStagesTheBoardDoesNotHave(t *testing.T) {
 
 	// A board with no QA columns at all: code review and UAT still apply.
 	noQA := &Service{
-		spans:   visited(domain.TaskColumnCodeReview, domain.TaskColumnPMUAT),
-		columns: boardWith(domain.TaskColumnCodeReview, domain.TaskColumnPMUAT, domain.TaskColumnDone),
+		spans:     visited(domain.TaskColumnCodeReview, domain.TaskColumnPMUAT),
+		columns:   boardWith(domain.TaskColumnCodeReview, domain.TaskColumnPMUAT, domain.TaskColumnDone),
+		workflows: workflowtest.Default().Reader(),
 	}
 	if err := noQA.reviewChainGate(context.Background(), repo, task, domain.TaskColumnPMUAT, domain.TaskColumnDone); err != nil {
 		t.Fatalf("a board without in_qa must not be deadlocked by the QA stage: %v", err)
 	}
 
 	missingUAT := &Service{
-		spans:   visited(domain.TaskColumnCodeReview),
-		columns: boardWith(domain.TaskColumnCodeReview, domain.TaskColumnPMUAT, domain.TaskColumnDone),
+		spans:     visited(domain.TaskColumnCodeReview),
+		columns:   boardWith(domain.TaskColumnCodeReview, domain.TaskColumnPMUAT, domain.TaskColumnDone),
+		workflows: workflowtest.Default().Reader(),
 	}
 	err := missingUAT.reviewChainGate(context.Background(), repo, task, domain.TaskColumnCodeReview, domain.TaskColumnDone)
 	if !errors.Is(err, domain.ErrReviewChainIncomplete) {
@@ -439,7 +442,7 @@ func TestReleaseDeployGate(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := &Service{}
+			svc := &Service{workflows: workflowtest.Default().Reader()}
 			if !tc.noStore {
 				svc.pipelineStore = &fakeDeployPipelines{runs: tc.runs, err: tc.listErr}
 			}
@@ -548,6 +551,7 @@ func TestUpdateTaskEnforcesLifecycleGatesForEveryActor(t *testing.T) {
 				tasks:         tasks,
 				spans:         tc.spans,
 				pipelineStore: &fakeDeployPipelines{runs: tc.runs},
+				workflows:     workflowtest.Default().Reader(),
 			}
 
 			target := tc.to

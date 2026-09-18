@@ -12,31 +12,35 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// reviewExitColumn is the column an approving verdict sends the task to, per
-// column whose work is a verdict. analiz_review is absent on purpose: it is a
-// human approval gate, so there is no agent verdict to sweep there.
-func reviewExitColumn(column domain.TaskColumn) (domain.TaskColumn, bool) {
-	switch column {
-	case domain.TaskColumnCodeReview:
-		return domain.TaskColumnReadyForQA, true
-	case domain.TaskColumnInQA, domain.TaskColumnReadyForQA:
-		return domain.TaskColumnPMUAT, true
-	case domain.TaskColumnPMUAT:
-		return domain.TaskColumnHumanUAT, true
-	default:
+// reviewExitColumn is the column an approving verdict sends the task to, read
+// off the stage's own review_verdict_sweep.pass_to param instead of a fixed
+// per-column table — which is what lets technical's ready_for_qa/in_qa sweep
+// to human_uat instead of pm_uat without a type check here. analiz_review
+// answers false on purpose: it is a human approval gate, so no stage of any
+// type carries review_verdict_sweep there and there is no agent verdict to
+// sweep.
+func reviewExitColumn(wf domain.Workflow, column domain.TaskColumn) (domain.TaskColumn, bool) {
+	target, ok := wf.Param(column, domain.BehaviourReviewVerdictSweep, "pass_to")
+	if !ok || target == "" {
 		return "", false
 	}
+	return domain.TaskColumn(target), true
 }
 
 // criterionReviewRole names whose verdict the criteria gate demands before a
-// task may leave this column. It mirrors Service.criteriaReviewGate — the two
-// disagreeing is what produces a sweep that asks for the wrong role's verdict
-// and a move that is refused anyway.
-func criterionReviewRole(column domain.TaskColumn) (domain.CriterionReviewRole, bool) {
-	switch column {
-	case domain.TaskColumnInQA, domain.TaskColumnReadyForQA:
+// task may leave this column, read off the stage's criterion_verdict.channel
+// param. It mirrors Service.criteriaReviewGate — the two disagreeing is what
+// produces a sweep that asks for the wrong role's verdict and a move that is
+// refused anyway.
+func criterionReviewRole(wf domain.Workflow, column domain.TaskColumn) (domain.CriterionReviewRole, bool) {
+	channel, ok := wf.Param(column, domain.BehaviourCriterionVerdict, "channel")
+	if !ok {
+		return "", false
+	}
+	switch channel {
+	case "qa":
 		return domain.CriterionReviewRoleQA, true
-	case domain.TaskColumnPMUAT:
+	case "pm":
 		return domain.CriterionReviewRolePM, true
 	default:
 		return "", false
@@ -76,7 +80,7 @@ func (r *Runner) missingVerdicts(ctx context.Context, job RunJob, role domain.Cr
 // the human reading the card knows WHY the move never went through instead of
 // re-triggering an agent that will hit the same gate.
 func (r *Runner) stuckVerdictNote(ctx context.Context, job RunJob) string {
-	role, ok := criterionReviewRole(job.Task.Column)
+	role, ok := criterionReviewRole(r.workflowFor(ctx, job.Task.TaskType), job.Task.Column)
 	if !ok {
 		return ""
 	}
@@ -132,7 +136,7 @@ func (r *Runner) finalizeReviewVerdict(
 	// refuses the move over. The sweep already asked for them; still missing
 	// means the move would be refused, and asking for a verdict we cannot act on
 	// would only cost a model call.
-	if role, ok := criterionReviewRole(job.Task.Column); ok {
+	if role, ok := criterionReviewRole(r.workflowFor(ctx, job.Task.TaskType), job.Task.Column); ok {
 		if missing := r.missingVerdicts(ctx, job, role); len(missing) > 0 {
 			return false, nil
 		}
@@ -246,10 +250,13 @@ func (r *Runner) sweepReviewVerdict(
 	if resp.Clarification != nil || resp.ResourceBlock != nil {
 		return nil
 	}
-	if job.Task.TaskType == domain.TaskTypeAnaliz {
-		return nil
-	}
-	exit, ok := reviewExitColumn(job.Task.Column)
+	wf := r.workflowFor(ctx, job.Task.TaskType)
+	// No type check here on purpose: a stage only sweeps when its own
+	// review_verdict_sweep behaviour names a pass_to, and analiz_review never
+	// carries one for any type (it is a human approval gate) — the old
+	// `TaskType == analiz` guard is now just the general "this stage has no
+	// verdict to sweep" case reviewExitColumn already answers.
+	exit, ok := reviewExitColumn(wf, job.Task.Column)
 	if !ok {
 		return nil
 	}
@@ -278,7 +285,7 @@ func (r *Runner) sweepReviewVerdict(
 	// cannot move the task directly", left the criteria unruled, and parked the
 	// card in in_qa across three more waves that each re-planned instead of
 	// recording anything.
-	if role, ok := criterionReviewRole(job.Task.Column); ok {
+	if role, ok := criterionReviewRole(wf, job.Task.Column); ok {
 		if missing := r.missingVerdicts(ctx, job, role); len(missing) > 0 {
 			sb.WriteString("\nFirst, the acceptance criteria you have not ruled on. The forward move is REFUSED while any of these " +
 				"lacks your " + string(role) + " verdict — that refusal is what you hit if you already tried to move the task:\n")

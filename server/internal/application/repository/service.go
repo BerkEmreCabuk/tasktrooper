@@ -34,14 +34,6 @@ type RevisionNotifier interface {
 	NotifyRevision(ctx context.Context, task domain.BoardTask)
 }
 
-// AnalizAssignmentSource is the narrow slice of settings.Service CreateTask
-// needs: read the backend/frontend/mobile analiz-assignment settings to
-// override an analiz task's assignee. Wired late by runtime, same setter
-// style as SetEvolution, so this package stays decoupled from settings.
-type AnalizAssignmentSource interface {
-	Get(ctx context.Context) (domain.AppSettings, error)
-}
-
 // ProfileRefresher is implemented by the repoprofile service; it rebuilds the
 // agent-maintained project profile in the background. Wired late by runtime
 // (same setter style as SetEvolution) so this package stays decoupled from it.
@@ -115,11 +107,10 @@ type Service struct {
 	syncWarnings  map[uuid.UUID]string
 	syncCheckedAt map[uuid.UUID]time.Time
 
-	pipelineJobs     port.RepositoryPipelineJobStore
-	githubToken      func(ctx context.Context) (string, error)
-	agentLister      func(ctx context.Context) ([]domain.Agent, error)
-	analizAssignment AnalizAssignmentSource
-	profiles         ProfileRefresher
+	pipelineJobs port.RepositoryPipelineJobStore
+	githubToken  func(ctx context.Context) (string, error)
+	agentLister  func(ctx context.Context) ([]domain.Agent, error)
+	profiles     ProfileRefresher
 
 	// GitHub push-webhook state (see webhook.go). publicBaseURL is where
 	// GitHub must deliver; the maps are the per-repo debounce ledger and the
@@ -314,11 +305,16 @@ func (s *Service) ReviewTaskCriterion(ctx context.Context, criterionID, agentID 
 	if err != nil {
 		return domain.CriterionCheck{}, err
 	}
+	wf, err := s.workflow(ctx, task.TaskType)
+	if err != nil {
+		return domain.CriterionCheck{}, fmt.Errorf("workflow unavailable for task %s: %w", task.Key, err)
+	}
+	channel, ok := wf.Param(task.Column, domain.BehaviourCriterionVerdict, "channel")
 	var role domain.CriterionReviewRole
-	switch task.Column {
-	case domain.TaskColumnReadyForQA, domain.TaskColumnInQA:
+	switch {
+	case ok && channel == string(domain.CriterionReviewRoleQA):
 		role = domain.CriterionReviewRoleQA
-	case domain.TaskColumnPMUAT:
+	case ok && channel == string(domain.CriterionReviewRolePM):
 		role = domain.CriterionReviewRolePM
 	default:
 		return domain.CriterionCheck{}, fmt.Errorf("criterion verdicts are recorded while the task is under QA (ready_for_qa/in_qa) or PM UAT (pm_uat); task %s is in %s — do not move the task to reach the criteria: their ids are in your run context and in move refusals; if the task already left your column, stop and report instead of retrying", task.Key, task.Column)
@@ -349,14 +345,18 @@ func (s *Service) currentTaskSHA(ctx context.Context, taskID uuid.UUID) string {
 	return strings.TrimSpace(info.HeadSHA)
 }
 
-// criteriaGate blocks forward moves while acceptance criteria remain open.
-func (s *Service) criteriaGate(ctx context.Context, taskID uuid.UUID, target domain.TaskColumn) error {
+// criteriaGate blocks forward moves while acceptance criteria remain open, at
+// whichever columns the task's workflow marks require_criteria_complete
+// (code_review/ready_for_qa/done/released by default).
+func (s *Service) criteriaGate(ctx context.Context, taskID uuid.UUID, taskType domain.TaskType, target domain.TaskColumn) error {
 	if !s.requireCriteria || s.criteria == nil {
 		return nil
 	}
-	switch target {
-	case domain.TaskColumnCodeReview, domain.TaskColumnReadyForQA, domain.TaskColumnDone, domain.TaskColumnReleased:
-	default:
+	wf, err := s.workflow(ctx, taskType)
+	if err != nil {
+		return fmt.Errorf("criteria gate: workflow unavailable for %s (%w)", target, err)
+	}
+	if !wf.Has(target, domain.BehaviourRequireCriteriaComplete) {
 		return nil
 	}
 	items, err := s.criteria.ListByTask(ctx, taskID)
@@ -437,18 +437,23 @@ func criterionApprovedByAReviewer(c domain.AcceptanceCriterion) bool {
 // criterion verdict it never recorded went with it. The task was reported
 // tested by a run that had executed nothing. Any forward exit is now the same
 // exit, so skipping the next column no longer skips the gate.
-func (s *Service) criteriaReviewGate(ctx context.Context, taskID uuid.UUID, prev, target domain.TaskColumn) error {
+func (s *Service) criteriaReviewGate(ctx context.Context, taskID uuid.UUID, taskType domain.TaskType, prev, target domain.TaskColumn) error {
 	if !s.requireCriteria || s.criteria == nil {
 		return nil
 	}
-	if !isForwardReviewExit(target) {
+	wf, err := s.workflow(ctx, taskType)
+	if err != nil {
+		return fmt.Errorf("criteria review gate: workflow unavailable for %s (%w)", target, err)
+	}
+	if !wf.Has(target, domain.BehaviourForwardExit) {
 		return nil
 	}
+	channel, ok := wf.Param(prev, domain.BehaviourCriterionVerdict, "channel")
 	var role domain.CriterionReviewRole
-	switch prev {
-	case domain.TaskColumnReadyForQA, domain.TaskColumnInQA:
+	switch {
+	case ok && channel == string(domain.CriterionReviewRoleQA):
 		role = domain.CriterionReviewRoleQA
-	case domain.TaskColumnPMUAT:
+	case ok && channel == string(domain.CriterionReviewRolePM):
 		role = domain.CriterionReviewRolePM
 	default:
 		return nil
@@ -487,23 +492,12 @@ func (s *Service) criteriaReviewGate(ctx context.Context, taskID uuid.UUID, prev
 	return nil
 }
 
-// isForwardReviewExit reports whether moving a task INTO this column means its
-// current review phase is over and passed.
-//
-// pm_uat/human_uat/done/released are all "this passed" claims — which one a
-// board actually uses depends on its columns and on require_human_review, so
-// the gate cannot key on the single expected next column. need_revision and
-// the working columns are not here on purpose: handing work back, or pulling it
-// back to be redone, never needs a verdict it is about to invalidate.
-func isForwardReviewExit(target domain.TaskColumn) bool {
-	switch target {
-	case domain.TaskColumnPMUAT, domain.TaskColumnHumanUAT,
-		domain.TaskColumnDone, domain.TaskColumnReleased:
-		return true
-	default:
-		return false
-	}
-}
+// forward_exit is what used to be isForwardReviewExit's hardcoded
+// {pm_uat, human_uat, done, released} switch — moving a task INTO a column
+// carrying it means its current review phase is over and passed. Inlined as
+// wf.Has(target, domain.BehaviourForwardExit) at each call site
+// (criteriaReviewGate, test_cases.go's testCaseGate) rather than a shared
+// helper, since each already has its own wf in hand.
 
 func criterionCheckFor(c domain.AcceptanceCriterion, role domain.CriterionReviewRole) *domain.CriterionCheck {
 	for i := range c.Checks {
@@ -553,32 +547,31 @@ func (s *Service) SetAgentLister(fn func(ctx context.Context) ([]domain.Agent, e
 func (s *Service) SetWorkflows(w port.WorkflowReader)  { s.workflows = w }
 func (s *Service) SetRoleResolver(r port.RoleResolver) { s.roles = r }
 
-// SetAnalizAssignmentSource wires the backend/frontend/mobile analiz-assignment
-// settings CreateTask consults to override an analiz task's assignee. Nil (the
-// pre-wiring behaviour) leaves CreateTask's existing behaviour untouched: the
-// PM's requested assignee is used as-is.
-func (s *Service) SetAnalizAssignmentSource(src AnalizAssignmentSource) {
-	s.analizAssignment = src
+// workflow resolves the workflow every gate in this package reads instead of
+// branching on a task-type/mid-lifecycle-column literal. An error (no reader
+// wired, or the reader's own snapshot unreadable) is the caller's to fail
+// closed on — a gate that reads "cannot check" as "checked and fine" is not a
+// gate — so this never substitutes a default and always returns the error.
+func (s *Service) workflow(ctx context.Context, taskType domain.TaskType) (domain.Workflow, error) {
+	if s.workflows == nil {
+		return domain.Workflow{}, fmt.Errorf("workflow reader unavailable")
+	}
+	return s.workflows.Workflow(ctx, taskType)
 }
 
-// CreateWorkflowSetupTask opens a board task (assigned by repo kind) to author
-// the repo's GitHub Actions CI/CD workflows, for repos that have none yet.
+// CreateWorkflowSetupTask opens a board task, assigned to whoever holds the
+// system_task_assignee purpose for the repo's own area, to author the repo's
+// GitHub Actions CI/CD workflows, for repos that have none yet.
 func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid.UUID) (domain.BoardTask, error) {
 	repo, err := s.repos.Get(ctx, repositoryID)
 	if err != nil {
 		return domain.BoardTask{}, err
 	}
-	role := domain.DeveloperAgentForKind(repo.Kind, repo.SubProjects)
 	var assignee *uuid.UUID
-	if s.agentLister != nil {
-		if agents, aerr := s.agentLister(ctx); aerr == nil {
-			for i := range agents {
-				if agents[i].Name == role {
-					id := agents[i].ID
-					assignee = &id
-					break
-				}
-			}
+	if s.roles != nil {
+		area := domain.RepoArea(repo.Kind, repo.SubProjects)
+		if agent, aerr := s.roles.AgentForPurpose(ctx, domain.PurposeSystemTaskAssignee, area); aerr == nil {
+			assignee = agent
 		}
 	}
 	desc := fmt.Sprintf(`Create and push GitHub Actions CI/CD workflows for this repository (kind: %s).
@@ -603,36 +596,6 @@ Once each workflow exists, save the job/workflow mapping under Repository Settin
 		CreatedBy:       "system",
 		AssigneeAgentID: assignee,
 	})
-}
-
-// resolveAnalizAssignee overrides an analiz task's assignee with the agent
-// named by the backend/frontend/mobile analiz-assignment settings, regardless
-// of what the caller (typically the PM agent) requested — the setting exists
-// precisely to correct a PM that keeps assigning analiz to a developer whose
-// tool policy cannot carry the task (see domain.RequiredAnalizTools). Returns
-// nil (leave the caller's assignee alone) when the setting source or agent
-// roster is not wired, or the resolved agent name has no matching row.
-func (s *Service) resolveAnalizAssignee(ctx context.Context, repo domain.Repository) *uuid.UUID {
-	if s.analizAssignment == nil || s.agentLister == nil {
-		return nil
-	}
-	settings, err := s.analizAssignment.Get(ctx)
-	if err != nil {
-		return nil
-	}
-	area := domain.ResolveAnalizArea(repo.Kind, repo.SubProjects)
-	name := domain.AnalizAssigneeForArea(settings, area)
-	agents, err := s.agentLister(ctx)
-	if err != nil {
-		return nil
-	}
-	for i := range agents {
-		if agents[i].Name == name {
-			id := agents[i].ID
-			return &id
-		}
-	}
-	return nil
 }
 
 func buildHintForKind(kind string) string {
@@ -1738,17 +1701,59 @@ func (s *Service) enrichTask(ctx context.Context, task domain.BoardTask) (domain
 	return task, nil
 }
 
+// resolveTaskType fills an empty request with the store's default task type
+// and confirms a requested one actually exists — TaskTypeExists against the
+// live workflow snapshot, not domain.ValidTaskType's hardcoded four-value
+// enum, since task types are data now and a repo may have its own.
+func (s *Service) resolveTaskType(ctx context.Context, requested domain.TaskType) (domain.TaskType, error) {
+	if requested == "" {
+		if s.workflows == nil {
+			return "", fmt.Errorf("workflow reader unavailable: cannot resolve the default task type")
+		}
+		def, err := s.workflows.DefaultTaskType(ctx)
+		if err != nil {
+			return "", fmt.Errorf("default task type unavailable: %w", err)
+		}
+		return def, nil
+	}
+	if s.workflows == nil {
+		return requested, nil
+	}
+	exists, err := s.workflows.TaskTypeExists(ctx, requested)
+	if err != nil {
+		return "", fmt.Errorf("task type check unavailable: %w", err)
+	}
+	if !exists {
+		return "", fmt.Errorf("invalid task type: %s", requested)
+	}
+	return requested, nil
+}
+
+// resolveNewTaskAssignee applies the type's assignee_role_id/assignee_mode
+// through port.RoleResolver.AssigneeForNewTask — what the settings-only
+// analiz special case (resolveAnalizAssignee) used to do for analiz alone,
+// generalised to every task type. A nil role resolver leaves the requested
+// assignee untouched, same as an analiz task before the resolver was wired.
+func (s *Service) resolveNewTaskAssignee(ctx context.Context, taskType domain.TaskType, repo domain.Repository, requested *uuid.UUID) (*uuid.UUID, error) {
+	if s.roles == nil {
+		return requested, nil
+	}
+	area := domain.RepoArea(repo.Kind, repo.SubProjects)
+	resolved, err := s.roles.AssigneeForNewTask(ctx, taskType, area, requested)
+	if err != nil {
+		return nil, fmt.Errorf("resolve assignee for new task: %w", err)
+	}
+	return resolved, nil
+}
+
 func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req domain.CreateBoardTaskRequest) (domain.BoardTask, error) {
 	repo, err := s.repos.Get(ctx, repositoryID)
 	if err != nil {
 		return domain.BoardTask{}, err
 	}
-	taskType := req.TaskType
-	if taskType == "" {
-		taskType = domain.TaskTypeTask
-	}
-	if !domain.ValidTaskType(taskType) {
-		return domain.BoardTask{}, fmt.Errorf("invalid task type: %s", taskType)
+	taskType, err := s.resolveTaskType(ctx, req.TaskType)
+	if err != nil {
+		return domain.BoardTask{}, err
 	}
 	priority := req.Priority
 	if priority == "" {
@@ -1764,7 +1769,7 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 	if err := s.validateColumn(ctx, col); err != nil {
 		return domain.BoardTask{}, err
 	}
-	if err := s.validateMoveAllowed(ctx, uuid.Nil, col); err != nil {
+	if err := s.validateMoveAllowed(ctx, uuid.Nil, taskType, col); err != nil {
 		return domain.BoardTask{}, err
 	}
 	createdBy := req.CreatedBy
@@ -1785,11 +1790,9 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 	if err != nil {
 		return domain.BoardTask{}, err
 	}
-	assignee := req.AssigneeAgentID
-	if taskType == domain.TaskTypeAnaliz {
-		if resolved := s.resolveAnalizAssignee(ctx, repo); resolved != nil {
-			assignee = resolved
-		}
+	assignee, err := s.resolveNewTaskAssignee(ctx, taskType, repo, req.AssigneeAgentID)
+	if err != nil {
+		return domain.BoardTask{}, err
 	}
 	task, err := s.tasks.Create(ctx, domain.BoardTask{
 		RepositoryID:         repositoryID,
@@ -1937,7 +1940,14 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 		task.Title = *req.Title
 	}
 	if req.TaskType != nil {
-		if !domain.ValidTaskType(*req.TaskType) {
+		if s.workflows == nil {
+			return domain.BoardTask{}, fmt.Errorf("workflow reader unavailable: cannot validate task type %s", *req.TaskType)
+		}
+		exists, err := s.workflows.TaskTypeExists(ctx, *req.TaskType)
+		if err != nil {
+			return domain.BoardTask{}, fmt.Errorf("task type check unavailable: %w", err)
+		}
+		if !exists {
 			return domain.BoardTask{}, fmt.Errorf("invalid task type: %s", *req.TaskType)
 		}
 		task.TaskType = *req.TaskType
@@ -1978,19 +1988,19 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 				return domain.BoardTask{}, err
 			}
 		}
-		if err := s.validateMoveAllowed(ctx, task.ID, *req.Column); err != nil {
+		if err := s.validateMoveAllowed(ctx, task.ID, task.TaskType, *req.Column); err != nil {
 			return domain.BoardTask{}, err
 		}
-		if err := s.criteriaGate(ctx, task.ID, *req.Column); err != nil {
+		if err := s.criteriaGate(ctx, task.ID, task.TaskType, *req.Column); err != nil {
 			return domain.BoardTask{}, err
 		}
-		if err := s.criteriaReviewGate(ctx, task.ID, prevColumn, *req.Column); err != nil {
+		if err := s.criteriaReviewGate(ctx, task.ID, task.TaskType, prevColumn, *req.Column); err != nil {
 			return domain.BoardTask{}, err
 		}
 		// The QA phase owes the board its round, not only its verdicts: which
 		// cases were derived, which were executed, and which were rejected as
 		// invalid. See testCaseGate.
-		if err := s.testCaseGate(ctx, task.ID, prevColumn, *req.Column); err != nil {
+		if err := s.testCaseGate(ctx, task.ID, task.TaskType, prevColumn, *req.Column); err != nil {
 			return domain.BoardTask{}, err
 		}
 		// The two terminal-column gates: done must have been earned by the
@@ -2074,32 +2084,54 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 		if s.evolution != nil && *req.Column == domain.TaskColumnNeedRevision {
 			s.evolution.NotifyRevision(ctx, updated)
 		}
+		// The four enter-stage side effects below all key off the target
+		// column's own workflow behaviours (ensure_pr_on_enter, wait_for_ci,
+		// detect_migration_on_enter, stage_deploy_on_enter) rather than literal
+		// column compares. An unreadable workflow skips them — they are
+		// automation on an already-written move, not a gate on the move itself,
+		// so the safe failure is "nothing extra happens this time", not
+		// refusing a move that already succeeded.
+		wf, wfErr := s.workflow(ctx, updated.TaskType)
+		if wfErr != nil {
+			log.Warn().Err(wfErr).Str("task_id", updated.ID.String()).
+				Msg("update task: workflow unavailable, skipping enter-stage side effects")
+		}
 		// The PR is opened when a task enters code_review so the
 		// validate/build/test pipeline can read PR-linked GitHub Actions runs.
 		// It is re-ensured on the later columns because that is also how a task
 		// whose first attempt raced the branch push gets one at all — and by
 		// `done` it has to exist, since that is where it gets merged.
-		if *req.Column == domain.TaskColumnCodeReview || *req.Column == domain.TaskColumnPMUAT || *req.Column == domain.TaskColumnDone {
+		if wfErr == nil && wf.Has(*req.Column, domain.BehaviourEnsurePROnEnter) {
 			s.ensurePullRequestAsync(ctx, updated)
 		}
 		// code_review entry → validate/build/test GitHub Actions gate; the
 		// architect reviews the diff only after it goes green.
-		if s.pipelines != nil && *req.Column == domain.TaskColumnCodeReview {
+		if s.pipelines != nil && wfErr == nil && wf.Has(*req.Column, domain.BehaviourWaitForCI) {
 			if _, perr := s.pipelines.Trigger(ctx, repositoryID, updated, domain.PipelineTriggerReadyForQA); perr != nil {
 				log.Warn().Err(perr).Str("task_id", updated.ID.String()).Msg("pipeline trigger failed")
 			}
 		}
 		// The schema-change check reads the branch diff, so it runs as soon as
 		// the work is reviewable — long before anyone tries to release it.
-		if *req.Column == domain.TaskColumnCodeReview || *req.Column == domain.TaskColumnReadyForQA {
+		if wfErr == nil && wf.Has(*req.Column, domain.BehaviourDetectMigrationOnEnter) {
 			s.DetectTaskMigration(ctx, updated)
 		}
 		// Staging deploys follow the repo's test strategy: local runs nothing,
-		// stage deploys once before QA, per_step also deploys at code review.
+		// stage deploys once before QA, per_step also deploys at code review —
+		// which of those it is is the stage_deploy_on_enter behaviour's own
+		// "when" param, not a second literal column compare alongside the first.
 		if s.pipelines != nil {
 			strategy := s.testStrategy(ctx, repositoryID)
-			deployNow := (*req.Column == domain.TaskColumnReadyForQA && domain.DeploysForQA(strategy)) ||
-				(*req.Column == domain.TaskColumnCodeReview && domain.DeploysOnCodeReview(strategy))
+			deployNow := false
+			if wfErr == nil && wf.Has(*req.Column, domain.BehaviourStageDeployOnEnter) {
+				when, _ := wf.Param(*req.Column, domain.BehaviourStageDeployOnEnter, "when")
+				switch when {
+				case "qa":
+					deployNow = domain.DeploysForQA(strategy)
+				case "per_step":
+					deployNow = domain.DeploysOnCodeReview(strategy)
+				}
+			}
 			if deployNow {
 				// A store-shipped stage target does not deploy until the app's
 				// onboarding checklist is verified (test_ready or later) — the
@@ -2251,25 +2283,28 @@ func validateAgentSelfMove(task domain.BoardTask, req domain.UpdateBoardTaskRequ
 	return nil
 }
 
-func (s *Service) validateMoveAllowed(ctx context.Context, taskID uuid.UUID, target domain.TaskColumn) error {
-	if taskID == uuid.Nil {
+func (s *Service) validateMoveAllowed(ctx context.Context, taskID uuid.UUID, taskType domain.TaskType, target domain.TaskColumn) error {
+	if taskID == uuid.Nil || s.relations == nil {
 		return nil
 	}
-	// Only in_progress is refused up front. todo is queueing, not starting —
-	// a task may sit there with an open blocker so its order is visible on the
-	// board (the work-order chip, read from the park below) instead of being
-	// unable to enter the board at all until every dependency happens to be
-	// done first. board.workOrderGateApplies still gates BOTH todo and
-	// in_progress at dispatch time (WorkOrder.Park): that is what actually
-	// stops an agent from picking the task up early, parking it in place with
-	// its blockers named, and the sweeper releases it the moment they land. A
-	// human or an agent dragging the card straight into in_progress is still
-	// told no up front, because that is a direct attempt to start the work
-	// this instant, not to queue it.
-	if target != domain.TaskColumnInProgress {
-		return nil
+	// Only a column whose block_on_dependencies carries refuse_move is refused
+	// up front — today that is in_progress alone. todo is queueing, not
+	// starting — a task may sit there with an open blocker so its order is
+	// visible on the board (the work-order chip, read from the park below)
+	// instead of being unable to enter the board at all until every dependency
+	// happens to be done first. board.workOrderGateApplies still gates BOTH
+	// todo and in_progress (wherever block_on_dependencies is on the stage at
+	// all) at dispatch time (WorkOrder.Park): that is what actually stops an
+	// agent from picking the task up early, parking it in place with its
+	// blockers named, and the sweeper releases it the moment they land. A
+	// human or an agent dragging the card straight into a refuse_move column is
+	// still told no up front, because that is a direct attempt to start the
+	// work this instant, not to queue it.
+	wf, err := s.workflow(ctx, taskType)
+	if err != nil {
+		return fmt.Errorf("work-order gate: workflow unavailable for %s (%w)", target, err)
 	}
-	if s.relations == nil {
+	if refuse, _ := wf.Param(target, domain.BehaviourBlockOnDependencies, "refuse_move"); refuse != "true" {
 		return nil
 	}
 	blockers, err := s.relations.ListBlockingSources(ctx, taskID)

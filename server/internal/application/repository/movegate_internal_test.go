@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -29,21 +30,27 @@ func (f *fixedBlockerStore) ListBlockingSources(context.Context, uuid.UUID) ([]d
 // place with the blockers named on the card. Only in_progress — a direct
 // attempt to start the work this instant — is still refused up front.
 func TestValidateMoveAllowedAllowsTodoWithAnOpenBlocker(t *testing.T) {
-	svc := &Service{relations: &fixedBlockerStore{
-		graphRelationStore: newGraphRelations(),
-		blockers:           []domain.BoardTask{{ID: uuid.New(), Key: "T-5", Title: "API migration", Column: domain.TaskColumnInProgress}},
-	}}
+	svc := &Service{
+		relations: &fixedBlockerStore{
+			graphRelationStore: newGraphRelations(),
+			blockers:           []domain.BoardTask{{ID: uuid.New(), Key: "T-5", Title: "API migration", Column: domain.TaskColumnInProgress}},
+		},
+		workflows: workflowtest.Default().Reader(),
+	}
 
-	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskColumnTodo))
+	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskTypeTask, domain.TaskColumnTodo))
 }
 
 func TestValidateMoveAllowedRefusesInProgressWithAnOpenBlocker(t *testing.T) {
-	svc := &Service{relations: &fixedBlockerStore{
-		graphRelationStore: newGraphRelations(),
-		blockers:           []domain.BoardTask{{ID: uuid.New(), Key: "T-5", Column: domain.TaskColumnTodo}},
-	}}
+	svc := &Service{
+		relations: &fixedBlockerStore{
+			graphRelationStore: newGraphRelations(),
+			blockers:           []domain.BoardTask{{ID: uuid.New(), Key: "T-5", Column: domain.TaskColumnTodo}},
+		},
+		workflows: workflowtest.Default().Reader(),
+	}
 
-	err := svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskColumnInProgress)
+	err := svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskTypeTask, domain.TaskColumnInProgress)
 
 	require.Error(t, err)
 	require.ErrorContains(t, err, "blocked until these are done")
@@ -53,8 +60,11 @@ func TestValidateMoveAllowedRefusesInProgressWithAnOpenBlocker(t *testing.T) {
 }
 
 func TestValidateMoveAllowedAllowsBothColumnsWhenBlockerIsDone(t *testing.T) {
-	svc := &Service{relations: &fixedBlockerStore{graphRelationStore: newGraphRelations(), blockers: nil}}
+	svc := &Service{
+		relations: &fixedBlockerStore{graphRelationStore: newGraphRelations(), blockers: nil},
+		workflows: workflowtest.Default().Reader(),
+	}
 
-	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskColumnTodo))
-	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskColumnInProgress))
+	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskTypeTask, domain.TaskColumnTodo))
+	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskTypeTask, domain.TaskColumnInProgress))
 }

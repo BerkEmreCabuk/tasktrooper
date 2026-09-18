@@ -264,7 +264,10 @@ func (r *Runner) reportVerificationFailure(ctx context.Context, job RunJob, fail
 	}); err != nil {
 		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("verification failure comment failed")
 	}
-	col := domain.TaskColumnInProgress
+	col, ok := r.workflowFor(ctx, job.Task.TaskType).WorkColumn()
+	if !ok {
+		col = domain.TaskColumnInProgress
+	}
 	if _, err := r.taskUpdater.UpdateTask(ctx, job.RepositoryID, job.Task.ID, domain.UpdateBoardTaskRequest{
 		Column:       &col,
 		SystemReason: domain.MoveReasonVerificationFailed,

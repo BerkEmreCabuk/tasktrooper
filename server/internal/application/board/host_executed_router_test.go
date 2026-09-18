@@ -11,6 +11,7 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -77,6 +78,7 @@ func TestCriteriaSweepRunsOnTheHostExecutor(t *testing.T) {
 	}
 	router, llm := hostRouter(ex)
 	r := NewRunner(RunnerDeps{AgentLoop: router})
+	r.SetWorkflows(workflowtest.Default().Reader())
 	r.SetTaskUpdater(&criteriaUpdater{criteria: []domain.AcceptanceCriterion{
 		{ID: uuid.New(), Text: "the gate refuses a red build", Completed: false},
 	}})
@@ -111,6 +113,7 @@ func TestReviewVerdictFinalizeRunsOnTheHostExecutor(t *testing.T) {
 	router, llm := hostRouter(ex)
 	updater := &fakeTaskUpdater{}
 	r := NewRunner(RunnerDeps{AgentLoop: router})
+	r.SetWorkflows(workflowtest.Default().Reader())
 	r.SetTaskUpdater(updater)
 
 	dir := t.TempDir()
@@ -141,6 +144,7 @@ func TestHostExecutedSweepFailsHonestlyWithNoRunner(t *testing.T) {
 	llm := &recordingLLM{}
 	router := agent.NewRouter(agent.NewLoop(llm, toollessRegistry{}, 3, 3, 16000))
 	r := NewRunner(RunnerDeps{AgentLoop: router})
+	r.SetWorkflows(workflowtest.Default().Reader())
 	r.SetTaskUpdater(&criteriaUpdater{criteria: []domain.AcceptanceCriterion{
 		{ID: uuid.New(), Text: "still open"},
 	}})
@@ -159,6 +163,7 @@ func TestHTTPProviderStillRunsOnTheLoop(t *testing.T) {
 	ex := &fakeExecutor{supports: domain.LLMProviderClaudeCode}
 	router, llm := hostRouter(ex)
 	r := NewRunner(RunnerDeps{AgentLoop: router})
+	r.SetWorkflows(workflowtest.Default().Reader())
 	r.SetTaskUpdater(&criteriaUpdater{criteria: []domain.AcceptanceCriterion{
 		{ID: uuid.New(), Text: "still open"},
 	}})

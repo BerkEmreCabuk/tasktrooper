@@ -70,12 +70,11 @@ func (r *Runner) sweepOpenCriteria(
 	model string,
 	policy domain.ToolPolicy,
 ) (domain.AgentResponse, bool, *domain.QuotaBlock) {
-	if isReviewColumn(job.Task.Column) {
+	wf := r.workflowFor(ctx, job.Task.TaskType)
+	if isReviewColumn(wf, job.Task.Column) {
 		return resp, true, nil
 	}
-	switch job.Task.Column {
-	case domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision:
-	default:
+	if !wf.Has(job.Task.Column, domain.BehaviourCriteriaSweep) {
 		return resp, true, nil
 	}
 	open := r.openCriteria(ctx, job)

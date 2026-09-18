@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -120,6 +121,23 @@ func (s *Service) AssigneeForNewTask(ctx context.Context, taskType domain.TaskTy
 	default: // AssigneeModeNone
 		return requested, nil
 	}
+}
+
+// RoleByKey resolves a role from its key against the snapshot — the extra
+// surface the create_board_task tool's optional assignee_role argument needs
+// beyond port.RoleResolver's id-keyed methods, so a task-creation call never
+// pays a query for it either.
+func (s *Service) RoleByKey(ctx context.Context, key string) (domain.AgentRole, error) {
+	snap, err := s.getSnapshot()
+	if err != nil {
+		return domain.AgentRole{}, err
+	}
+	for _, r := range snap.roles {
+		if r.Key == key {
+			return r, nil
+		}
+	}
+	return domain.AgentRole{}, fmt.Errorf("unknown role %q", key)
 }
 
 func containsArea(areas []string, area string) bool {

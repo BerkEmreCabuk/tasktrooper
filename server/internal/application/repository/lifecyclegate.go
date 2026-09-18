@@ -106,7 +106,15 @@ func (s *Service) reviewChainGate(ctx context.Context, repo domain.Repository, t
 	if target == domain.TaskColumnReleased && prev == domain.TaskColumnDone {
 		return nil
 	}
-	stages := domain.ReviewChainForType(task.TaskType)
+	wf, err := s.workflow(ctx, task.TaskType)
+	if err != nil {
+		// Fail closed: an unreadable workflow means the chain it would have
+		// named cannot be evaluated, and "cannot check" must never read as
+		// "checked and fine".
+		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("review-chain gate could not read the task's workflow")
+		return fmt.Errorf("%w: its workflow could not be read (%v) — retry the move", domain.ErrReviewChainIncomplete, err)
+	}
+	stages := wf.ReviewChain()
 	if len(stages) == 0 {
 		return nil
 	}
@@ -209,13 +217,19 @@ func (s *Service) CheckReviewChain(ctx context.Context, repositoryID, taskID uui
 // store submit both require a real successful job). A repository in that state
 // must leave require_release_deploy off — the block message says so.
 //
-// analiz tasks are exempt: they ship no code, and their own workflow moves them
+// A type whose released stage carries no require_release_deploy is exempt —
+// analiz by default: it ships no code, and its own workflow moves it
 // done → released once the implementation tasks have been created.
 func (s *Service) releaseDeployGate(ctx context.Context, repo domain.Repository, task domain.BoardTask, target domain.TaskColumn) error {
 	if !repo.RequireReleaseDeploy || target != domain.TaskColumnReleased {
 		return nil
 	}
-	if !domain.TaskTypeShipsCode(task.TaskType) {
+	wf, err := s.workflow(ctx, task.TaskType)
+	if err != nil {
+		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("release-deploy gate could not read the task's workflow")
+		return fmt.Errorf("%w: its workflow could not be read (%v) — retry the move", domain.ErrReleaseNotDeployed, err)
+	}
+	if !wf.Has(domain.TaskColumnReleased, domain.BehaviourRequireReleaseDeploy) {
 		return nil
 	}
 	if s.pipelineStore == nil {
