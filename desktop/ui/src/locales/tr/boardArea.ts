@@ -65,6 +65,8 @@ export const boardArea: BoardAreaDict = {
     dropToColumn: "Bırak → {column}",
     releasedArchive: "Yayınlananlar",
     createDialogTitle: "Backlog'a Görev Ekle",
+    filterAllProjects: "Tüm projeler",
+    filterNoProject: "Projesiz",
   },
   board: {
     repoFallback: "Depo",
@@ -87,7 +89,6 @@ export const boardArea: BoardAreaDict = {
     activity: "Aktivite",
     backlog: "Backlog",
     newTask: "Yeni Görev",
-    summary: "{tasks} aktif görev · {repos} depo",
     emptyColumn: "Boş",
     activityDialogTitle: "Aktivite: hangi ajan ne yapıyor",
   },

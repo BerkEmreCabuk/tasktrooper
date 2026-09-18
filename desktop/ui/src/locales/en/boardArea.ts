@@ -67,6 +67,8 @@ export const boardArea = {
     dropToColumn: "Drop to move to {column}",
     releasedArchive: "Released",
     createDialogTitle: "Add Task to Backlog",
+    filterAllProjects: "All projects",
+    filterNoProject: "No project",
   },
   board: {
     repoFallback: "Repository",
@@ -89,7 +91,6 @@ export const boardArea = {
     activity: "Activity",
     backlog: "Backlog",
     newTask: "New Task",
-    summary: "{tasks} active tasks · {repos} repositories",
     emptyColumn: "Empty",
     activityDialogTitle: "Activity: which agent is doing what",
   },

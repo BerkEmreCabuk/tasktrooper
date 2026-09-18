@@ -572,13 +572,6 @@ export function BoardPage() {
             onReadyForTask={() => setDialogOpen(true)}
           />
         )}
-        <p className="mb-4 text-sm text-muted-foreground">
-          {t("boardArea.board.summary", {
-            tasks: tasks.filter((task) => board.some((c) => c.slug === task.column)).length,
-            repos: repositories.length,
-          })}
-        </p>
-
         <div className="flex min-h-0 flex-1 overflow-x-auto pb-1">
           <div className="flex h-full min-h-0 min-w-max gap-3">
             {lanes.map((lane) => (

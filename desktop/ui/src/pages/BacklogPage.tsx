@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCachedState, useFirstLoad } from "@/hooks/useCachedState";
 import { useI18n } from "@/hooks/useI18n";
@@ -65,6 +66,7 @@ export function BacklogPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [defaultRepositoryId, setDefaultRepositoryId] = useState("");
   const [repositoryAutoOpen, setRepositoryAutoOpen] = useState<"create" | "open" | null>(null);
+  const [projectFilter, setProjectFilter] = useState("all");
 
   const openTaskCreate = () => {
     if (repositories.length === 0) {
@@ -147,8 +149,13 @@ export function BacklogPage() {
     () =>
       tasks
         .filter((task) => task.column === backlogSlug)
+        .filter((task) => {
+          if (projectFilter === "all") return true;
+          if (projectFilter === "none") return !task.initiative_project_id;
+          return task.initiative_project_id === projectFilter;
+        })
         .sort((a, b) => a.position - b.position),
-    [tasks, backlogSlug],
+    [tasks, backlogSlug, projectFilter],
   );
 
   // Looked up against every task, not just the backlog slice: changing the
@@ -252,6 +259,22 @@ export function BacklogPage() {
           description={t("boardArea.backlog.description")}
           action={
             <div className="flex flex-wrap gap-2">
+              {initiativeProjects.length > 0 && (
+                <Select value={projectFilter} onValueChange={setProjectFilter}>
+                  <SelectTrigger className="w-44">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t("boardArea.backlog.filterAllProjects")}</SelectItem>
+                    <SelectItem value="none">{t("boardArea.backlog.filterNoProject")}</SelectItem>
+                    {initiativeProjects.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               <Button variant="outline" asChild className="gap-2">
                 <Link to="/released">
                   <Archive className="h-4 w-4" />
