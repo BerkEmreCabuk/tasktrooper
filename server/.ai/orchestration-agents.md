@@ -18,11 +18,12 @@ At boot `EnsureRoleAgents` creates any missing role agents (by name) and fills i
 | `backend-developer` | `backend-engineer` | high | Go/Fiber/hexagonal and Java/Quarkus APIs, DB, tests |
 | `frontend-developer` | `frontend-engineer` | high | React/Vite/Tailwind UI |
 | `mobile-developer` | `mobile-dev-engineer` | high | Flutter, SwiftUI, Compose; store deploy |
+| `devops-engineer` | `devops-engineer` | high | CI/CD, container images, Kubernetes/Coolify deploys, secrets, networking, releases |
 | `product-manager` | `generalPurpose` | medium | Backlog, requirements, board tools |
 | `qa-agent` | `generalPurpose` | medium | Manual test rounds, QA columns, read-only code tools |
 | `system-architect` | `system-architect` | high | Analysis (`analiz`) tasks, code review, task decomposition |
 
-Each role agent is seeded with 6–17 skills and 3–10 rules. Skill embeddings are filled in after the seed by the backfill above. Seed reconciliation updates existing skill/rule content on restart when the markdown under `internal/application/catalog/seeddata/` changes; renamed/removed entries must be listed in `deprecatedRoleSkills`/`deprecatedRoleRules` (`seed.go`) to be deleted from existing installs. Tool policies and effort are applied on agent CREATE only — admin customizations survive restarts, so policy additions reach existing installs via the admin UI.
+Each role agent is seeded with 6–22 skills and 3–11 rules. Skill embeddings are filled in after the seed by the backfill above. Seed reconciliation updates existing skill/rule content on restart when the markdown under `internal/application/catalog/seeddata/` changes; renamed/removed entries must be listed in `deprecatedRoleSkills`/`deprecatedRoleRules` (`seed.go`) to be deleted from existing installs. Tool policies and effort are applied on agent CREATE only — admin customizations survive restarts, so policy additions reach existing installs via the admin UI.
 
 ### Seeded models
 

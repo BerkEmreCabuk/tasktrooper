@@ -16,7 +16,7 @@ import (
 
 func TestRoleAgentDefinitions_CountAndSkills(t *testing.T) {
 	defs := roleAgentDefinitions()
-	assert.Len(t, defs, 6)
+	assert.Len(t, defs, 7)
 	names := map[string]bool{}
 	for _, d := range defs {
 		names[d.agent.Name] = true
@@ -28,6 +28,7 @@ func TestRoleAgentDefinitions_CountAndSkills(t *testing.T) {
 	assert.True(t, names["backend-developer"])
 	assert.True(t, names["frontend-developer"])
 	assert.True(t, names["mobile-developer"])
+	assert.True(t, names["devops-engineer"])
 	assert.True(t, names["product-manager"])
 	assert.True(t, names["qa-agent"])
 }
@@ -428,7 +429,7 @@ func TestEnsureRoleAgents_SeedsSonnetWithOpusForHardWork(t *testing.T) {
 
 	agents, err := store.ListAgents(context.Background())
 	require.NoError(t, err)
-	require.Len(t, agents, 6)
+	require.Len(t, agents, len(roleAgentDefinitions()))
 	for _, a := range agents {
 		// The provider is asserted with the names, not beside them: these two
 		// aliases are Claude Code CLI values and mean nothing anywhere else.
@@ -440,7 +441,7 @@ func TestEnsureRoleAgents_SeedsSonnetWithOpusForHardWork(t *testing.T) {
 
 // A host with no CLI attached gets no model names at all. CreateAgent refuses
 // an agent on a provider it cannot execute, so seeding the pair there would not
-// produce a mildly wrong agent — it would produce none of the six.
+// produce a mildly wrong agent — it would produce none of them at all.
 func TestEnsureRoleAgents_SeedsNoModelsWhereTheCLICannotRun(t *testing.T) {
 	store := newMemCatalogStore()
 	svc := NewService(store, stubLLMClient{}, "")
@@ -449,7 +450,7 @@ func TestEnsureRoleAgents_SeedsNoModelsWhereTheCLICannotRun(t *testing.T) {
 
 	agents, err := store.ListAgents(context.Background())
 	require.NoError(t, err)
-	require.Len(t, agents, 6)
+	require.Len(t, agents, len(roleAgentDefinitions()))
 	for _, a := range agents {
 		assert.Empty(t, a.ProviderType, a.Name)
 		assert.Empty(t, a.Model, a.Name)

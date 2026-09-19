@@ -469,7 +469,7 @@ func (s *Service) CreateSetupTask(ctx context.Context, repositoryID uuid.UUID, e
 		Priority:        domain.TaskPriorityHigh,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
-		AssigneeAgentID: s.roleAgent(ctx, domain.DeveloperAgentForKind(repo.Kind, repo.SubProjects)),
+		AssigneeAgentID: s.firstRoleAgent(ctx, domain.InfraAgentForKind(repo.Kind, repo.SubProjects)...),
 	})
 }
 
@@ -538,6 +538,17 @@ func (s *Service) CreateLocalSetupTask(ctx context.Context, repositoryID uuid.UU
 // roleAgent resolves the named role agent (see domain.DeveloperAgentForKind).
 // Deploy setup writes workflow files into a branch, so even a monorepo's goes
 // to a developer: the system architect refuses to author files.
+// firstRoleAgent resolves the first of roles that this installation actually
+// has, so a caller can state a preference order rather than one name.
+func (s *Service) firstRoleAgent(ctx context.Context, roles ...string) *uuid.UUID {
+	for _, role := range roles {
+		if id := s.roleAgent(ctx, role); id != nil {
+			return id
+		}
+	}
+	return nil
+}
+
 func (s *Service) roleAgent(ctx context.Context, role string) *uuid.UUID {
 	if s.agents == nil {
 		return nil

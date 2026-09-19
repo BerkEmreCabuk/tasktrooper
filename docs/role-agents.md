@@ -1,11 +1,11 @@
 ---
 title: Role agents
-description: The six agents every board is seeded with, what each one does, and what "seeding" and reconciliation mean when you upgrade.
+description: The seven agents every board is seeded with, what each one does, and what "seeding" and reconciliation mean when you upgrade.
 ---
 
-When you set up a repository, TaskTrooper creates six agents for you: a
+When you set up a repository, TaskTrooper creates seven agents for you: a
 product manager, a system architect, a backend developer, a frontend
-developer, a mobile developer and a QA agent. They show up in the sidebar
+developer, a mobile developer, a DevOps engineer and a QA agent. They show up in the sidebar
 under **Agent Chats**, and each has its own **Settings**, **Skills**,
 **Rules**, **Columns**, **Memory** and **Performance** tabs.
 
@@ -14,24 +14,25 @@ those tabs or replaced with [your own agents](custom-agents.md) — but they are
 built to run a board end to end without any setup beyond registering a
 repository.
 
-## The six agents
+## The seven agents
 
 | Agent | Runs as | Effort | What it does |
 |---|---|---|---|
 | `product-manager` | `generalPurpose` | medium | Backlog, requirements, stakeholder questions, board organization |
 | `system-architect` | `system-architect` | high | Analysis tasks, task decomposition, code review |
-| `backend-developer` | `backend-engineer` | high | Go/Fiber and Java/Quarkus APIs, database migrations, backend tests |
+| `backend-developer` | `backend-engineer` | high | Go/Fiber, Java/Quarkus and ASP.NET Core APIs, database migrations, backend tests |
 | `frontend-developer` | `frontend-engineer` | high | React/Vite/Tailwind UI |
 | `mobile-developer` | `mobile-dev-engineer` | high | Flutter, SwiftUI, Jetpack Compose apps; store deploys |
+| `devops-engineer` | `devops-engineer` | high | CI/CD pipelines, container images, Kubernetes and Coolify deploys, secrets, networking, releases |
 | `qa-agent` | `generalPurpose` | medium | Manual test rounds against a running build |
 
 "Runs as" is the **subagent type** shown on the agent's Settings tab — it is
 metadata the CLI session carries, not a separate program. "Effort" is the CLI
 effort level (`low`/`medium`/`high`/`xhigh`/`max`) the agent's sessions run
 at; a checklist pass and a multi-file refactor do not want the same depth of
-thinking, so the two engineering-heavy roles (system-architect and the three
-developers) are seeded at `high` while the two roles that mostly read, write
-and route (product-manager, qa-agent) run at `medium`.
+thinking, so the engineering-heavy roles (system-architect, the three developers and
+the DevOps engineer) are seeded at `high` while the two roles that mostly
+read, write and route (product-manager, qa-agent) run at `medium`.
 
 Every seeded agent's provider is Claude Code and its models are `sonnet` for
 ordinary work and `opus` for subtasks the planner rates "hard" (plus
@@ -43,7 +44,7 @@ provider until one is configured on the Settings tab.
 ## Which columns each agent works
 
 Agents are dispatched to a board column either because they are the task's
-**assignee** or because they **subscribe** to that column. Three of the six
+**assignee** or because they **subscribe** to that column. Three of the seven
 carry a subscription out of the box, so tasks flow to the right reviewer
 automatically instead of bouncing back to whoever implemented the task:
 
@@ -55,6 +56,10 @@ automatically instead of bouncing back to whoever implemented the task:
 
 Analysis Review and Human UAT have no subscriber on purpose: those are the
 two columns where a human approves or rejects, not an agent.
+
+The DevOps engineer subscribes to nothing by design: it is an implementer,
+so it works the tasks it is assigned like the other developer roles, and the
+review, QA and release columns keep the owners they already have.
 
 A task's **assignee** (a developer, typically) is dispatched when the task
 sits in a column nobody subscribes to — Todo, In Progress, Need Revision — and
@@ -72,12 +77,13 @@ as seeded today:
 |---|---|---|
 | `product-manager` | 22 | 20 |
 | `system-architect` | 13 | 9 |
-| `backend-developer` | 27 (12 shared + 15 of its own) | 10 |
+| `backend-developer` | 30 (12 shared + 18 of its own) | 10 |
 | `frontend-developer` | 21 (12 shared + 9 of its own) | 7 |
 | `mobile-developer` | 25 (12 shared + 13 of its own) | 8 |
+| `devops-engineer` | 23 (12 shared + 11 of its own) | 12 |
 | `qa-agent` | 17 enabled + 4 disabled (3 shared + 18 of its own) | 13 enabled + 2 disabled |
 
-The three developer roles share a dozen skills (board comment style,
+The three developer roles and the DevOps engineer share a dozen skills (board comment style,
 performance awareness, TDD workflow, incremental commits, root-cause
 debugging, CI/CD authoring, deploy templates, incident response, and a few
 more) on top of their own language- and platform-specific skills. Every skill
@@ -86,7 +92,7 @@ can add, edit or delete any of them from that agent's **Skills** and **Rules**
 tabs.
 
 What each role's tools actually allow is covered in full on
-[Tool policies](tool-policies.md); in short: the three developer roles and QA
+[Tool policies](tool-policies.md); in short: the three developer roles, the DevOps engineer and QA
 get the terminal and file editors, the product manager and QA can create,
 move and delete board tasks, and QA is deliberately kept away from the
 code-reading tools — it tests the running product, not the source.
@@ -106,7 +112,7 @@ tools, capture evidence, then move to PM UAT or back to Need Revision.
 
 ## Agent templates
 
-The six role agents also exist as built-in **agent templates** — read-only
+The seven role agents also exist as built-in **agent templates** — read-only
 snapshots of an agent's fields, skills and rules that you can copy from when
 creating a new agent. Opening **New agent** in the sidebar offers "From
 scratch" or a list of templates (built-in ones are marked accordingly); picking

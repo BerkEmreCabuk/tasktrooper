@@ -99,3 +99,34 @@ func TestAnalizAssigneeForArea(t *testing.T) {
 		})
 	}
 }
+
+// Infrastructure work prefers the role built for it and keeps the old answer
+// as the fallback, so an install seeded before devops-engineer existed still
+// gets its deploy and incident tasks assigned to somebody.
+func TestInfraAgentForKind(t *testing.T) {
+	cases := []struct {
+		kind string
+		subs []domain.RepoSubProject
+		want []string
+	}{
+		{kind: domain.RepoKindBackend, want: []string{domain.AgentDevopsEngineer, domain.AgentBackendDeveloper}},
+		{kind: domain.RepoKindFrontend, want: []string{domain.AgentDevopsEngineer, domain.AgentFrontendDeveloper}},
+		{kind: domain.RepoKindMobile, want: []string{domain.AgentDevopsEngineer, domain.AgentMobileDeveloper}},
+		{
+			kind: domain.RepoKindMonorepo,
+			subs: []domain.RepoSubProject{{Kind: domain.RepoKindFrontend}, {Kind: domain.RepoKindFrontend}, {Kind: domain.RepoKindBackend}},
+			want: []string{domain.AgentDevopsEngineer, domain.AgentFrontendDeveloper},
+		},
+	}
+	for _, tc := range cases {
+		got := domain.InfraAgentForKind(tc.kind, tc.subs)
+		if len(got) != len(tc.want) {
+			t.Fatalf("InfraAgentForKind(%q) = %v, want %v", tc.kind, got, tc.want)
+		}
+		for i := range got {
+			if got[i] != tc.want[i] {
+				t.Fatalf("InfraAgentForKind(%q) = %v, want %v", tc.kind, got, tc.want)
+			}
+		}
+	}
+}

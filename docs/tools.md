@@ -8,7 +8,7 @@ set of named tools. A [tool policy](tool-policies.md) decides which of these
 a given agent may call; this page describes what each tool does. "Typically
 held by" reflects the default role policies TaskTrooper ships with
 (`backend-developer`, `frontend-developer`, `mobile-developer`,
-`system-architect`, `qa-agent`, `product-manager`) — your own agents and
+`devops-engineer`, `system-architect`, `qa-agent`, `product-manager`) — your own agents and
 [custom agents](custom-agents.md) can be granted any subset.
 
 ## Shell and files
@@ -70,7 +70,7 @@ Read-only, and available even on a repository with no semantic index yet.
 | `record_test_cases` | Writes the QA test round for a task | `qa-agent` only |
 | `set_test_case_result` | Updates one test case's result | `qa-agent` only |
 | `list_test_cases` | Reads the recorded test round | Every role |
-| `get_pipeline_status` | Reads the most recent QA-gate pipeline run | Developer roles, `system-architect`, `qa-agent` |
+| `get_pipeline_status` | Reads the most recent QA-gate pipeline run | Developer roles, `devops-engineer`, `system-architect`, `qa-agent` |
 | `get_board_summary` | Board-wide counts and status | Every role |
 | `list_projects` / `create_project` / `update_project` | Initiative projects | Read: every role. Write: `product-manager` |
 | `list_repositories` | Lists registered repositories | Every role |
@@ -95,14 +95,14 @@ refusal matrix.
 | Tool | What it does | Typically held by |
 |---|---|---|
 | `trigger_release` | Dispatches the production deploy for a task in Done | Whichever role your board wakes on Done (typically `qa-agent`) |
-| `get_task_deploy_status` | Reports what production did with a task's merge commit | `qa-agent` only |
-| `get_deploy_logs` | Reads the log behind a deploy, summarized | `qa-agent` only |
+| `get_task_deploy_status` | Reports what production did with a task's merge commit | `qa-agent`, `devops-engineer` (read-only) |
+| `get_deploy_logs` | Reads the log behind a deploy, summarized | `qa-agent`, `devops-engineer` (read-only) |
 | `rollback_task_release` | Undoes a task's release | `qa-agent` only, and only in Done/Released |
-| `list_deploy_templates` | Lists the deploy recipe catalog | `qa-agent`, `product-manager` (via `get_deploy_target`) |
-| `load_deploy_template` | Reads one recipe in full | Same as above |
-| `get_deploy_target` | How a repository ships to an environment | `qa-agent`, `product-manager` |
-| `update_deploy_target` | Records the address an environment actually answers at (`base_url`/`health_url`/`logs_url`/`app_url` only) | `qa-agent`, `product-manager` |
-| `record_local_deploy` | Records a break-glass deploy run made from a machine directly, so the Deployments page still reflects it | Ops-facing agents with board/deploy write access |
+| `list_deploy_templates` | Lists the deploy recipe catalog | `devops-engineer` |
+| `load_deploy_template` | Reads one recipe in full | `devops-engineer` |
+| `get_deploy_target` | How a repository ships to an environment | `qa-agent`, `product-manager`, `devops-engineer` |
+| `update_deploy_target` | Records the address an environment actually answers at (`base_url`/`health_url`/`logs_url`/`app_url` only) | `qa-agent`, `product-manager`, `devops-engineer` |
+| `record_local_deploy` | Records a break-glass deploy run made from a machine directly, so the Deployments page still reflects it | `devops-engineer` |
 
 See [Deploy targets and recipes](deploy.md).
 
@@ -110,10 +110,10 @@ See [Deploy targets and recipes](deploy.md).
 
 | Tool | What it does | Typically held by |
 |---|---|---|
-| `list_incidents` | Lists live production incidents | Ops-facing agents |
-| `get_incident` | Full incident: alert payload, timeline, occurrences, remedy | Ops-facing agents |
-| `propose_incident_remedy` | Records a diagnosis: kind, steps, evidence, confidence | Ops-facing agents |
-| `resolve_incident` | Closes an incident after verifying recovery | Ops-facing agents |
+| `list_incidents` | Lists live production incidents | `devops-engineer` |
+| `get_incident` | Full incident: alert payload, timeline, occurrences, remedy | `devops-engineer` |
+| `propose_incident_remedy` | Records a diagnosis: kind, steps, evidence, confidence | `devops-engineer` |
+| `resolve_incident` | Closes an incident after verifying recovery | `devops-engineer` |
 
 See [Production incidents](incidents.md).
 

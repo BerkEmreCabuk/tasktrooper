@@ -7,6 +7,13 @@ const (
 	AgentBackendDeveloper  = "backend-developer"
 	AgentFrontendDeveloper = "frontend-developer"
 	AgentMobileDeveloper   = "mobile-developer"
+	// AgentDevopsEngineer owns the path from a merged commit to a running
+	// deployment: pipelines, images, manifests, deploy setup and the incident
+	// loop. It is the only role holding the incident tools
+	// (list_incidents/get_incident/propose_incident_remedy/resolve_incident)
+	// and the deploy templates, so work that needs those is routed to it in
+	// preference to the language developer — see InfraAgentForKind.
+	AgentDevopsEngineer = "devops-engineer"
 	// AgentSystemArchitect is the default assignee for an analiz task: it
 	// designs and reviews rather than writing code, and it is the only role
 	// whose tool policy (architectToolPolicy) is guaranteed to carry every
@@ -23,6 +30,17 @@ const (
 // mobile, and a monorepo with no recorded sub-projects falls back to backend.
 func DeveloperAgentForKind(kind string, subProjects []RepoSubProject) string {
 	return agentForArea(ResolveAnalizArea(kind, subProjects))
+}
+
+// InfraAgentForKind names the role that owns infrastructure work for a
+// repository — deploy setup, pipelines, incident triage — in preference
+// order. The DevOps engineer comes first because it is the role built for it;
+// the language developer follows as the fallback for an installation that has
+// no devops-engineer (one seeded before the role existed, or one where an
+// operator deleted or renamed it), which is what this work used to resolve to
+// in every case.
+func InfraAgentForKind(kind string, subProjects []RepoSubProject) []string {
+	return []string{AgentDevopsEngineer, DeveloperAgentForKind(kind, subProjects)}
 }
 
 // ResolveAnalizArea names the backend/frontend/mobile area that owns a

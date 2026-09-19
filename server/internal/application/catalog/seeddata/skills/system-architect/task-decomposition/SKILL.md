@@ -12,7 +12,7 @@ After the plan is written and self-reviewed, turn it into implementation board t
 
 ## Slicing Rules
 
-- **One repository + one layer per task** (backend / frontend / mobile). Never bundle layers — a task that says "add the API and the UI" is two tasks.
+- **One repository + one layer per task** (backend / frontend / mobile / devops). Never bundle layers — a task that says "add the API and the UI" is two tasks. Pipeline, container, deployment, secret-store, networking and release work is its own devops task, never an appendix to a feature task.
 - Each task maps to one or more plan tasks that form an independently deliverable unit: its tests can pass and its code can be reviewed without waiting for a sibling.
 - Order by dependency: backend API before the frontend/mobile that consumes it. Declare it in the ARGUMENTS (see "Ordering is an argument" below), and write the human-readable "Depends on: <task title> — consumes POST /api/v1/..." line in the description as well — but never only the line, because prose enforces nothing.
 
@@ -24,7 +24,7 @@ Each of these is a separate `create_board_task` field. Never paste one field's c
 - **`description`** (product only): user story ("As [persona], I want [capability], so that [outcome]") + context + which plan tasks it covers + the dependency line ("Depends on: …").
 - **`technical_description`** (technical only): the titles of the analiz task's spec and plan documents (`spec: …`, `plan: …`), the endpoints/files/schema this slice touches, and the **interfaces** — the exact names/types it consumes from and produces for its neighbors, copied from the plan's Interfaces blocks.
 - **`acceptance_criteria`:** an array of strings, one observable Given/When/Then per item including error cases — copied or derived from the plan, never aspirational wording. Passing them as an array is what gives the task a real checklist; writing them as prose in `description` leaves it empty and the task can never be verified complete. **Product only:** a criterion is checked against the running system, never against the board — "moved to code_review", "PR opened", "QA notified", "the follow-up task is created" are workflow, and `create_board_task` drops them with the reason in its result.
-- **`assignee`:** the matching developer role — backend-developer / frontend-developer / mobile-developer.
+- **`assignee`:** the matching implementer role — backend-developer / frontend-developer / mobile-developer, or devops-engineer for CI/CD, containers, Kubernetes/Coolify deploys, secrets, networking and releases.
 - **`derived_from`:** `["A-N"]` — the analiz task this slice came out of. REQUIRED on every task you create from an approved analysis. Your spec and plan are documents on that task and nowhere else; this reference is what feeds them into the developer's run and what makes `list_task_documents A-N` the answer when they need to re-read the plan. Naming the document titles in `technical_description` is not a substitute — a title is not a route.
 
 ## Ordering Is an Argument, Not a Sentence

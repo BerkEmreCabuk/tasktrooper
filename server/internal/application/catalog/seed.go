@@ -218,7 +218,7 @@ func (s *Service) fillRoleAgentModels(agent *domain.Agent) bool {
 // claudeCodeRunnable asks the same question checkHostExecutor does — may an
 // agent be saved onto the CLI provider here — and asks it first, so the seed
 // never proposes a configuration that guard would refuse. Without it a host
-// with no CLI attached would lose all six role agents to a create that fails.
+// with no CLI attached would lose every role agent to a create that fails.
 func (s *Service) claudeCodeRunnable() bool {
 	return s.hostExecutor != nil && s.hostExecutor(roleAgentProvider)
 }
@@ -534,6 +534,7 @@ func roleAgentDefinitions() []roleAgentDef {
 		backendDeveloperAgent(),
 		frontendDeveloperAgent(),
 		mobileDeveloperAgent(),
+		devopsEngineerAgent(),
 		productManagerAgent(),
 		qaAgent(),
 	}
@@ -588,7 +589,7 @@ func defaultRoleKPIs(agentName string) []domain.CreateKPIRequest {
 	switch agentName {
 	case "system-architect":
 		return []domain.CreateKPIRequest{tasksCompleted, revisions, architectSpeed, architectAnalysisSpeed, reviewEscapes}
-	case "backend-developer", "frontend-developer", "mobile-developer":
+	case "backend-developer", "frontend-developer", "mobile-developer", "devops-engineer":
 		return []domain.CreateKPIRequest{tasksCompleted, revisions, bugs, devSpeed}
 	case "qa-agent":
 		return []domain.CreateKPIRequest{

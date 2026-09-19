@@ -61,6 +61,42 @@ func TestRoleToolPolicies(t *testing.T) {
 	assert.Contains(t, pm.AllowTools, "mobile_screenshot")
 }
 
+// The DevOps engineer is an implementer with the deploy surface: it writes
+// files and runs commands like a developer, reads and acts on deploys and
+// incidents, and holds neither of the two production writes that belong to QA.
+func TestDevopsEngineerToolPolicy(t *testing.T) {
+	defs := roleAgentDefinitions()
+	byName := make(map[string]roleAgentDef, len(defs))
+	for _, d := range defs {
+		byName[d.agent.Name] = d
+	}
+	devops := byName["devops-engineer"].agent.ToolPolicy
+	require.NotEmpty(t, devops.AllowTools, "an empty allowlist is unrestricted")
+
+	for _, tool := range []string{
+		"run_terminal", "write_file", "edit_file", "web_search", "grep_code",
+		"list_board_tasks", "move_board_task", "claim_board_task",
+		"get_pipeline_status", "get_deploy_target", "update_deploy_target",
+		"list_deploy_templates", "load_deploy_template", "record_local_deploy",
+		"get_task_deploy_status", "get_deploy_logs",
+		"list_incidents", "get_incident", "propose_incident_remedy", "resolve_incident",
+		"get_task_pull_request", "comment_on_pull_request", "commit_task_changes",
+	} {
+		assert.Contains(t, devops.AllowTools, tool)
+	}
+
+	// QA's, and only QA's: the role that last exercised the built product
+	// lands the change and undoes it (migrations 104/105).
+	assert.NotContains(t, devops.AllowTools, "merge_task_pull_request")
+	assert.NotContains(t, devops.AllowTools, "rollback_task_release")
+	// The PM owns the backlog.
+	assert.NotContains(t, devops.AllowTools, "create_board_task")
+	assert.NotContains(t, devops.AllowTools, "delete_board_task")
+	// This role verifies by running the build and reading the deploy.
+	assert.NotContains(t, devops.AllowTools, "browser_navigate")
+	assert.NotContains(t, devops.AllowTools, "mobile_tap")
+}
+
 func TestToolPolicyEqual(t *testing.T) {
 	a := productManagerToolPolicy()
 	b := productManagerToolPolicy()

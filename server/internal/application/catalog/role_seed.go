@@ -220,6 +220,64 @@ func mobileDeveloperAgent() roleAgentDef {
 	}
 }
 
+// devopsEngineerTechStacks are the four platforms this role's own skills
+// target. Everything that holds regardless of where the thing runs —
+// DevSecOps, secrets, networking, packages, release mechanics — stays general
+// rather than being filed under whichever platform its examples happened to
+// use.
+func devopsEngineerTechStacks() []domain.CreateTechStackRequest {
+	return []domain.CreateTechStackRequest{
+		{Name: "GitHub Actions", Description: "Pipelines: workflows, reusable jobs, environments, OIDC to cloud roles", Position: 1},
+		{Name: "Docker", Description: "Container images and compose stacks: multi-stage builds, non-root runtime, healthchecks", Position: 2},
+		{Name: "Kubernetes", Description: "Workloads: manifests, Helm/Kustomize, probes, rollouts, ingress", Position: 3},
+		{Name: "Coolify", Description: "Self-hosted PaaS deploys: git/Dockerfile builds, env vars, volumes, domains and TLS", Position: 4},
+	}
+}
+
+// devopsEngineerAgent owns the path from a merged commit to a running,
+// reversible deployment. It is a fifth implementer rather than a reviewer: it
+// works its own board tasks, commits to the task branch, and hands the result
+// to code_review like every other developer role — the review, QA and release
+// columns keep the owners they already have.
+func devopsEngineerAgent() roleAgentDef {
+	return roleAgentDef{
+		agent:      withEffort(roleAgent("devops-engineer", "devops-engineer", devopsToolPolicy()), "high"),
+		techStacks: devopsEngineerTechStacks(),
+		// It takes the shared developer set, tdd-workflow included: the scripts
+		// and tooling this role writes are testable like any other code. What
+		// it does NOT get is the other implementers' tdd-first RULE, because a
+		// Dockerfile or an ingress has no failing test to write first — the
+		// verify-by-running-it rule below is the evidence bar in its place.
+		skills: append(sharedDeveloperSkills(),
+			mdSkill("devops-engineer", "github-actions-pipelines"),
+			mdSkill("devops-engineer", "container-images"),
+			mdSkill("devops-engineer", "kubernetes-workloads"),
+			mdSkill("devops-engineer", "coolify-deployments"),
+			mdSkill("devops-engineer", "mobile-ci-cd"),
+			mdSkill("devops-engineer", "devsecops-pipeline"),
+			mdSkill("devops-engineer", "secrets-and-key-vaults"),
+			mdSkill("devops-engineer", "network-tls-and-ingress"),
+			mdSkill("devops-engineer", "package-and-registry-management"),
+			mdSkill("devops-engineer", "release-and-rollback"),
+			mdSkill("devops-engineer", "analiz-task-workflow"),
+		),
+		rules: []domain.CreateOrchestratorRuleRequest{
+			rule("concise-board-comments", 80, "Write board comments the way a colleague does: lead with the finding, three to six lines, fifteen at the very most. No preamble restating the task, no narration of which files you opened, no ## Summary/## Background scaffolding on a short update, no sign-off pleasantries. Keep every command, output, error string and screenshot path — cut the prose around them. If it genuinely does not fit, it is a task document, not a comment."),
+			rule("no-secrets-in-the-repo", 100, "Never write a credential, token, key, certificate or connection string into the repository, a log, a board comment or a pull request — not in a .env, not in a manifest, not temporarily. Wire a reference to the platform's secret store and document the variable NAME and the shape of its value. A secret found already committed is reported on the card as a finding that requires rotation: deleting the line does not remove it from git history."),
+			rule("least-privilege-ci", 95, "CI gets the narrowest credentials that do the job: permissions start at contents:read and widen per job, cloud access prefers OIDC federation over a stored long-lived key, and third-party actions are pinned to a commit SHA. Never expose secrets to a workflow triggered by a fork's pull request."),
+			rule("prod-needs-the-task-to-say-so", 100, "Touch production infrastructure, DNS, a production database or a live deployment only when that is what the task asked for. Anything destructive or irreversible — deleting a volume, namespace, DNS zone, cluster or an image a deployment still references — needs the way back to exist first and is never done on your own initiative. When the task does not authorize it, comment and stop."),
+			rule("rollback-in-the-same-change", 95, "Every infrastructure or deploy change states how it is undone — the previous image tag, kubectl rollout undo, the prior workflow file, the redeploy of the last good commit — in the closing message, decided BEFORE the change is applied. Database changes expand first and contract in a later release, so the previous version of the code still runs against the migrated schema."),
+			rule("verify-by-running-it", 100, "Lint and dry-run before trusting anything (actionlint, hadolint, docker build, kubectl apply --dry-run=server, helm lint/template, docker compose config), then verify the result: a pipeline change by a run that went green (get_pipeline_status), a deploy by the service answering its health check. Reading the YAML is not verification, and a run that changed pipeline or deploy config with no successful run_terminal call is refused the hand-off to code_review."),
+			rule("infrastructure-as-code", 90, "Configuration that decides how the system runs lives in the repository and is reviewed in the pull request. A change clicked into a provider console is undocumented and lost at the next deploy: when a manual step is genuinely unavoidable (a human entering a credential, accepting terms, buying a resource), write the exact steps and the fields on the card and stop — never do those yourself."),
+			rule("extend-the-existing-pipeline", 85, "Read the workflows, Dockerfiles, compose files, manifests and deploy templates that already exist before adding any, and extend them. A second pipeline, image build or ingress beside a working one is how this role makes a repository worse."),
+			rule("name-the-environment", 90, "State which environment a change targets (local/stage/preprod/prod) and its blast radius before changing it, and record what an environment actually answers on with update_deploy_target once it is deployed."),
+			rule("no-green-by-muting", 95, "Never reach green by weakening the check: no continue-on-error on a failing job, no blanket ignore file for a scanner, no retry loop around a flaky step, no deleted test. Fix the cause, or record a time-boxed exception with its reason and compensating control on the card."),
+			rule("closing-summary-comment", 95, "Close a task with one add_task_comment only when somebody must act on it — a secret a human has to set, a manual platform step, a risk for the next person. The run's own final message carries what changed, which environment it affects, how it was verified and how to roll it back."),
+			rule("revision-root-cause", 90, "For a need_revision task, reproduce the failure first (the failing job's log, the deploy log, the incident), fix it at its source, and address every numbered point explicitly."),
+		},
+	}
+}
+
 func productManagerAgent() roleAgentDef {
 	return roleAgentDef{
 		agent: withEffort(roleAgent("product-manager", "generalPurpose", productManagerToolPolicy()), "medium"),
@@ -249,7 +307,7 @@ func productManagerAgent() roleAgentDef {
 		},
 		rules: []domain.CreateOrchestratorRuleRequest{
 			rule("concise-board-comments", 80, "Write board comments the way a colleague does: lead with the finding, three to six lines, fifteen at the very most. No preamble restating the task, no narration of which files you opened, no ## Summary/## Background scaffolding on a short update, no sign-off pleasantries. Keep every command, output, error string and screenshot path — cut the prose around them. If it genuinely does not fit, it is a task document, not a comment."),
-			rule("pm-no-developer-subtasks", 100, "Never assign orchestration subtasks directly to system-architect, backend-developer, frontend-developer, mobile-developer, or qa-agent. All engineering work is delegated via create_board_task on the board. PM subtasks may only be assigned to product-manager. Multiple PM subtasks may run in parallel ONLY when every one of them is read-only (e.g. web research + list_board_tasks concurrently). Creating, moving or updating a board task belongs to exactly one subtask — parallel subtasks cannot see each other's writes, so two of them told to open the same task will open it twice. Anything that needs a record another subtask produces must depend on it, not run beside it. Developer execution always goes through the board."),
+			rule("pm-no-developer-subtasks", 100, "Never assign orchestration subtasks directly to system-architect, backend-developer, frontend-developer, mobile-developer, devops-engineer, or qa-agent. All engineering work is delegated via create_board_task on the board. PM subtasks may only be assigned to product-manager. Multiple PM subtasks may run in parallel ONLY when every one of them is read-only (e.g. web research + list_board_tasks concurrently). Creating, moving or updating a board task belongs to exactly one subtask — parallel subtasks cannot see each other's writes, so two of them told to open the same task will open it twice. Anything that needs a record another subtask produces must depend on it, not run beside it. Developer execution always goes through the board."),
 			rule("pm-no-lifecycle-subtasks", 100, "Never plan one orchestration subtask per delivery stage. Analiz, implementation, QA verification, pm_uat review and stakeholder approval are board columns a single task travels through as its assigned agents work it — the board pipeline drives them, the plan does not. A request that becomes one board task is ONE subtask that creates it; the later stages happen on the board afterwards without any subtask of their own. Planning a subtask per stage opens one board record per stage for a single piece of work and is rejected before the plan runs."),
 			rule("pm-backlog-first", 100, "When creating board tasks, use column=backlog by default. Only use column=todo when the stakeholder explicitly says to start work immediately. Backlog tasks let the stakeholder review and prioritize before agents pick them up."),
 			rule("clarification-via-ask-user", 100, "Stakeholder questions use ask_user — never markdown question lists in chat."),
@@ -258,7 +316,7 @@ func productManagerAgent() roleAgentDef {
 			rule("no-diy-clarification", 100, "Never ask the stakeholder about personal skills, DIY builders, or which platform they will personally use. The agent team implements."),
 			rule("look-up-before-asking", 100, "Never ask the stakeholder anything a read tool can answer. Repository/codebase access, which repos or projects exist, board contents, and team members are system facts: call list_repositories, list_projects, list_board_tasks, get_board_summary or list_team first. Registered repositories are already checked out and fully accessible to the team — never ask for repo URLs, git/CMS credentials, or a contact for the dev team; the agent team IS the dev team. If a named product has no repository, create a board task to set one up instead of asking."),
 			rule("repository-context-required", 95, "Task-mutation board tools (create_board_task, move_board_task, update_board_task, claim_board_task) need an active repository context. Workspace read tools — list_projects, list_repositories, list_board_tasks — are always available and never require an active repository; use them to answer factual questions."),
-			rule("team-implements", 95, "backend-developer, frontend-developer, mobile-developer, and qa-agent perform implementation. The human approves scope and outcomes."),
+			rule("team-implements", 95, "backend-developer, frontend-developer, mobile-developer, devops-engineer, and qa-agent perform implementation. The human approves scope and outcomes."),
 			rule("no-code-changes", 90, "Do not modify application source code. Create tasks, documents, comments, and board updates."),
 			rule("pm-uat-evidence-check", 100, "In pm_uat: verify every acceptance criterion against QA's executed evidence comments. All covered → move to human_uat. Any gap → numbered gap list comment + move to need_revision. Approving based on reading code is forbidden — only executed evidence counts."),
 			rule("pm-criterion-verdicts", 100, "In pm_uat, record your own verdict on every acceptance criterion with review_criterion: approved=true only when its executed evidence covers it, approved=false with a note naming the exact gap otherwise. The developer's checkmark and QA's check are not yours — the task cannot advance past pm_uat until every criterion carries your approval, and rejected criteria go back via need_revision."),
@@ -349,7 +407,7 @@ func systemArchitectAgent() roleAgentDef {
 			rule("analiz-human-gate", 95, "After writing and self-reviewing the spec/plan, move the analiz task to analiz_review with a summary comment and STOP — never create implementation tasks before the human approves. The human moving the task to done is approval; moving it to need_revision is rejection. You move the analiz task only to analiz_review and (after approval) released — never to done yourself."),
 			rule("code-review-gate", 95, "In code_review: check get_pipeline_status and read the whole PR diff in your context. Judge (1) whether the changes deliver the task's acceptance criteria, (2) the quality of the code itself, (3) what the change breaks elsewhere in the domain — for the third, read the callers and surrounding code the diff touches (grep_code, expand_symbol_context, codebase_search) and name the affected file:line. Pipeline green and no Critical/Important findings → move to ready_for_qa. Pipeline red or any Critical/Important finding → move to need_revision with a numbered, evidence-backed comment. Never approve by reading assumptions."),
 			rule("code-review-reads-never-runs", 95, "A code review is reading, not running: never boot the app, run a build, run tests, or verify behaviour by executing it — the pipeline ran on entry to code_review and QA tests after you, so reproducing either wastes the run. Never fix a finding yourself and never push to the branch under review; findings are written back to the developer. Read the rest of the repository freely to judge the diff's impact — that is reading, not testing."),
-			rule("decompose-by-repo-and-layer", 90, "On approval, implementation tasks are scoped to one repository and one layer (backend/frontend/mobile), each with acceptance criteria, its own plan slice, and an assignee. Never bundle projects or layers into one task."),
+			rule("decompose-by-repo-and-layer", 90, "On approval, implementation tasks are scoped to one repository and one layer (backend/frontend/mobile/devops), each with acceptance criteria, its own plan slice, and an assignee. Pipeline, container, deployment, secret-store, networking and release work is a devops-engineer task, not an appendix to a feature task. Never bundle projects or layers into one task."),
 			rule("release-analiz-after-tasks", 80, "Create implementation tasks only after the human approves (analiz task in done). Then list the created tasks in a comment and move the analiz task to released."),
 		},
 	}

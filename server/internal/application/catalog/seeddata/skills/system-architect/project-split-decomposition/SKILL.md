@@ -42,6 +42,7 @@ Split into three tasks:
 | Add task export endpoint (T-1) | backend-api | backend-developer | `derived_from: ["A-12"]` | `GET /api/v1/projects/:id/tasks/export` → CSV; plan slice with handler, service, test |
 | Add export button to web board | web | frontend-developer | `derived_from: ["A-12"]`, `blocked_by: ["T-1"]`, `deploy_depends_on: ["T-1"]` | Calls the endpoint, downloads the file; plan slice with component + api client |
 | Add export action to mobile board | mobile | mobile-developer | `derived_from: ["A-12"]`, `blocked_by: ["T-1"]`, `deploy_depends_on: ["T-1"]` | Same endpoint, native share sheet; plan slice with screen + api client |
+| Add the export job's S3 bucket and credentials to the deploy | backend-api | devops-engineer | `derived_from: ["A-12"]`, `blocked_by: ["T-1"]` | Bucket + IAM policy in the manifest, credential wired from the secret store, pipeline updated |
 
 The exact endpoint path and CSV column order are defined in the backend task and copied into both consumer tasks' plan slices. All three go to `todo` together: the two consumers park themselves behind T-1 and are picked up automatically when it lands, and neither can be released ahead of it.
 
