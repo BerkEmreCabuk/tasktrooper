@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/antigravity"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/claudecode"
@@ -190,13 +191,20 @@ func (s *Service) Connect(ctx context.Context, flavor domain.AgentCLIFlavor) (do
 		return domain.AgentCLIState{}, domain.ErrUnavailableProvider(provider)
 	}
 
+	started := time.Now()
+	log.Info().Str("flavor", string(flavor)).Msg("agent cli connect: probing")
 	probe, err := s.probe(ctx, flavor)
 	if err != nil {
+		log.Warn().Err(err).Str("flavor", string(flavor)).Dur("took", time.Since(started)).
+			Msg("agent cli connect: probe failed")
 		return domain.AgentCLIState{}, err
 	}
+	log.Info().Str("flavor", string(flavor)).Str("binary", probe.BinaryPath).Str("version", probe.Version).
+		Dur("took", time.Since(started)).Msg("agent cli connect: probe passed")
 
 	root, agents, skills, err := s.snapshotCatalog(ctx, flavor)
 	if err != nil {
+		log.Warn().Err(err).Str("flavor", string(flavor)).Msg("agent cli connect: catalog snapshot failed")
 		return domain.AgentCLIState{}, err
 	}
 
@@ -209,8 +217,11 @@ func (s *Service) Connect(ctx context.Context, flavor domain.AgentCLIFlavor) (do
 		AgentCount:    agents,
 		SkillCount:    skills,
 	}); err != nil {
+		log.Warn().Err(err).Str("flavor", string(flavor)).Msg("agent cli connect: saving the connection failed")
 		return domain.AgentCLIState{}, err
 	}
+	log.Info().Str("flavor", string(flavor)).Int("agents", agents).Int("skills", skills).
+		Dur("took", time.Since(started)).Msg("agent cli connect: connected")
 	s.reconcileRuntimes(ctx)
 	return s.State(ctx)
 }
