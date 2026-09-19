@@ -3,11 +3,14 @@ package claudecode
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/core"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -43,12 +46,16 @@ var authFailureMarkers = []string{
 
 func Probe(ctx context.Context, binary string, settingSources string) (ProbeResult, error) {
 	resolved, err := ResolveBinary(binary)
+	log.Info().Str("configured", binary).Str("resolved", resolved).AnErr("resolve_err", err).
+		Msg("claude probe: binary lookup")
 	if err != nil {
 		return ProbeResult{}, fmt.Errorf("%s. Install the agent cli on this machine, or set CLAUDE_CODE_BIN to its path: %w",
 			err.Error(), domain.ErrAgentCLIBinaryMissing)
 	}
 
 	version, out, err := probeVersion(ctx, resolved)
+	log.Info().Str("version", version).AnErr("version_err", err).Str("output", core.Tail(out)).
+		Msg("claude probe: --version")
 	if err != nil {
 return ProbeResult{}, fmt.Errorf("%s was found but would not run (%v)%s: %w",
 		resolved, err, core.Tail(out), domain.ErrAgentCLIBinaryMissing)
@@ -106,8 +113,14 @@ func probeAuth(ctx context.Context, bin string, settingSources string) error {
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
 
+	authStarted := time.Now()
+	log.Info().Str("dir", dir).Str("setting_sources", normalizeSettingSources(settingSources)).
+		Msg("claude probe: starting one-turn auth session")
 	runErr := cmd.Run()
 	out := buf.String()
+	log.Info().AnErr("run_err", runErr).Bool("timed_out", errors.Is(ctx.Err(), context.DeadlineExceeded)).
+		Dur("took", time.Since(authStarted)).Str("output", core.Tail(out)).
+		Msg("claude probe: auth session finished")
 	if runErr == nil {
 		return nil
 	}
