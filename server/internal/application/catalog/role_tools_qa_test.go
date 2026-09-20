@@ -94,6 +94,7 @@ func TestOnlyQAHoldsTheMergeTool(t *testing.T) {
 	for name, policy := range map[string]domain.ToolPolicy{
 		"developer":        developerToolPolicy(),
 		"mobile-developer": mobileDeveloperToolPolicy(),
+		"devops-engineer":  devopsToolPolicy(),
 		"system-architect": architectToolPolicy(),
 		"product-manager":  productManagerToolPolicy(),
 	} {
@@ -158,6 +159,7 @@ func TestOnlyQAHoldsTheRollback(t *testing.T) {
 	others := map[string]domain.ToolPolicy{
 		"developer":        developerToolPolicy(),
 		"mobile-developer": mobileDeveloperToolPolicy(),
+		"devops-engineer":  devopsToolPolicy(),
 		"architect":        architectToolPolicy(),
 		"product-manager":  productManagerToolPolicy(),
 	}

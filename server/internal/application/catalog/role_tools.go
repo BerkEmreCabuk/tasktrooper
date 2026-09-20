@@ -155,6 +155,27 @@ var (
 	rolePRCommitTools = []string{
 		"commit_task_changes",
 	}
+	// roleDeployReadTools are the deploy facts a role needs before it changes
+	// anything: the environment's address and health URL, the templates this
+	// installation ships, and the state of the last pipeline run.
+	roleDeployReadTools = []string{
+		"get_pipeline_status",
+		"get_deploy_target",
+		"list_deploy_templates",
+		"load_deploy_template",
+		domain.DeployStatusToolName,
+		domain.DeployLogsToolName,
+	}
+
+	// roleIncidentTools are the production-incident loop: read what is firing,
+	// propose the fix, close it with what actually recovered it.
+	roleIncidentTools = []string{
+		"list_incidents",
+		"get_incident",
+		"propose_incident_remedy",
+		"resolve_incident",
+	}
+
 	// rolePRMergeTools: landing the change. QA holds it and nobody else — the
 	// developer must not merge its own branch, the architect reviews it, and the
 	// PM signs off on the product rather than on the git history. QA is the last
@@ -184,6 +205,41 @@ func developerToolPolicy() domain.ToolPolicy {
 	tools = append(tools, roleProfileTools...)
 	// The developer is who a human talks to about "the PR you opened", and the
 	// only role that may push a change into it.
+	tools = append(tools, rolePRReadTools...)
+	tools = append(tools, rolePRReplyTools...)
+	tools = append(tools, rolePRCommitTools...)
+	return domain.ToolPolicy{AllowTools: tools}
+}
+
+// devopsToolPolicy is the developer policy with the deploy surface added and
+// the browser taken away: this role's deliverable is a pipeline, an image or a
+// manifest, and it verifies by running the build and reading the deploy — not
+// by looking at a page.
+//
+// Two writes it deliberately does NOT get, both of which it could plausibly
+// want: rollback_task_release and merge_task_pull_request. Those stay QA's
+// (migrations 104/105), because they belong to the role that last exercised
+// the built product and that `done` wakes. update_deploy_target it does get —
+// recording the address and health URL an environment actually answers on is
+// this role's own work, and it is the only writer of that record that sets it
+// up in the first place.
+func devopsToolPolicy() domain.ToolPolicy {
+	tools := make([]string, 0, len(roleShellTools)+len(roleWebTools)+len(roleCodeTools)+len(roleBoardReadTools)+len(roleBoardClaimTools)+len(roleDeployReadTools)+len(roleIncidentTools)+len(roleMemoryTools)+len(roleSkillTools)+8)
+	tools = append(tools, roleShellTools...)
+	tools = append(tools, roleWebTools...)
+	tools = append(tools, roleCodeTools...)
+	tools = append(tools, roleBoardReadTools...)
+	tools = append(tools, roleBoardClaimTools...)
+	// The analysis deliverable, and only that half of roleBoardCreateTools:
+	// an infrastructure analiz ("Coolify or Kubernetes for this?") ends in a
+	// document like any other analysis. Opening board tasks stays the PM's.
+	tools = append(tools, "add_task_document", "update_task_document")
+	tools = append(tools, roleDeployReadTools...)
+	tools = append(tools, "update_deploy_target", "record_local_deploy")
+	tools = append(tools, roleIncidentTools...)
+	tools = append(tools, roleMemoryTools...)
+	tools = append(tools, roleSkillTools...)
+	tools = append(tools, roleProfileTools...)
 	tools = append(tools, rolePRReadTools...)
 	tools = append(tools, rolePRReplyTools...)
 	tools = append(tools, rolePRCommitTools...)

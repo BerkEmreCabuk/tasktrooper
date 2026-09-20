@@ -37,6 +37,17 @@ The three developer roles (`backend-developer`, `frontend-developer`,
   other two developer roles do not, since the device is one shared phone and
   only mobile work has a use for it.
 
+**`devops-engineer`** gets the same shell, file writers, web and code-reading
+tools as a developer, minus the browser (its deliverable is a pipeline, an
+image or a manifest, and it verifies by running the build and reading the
+deploy), plus the deploy surface: `get_pipeline_status`, `get_deploy_target`
+and `update_deploy_target`, `list_deploy_templates` / `load_deploy_template`,
+`record_local_deploy`, the read-only `get_task_deploy_status` /
+`get_deploy_logs`, and the incident loop (`list_incidents`, `get_incident`,
+`propose_incident_remedy`, `resolve_incident`). It deliberately does **not**
+get `merge_task_pull_request` or `rollback_task_release` — those stay with
+`qa-agent`, the role that last exercised the built product.
+
 **`product-manager`** gets no shell and no file writers — it works the board,
 not the code. It gets the read-only code tools (to verify a real file or
 endpoint name before writing a technical description, never to change one),

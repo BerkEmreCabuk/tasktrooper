@@ -1629,7 +1629,7 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 		// errors on the card — handing it on as well would contradict that in the
 		// same second.
 		if buildVerified {
-			r.advanceToCodeReview(ctx, job, taskWorkspace, toolUsage)
+			r.advanceToCodeReview(ctx, job, taskWorkspace, toolUsage, agentRec)
 			r.advanceToAnalizReview(ctx, job, toolUsage)
 		} else {
 			log.Info().Str("task_id", job.Task.ID.String()).
@@ -2113,7 +2113,7 @@ type taskColumnReader interface {
 // Attributed to the agent, exactly like enterWorkingColumn: the dispatcher skips
 // the agent whose own tool call produced a move event, so attributing it to the
 // system here would dispatch this same agent again on its own hand-off.
-func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, taskWorkspace string, usage *registry.ToolUsage) {
+func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, taskWorkspace string, usage *registry.ToolUsage, agent domain.Agent) {
 	if r.taskUpdater == nil || r.git == nil || taskWorkspace == "" {
 		return
 	}
@@ -2161,7 +2161,7 @@ func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, taskWorksp
 	// run that shipped that button never opened the page at all. Same shape as
 	// the check above: the evidence is missing, so the work stays where it is
 	// with the reason on the card.
-	if usage != nil && r.uiRepo(ctx, job.RepositoryID) && !usage.UsedAny(domain.UIObservationTools...) {
+	if usage != nil && agentCanObserveUI(agent) && r.uiRepo(ctx, job.RepositoryID) && !usage.UsedAny(domain.UIObservationTools...) {
 		needsUI := true
 		if files, filesErr := r.git.TaskChangedFiles(ctx, taskWorkspace); filesErr == nil {
 			needsUI = domain.DiffNeedsUIEvidence(files)
@@ -2478,6 +2478,25 @@ func (r *Runner) qaSkippedTheUI(ctx context.Context, job RunJob, usage *registry
 // uiRepo reports whether this repository's work is work on a screen. Unresolved
 // is false: an unknown kind is not evidence of anything, and failing runs over a
 // lookup error would punish the repository for the resolver's bad minute.
+// agentCanObserveUI reports whether this agent could produce UI evidence at
+// all. The gate above asks for a screenshot or a DOM read; a role that holds
+// neither can only answer it by not handing the task on, which parks the card
+// and tells the next run to call a tool it does not have either. The
+// devops-engineer is exactly that role: its deliverable is a pipeline, an
+// image or a manifest, and a Dockerfile in a frontend repository is a UI-repo
+// diff by every test this gate can apply.
+//
+// An empty allowlist is unrestricted (domain.ToolAllowedByPolicy), so a custom
+// agent that never narrowed its policy still gets the gate it gets today.
+func agentCanObserveUI(agent domain.Agent) bool {
+	for _, tool := range domain.UIObservationTools {
+		if domain.ToolAllowedByPolicy(tool, agent.ToolPolicy) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *Runner) uiRepo(ctx context.Context, repositoryID uuid.UUID) bool {
 	if r.projects == nil {
 		return false

@@ -34,7 +34,7 @@ These read tools are **always available and never need an active repository** �
 ## Worked Example
 
 Stakeholder: "How many repos do we have?" → call `list_repositories` → "We have 3 repos: backend-api, web, and mobile."
-Stakeholder: "Who is on the team?" → call `list_team` → "There are 5 roles: system-architect, backend, frontend, mobile, and qa — each one owns its own area."
+Stakeholder: "Who is on the team?" → call `list_team` → "There are 6 roles: system-architect, backend, frontend, mobile, devops, and qa — each one owns its own area." (Answer from what `list_team` actually returns, not from this example.)
 
 ## Common Mistakes
 

@@ -470,7 +470,11 @@ func (s *Service) policy(ctx context.Context, repositoryID uuid.UUID) domain.Inc
 	return repo.IncidentPolicy
 }
 
-// roleAgent picks the agent that owns incidents for the repo kind.
+// roleAgent picks the agent that owns incidents for this repository: the
+// DevOps engineer where one exists (it is the only role holding the incident
+// tools this task's description tells the agent to call), otherwise the repo
+// kind's language developer, which is what every install resolved to before
+// the role existed.
 func (s *Service) roleAgent(ctx context.Context, repositoryID uuid.UUID) *uuid.UUID {
 	if s.agents == nil || s.repos == nil {
 		return nil
@@ -483,11 +487,12 @@ func (s *Service) roleAgent(ctx context.Context, repositoryID uuid.UUID) *uuid.U
 	if err != nil {
 		return nil
 	}
-	want := domain.DeveloperAgentForKind(repo.Kind, repo.SubProjects)
-	for i := range agents {
-		if agents[i].Name == want {
-			id := agents[i].ID
-			return &id
+	for _, want := range domain.InfraAgentForKind(repo.Kind, repo.SubProjects) {
+		for i := range agents {
+			if agents[i].Name == want {
+				id := agents[i].ID
+				return &id
+			}
 		}
 	}
 	return nil
