@@ -97,12 +97,11 @@ func (s *Service) CreateDocTask(ctx context.Context, repositoryID uuid.UUID, sub
 		fmt.Fprintf(&b, "Write or refresh %s for this %s repository. If it already exists, read it first and update whatever is stale or wrong against the current codebase rather than starting over; otherwise write it from scratch.\n\n", doc.fullPath, doc.kindLabel)
 	}
 	b.WriteString(docInstructions(doc))
-	b.WriteString("\nAlso make sure this repository has a CLAUDE.md at its root with a short docs index; create a minimal one if it's missing, and add (or update) a line linking to this file so agents find it.\n")
+	b.WriteString("\nAlso make sure the agent instructions file at the repository root (CLAUDE.md, AGENTS.md or the equivalent the agents on this repo read) has a short docs index; create a minimal one if it's missing, and add (or update) a line linking to this file so agents find it.\n")
 
 	return s.tasks.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
 		Title:           fmt.Sprintf("Write %s (%s)", doc.fullPath, doc.kindLabel),
 		Description:     b.String(),
-		TaskType:        domain.TaskTypeTask,
 		Priority:        domain.TaskPriorityMedium,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
@@ -241,7 +240,6 @@ func (s *Service) CreateDocsBundleTask(ctx context.Context, repositoryID uuid.UU
 	task, err := s.tasks.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
 		Title:           "Generate reference docs",
 		Description:     bundleDescription(repo, docs),
-		TaskType:        domain.TaskTypeTask,
 		Priority:        domain.TaskPriorityMedium,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
@@ -272,7 +270,7 @@ func bundleDescription(repo domain.Repository, docs []resolvedDoc) string {
 		}
 		b.WriteString(docInstructions(doc))
 	}
-	b.WriteString("\n---\n\nAlso make sure this repository has a CLAUDE.md at its root with a short docs index, and that it links to every file above so agents find them; create a minimal CLAUDE.md if it is missing.\n")
+	b.WriteString("\n---\n\nAlso make sure the agent instructions file at the repository root (CLAUDE.md, AGENTS.md or the equivalent the agents on this repo read) has a short docs index, and that it links to every file above so agents find them; create a minimal one if it is missing.\n")
 	return b.String()
 }
 

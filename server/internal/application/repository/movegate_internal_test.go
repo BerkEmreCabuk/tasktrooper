@@ -38,7 +38,7 @@ func TestValidateMoveAllowedAllowsTodoWithAnOpenBlocker(t *testing.T) {
 		workflows: workflowtest.Default().Reader(),
 	}
 
-	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskTypeTask, domain.TaskColumnTodo))
+	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), "task", domain.TaskColumnTodo))
 }
 
 func TestValidateMoveAllowedRefusesInProgressWithAnOpenBlocker(t *testing.T) {
@@ -50,7 +50,7 @@ func TestValidateMoveAllowedRefusesInProgressWithAnOpenBlocker(t *testing.T) {
 		workflows: workflowtest.Default().Reader(),
 	}
 
-	err := svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskTypeTask, domain.TaskColumnInProgress)
+	err := svc.validateMoveAllowed(context.Background(), uuid.New(), "task", domain.TaskColumnInProgress)
 
 	require.Error(t, err)
 	require.ErrorContains(t, err, "blocked until these are done")
@@ -65,6 +65,6 @@ func TestValidateMoveAllowedAllowsBothColumnsWhenBlockerIsDone(t *testing.T) {
 		workflows: workflowtest.Default().Reader(),
 	}
 
-	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskTypeTask, domain.TaskColumnTodo))
-	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), domain.TaskTypeTask, domain.TaskColumnInProgress))
+	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), "task", domain.TaskColumnTodo))
+	require.NoError(t, svc.validateMoveAllowed(context.Background(), uuid.New(), "task", domain.TaskColumnInProgress))
 }

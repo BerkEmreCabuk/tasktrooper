@@ -920,7 +920,7 @@ func (s *DispatcherSuite) TestDoneDoesNotDispatchImplementationAssignee() {
 			RepositoryID:    repositoryID,
 			Title:           "shipped",
 			Column:          domain.TaskColumnDone,
-			TaskType:        domain.TaskTypeTask,
+			TaskType:        "task",
 			AssigneeAgentID: &assignee,
 		},
 		EventType: domain.BoardEventTaskMoved,
@@ -938,7 +938,7 @@ func doneTaskWithOpenPR(repositoryID uuid.UUID, assignee *uuid.UUID) domain.Boar
 		RepositoryID:    repositoryID,
 		Title:           "signed off, not merged",
 		Column:          domain.TaskColumnDone,
-		TaskType:        domain.TaskTypeTask,
+		TaskType:        "task",
 		AssigneeAgentID: assignee,
 		PRURL:           "https://github.com/acme/widget/pull/42",
 		PRNumber:        42,
@@ -1044,7 +1044,7 @@ func (s *DispatcherSuite) TestDoneMergeWakeIgnoresAnalizTasks() {
 	repositoryID := uuid.New()
 	s.board.agentsByColumn["done"] = []uuid.UUID{qa}
 	task := doneTaskWithOpenPR(repositoryID, &assignee)
-	task.TaskType = domain.TaskTypeAnaliz
+	task.TaskType = "analiz"
 
 	err := s.disp.Dispatch(context.Background(), board.DispatchInput{
 		RepositoryID: repositoryID,
@@ -1068,7 +1068,7 @@ func (s *DispatcherSuite) TestDoneDispatchesAnalizAssignee() {
 			RepositoryID:    repositoryID,
 			Title:           "analiz approved",
 			Column:          domain.TaskColumnDone,
-			TaskType:        domain.TaskTypeAnaliz,
+			TaskType:        "analiz",
 			AssigneeAgentID: &assignee,
 		},
 		EventType: domain.BoardEventTaskMoved,
@@ -1090,7 +1090,7 @@ func (s *DispatcherSuite) TestReleasedDoesNotDispatch() {
 			RepositoryID:    repositoryID,
 			Title:           "released",
 			Column:          domain.TaskColumnReleased,
-			TaskType:        domain.TaskTypeAnaliz,
+			TaskType:        "analiz",
 			AssigneeAgentID: &assignee,
 		},
 		EventType: domain.BoardEventTaskMoved,

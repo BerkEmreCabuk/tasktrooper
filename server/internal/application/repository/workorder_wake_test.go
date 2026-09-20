@@ -94,7 +94,7 @@ func newWakeFixture(t *testing.T) *wakeFixture {
 
 func (f *wakeFixture) addTask(column domain.TaskColumn) domain.BoardTask {
 	id := uuid.New()
-	task := domain.BoardTask{ID: id, RepositoryID: f.repoID, Key: "T-X", Column: column, TaskType: domain.TaskTypeTask}
+	task := domain.BoardTask{ID: id, RepositoryID: f.repoID, Key: "T-X", Column: column, TaskType: "task"}
 	f.tasks.tasks[id] = task
 	return task
 }

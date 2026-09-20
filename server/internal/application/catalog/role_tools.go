@@ -266,16 +266,18 @@ func qaToolPolicy() domain.ToolPolicy {
 	tools = append(tools, rolePRReadTools...)
 	// …and, once the board has signed the task off, merges it. The one
 	// non-read-only thing QA does to code, available to it only in `done`:
-	// RestrictToolsForVerdictColumn takes it away in in_qa/ready_for_qa, where
-	// QA's job is a verdict on the change rather than the landing of it.
+	// RestrictToolsForStage's strip_writers behaviour takes it away in
+	// in_qa/ready_for_qa, where QA's job is a verdict on the change rather than
+	// the landing of it.
 	tools = append(tools, rolePRMergeTools...)
 	// …and then watches what the merge shipped, and undoes it when it breaks.
 	// QA and nobody else, for the same reason the merge is QA's: it is the role
 	// that last exercised the built product, it is the role `done` wakes, and
 	// the deploy it watches is the deploy of the merge it just made. A developer
 	// that could roll production back could undo a release it was never asked
-	// about. Two of the three only read; RestrictToolsForVerdictColumn takes the
-	// third (the rollback) away everywhere except `done`/`released`.
+	// about. Two of the three only read; RestrictToolsForStage's strip_writers
+	// behaviour takes the third (the rollback) away everywhere except
+	// `done`/`released`.
 	tools = append(tools, roleReleaseWatchTools...)
 	tools = append(tools, roleMemoryTools...)
 	tools = append(tools, roleSkillTools...)

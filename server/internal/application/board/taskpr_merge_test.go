@@ -94,7 +94,7 @@ func mergeTask() domain.BoardTask {
 		ID:          uuid.New(),
 		Key:         "T-7",
 		Title:       "Add the store link",
-		TaskType:    domain.TaskTypeTask,
+		TaskType:    "task",
 		Column:      domain.TaskColumnDone,
 		VerifiedSHA: mergeHeadSHA,
 		PRURL:       "https://github.com/acme/widget/pull/42",

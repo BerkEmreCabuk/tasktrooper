@@ -64,25 +64,3 @@ func TestTaskBranchName(t *testing.T) {
 	assert.Equal(t, "feature/de-12",
 		TaskBranchName(BoardTask{ID: id, Key: " DE  #12 ", TaskNumber: 12}))
 }
-
-// The key carries the task's type, so "B-4" and "A-2" are legible on their own
-// — in a branch, a commit trailer or a chat — without looking the task up.
-func TestTaskKeyPrefixes(t *testing.T) {
-	assert.Equal(t, "T-7", FormatTaskKey(TaskTypeTask, 7))
-	assert.Equal(t, "B-7", FormatTaskKey(TaskTypeBug, 7))
-	assert.Equal(t, "A-7", FormatTaskKey(TaskTypeAnaliz, 7))
-	assert.Equal(t, "TC-7", FormatTaskKey(TaskTypeTechnical, 7))
-	// An unset type is ordinary work rather than an error: the board created
-	// tasks before types were mandatory.
-	assert.Equal(t, "T-7", FormatTaskKey("", 7))
-
-	for prefix, want := range map[string]TaskType{"T": TaskTypeTask, "b": TaskTypeBug, " a ": TaskTypeAnaliz, "tc": TaskTypeTechnical} {
-		got, ok := TaskTypeForKeyPrefix(prefix)
-		assert.True(t, ok, prefix)
-		assert.Equal(t, want, got)
-	}
-	// An unknown prefix must not fall through to "task": a lookup for X-1 has
-	// to fail as unknown rather than answer with T-1.
-	_, ok := TaskTypeForKeyPrefix("DE")
-	assert.False(t, ok)
-}

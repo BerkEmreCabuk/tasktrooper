@@ -59,7 +59,7 @@ func deployParkedTask(col domain.TaskColumn) domain.BoardTask {
 		ID:             uuid.New(),
 		RepositoryID:   uuid.New(),
 		Column:         col,
-		TaskType:       domain.TaskTypeTask,
+		TaskType:       "task",
 		MergeCommitSHA: "abc123def456789012345678901234567890abcd",
 	}
 }
@@ -134,7 +134,7 @@ func TestDeployWatchWakeOnlyFiresForTheSweepersResumePayload(t *testing.T) {
 		{"the device park's resume", deployParkedTask(domain.TaskColumnDone), domain.BoardEventTaskMoved,
 			map[string]interface{}{domain.EventPayloadResumedResource: domain.ResourceMobileDevice}, false},
 	}
-	taskWF := workflowtest.Default().Workflows[domain.TaskTypeTask]
+	taskWF := workflowtest.Default().Workflows["task"]
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			got := deployWatchWake(taskWF, true, DispatchInput{Task: tc.task, EventType: tc.event, Payload: tc.payload})
@@ -145,8 +145,8 @@ func TestDeployWatchWakeOnlyFiresForTheSweepersResumePayload(t *testing.T) {
 
 func TestDeployWatchWakeSkipsNonCodeTasks(t *testing.T) {
 	task := deployParkedTask(domain.TaskColumnDone)
-	task.TaskType = domain.TaskTypeAnaliz
-	analizWF := workflowtest.Default().Workflows[domain.TaskTypeAnaliz]
+	task.TaskType = "analiz"
+	analizWF := workflowtest.Default().Workflows["analiz"]
 	got := deployWatchWake(analizWF, true, DispatchInput{
 		Task:      task,
 		EventType: domain.BoardEventTaskMoved,

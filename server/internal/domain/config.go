@@ -28,7 +28,7 @@ type Config struct {
 
 // CursorAgentConfig drives the local Cursor CLI executor: the path a board run
 // on the cursor_agent provider is handed to instead of the in-process agent
-// loop (internal/adapter/agentcli/cursor).
+// loop (internal/adapter/cli/cursor).
 //
 // There is no Enabled flag, for the same reason AntigravityConfig has none:
 // the switch is whether the binary exists on this host.
@@ -43,7 +43,7 @@ type CursorAgentConfig struct {
 
 // OpencodeConfig drives the local OpenCode CLI executor: the path a board run
 // on the opencode provider is handed to instead of the in-process agent loop
-// (internal/adapter/agentcli/opencode).
+// (internal/adapter/cli/opencode).
 //
 // There is no Enabled flag, for the same reason AntigravityConfig has none:
 // the switch is whether the binary exists on this host.
@@ -58,7 +58,7 @@ type OpencodeConfig struct {
 
 // AntigravityConfig drives the local Antigravity (AGY) CLI executor: the path a
 // board run on the antigravity provider is handed to instead of the in-process
-// agent loop (internal/adapter/agentcli/antigravity).
+// agent loop (internal/adapter/cli/antigravity).
 //
 // There is no Enabled flag, for the same reason ClaudeCodeConfig has none: the
 // switch is whether the binary exists on this host. An installation without the
@@ -77,7 +77,7 @@ type AntigravityConfig struct {
 
 // ClaudeCodeConfig drives the local Claude Code CLI executor: the path a board
 // run on the claude_code provider is handed to instead of the in-process agent
-// loop (internal/adapter/agentcli/claudecode).
+// loop (internal/adapter/cli/claudecode).
 //
 // There is no Enabled flag, for the same reason MobileConfig has none: the
 // switch is whether the binary exists on this host. An installation without the

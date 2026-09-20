@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
-	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/github"
+	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -255,10 +255,12 @@ func (p *PipelineRunner) ResolveUnfinished(ctx context.Context, pipeline domain.
 
 	// The card moved on while the pipeline hung — a human dragged it, the
 	// reviewer was dispatched by some other path. Settle the ROW so it stops
-	// showing a spinner, but fire no side effects: DispatchQA on a task that is
-	// no longer in code_review would put an agent on whatever column it reached.
-	if task.Column != domain.TaskColumnCodeReview {
-		return p.settleQuietly(ctx, fresh, "the task left code_review before this pipeline reported")
+	// showing a spinner, but fire no side effects: DispatchQA on a task whose
+	// column no longer gates on wait_for_ci would put an agent on whatever
+	// column it reached. An unreadable workflow fails closed the other way —
+	// treated as still gated, so a bad read never abandons a real pipeline.
+	if wf, ok := p.workflowFor(ctx, task.TaskType); ok && !wf.Has(task.Column, domain.BehaviourWaitForCI) {
+		return p.settleQuietly(ctx, fresh, "the task left the CI-gated column before this pipeline reported")
 	}
 
 	expired := time.Since(fresh.CreatedAt) >= window
@@ -378,6 +380,24 @@ func (p *PipelineRunner) ResolveUnfinished(ctx context.Context, pipeline domain.
 	}
 	return p.openGate(ctx, job, fresh, domain.PipelineGateReasonTimeout,
 		"no build result arrived within "+window.String())
+}
+
+// workflowFor resolves the workflow ResolveUnfinished reads wait_for_ci off.
+// False means "treat every workflow-gated behaviour as closed" (no reader
+// wired, or Workflow() itself errored) — callers must fail closed to "still
+// gated", never to "gate lifted", the same rule Dispatcher.workflowFor
+// documents.
+func (p *PipelineRunner) workflowFor(ctx context.Context, taskType domain.TaskType) (domain.Workflow, bool) {
+	if p.workflows == nil {
+		return domain.Workflow{}, false
+	}
+	wf, err := p.workflows.Workflow(ctx, taskType)
+	if err != nil {
+		log.Warn().Err(err).Str("task_type", string(taskType)).
+			Msg("pipeline gate: workflow lookup failed, failing closed")
+		return domain.Workflow{}, false
+	}
+	return wf, true
 }
 
 // anyReportedFailure reports whether any mapped check has completed with a

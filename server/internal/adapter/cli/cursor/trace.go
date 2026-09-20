@@ -1,0 +1,27 @@
+package cursor
+
+import "strings"
+
+// nativeToolNames maps the CLI's tool names onto the ledger's canonical ones.
+// Names cursor-agent happens to share with TaskTrooper's own tools map to
+// themselves.
+var nativeToolNames = map[string]string{
+	"read":  "read_file",
+	"write": "write_file",
+}
+
+const ownToolMarker = "tasktrooper"
+
+// recordedElsewhere filters TaskTrooper's own MCP tools back out of the
+// ledger: their calls are recorded by the MCP server, and counting the CLI's
+// reflect of them again would double-count.
+func recordedElsewhere(nativeName string) bool {
+	return strings.Contains(strings.ToLower(nativeName), ownToolMarker)
+}
+
+func ledgerToolName(native string) string {
+	if mapped, ok := nativeToolNames[native]; ok {
+		return mapped
+	}
+	return native
+}

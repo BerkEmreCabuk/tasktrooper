@@ -14,9 +14,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// RateLimitError is what a provider returns when it refuses a call for pacing
-// reasons (429, or 503 while shedding load). It carries the wait the provider
-// asked for so the caller can obey it instead of guessing.
 type RateLimitError struct {
 	Endpoint   string
 	StatusCode int
@@ -28,12 +25,8 @@ func (e *RateLimitError) Error() string {
 	return fmt.Sprintf("%s returned %d: %s", e.Endpoint, e.StatusCode, e.Body)
 }
 
-// statusOverloaded is Anthropic's 529 "overloaded_error" — net/http has no
-// constant for it because it is not a standard status.
 const statusOverloaded = 529
 
-// newRateLimitError builds a RateLimitError for a rate-limited HTTP response,
-// or returns nil when the status is a plain failure that must not be retried.
 func newRateLimitError(endpoint string, resp *http.Response, body string) *RateLimitError {
 	if resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable && resp.StatusCode != statusOverloaded {
 		return nil
@@ -46,29 +39,12 @@ func newRateLimitError(endpoint string, resp *http.Response, body string) *RateL
 	}
 }
 
-// resetHeaders are the headers an OpenAI-compatible provider uses to say when
-// the window it just refused us on reopens. They are read in addition to
-// Retry-After, not instead of it: many providers send only these.
 var resetHeaders = []string{
 	"X-RateLimit-Reset-Requests",
 	"X-RateLimit-Reset-Tokens",
 	"X-RateLimit-Reset",
 }
 
-// retryHint reports the wait the provider itself asked for, reading every form
-// it might have used, and zero when it said nothing.
-//
-// Retry-After wins when present — it is the one header that means only this.
-// Otherwise the reset countdowns are used, and of those the longest, because a
-// 429 is a refusal by whichever limit is still shut and the shorter window
-// reopening does not make the call allowed. Waiting slightly too long costs one
-// slow reply; waiting too little costs the whole run, which is the failure that
-// sends people here.
-//
-// Reading only Retry-After was not enough: a provider that states its limit
-// solely as a reset countdown left us with no number at all, so chat fell back
-// to a curve we invented and spent all three of its attempts inside a window
-// whose length the provider had already told us.
 func retryHint(h http.Header) time.Duration {
 	if h == nil {
 		return 0
@@ -88,8 +64,6 @@ func retryHint(h http.Header) time.Duration {
 	return longest
 }
 
-// parseResetHint reads a reset countdown, which providers write either as a Go
-// duration ("1.5s", "2m59.56s", "88ms") or as bare seconds.
 func parseResetHint(value string) time.Duration {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -104,7 +78,6 @@ func parseResetHint(value string) time.Duration {
 	return 0
 }
 
-// parseRetryAfter reads both Retry-After forms: delay seconds and HTTP date.
 func parseRetryAfter(value string) time.Duration {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -124,9 +97,6 @@ func parseRetryAfter(value string) time.Duration {
 	return 0
 }
 
-// isRateLimited also matches providers that surface the limit only as text —
-// the Vertex SDK returns RESOURCE_EXHAUSTED, and OpenAI-compatible proxies
-// wrap the status in the message body.
 func isRateLimited(err error) bool {
 	if err == nil {
 		return false
@@ -145,9 +115,6 @@ func isRateLimited(err error) bool {
 		strings.Contains(msg, "overloaded")
 }
 
-// retryAfterOf reports the wait a provider asked for, when it asked for one.
-// Both error shapes carry it: embeddings fail as *RateLimitError, chat as
-// *domain.LLMHTTPError, and the header means the same thing on either path.
 func retryAfterOf(err error) time.Duration {
 	var rle *RateLimitError
 	if errors.As(err, &rle) {
@@ -160,8 +127,6 @@ func retryAfterOf(err error) time.Duration {
 	return 0
 }
 
-// httpError builds the typed chat-path error, keeping the provider's own
-// Retry-After instead of dropping it at the adapter boundary.
 func httpError(resp *http.Response, body []byte) *domain.LLMHTTPError {
 	e := domain.NewLLMHTTPError(resp.StatusCode, body)
 	e.RetryAfter = retryHint(resp.Header)
@@ -171,32 +136,10 @@ func httpError(resp *http.Response, body []byte) *domain.LLMHTTPError {
 	return e
 }
 
-// secretHeaderMarkers are the substrings that make a header unloggable whatever
-// else its name looks like. The exclusion is checked first and wins outright:
-// a header called `x-api-key-remaining` must not be printed because it matched
-// "remaining".
-//
-// Bare "token" and "key" are deliberately not markers: providers state their
-// token budgets as `x-ratelimit-remaining-tokens`, which is precisely the
-// number this capture exists to find. The credential shapes are named exactly
-// enough to catch a secret without swallowing a budget.
 var secretHeaderMarkers = []string{"authorization", "cookie", "auth", "api-key", "apikey", "access-token", "refresh-token", "id-token", "secret", "credential", "signature", "bearer"}
 
-// rateLimitMarkers are the shapes providers use to state a limit. The list is
-// deliberately loose: the point of capturing these is that we do NOT know what
-// this provider sends, and a name we failed to anticipate is exactly the one
-// worth seeing.
 var rateLimitMarkers = []string{"retry-after", "ratelimit", "rate-limit", "reset", "remaining", "limit", "quota", "usage"}
 
-// rateLimitHeaders picks the rate-limit-relevant headers out of a response,
-// leaving out anything key-like.
-//
-// It exists because the provider behind the incident sends no Retry-After and
-// no reset header, and its own dashboard's quota indicator is broken — so there
-// is no way to tell "bursting over a per-minute window" from "plan spent"
-// except by writing down, once per refusal, exactly what it does send. An empty
-// map is a real answer too: it proves the hedge in the user-facing message is
-// warranted rather than assumed.
 func rateLimitHeaders(h http.Header) map[string]string {
 	out := map[string]string{}
 	if h == nil {
@@ -224,9 +167,6 @@ func containsAny(s string, markers []string) bool {
 	return false
 }
 
-// logRateLimitHeaders writes the one structured line per refusal. It is cheap
-// enough (a handful of string ops on a path that only runs when a call was
-// already refused) to leave on permanently.
 func logRateLimitHeaders(resp *http.Response) {
 	headers := rateLimitHeaders(resp.Header)
 	log.Warn().
@@ -241,26 +181,11 @@ const (
 	defaultEmbedMaxRetryWait = 60 * time.Second
 )
 
-// backgroundGrace is how long a background call hangs back after the window
-// opens before claiming the slot. Without it, a reindex that has been waiting
-// takes the very instant the slot frees, and a chat request arriving in the
-// same moment queues behind it; with it, the interactive caller wins that race.
-// It is small enough to be invisible to indexing throughput.
 const backgroundGrace = 50 * time.Millisecond
 
-// accountLimiter paces every call made against one provider account and retries
-// the rate-limited ones.
-//
-// It used to pace embeddings only, which was the bug behind chat getting a 429
-// on the first attempt with nobody else on the system: chat spent the same
-// account's window, so the counter protecting that window was measuring a
-// fraction of the traffic hitting it. One account is one limiter — the quota
-// belongs to the provider, not to the endpoint or the call site.
 type accountLimiter struct {
 	mu          sync.Mutex
 	minInterval time.Duration
-	// next is the earliest wall-clock time the next call may start. Both the
-	// steady-state spacing and a provider's Retry-After push it forward.
 	next       time.Time
 	maxRetries int
 	backoff    time.Duration
@@ -302,7 +227,6 @@ func (l *accountLimiter) settings() (maxRetries int, backoff, maxWait time.Durat
 	return l.maxRetries, backoff, maxWait
 }
 
-// reserve claims the next slot and returns how long the caller must wait for it.
 func (l *accountLimiter) reserve() time.Duration {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -316,8 +240,6 @@ func (l *accountLimiter) reserve() time.Duration {
 	return wait
 }
 
-// penalize holds every following call back by d, so one 429 slows the whole
-// stream instead of only the call that hit it.
 func (l *accountLimiter) penalize(d time.Duration) {
 	if d <= 0 {
 		return
@@ -330,10 +252,6 @@ func (l *accountLimiter) penalize(d time.Duration) {
 	}
 }
 
-// tryReserve claims the slot only if it is free right now, and otherwise
-// reports how long is left on the window without claiming anything. Not
-// claiming is the point: a background caller that held a reservation while it
-// slept would put every chat request behind it.
 func (l *accountLimiter) tryReserve() (time.Duration, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -345,13 +263,6 @@ func (l *accountLimiter) tryReserve() (time.Duration, bool) {
 	return 0, true
 }
 
-// acquire waits for this call's turn in the account's window.
-//
-// Interactive callers take a firm reservation and are served in arrival order.
-// Background callers (marked on the context) never hold one: they wait, look
-// again, and take the slot only when it is free, so any interactive call that
-// shows up in the meantime goes first. Background work therefore yields to a
-// person waiting on a reply — it does not stop, it just never goes ahead.
 func (l *accountLimiter) acquire(ctx context.Context) error {
 	if domain.IsBackgroundLLM(ctx) {
 		return l.acquireBackground(ctx)
@@ -375,22 +286,12 @@ func (l *accountLimiter) acquireBackground(ctx context.Context) error {
 	}
 }
 
-// guard runs one non-embedding call (chat, streamed or not) under the same
-// account pacing, and makes its rate limit slow everything else down too. It
-// does not retry: chat retries are the agent loop's decision, since only the
-// loop can shrink the conversation instead of re-sending it.
-// The provider and model are passed in because nothing below this point knows
-// them: the limiter is keyed by account and the HTTP client only has a base
-// URL. Without them the rate-limit warning named no account at all, so an
-// incident could not be tied to a provider without reading the code — and the
-// user-facing message had nothing to attribute the limit to.
 func (l *accountLimiter) guard(ctx context.Context, provider domain.LLMProviderType, model string, fn func(context.Context) error) error {
 	if err := l.acquire(ctx); err != nil {
 		return err
 	}
 	err := fn(ctx)
-	// Stamp the account onto the typed error while it is still identifiable, so
-	// the identity survives every wrapping between here and the user's screen.
+
 	var he *domain.LLMHTTPError
 	if errors.As(err, &he) {
 		if he.Provider == "" {
@@ -411,9 +312,7 @@ func (l *accountLimiter) guard(ctx context.Context, provider domain.LLMProviderT
 			wait = maxWait
 		}
 		l.penalize(wait)
-		// Whether the provider told us when its window reopens is the first
-		// thing anyone needs when a chat run dies on a 429, and it is invisible
-		// in the error text.
+
 		log.Warn().Err(err).
 			Str("provider", string(provider)).
 			Str("model", model).
@@ -435,7 +334,6 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// do runs fn under the pacing rules, retrying while the provider rate-limits us.
 func (l *accountLimiter) do(ctx context.Context, fn func(context.Context) ([]float32, error)) ([]float32, error) {
 	maxRetries, backoff, maxWait := l.settings()
 	for attempt := 0; ; attempt++ {
@@ -460,8 +358,7 @@ func (l *accountLimiter) do(ctx context.Context, fn func(context.Context) ([]flo
 		if wait > maxWait {
 			wait = maxWait
 		}
-		// Delay the whole stream, not just this retry: the next chunk would
-		// otherwise walk straight into the same limit.
+
 		l.penalize(wait)
 
 		if attempt >= maxRetries {

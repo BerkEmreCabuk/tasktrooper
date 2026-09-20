@@ -82,6 +82,21 @@ type Service struct {
 func (s *Service) SetWorkflows(w port.WorkflowReader)  { s.workflows = w }
 func (s *Service) SetRoleResolver(r port.RoleResolver) { s.roles = r }
 
+// defectTaskType is the type a remediation task opens as: "" (CreateTask's
+// own default-type fallback) only when no reader is wired, which production
+// always wires — see runtime.go's prodOpsSvc.SetWorkflows.
+func (s *Service) defectTaskType(ctx context.Context) domain.TaskType {
+	if s.workflows == nil {
+		return ""
+	}
+	t, err := s.workflows.DefectTaskType(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("prodops: defect task type unavailable, opening as the default type")
+		return ""
+	}
+	return t
+}
+
 func NewService(deps Deps) *Service {
 	return &Service{
 		incidents: deps.Incidents,
@@ -344,7 +359,7 @@ func (s *Service) openRemediationTask(ctx context.Context, incident domain.Incid
 	task, err := s.tasks.CreateTask(ctx, incident.RepositoryID, domain.CreateBoardTaskRequest{
 		Title:           "Incident: " + truncate(incident.Title, 120),
 		Description:     b.String(),
-		TaskType:        domain.TaskTypeBug,
+		TaskType:        s.defectTaskType(ctx),
 		Priority:        priority,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",

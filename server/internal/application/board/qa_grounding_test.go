@@ -67,7 +67,7 @@ func TestUngroundedQAIgnoresEveryOtherRun(t *testing.T) {
 			"column %s is not a QA round", column)
 	}
 
-	analiz := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInQA, TaskType: domain.TaskTypeAnaliz}
+	analiz := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInQA, TaskType: "analiz"}
 	assert.False(t, isUngroundedQA(analizWF, analiz, domain.AgentResponse{}, qaUsage("add_task_comment")))
 }
 

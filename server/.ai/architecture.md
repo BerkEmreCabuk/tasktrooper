@@ -475,7 +475,7 @@ behind a dependency it no longer has.
 
 It is a **park**, not a refusal: a refused dispatch leaves the card looking unstarted with
 nothing saying why. It is the fourth `domain.ResourceBlock` resource (`work_order`, beside
-`mobile_device`, `claude_code_quota`, `deploy_watch`) and the odd one out in what it waits
+`mobile_device`, `llm_provider_code_quota`, `deploy_watch`) and the odd one out in what it waits
 for — the other three are facts about the world outside the board. Everything else is
 identical: `blocked_resource`, the `blocked` column with the reason, a comment naming every
 blocker, and a sweeper.
@@ -730,7 +730,7 @@ about the work. Failing the run would spend one of the task's three consecutive-
 and throw away the session holding the half-finished change. So it is a **park**, modelled on
 the device park, with one difference that shapes the rest:
 
-| | device (`mobile_device`) | quota (`claude_code_quota`) |
+| | device (`mobile_device`) | quota (`llm_provider_code_quota`) |
 |---|---|---|
 | carried as | `AgentResponse.ResourceBlock` (a tool said "not now") | `error` — `*domain.QuotaBlock` (the run produced nothing to carry it on) |
 | released by | probing the hub: is a phone free | the clock: has the recorded reset passed |

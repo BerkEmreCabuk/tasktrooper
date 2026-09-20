@@ -21,13 +21,9 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("agent-server configuration error")
 	}
-	// Before anything logs: the LISTENING line is the only thing on stdout, and
-	// zerolog's default writer is stdout.
+
 	runtime.ConfigureLogger(cfg.Options.Debug)
 
-	// The workspace root is derived from DATA_DIR and the toolchain detector
-	// refuses relative paths, so the "./data" default becomes absolute once,
-	// here, against the directory the process was started in.
 	if abs, absErr := filepath.Abs(cfg.Options.DataDir); absErr == nil {
 		cfg.Options.DataDir = abs
 	}
@@ -78,10 +74,6 @@ func main() {
 		log.Info().Msg("stdin closed by the supervisor")
 	}
 
-	// Shutdown drains, cancel severs — so Shutdown runs FIRST and cancel only
-	// mops up afterwards. Calling cancel() here killed the run context before
-	// the drain even started, which left whatever agent run was in flight stuck
-	// 'running'. Postgres stops last for the same reason: the drain writes to it.
 	log.Info().Dur("grace", cfg.ShutdownGrace).Msg("shutting down, draining in-flight work")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.ShutdownGrace)
 	if err := server.Shutdown(shutdownCtx); err != nil {

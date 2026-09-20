@@ -50,7 +50,7 @@ func runContext(tools ...string) context.Context {
 }
 
 func TestAddDocumentRejectsAnalysisWithoutCodeExploration(t *testing.T) {
-	kit, tasks, taskID := newDocumentKit(domain.TaskTypeAnaliz)
+	kit, tasks, taskID := newDocumentKit("analiz")
 	tool := newAddDocumentTool(kit)
 
 	// The DE-1 ledger: a skill was loaded, the shell was used, the repository
@@ -69,7 +69,7 @@ func TestAddDocumentRejectsAnalysisWithoutCodeExploration(t *testing.T) {
 }
 
 func TestAddDocumentAcceptsAnalysisAfterCodeExploration(t *testing.T) {
-	kit, tasks, taskID := newDocumentKit(domain.TaskTypeAnaliz)
+	kit, tasks, taskID := newDocumentKit("analiz")
 	tool := newAddDocumentTool(kit)
 
 	res := tool.Execute(runContext("get_repo_tree", "grep_code"), documentArgs(taskID))
@@ -83,7 +83,7 @@ func TestAddDocumentAcceptsAnalysisAfterCodeExploration(t *testing.T) {
 }
 
 func TestAddDocumentDoesNotGateNonAnalysisTasks(t *testing.T) {
-	kit, tasks, taskID := newDocumentKit(domain.TaskTypeTask)
+	kit, tasks, taskID := newDocumentKit("task")
 	tool := newAddDocumentTool(kit)
 
 	res := tool.Execute(runContext("run_terminal"), documentArgs(taskID))
@@ -97,7 +97,7 @@ func TestAddDocumentDoesNotGateNonAnalysisTasks(t *testing.T) {
 }
 
 func TestAddDocumentAllowsUnmeasuredRuns(t *testing.T) {
-	kit, tasks, taskID := newDocumentKit(domain.TaskTypeAnaliz)
+	kit, tasks, taskID := newDocumentKit("analiz")
 	tool := newAddDocumentTool(kit)
 
 	// No tracker in context: a chat session, not a board run. Missing evidence

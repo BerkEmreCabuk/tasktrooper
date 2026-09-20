@@ -15,7 +15,7 @@ import (
 // They are dropped here rather than left in place because scrubbing the *child*
 // environment (internal/platform/childenv) does not remove them from the
 // *parent*, and exec sites outside the three that were hardened still build
-// their child environment from os.Environ() — internal/adapter/git among them.
+// their child environment from os.Environ() — internal/adapter/vcs/git among them.
 // Anything an agent can reach through those inherits whatever is still set
 // here. Unsetting closes all of them at once, and closes them for exec sites
 // added in future that forget to scrub.

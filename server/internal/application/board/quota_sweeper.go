@@ -151,7 +151,7 @@ func (s *QuotaSweeper) sweep(ctx context.Context) {
 		log.Info().
 			Str("task_id", task.ID.String()).
 			Str("resource", domain.ResourceClaudeCodeQuota).
-			Msg("parked task resumed: the claude code usage limit has reset")
+			Msg("parked task resumed: the agent cli usage limit has reset")
 	}
 	// Only reachable by exhausting the cap — every other exit returns above.
 	log.Info().Int("cap", quotaSweepBatchCap).

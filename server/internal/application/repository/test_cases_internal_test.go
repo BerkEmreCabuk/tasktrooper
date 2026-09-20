@@ -124,7 +124,7 @@ func TestTestCaseGate(t *testing.T) {
 				requireCriteria: tc.require,
 				workflows:       workflowtest.Default().Reader(),
 			}
-			err := svc.testCaseGate(context.Background(), taskID, domain.TaskTypeTask, tc.prev, tc.target)
+			err := svc.testCaseGate(context.Background(), taskID, "task", tc.prev, tc.target)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("expected pass, got %v", err)

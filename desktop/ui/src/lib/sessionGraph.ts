@@ -781,7 +781,7 @@ export function buildSessionGraph(steps: SessionStep[], plan: OrchestrationPlan 
       }
       // The subscription behind the CLI is spent. The run stops with nothing
       // wrong with it, so this is a warning, not a failure of the work.
-      case "claude_code_quota_park": {
+      case "llm_provider_code_quota_park": {
         const resumeAt = typeof payload.resume_at === "string" ? payload.resume_at : undefined;
         entries.push({
           kind: "event",
@@ -923,8 +923,8 @@ export function getLiveStepSummary(steps: SessionStep[], isLive: boolean): strin
   if (last.step_type === "claude_code_result") {
     return "Claude Code session finished";
   }
-  if (last.step_type === "claude_code_quota_park") {
-    return "Claude Code usage limit reached — task parked";
+  if (last.step_type === "llm_provider_code_quota_park") {
+    return "LLM Provider usage limit reached — task parked";
   }
   return stepLabel(last.step_type);
 }

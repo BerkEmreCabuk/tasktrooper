@@ -116,7 +116,6 @@ func (s *Service) Onboard(ctx context.Context, repositoryID uuid.UUID, provider,
 			task, err := s.tasks.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
 				Title:       fmt.Sprintf("Store onboarding: %s (%s)", identifier, platform),
 				Description: checklistTaskDescription(app.Checklist),
-				TaskType:    domain.TaskTypeTask,
 				Priority:    domain.TaskPriorityHigh,
 				Column:      domain.TaskColumnTodo,
 				CreatedBy:   "system",

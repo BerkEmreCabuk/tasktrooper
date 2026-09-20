@@ -22,25 +22,25 @@ const (
 	// workspace. Everything the board does around a run — the clone + tt-<key>
 	// branch checkout before it, the grounding checks, the verify gate, the
 	// commit/PR and the column advance after it — is unchanged; only the middle
-	// (the LLM tool-use loop) is delegated. See internal/adapter/agentcli/claudecode.
+	// (the LLM tool-use loop) is delegated. See internal/adapter/cli/claudecode.
 	LLMProviderClaudeCode LLMProviderType = "claude_code"
 	// LLMProviderCursorAgent is the same kind of thing as LLMProviderClaudeCode
 	// — the Cursor CLI (`cursor-agent`) as a process on the runner host, with
 	// its own subscription auth, no base URL and no API key. See
-	// internal/adapter/agentcli/cursor for the executor and
+	// internal/adapter/cli/cursor for the executor and
 	// application/agentfs.FlavorCursor for the catalog it reads
 	// (.cursor/rules/*.mdc, the same layout the Cursor IDE uses).
 	LLMProviderCursorAgent LLMProviderType = "cursor_agent"
 	// LLMProviderAntigravity is the same kind of thing as LLMProviderCursorAgent
 	// one line up — Google's Antigravity agentic CLI (`agy`) as a process on the
 	// runner host, with its own account auth, no base URL and no API key. See
-	// internal/adapter/agentcli/antigravity for the executor and
+	// internal/adapter/cli/antigravity for the executor and
 	// application/agentfs.FlavorAntigravity for the catalog it reads (the same
 	// .claude/ layout claudecode uses).
 	LLMProviderAntigravity LLMProviderType = "antigravity"
 	// LLMProviderOpencode is the same kind of thing one line up — the OpenCode
 	// CLI (`opencode`) as a process on the runner host, with its own provider
-	// auth, no base URL and no API key. See internal/adapter/agentcli/opencode
+	// auth, no base URL and no API key. See internal/adapter/cli/opencode
 	// for the executor. Unlike cursor_agent and antigravity it has no dedicated
 	// agentfs flavor: OpenCode discovers skills from the same .claude/skills
 	// layout claudecode and antigravity already write (confirmed compatible per
@@ -314,11 +314,18 @@ var ErrProviderUnavailable = errors.New("provider is declared but not yet availa
 // anything the user can configure, and what to do instead — because the
 // alternative message ("no client for provider cursor_agent") sends people to
 // look for a key they were never going to find.
-func ErrUnavailableProvider(t LLMProviderType) error {
-	label := string(t)
+// LLMProviderLabel is the human name of a provider type: the catalog's own
+// label, or the raw type string for one the catalog does not recognise. Empty
+// only for an empty type.
+func LLMProviderLabel(t LLMProviderType) string {
 	if def, ok := LLMProviderDefinitionFor(t); ok && def.Label != "" {
-		label = def.Label
+		return def.Label
 	}
+	return string(t)
+}
+
+func ErrUnavailableProvider(t LLMProviderType) error {
+	label := LLMProviderLabel(t)
 	return fmt.Errorf("%s is not available yet: it is listed so you can see it is coming, but this server has no executor "+
 		"for it, so anything selected on it would never run. Pick a provider that is available: %w", label, ErrProviderUnavailable)
 }
@@ -357,10 +364,7 @@ func RequiresHostExecutor(t LLMProviderType) bool {
 // request must never become an HTTP request" is an invariant, and an invariant
 // guarded in exactly one spot is one refactor away from not being guarded.
 func ErrHostExecutedProvider(t LLMProviderType) error {
-	label := string(t)
-	if def, ok := LLMProviderDefinitionFor(t); ok && def.Label != "" {
-		label = def.Label
-	}
+	label := LLMProviderLabel(t)
 	return fmt.Errorf("this agent runs on %s, which is only available on a local runner host: "+
 		"its CLI is not installed where this server runs, so there is no engine here to answer with. "+
 		"Run this agent on a local runner, or move it to an API-backed provider: %w", label, ErrHostExecutedUnservable)

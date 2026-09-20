@@ -174,25 +174,6 @@ func connectServer(ctx context.Context, cfg domain.MCPServerConfig, policy urlgu
 	return executors, closeFunc, nil
 }
 
-// stdioServerEnv builds the environment for a stdio MCP server subprocess.
-//
-// It used to be the whole process environment plus the config's overrides, so
-// every MCP server the user could configure ran with the pod's DATABASE_URL,
-// INTERNAL_AUTH_KEY and MCP_SECRETS_KEY in reach — an npx package away from
-// posting them anywhere. An MCP server config is user input; it is
-// attacker-influenced in exactly the way a run_terminal command is, and gets
-// the same treatment.
-//
-// The distinction that matters here: the *ambient* environment is scrubbed, the
-// *configured* one is not. An MCP server config normally supplies that server's
-// own credentials (a GitHub token, a vendor API key), and those are passed as
-// the overlay so they still reach the subprocess — including a deliberate
-// override of a forwarded variable such as PATH or HOME, since the overlay is
-// appended last and os/exec keeps the last value for a repeated name.
-//
-// Overrides are sorted so a config that sets the same key twice (it cannot —
-// it is a map — but a future caller might) and the resulting command line stay
-// deterministic across runs, which keeps failures reproducible.
 func stdioServerEnv(overrides map[string]string) []string {
 	configured := make([]string, 0, len(overrides))
 	for _, key := range slices.Sorted(maps.Keys(overrides)) {
@@ -216,25 +197,6 @@ func toolInputSchema(schema any) (map[string]interface{}, error) {
 	return m, nil
 }
 
-// guardedMCPClient builds the HTTP client for an MCP endpoint.
-//
-// Two things were wrong with the plain &http.Client{Timeout: 30s} this replaces.
-//
-// First, the endpoint is agent-configured: the operator (or a prompt injection
-// that reaches the MCP settings) picks the URL, and cfg.Headers is an arbitrary
-// attacker-chosen map — which is what makes this the one outbound path that can
-// satisfy GCP's Metadata-Flavor: Google gate. So the destination is resolved and
-// checked here, at connect time, not only where the row was written: rows stored
-// before the write-time check existed, or edited around it, arrive here anyway.
-//
-// Second, redirects. Go's http.Client strips Authorization and Cookie when a
-// redirect changes host, but it strips them from the request it builds, and
-// headerTransport sits below that and used to put them straight back. With no
-// CheckRedirect set, the default ten hops applied. A compromised or lookalike
-// MCP host answering 302 replayed the caller's bearer token to the attacker in
-// cleartext. Cross-host redirects are now refused outright — the same defence
-// adapter/appstore/client.go already applies to ASC's paging links, where the
-// host always stays the configured one.
 func guardedMCPClient(ctx context.Context, cfg domain.MCPServerConfig, policy urlguard.Policy) (*http.Client, error) {
 	target, err := policy.Validate(ctx, cfg.URL)
 	if err != nil {
@@ -253,12 +215,6 @@ func guardedMCPClient(ctx context.Context, cfg domain.MCPServerConfig, policy ur
 	return client, nil
 }
 
-// headerTransport applies the server's configured headers to every request.
-//
-// The headers are keyed to the configured host on purpose. Belt and braces with
-// the CheckRedirect above: a RoundTripper cannot see that net/http decided to
-// strip a credential for this hop, so the only thing it can do is refuse to
-// re-attach one to a host that is not the one the credential belongs to.
 type headerTransport struct {
 	base    http.RoundTripper
 	headers map[string]string
@@ -285,9 +241,6 @@ type serverHealth struct {
 	LastError string
 }
 
-// Manager is read from request goroutines (Health, via /mcp and the tools
-// endpoint) while MCP servers connect on a background goroutine, so both slices
-// need the mutex — a torn slice-header read would panic inside a handler.
 type Manager struct {
 	mu         sync.RWMutex
 	closeFuncs []func()
@@ -295,20 +248,12 @@ type Manager struct {
 	policy     urlguard.Policy
 }
 
-// SetURLPolicy overrides the policy HTTP MCP endpoints are vetted against.
-// Unset (the zero value, which is how runtime builds a Manager) means
-// urlguard.Default — public internet only, plus loopback when a self-hosted
-// operator has set ALLOW_LOOPBACK_TOOL_URLS.
 func (m *Manager) SetURLPolicy(p urlguard.Policy) {
 	m.mu.Lock()
 	m.policy = p
 	m.mu.Unlock()
 }
 
-// urlPolicy resolves the policy lazily rather than in a constructor, because a
-// Manager is legitimately created as &Manager{} and a zero Policy allows no
-// scheme at all — failing closed is right for a forgotten field, but it would be
-// wrong to let that shape reach a caller that never asked for a policy.
 func (m *Manager) urlPolicy() urlguard.Policy {
 	m.mu.RLock()
 	p := m.policy
@@ -351,8 +296,6 @@ func (m *Manager) Health() []map[string]interface{} {
 }
 
 func (m *Manager) LoadAndRegister(ctx context.Context, configs []domain.MCPServerConfig, registry port.ToolRegistry) {
-	// Built locally and published under the lock at the end, so Health() never
-	// observes a half-filled server list.
 	var (
 		servers    []serverHealth
 		closeFuncs []func()
@@ -396,8 +339,6 @@ func (m *Manager) Reload(ctx context.Context, configs []domain.MCPServerConfig, 
 	m.LoadAndRegister(ctx, configs, registry)
 }
 
-// Close shuts every connected server down and drops the close funcs, so a
-// following Reload does not run them twice.
 func (m *Manager) Close() {
 	m.mu.Lock()
 	closeFuncs := m.closeFuncs

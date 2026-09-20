@@ -24,11 +24,6 @@ type openAICompatClient struct {
 	httpClient   *http.Client
 }
 
-// idleConnTimeout closes an idle keep-alive connection before the server on
-// the other end does. The local embedder keeps idle sockets for 65 seconds (an
-// older one for Node's default five), and a request written onto a socket the
-// server already closed fails with "connection reset by peer" - a POST is not
-// retried by net/http, so that race used to fail a whole index.
 const idleConnTimeout = 30 * time.Second
 
 func newIdleSafeTransport() *http.Transport {
@@ -42,9 +37,6 @@ func NewOpenAICompatClient(baseURL, model, apiKey string, timeout time.Duration)
 }
 
 func newOpenAICompatClientExt(baseURL, model, apiKey string, timeout time.Duration, extraHeaders map[string]string) port.LLMClient {
-	// Trim trailing slashes: request paths are joined as baseURL+"/chat/completions"
-	// etc., so a pasted URL ending in "/" (e.g. Gemini's ".../v1beta/openai/")
-	// would produce a double slash and 404.
 	baseURL = strings.TrimRight(baseURL, "/")
 	return &openAICompatClient{
 		baseURL:      baseURL,
@@ -72,15 +64,9 @@ type chatRequest struct {
 	Stream         bool                `json:"stream"`
 	StreamOptions  *chatStreamOptions  `json:"stream_options,omitempty"`
 	ResponseFormat *chatResponseFormat `json:"response_format,omitempty"`
-	// MaxTokens caps the completion's own length. omitempty drops it entirely
-	// when the caller set none, which is every request this adapter sent
-	// before domain.AgentRequest.MaxTokens existed — the endpoint's own
-	// default applies exactly as it always has.
 	MaxTokens int `json:"max_tokens,omitempty"`
 }
 
-// chatStreamOptions asks for the usage block a streamed response otherwise
-// never sends. omitempty keeps it off non-streamed requests, which reject it.
 type chatStreamOptions struct {
 	IncludeUsage bool `json:"include_usage"`
 }
@@ -96,9 +82,6 @@ type chatJSONSchema struct {
 	Schema map[string]interface{} `json:"schema"`
 }
 
-// buildResponseFormat maps the provider-neutral request to the OpenAI-compatible
-// response_format parameter. Plain JSON mode when no schema is given; schema mode
-// otherwise (schema mode needs a name — OpenAI rejects an empty one).
 func buildResponseFormat(rf *domain.ResponseFormat) *chatResponseFormat {
 	if rf == nil {
 		return nil
@@ -119,18 +102,12 @@ func buildResponseFormat(rf *domain.ResponseFormat) *chatResponseFormat {
 type chatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
-	// ContentParts is the multimodal form of Content: when it is set, the
-	// request sends a content ARRAY instead of the string. It is request-only
-	// (responses always come back as a string) and marshalled by
-	// MarshalJSON below, never directly — hence the "-" tag.
 	ContentParts []chatContentPart `json:"-"`
 	ToolCalls    []toolCall        `json:"tool_calls,omitempty"`
 	ToolCallID   string            `json:"tool_call_id,omitempty"`
 	Name         string            `json:"name,omitempty"`
 }
 
-// chatContentPart is one element of an OpenAI-compatible multimodal content
-// array — text, or an image carried as a data: URI.
 type chatContentPart struct {
 	Type     string        `json:"type"`
 	Text     string        `json:"text,omitempty"`
@@ -141,12 +118,8 @@ type chatImageURL struct {
 	URL string `json:"url"`
 }
 
-// MarshalJSON keeps content a plain string unless the message actually carries
-// parts. Strict OpenAI-compatible servers (and small local ones) reject or
-// mishandle an array where they expect a string, so the overwhelmingly common
-// text-only message must stay byte-for-byte what it has always been.
 func (m chatMessage) MarshalJSON() ([]byte, error) {
-	type plain chatMessage // no MarshalJSON of its own — avoids recursing here
+	type plain chatMessage
 	if len(m.ContentParts) == 0 {
 		return json.Marshal(plain(m))
 	}
@@ -197,11 +170,6 @@ type choice struct {
 	FinishReason string      `json:"finish_reason"`
 }
 
-// usage follows the OpenAI convention: prompt_tokens ALREADY includes whatever
-// the cache served, and prompt_tokens_details.cached_tokens breaks out how much
-// of it that was. Endpoints that don't do prompt caching omit the details
-// object entirely, which is why it is a pointer — an absent object must read as
-// "no cache", not as a zeroed one we then trust.
 type usage struct {
 	PromptTokens        int                  `json:"prompt_tokens"`
 	CompletionTokens    int                  `json:"completion_tokens"`
@@ -227,8 +195,7 @@ func (u usage) toDomain() domain.Usage {
 		CompletionTokens: u.CompletionTokens,
 		TotalTokens:      total,
 		CacheReadTokens:  cached,
-		// OpenAI-compatible endpoints cache automatically and bill the write at
-		// the plain input rate, so there is no write premium to record.
+
 		CacheWriteTokens: 0,
 	}
 }
@@ -318,10 +285,6 @@ func (c *openAICompatClient) Chat(ctx context.Context, req domain.AgentRequest) 
 	}, nil
 }
 
-// buildToolDefs renders the provider-neutral tool definitions for an
-// OpenAI-compatible endpoint. Shared by Chat and ChatStream: a streamed turn
-// plans its tool calls exactly like a buffered one, and a stream sent without
-// tools can only ever answer in prose.
 func buildToolDefs(tools []domain.ToolDefinition) []toolDef {
 	out := make([]toolDef, 0, len(tools))
 	for _, t := range tools {
@@ -362,13 +325,6 @@ type streamDelta struct {
 	ToolCalls []streamToolCall `json:"tool_calls,omitempty"`
 }
 
-// streamToolCall is one fragment of a tool call. A provider sends the id and
-// the function name once and then dribbles the arguments out across as many
-// chunks as it likes, all tied together by index.
-//
-// Index is a pointer because a missing index and index 0 are different things:
-// servers that send no index at all put every call of a turn at 0, which would
-// splice two calls' arguments into one unparseable string. See toolCallStream.
 type streamToolCall struct {
 	Index    *int                `json:"index,omitempty"`
 	ID       string              `json:"id,omitempty"`
@@ -381,16 +337,11 @@ type streamFunctionCall struct {
 	Arguments string `json:"arguments,omitempty"`
 }
 
-// toolCallAccum is one call under construction. It is only ever held by
-// pointer: a strings.Builder panics if it is copied after its first write, and
-// a slice of them is copied wholesale every time it grows.
 type toolCallAccum struct {
 	call toolCall
 	args strings.Builder
 }
 
-// toolCallStream reassembles the fragments into whole calls, in the order the
-// provider first mentioned them.
 type toolCallStream struct {
 	order []*toolCallAccum
 	byKey map[int]*toolCallAccum
@@ -400,8 +351,6 @@ func newToolCallStream() *toolCallStream {
 	return &toolCallStream{byKey: make(map[int]*toolCallAccum)}
 }
 
-// add folds one fragment in. pos is the fragment's place in its own chunk, used
-// as the key when the provider sends no index.
 func (s *toolCallStream) add(pos int, frag streamToolCall) {
 	key := pos
 	if frag.Index != nil {
@@ -409,8 +358,6 @@ func (s *toolCallStream) add(pos int, frag streamToolCall) {
 	}
 
 	acc, known := s.byKey[key]
-	// A fresh id under a key that already carries a different one means the
-	// provider is numbering nothing and has simply moved on to the next call.
 	if known && frag.ID != "" && acc.call.ID != "" && acc.call.ID != frag.ID {
 		known = false
 	}
@@ -434,8 +381,6 @@ func (s *toolCallStream) add(pos int, frag streamToolCall) {
 	}
 }
 
-// calls returns the finished calls in the wire shape the buffered path produces,
-// so both go through parseToolCalls and get the same id repair.
 func (s *toolCallStream) calls() []toolCall {
 	out := make([]toolCall, 0, len(s.order))
 	for _, acc := range s.order {
@@ -459,10 +404,6 @@ func (c *openAICompatClient) ChatStream(ctx context.Context, req domain.AgentReq
 		Model:    model,
 		Messages: msgs,
 		Stream:   true,
-		// Without this a streamed response carries no usage at all, so every
-		// streamed turn was billed as zero tokens. Providers that do not know
-		// the option ignore it and simply send no usage, which is what the
-		// nil check below already handles.
 		StreamOptions:  &chatStreamOptions{IncludeUsage: true},
 		ResponseFormat: buildResponseFormat(req.ResponseFormat),
 		MaxTokens:      req.MaxTokens,
@@ -498,8 +439,6 @@ func (c *openAICompatClient) ChatStream(ctx context.Context, req domain.AgentReq
 	var streamUsage usage
 
 	scanner := bufio.NewScanner(resp.Body)
-	// SSE frames carrying tool-call arguments routinely exceed bufio's 64 KB
-	// default, which aborted the stream with "token too long".
 	scanner.Buffer(make([]byte, 0, 64*1024), maxSSELineBytes)
 
 	for scanner.Scan() {
@@ -517,9 +456,6 @@ func (c *openAICompatClient) ChatStream(ctx context.Context, req domain.AgentReq
 			continue
 		}
 
-		// The usage chunk is read before the choices check, not after: the
-		// chunk that carries usage is the one with an EMPTY choices array, so
-		// skipping it as choiceless threw away the only token count sent.
 		if chunk.Usage != nil {
 			streamUsage = *chunk.Usage
 		}
@@ -529,9 +465,7 @@ func (c *openAICompatClient) ChatStream(ctx context.Context, req domain.AgentReq
 		}
 
 		delta := chunk.Choices[0].Delta
-		// Only text goes to the caller. Tool-call fragments are half-written
-		// JSON — forwarding them would print the model's plumbing into the
-		// user's answer.
+
 		if delta.Content != "" {
 			fullContent.WriteString(delta.Content)
 			onToken(delta.Content)
@@ -588,24 +522,9 @@ func (c *openAICompatClient) Models(ctx context.Context) ([]string, error) {
 	return models, nil
 }
 
-// llmErrorBodyMax bounds how much of a provider's rejection body this type
-// carries; it is quoted into tool results, run summaries and logs.
 const llmErrorBodyMax = 2000
 
-// EmbeddingUnavailableError is the embedding provider refusing the call for a
-// reason that sending the same bytes again cannot fix: a key it does not
-// accept, a plan that is unpaid or spent, a model it will not serve, or a
-// window it has shut. It also covers never reaching the provider at all.
-//
-// It exists because callers could only see the provider's own words. The tool
-// that reads this error surfaced `embeddings returned 402: {"detail":"Check
-// your subscription on https://admin.mistral.ai/subscription"}` verbatim, which
-// the agent read as a transient glitch and retried eight times in one run. A
-// type lets that caller say "this server has no semantic search, use the other
-// tools" without matching on a provider's prose.
 type EmbeddingUnavailableError struct {
-	// StatusCode is the provider's refusal status, or 0 when the request never
-	// got an answer (DNS, dial, TLS, timeout) — Cause holds the reason then.
 	StatusCode int
 	Body       string
 	Cause      error
@@ -615,25 +534,18 @@ func (e *EmbeddingUnavailableError) Error() string {
 	if e.StatusCode == 0 {
 		return fmt.Sprintf("embeddings unreachable: %v", e.Cause)
 	}
-	// The provider's own wording is kept so logs and stored run summaries read
-	// the same as they did before this type existed.
+
 	return fmt.Sprintf("embeddings returned %d: %s", e.StatusCode, e.Body)
 }
 
 func (e *EmbeddingUnavailableError) Unwrap() error { return e.Cause }
 
-// embeddingRejectionStatuses are the refusals no retry can clear: the account
-// is not authenticated (401), not paid up or out of credit (402), or not
-// allowed this model (403). 429 is deliberately absent — it is retryable and
-// stays a *RateLimitError so the account limiter can honour its Retry-After.
 var embeddingRejectionStatuses = map[int]bool{
 	http.StatusUnauthorized:    true,
 	http.StatusPaymentRequired: true,
 	http.StatusForbidden:       true,
 }
 
-// newEmbeddingUnavailableError types a refusal the caller must not retry, and
-// returns nil for any other status so the plain error is used instead.
 func newEmbeddingUnavailableError(statusCode int, body string) *EmbeddingUnavailableError {
 	if !embeddingRejectionStatuses[statusCode] {
 		return nil
@@ -676,9 +588,6 @@ func (c *openAICompatClient) Embed(ctx context.Context, input string, model stri
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		// A call that never reached the provider is typed too, but not when the
-		// caller is the one who walked away: a cancelled or expired context is
-		// our own doing and must not be reported as the provider being down.
 		if ctx.Err() != nil {
 			return nil, fmt.Errorf("http request: %w", err)
 		}
@@ -692,13 +601,10 @@ func (c *openAICompatClient) Embed(ctx context.Context, input string, model stri
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		// A 429 is retryable and carries the provider's own pacing hint, so it
-		// leaves this client as a typed error instead of an opaque string.
 		if rle := newRateLimitError("embeddings", resp, string(respBody)); rle != nil {
 			return nil, rle
 		}
-		// An auth, billing or permission refusal is the opposite: retrying it
-		// spends the run to collect the same answer, so it is typed as such.
+
 		if eue := newEmbeddingUnavailableError(resp.StatusCode, string(respBody)); eue != nil {
 			return nil, eue
 		}

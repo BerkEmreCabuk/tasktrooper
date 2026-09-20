@@ -14,6 +14,7 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/domain/taskkey"
 )
 
 // assigneeTaskStore is fakePackageTaskStore with a Create that actually
@@ -25,7 +26,11 @@ type assigneeTaskStore struct {
 
 func (a *assigneeTaskStore) Create(_ context.Context, task domain.BoardTask) (domain.BoardTask, error) {
 	task.ID = uuid.New()
-	task.Key = domain.FormatTaskKey(task.TaskType, task.TaskNumber)
+	prefix := "T"
+	if wf, ok := workflowtest.Default().Workflows[task.TaskType]; ok {
+		prefix = wf.Type.KeyPrefix
+	}
+	task.Key = taskkey.FormatTaskKey(prefix, task.TaskNumber)
 	a.tasks[task.ID] = task
 	return task, nil
 }

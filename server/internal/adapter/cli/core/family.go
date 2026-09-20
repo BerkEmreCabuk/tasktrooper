@@ -1,0 +1,230 @@
+package core
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"os/exec"
+	"strings"
+	"time"
+
+	"github.com/rs/zerolog/log"
+
+	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+)
+
+// StderrTailMax is how much of a child's stderr is kept for quoting when the
+// session ends badly; the head is usually noise anyway.
+const StderrTailMax = 8 << 10
+
+// FamilySpec is everything a "role CLI" executor's run differs in that can be
+// expressed as data plus hooks. Family implements the whole spawn+parse+finish
+// flow against the spec; a flavor package is left with the two surfaces that
+// genuinely cannot be shared — its event parser and its arg builder — plus its
+// own probe/auth and its own mcp wiring.
+type FamilySpec struct {
+	// ProcessName is what logs and errors call the CLI.
+	ProcessName string
+	Provider    domain.LLMProviderType
+	// Message scaffolding. NewError is the fmt for New's resolve failure.
+	NewError      string
+	NotConfigured string
+	NoWorkDir     string
+	StartFmt      string
+	StdoutFmt     string
+	GateLogMsg    string
+	GateDetailFmt string
+	QuotaLogMsg   string
+
+	// BuildArgs is the CLI's invocation contract (its only real flag surface).
+	BuildArgs func(inv Invocation) []string
+	// Parse turns the CLI's stream format into the common Outcome.
+	Parse func(r io.Reader, s Sink) (Outcome, error)
+	// TraceStep is the activity step name for the CLI's session, and the two
+	// predicates translate its native tool names into ledger names and filter
+	// TaskTrooper's own tools back out of the ledger.
+	TraceStep    string
+	SinceOwnTool func(string) bool
+	LedgerTool   func(string) string
+	// ApplyMCP hands the run's MCP config to the CLI the way only it can: a
+	// config file in the workspace (cursor, antigravity) or an inline env var
+	// (opencode). It returns extra env entries and a cleanup for the run's
+	// credential.
+	ApplyMCP func(ctx context.Context, workDir string, cfg MCPConfig) (env []string, cleanup func(), err error)
+	// WatchStderr wraps the stderr tail with anything that needs raw stderr
+	// (opencode's rate-limit watcher). nil means the tail is all there is.
+	WatchStderr func(cancel context.CancelFunc, tail io.Writer) io.Writer
+	// AllowCleanExitAsResult lets a session that ended cleanly with real text
+	// but no terminal result event count as an answer anyway (a known
+	// opencode misbehaviour). Cursor and AGY have no such carve-out.
+	AllowCleanExitAsResult bool
+	// BlockFrom detects a spent-subscription outcome for this CLI.
+	BlockFrom func(out Outcome, stderrTail, sessionID string, now time.Time) *domain.QuotaBlock
+}
+
+// Family is the shared role-CLI executor. A flavor package embeds it as a
+// value and forwards its port.TaskExecutor calls, so one implementation of the
+// spawn/parse/finish flow serves cursor-agent, agy and opencode.
+type Family struct {
+	spec        FamilySpec
+	bin         string
+	runTimeout  time.Duration
+	mcp         MCPConfig
+	mcpProvider MCPProvider
+}
+
+func NewFamily(spec FamilySpec, bin string, runTimeout time.Duration, mcp MCPConfig, mcpProvider MCPProvider) *Family {
+	return &Family{spec: spec, bin: bin, runTimeout: runTimeout, mcp: mcp, mcpProvider: mcpProvider}
+}
+
+func (f *Family) Spec() FamilySpec { return f.spec }
+
+func (f *Family) Bin() string { return f.bin }
+
+func (f *Family) Supports(provider domain.LLMProviderType) bool {
+	return f != nil && provider == f.spec.Provider
+}
+
+// Execute resolves and applies the run's MCP config, spawns the CLI, and
+// turns the outcome through the shared finish decision tree.
+func (f *Family) Execute(ctx context.Context, req domain.TaskExecution, now func() time.Time) (domain.AgentResponse, error) {
+	mcpCfg, releaseMCP, err := ResolveMCP(ctx, f.mcpProvider, f.mcp, MCPRun{Policy: req.Policy, Label: req.TaskKey})
+	defer releaseMCP()
+	if err != nil {
+		return domain.AgentResponse{}, err
+	}
+	extraEnv, cleanupMCP, err := f.spec.ApplyMCP(ctx, req.WorkDir, mcpCfg)
+	if err != nil {
+		return domain.AgentResponse{}, err
+	}
+	defer cleanupMCP()
+
+	inv := Invocation{
+		Trace:   NewTrace(ctx, req.TaskKey, f.spec.TraceStep, f.spec.SinceOwnTool, f.spec.LedgerTool),
+		WorkDir: req.WorkDir,
+		Prompt:  FlattenHistory(req.History),
+		Model:   req.Model,
+		Label:   req.TaskKey,
+	}
+	s, err := f.spawn(ctx, inv, extraEnv)
+	if err != nil {
+		return domain.AgentResponse{}, err
+	}
+	return f.finishInner(ctx, req.TaskKey, s, now)
+}
+
+func (f *Family) spawn(ctx context.Context, inv Invocation, extraEnv []string) (Session, error) {
+	runCtx, cancel := context.WithTimeout(ctx, f.runTimeout)
+	defer cancel()
+
+	args := f.spec.BuildArgs(inv)
+	cmd := exec.CommandContext(runCtx, f.bin, args...)
+	cmd.Dir = inv.WorkDir
+	cmd.Env = append(ChildEnv(ctx, false, nil), extraEnv...)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return Session{}, fmt.Errorf(f.spec.StdoutFmt, err)
+	}
+	tail := &TailWriter{max: StderrTailMax}
+	cmd.Stderr = tail
+	if f.spec.WatchStderr != nil {
+		if w := f.spec.WatchStderr(cancel, tail); w != nil {
+			cmd.Stderr = w
+		}
+	}
+
+	if err := cmd.Start(); err != nil {
+		return Session{}, fmt.Errorf(f.spec.StartFmt, err)
+	}
+
+	out, parseErr := f.spec.Parse(stdout, NewStreamingSink(inv.Trace, inv.Stream))
+	if parseErr != nil {
+		_, _ = io.Copy(io.Discard, stdout)
+	}
+	waitErr := cmd.Wait()
+	timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+
+	return Session{
+		Out:        out,
+		StderrTail: tail.String(),
+		ParseErr:   parseErr,
+		WaitErr:    waitErr,
+		TimedOut:   timedOut,
+	}, nil
+}
+
+func (f *Family) finishInner(ctx context.Context, label string, s Session, now func() time.Time) (domain.AgentResponse, error) {
+	out := s.Out
+	usageapp.TokenUsageFromContext(ctx).Add(out.Usage)
+
+	if s.TimedOut {
+		return domain.AgentResponse{}, fmt.Errorf("%s did not finish within %s and was stopped: %s",
+			f.spec.ProcessName, f.runTimeout, domain.TruncateHead(strings.TrimSpace(s.StderrTail), 500))
+	}
+	if s.ParseErr != nil {
+		return domain.AgentResponse{}, s.ParseErr
+	}
+
+	if !out.SawResult || out.IsError {
+		if block := f.spec.BlockFrom(out, s.StderrTail, out.SessionID, now()); block != nil {
+			log.Warn().
+				Str("task_key", label).
+				Str("cli_session_id", out.SessionID).
+				Time("resume_at", block.ResumeAt).
+				Msg(f.spec.QuotaLogMsg)
+			return domain.AgentResponse{}, block
+		}
+	}
+
+	if !out.SawResult {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return domain.AgentResponse{}, ctxErr
+		}
+		noOutput := s.WaitErr != nil || strings.TrimSpace(out.Text) == ""
+		if noOutput || !f.spec.AllowCleanExitAsResult {
+			if sig, ok := domain.ExitSignal(s.WaitErr); ok {
+				return domain.AgentResponse{}, fmt.Errorf(
+					"%s was killed by signal %s from outside this run: %s",
+					f.spec.ProcessName, sig, domain.TruncateHead(strings.TrimSpace(s.StderrTail), 500))
+			}
+			return domain.AgentResponse{}, fmt.Errorf("%s ended without a result (%v): %s",
+				f.spec.ProcessName, s.WaitErr, domain.TruncateHead(strings.TrimSpace(s.StderrTail), 500))
+		}
+	}
+	if out.IsError {
+		return domain.AgentResponse{}, fmt.Errorf("%s failed (%s): %s",
+			f.spec.ProcessName, out.Status, domain.TruncateHead(FirstNonEmpty(out.Text, strings.TrimSpace(s.StderrTail)), 1000))
+	}
+	if s.WaitErr != nil {
+		return domain.AgentResponse{}, fmt.Errorf("%s exited with an error after reporting success (%v): %s",
+			f.spec.ProcessName, s.WaitErr, domain.TruncateHead(strings.TrimSpace(s.StderrTail), 500))
+	}
+	if strings.TrimSpace(out.Text) == "" {
+		return domain.AgentResponse{}, errors.New(f.spec.ProcessName + " finished without producing any answer")
+	}
+	return domain.AgentResponse{
+		Message: domain.Message{Role: domain.RoleAssistant, Content: out.Text},
+		Usage:   out.Usage,
+	}, nil
+}
+
+// FlattenHistory folds a task's message history into the one prose prompt
+// these CLIs take as their positional prompt argument. Assistant turns are
+// marked so the model still sees them as prior answers, not new instructions.
+func FlattenHistory(history []domain.Message) string {
+	var parts []string
+	for _, msg := range history {
+		content := strings.TrimSpace(msg.Content)
+		if content == "" {
+			continue
+		}
+		if msg.Role == domain.RoleAssistant {
+			content = "Earlier assistant turn:\n" + content
+		}
+		parts = append(parts, content)
+	}
+	return strings.Join(parts, "\n\n")
+}

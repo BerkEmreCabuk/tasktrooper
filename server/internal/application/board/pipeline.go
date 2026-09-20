@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/github"
+	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -132,6 +132,9 @@ type PipelineRunner struct {
 	stores     StoreSubmitter
 	prRecorder TaskPRRecorder
 	taskReader TaskRunbookReader
+	// workflows backs ResolveUnfinished's "is this task's current column still
+	// the CI gate" check (wait_for_ci) — see workflowFor in pipeline_gate.go.
+	workflows port.WorkflowReader
 	// bounces refuses a second bounce off the SAME failed commit. Nil keeps the
 	// old behaviour: every failed pipeline sends the task back, however many
 	// times the identical commit has already done so.
@@ -159,6 +162,10 @@ func (p *PipelineRunner) SetIncidentReporter(r IncidentReporter) { p.incidents =
 // without it (and without Deps.DeployTargets) a store prod deploy still
 // releases the task, it just isn't tracked through review.
 func (p *PipelineRunner) SetStoreSubmitter(s StoreSubmitter) { p.stores = s }
+
+// SetWorkflows wires the workflow reader ResolveUnfinished asks whether the
+// task's current column still gates on wait_for_ci.
+func (p *PipelineRunner) SetWorkflows(w port.WorkflowReader) { p.workflows = w }
 
 func NewPipelineRunner(deps PipelineRunnerDeps) *PipelineRunner {
 	return &PipelineRunner{

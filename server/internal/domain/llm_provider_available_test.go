@@ -9,7 +9,7 @@ import (
 )
 
 // cursor_agent now has both halves built: application/agentfs.FlavorCursor
-// renders the catalog and internal/adapter/agentcli/cursor executes it, so the
+// renders the catalog and internal/adapter/cli/cursor executes it, so the
 // definition must say it is available like any other host-executed CLI.
 func TestCursorAgentIsDeclaredAsAnAvailableHostExecutedProvider(t *testing.T) {
 	def, ok := domain.LLMProviderDefinitionFor(domain.LLMProviderCursorAgent)
@@ -17,7 +17,7 @@ func TestCursorAgentIsDeclaredAsAnAvailableHostExecutedProvider(t *testing.T) {
 	require.True(t, ok, "the provider must be listed, or the UI has nothing to show")
 	require.Equal(t, domain.LLMProviderCursorAgent, def.Type)
 	require.True(t, def.HostExecuted, "it is a process on the runner host, not an endpoint")
-	require.True(t, def.Available, "internal/adapter/agentcli/cursor hands a task to cursor-agent")
+	require.True(t, def.Available, "internal/adapter/cli/cursor hands a task to cursor-agent")
 	require.False(t, def.RequiresAPIKey, "a CLI carries its own subscription auth")
 	require.False(t, def.BaseURLRequired, "there is no endpoint to dial")
 	require.False(t, def.ModelRequired)
@@ -27,7 +27,7 @@ func TestCursorAgentIsDeclaredAsAnAvailableHostExecutedProvider(t *testing.T) {
 	require.True(t, domain.ProviderAvailable(domain.LLMProviderCursorAgent))
 }
 
-// antigravity follows the exact same pattern: internal/adapter/agentcli/antigravity
+// antigravity follows the exact same pattern: internal/adapter/cli/antigravity
 // is now the executor and application/agentfs.FlavorAntigravity is the catalog.
 func TestAntigravityIsDeclaredAsAnAvailableHostExecutedProvider(t *testing.T) {
 	def, ok := domain.LLMProviderDefinitionFor(domain.LLMProviderAntigravity)
@@ -35,7 +35,7 @@ func TestAntigravityIsDeclaredAsAnAvailableHostExecutedProvider(t *testing.T) {
 	require.True(t, ok, "the provider must be listed, or the UI has nothing to show")
 	require.Equal(t, domain.LLMProviderAntigravity, def.Type)
 	require.True(t, def.HostExecuted, "it is a process on the runner host, not an endpoint")
-	require.True(t, def.Available, "internal/adapter/agentcli/antigravity hands a task to agy")
+	require.True(t, def.Available, "internal/adapter/cli/antigravity hands a task to agy")
 	require.False(t, def.RequiresAPIKey, "a CLI carries its own subscription auth")
 	require.False(t, def.BaseURLRequired, "there is no endpoint to dial")
 	require.False(t, def.ModelRequired)
@@ -45,7 +45,7 @@ func TestAntigravityIsDeclaredAsAnAvailableHostExecutedProvider(t *testing.T) {
 	require.True(t, domain.ProviderAvailable(domain.LLMProviderAntigravity))
 }
 
-// opencode is the newest of the local-CLI providers: internal/adapter/agentcli/opencode
+// opencode is the newest of the local-CLI providers: internal/adapter/cli/opencode
 // is its executor, and it has no dedicated agentfs flavor beyond the shared
 // .claude/skills directory (see agentfs/opencode.go).
 func TestOpencodeIsDeclaredAsAnAvailableHostExecutedProvider(t *testing.T) {
@@ -54,7 +54,7 @@ func TestOpencodeIsDeclaredAsAnAvailableHostExecutedProvider(t *testing.T) {
 	require.True(t, ok, "the provider must be listed, or the UI has nothing to show")
 	require.Equal(t, domain.LLMProviderOpencode, def.Type)
 	require.True(t, def.HostExecuted, "it is a process on the runner host, not an endpoint")
-	require.True(t, def.Available, "internal/adapter/agentcli/opencode hands a task to opencode")
+	require.True(t, def.Available, "internal/adapter/cli/opencode hands a task to opencode")
 	require.False(t, def.RequiresAPIKey, "a CLI carries its own provider auth")
 	require.False(t, def.BaseURLRequired, "there is no endpoint to dial")
 	require.False(t, def.ModelRequired)

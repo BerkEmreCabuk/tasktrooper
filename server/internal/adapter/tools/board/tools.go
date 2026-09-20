@@ -167,7 +167,7 @@ func NewExecutors(kit *ToolKit) []port.ToolExecutor {
 		// a merge nobody watches is how a task reaches `released` on the
 		// strength of a green PR check. Registration is what makes them callable
 		// at all; catalog/role_tools.go decides by whom, and
-		// domain.RestrictToolsForVerdictColumn decides in which column.
+		// domain.RestrictToolsForStage's strip_writers behaviour decides in which column.
 		execs = append(execs,
 			newDeployStatusTool(kit),
 			newDeployLogsTool(kit),

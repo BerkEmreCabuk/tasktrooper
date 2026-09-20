@@ -466,7 +466,6 @@ func (s *Service) CreateSetupTask(ctx context.Context, repositoryID uuid.UUID, e
 	return s.tasks.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
 		Title:           fmt.Sprintf("Set up %s deploy (%s)", env, tpl.Name),
 		Description:     b.String(),
-		TaskType:        domain.TaskTypeTask,
 		Priority:        domain.TaskPriorityHigh,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
@@ -528,7 +527,6 @@ func (s *Service) CreateLocalSetupTask(ctx context.Context, repositoryID uuid.UU
 	return s.tasks.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
 		Title:           fmt.Sprintf("Write the local bootstrap script (%s)", kind),
 		Description:     b.String(),
-		TaskType:        domain.TaskTypeTask,
 		Priority:        domain.TaskPriorityMedium,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",

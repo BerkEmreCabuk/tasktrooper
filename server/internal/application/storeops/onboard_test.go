@@ -173,7 +173,7 @@ func (s *OnboardSuite) TestOnboardIOSWithoutRecordOpensChecklistTask() {
 	call := s.tasks.Calls[0]
 	s.Equal(repoID, call.RepositoryID)
 	s.Equal("Store onboarding: com.example.app (ios)", call.Request.Title)
-	s.Equal(domain.TaskTypeTask, call.Request.TaskType)
+	s.Empty(call.Request.TaskType, "left for CreateTask's own resolveTaskType to fill in the default type")
 	s.Equal(domain.TaskPriorityHigh, call.Request.Priority)
 	s.Equal(domain.TaskColumnTodo, call.Request.Column)
 	s.Equal("system", call.Request.CreatedBy)

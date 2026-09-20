@@ -33,7 +33,7 @@ func TestDoneRunNeverCommitsTheWorkspace(t *testing.T) {
 func TestDoneInstructionIsAboutMergingAndNeverAboutReleasing(t *testing.T) {
 	instruction := columnInstruction(taskWF, domain.BoardTask{
 		Column:   domain.TaskColumnDone,
-		TaskType: domain.TaskTypeTask,
+		TaskType: "task",
 	})
 
 	assert.Contains(t, instruction, "merge_task_pull_request")
@@ -44,7 +44,7 @@ func TestDoneInstructionIsAboutMergingAndNeverAboutReleasing(t *testing.T) {
 func TestDoneInstructionForAnalizIsUnchanged(t *testing.T) {
 	instruction := columnInstruction(analizWF, domain.BoardTask{
 		Column:   domain.TaskColumnDone,
-		TaskType: domain.TaskTypeAnaliz,
+		TaskType: "analiz",
 	})
 
 	assert.Contains(t, instruction, "decompose")

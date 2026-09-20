@@ -34,13 +34,11 @@ type geminiVertexClient struct {
 func NewGeminiVertexClient(project, location, model, apiKey string, _ time.Duration) (port.LLMClient, error) {
 	var cfg *genai.ClientConfig
 	if apiKey != "" {
-		// API key → Gemini API (generativelanguage.googleapis.com), no project/location needed
 		cfg = &genai.ClientConfig{
 			APIKey:  apiKey,
 			Backend: genai.BackendGeminiAPI,
 		}
 	} else {
-		// No API key → Vertex AI (aiplatform.googleapis.com) with ADC
 		cfg = &genai.ClientConfig{
 			Project:  project,
 			Location: location,
@@ -61,10 +59,6 @@ func (c *geminiVertexClient) modelID(req domain.AgentRequest) string {
 	return c.model
 }
 
-// geminiInlineImageParts turns the domain's base64 images into inline_data
-// parts. The SDK's Blob takes raw bytes and re-encodes them itself, so an image
-// whose data is not valid base64 is dropped rather than shipped as garbage the
-// API would reject for the whole request.
 func geminiInlineImageParts(images []domain.ToolResultImage) []*genai.Part {
 	if len(images) == 0 {
 		return nil
@@ -84,13 +78,6 @@ func geminiInlineImageParts(images []domain.ToolResultImage) []*genai.Part {
 
 func buildGeminiContents(messages []domain.Message) ([]*genai.Content, *genai.Content) {
 	var contents []*genai.Content
-	// Gemini takes one system instruction, but callers stack several system
-	// messages (persona + skills + rules, KPI, memory, workspace note, language
-	// rule). Collect them all — overwriting would drop the agent's instructions.
-	//
-	// Only the leading run of them, though: Gemini has no system role inside the
-	// contents array either, so a mid-run injection takes the same in-position
-	// user turn Anthropic gives it. See systemReminder.
 	var systemParts []string
 	seenTurn := false
 
@@ -111,9 +98,6 @@ func buildGeminiContents(messages []domain.Message) ([]*genai.Content, *genai.Co
 			i++
 		case domain.RoleUser:
 			seenTurn = true
-			// A lone text part is what every user turn has always been; images
-			// the human attached ride as inline_data parts behind it, which is
-			// how Gemini takes multimodal input.
 			parts := []*genai.Part{{Text: m.Content}}
 			parts = append(parts, geminiInlineImageParts(m.Images)...)
 			contents = append(contents, &genai.Content{
@@ -147,7 +131,6 @@ func buildGeminiContents(messages []domain.Message) ([]*genai.Content, *genai.Co
 			i++
 		case domain.RoleTool:
 			seenTurn = true
-			// batch consecutive tool results into one user turn
 			var parts []*genai.Part
 			var carried []domain.ToolResultImage
 			for i < len(messages) && messages[i].Role == domain.RoleTool {
@@ -156,9 +139,6 @@ func buildGeminiContents(messages []domain.Message) ([]*genai.Content, *genai.Co
 				if err := json.Unmarshal([]byte(tm.Content), &response); err != nil {
 					response = map[string]any{"result": tm.Content}
 				}
-				// FunctionResponse is a JSON map, not content parts — images
-				// cannot ride along with the result itself, so they follow the
-				// batch as inline data on their own user turn.
 				if len(tm.Images) > 0 {
 					if response == nil {
 						response = map[string]any{}
@@ -217,8 +197,7 @@ func buildGeminiConfig(systemInstruction *genai.Content, tools []domain.ToolDefi
 		}
 		config.Tools = []*genai.Tool{{FunctionDeclarations: decls}}
 	} else if respFormat != nil {
-		// Gemini rejects a JSON response MIME type combined with function
-		// declarations, so JSON mode only applies to tool-less requests.
+
 		config.ResponseMIMEType = "application/json"
 		if respFormat.Schema != nil {
 			config.ResponseJsonSchema = respFormat.Schema
@@ -227,9 +206,6 @@ func buildGeminiConfig(systemInstruction *genai.Content, tools []domain.ToolDefi
 	return config
 }
 
-// geminiToolCalls converts the SDK's function calls to the domain shape. The
-// streamed path needs the same conversion the buffered one does — a chunk
-// carries whole function calls, not fragments, so it can simply collect them.
 func geminiToolCalls(fcs []*genai.FunctionCall) []domain.ToolCall {
 	toolCalls := make([]domain.ToolCall, 0, len(fcs))
 	for _, fc := range fcs {
@@ -253,11 +229,6 @@ func geminiToolCalls(fcs []*genai.FunctionCall) []domain.ToolCall {
 	return toolCalls
 }
 
-// geminiUsage normalizes Vertex's accounting. PromptTokenCount is already the
-// whole prompt with the cached span folded in, matching domain.Usage, so only
-// the cached slice needs breaking out. Gemini has no write premium to report:
-// context caching is provisioned ahead of a call rather than billed per
-// request, so CacheWriteTokens stays zero.
 func geminiUsage(m *genai.GenerateContentResponseUsageMetadata) domain.Usage {
 	return domain.Usage{
 		PromptTokens:     int(m.PromptTokenCount),
@@ -309,14 +280,12 @@ func (c *geminiVertexClient) ChatStream(ctx context.Context, req domain.AgentReq
 		if err != nil {
 			return domain.AgentResponse{}, fmt.Errorf("gemini stream: %w", err)
 		}
-		// Only the text reaches the caller; a function call is plumbing, not
-		// something to print into the answer.
+
 		if text := resp.Text(); text != "" {
 			fullText.WriteString(text)
 			onToken(text)
 		}
-		// Every streamed turn used to come back tool-less, so a streamed run
-		// could only ever answer in prose no matter what the model asked for.
+
 		toolCalls = append(toolCalls, geminiToolCalls(resp.FunctionCalls())...)
 		if m := resp.UsageMetadata; m != nil && m.TotalTokenCount > 0 {
 			finalUsage = geminiUsage(m)
@@ -339,8 +308,7 @@ func (c *geminiVertexClient) Models(_ context.Context) ([]string, error) {
 
 func (c *geminiVertexClient) Embed(ctx context.Context, input string, model string) ([]float32, error) {
 	embedModel := strings.TrimPrefix(strings.TrimSpace(model), "models/")
-	// text-embedding-004 API'den kaldırıldı; eski kayıtları da (eski "models/" önekiyle
-	// kaydedilmiş olsa dahi) yeni modele çevir.
+
 	if embedModel == "" || !strings.Contains(embedModel, "embedding") || embedModel == "text-embedding-004" {
 		embedModel = "gemini-embedding-001"
 	}
@@ -358,19 +326,6 @@ func (c *geminiVertexClient) Embed(ctx context.Context, input string, model stri
 	return resp.Embeddings[0].Values, nil
 }
 
-// geminiEmbedError classifies an embedding failure the same way the
-// OpenAI-compatible client does, so codebase_search can word it the same way.
-//
-// It exists because the two clients failed differently for the same reason: a
-// rejected Gemini/Vertex key got `gemini embed: Error 403, Message: ...` —
-// the provider's own prose, which the agent reads as worth another go —
-// while the same failure on Mistral got a typed error and a tool result that
-// told it to stop. The classification belongs to the failure, not to the SDK
-// that happened to report it.
-//
-// Anything else (a malformed request, an SDK-level fault) keeps the original
-// wrapping: it is a bug here, not a provider verdict, and typing it would tell
-// the agent to abandon semantic search over our own mistake.
 func geminiEmbedError(ctx context.Context, err error) error {
 	var apiErr genai.APIError
 	if errors.As(err, &apiErr) {
@@ -378,8 +333,7 @@ func geminiEmbedError(ctx context.Context, err error) error {
 		if body == "" {
 			body = apiErr.Status
 		}
-		// 429/503 stay retryable and carry the provider's own wait, exactly as
-		// newRateLimitError builds them on the OpenAI-compatible path.
+
 		if apiErr.Code == http.StatusTooManyRequests || apiErr.Code == http.StatusServiceUnavailable {
 			return &RateLimitError{
 				Endpoint:   "embeddings",
@@ -393,8 +347,7 @@ func geminiEmbedError(ctx context.Context, err error) error {
 		}
 		return fmt.Errorf("gemini embed: %w", err)
 	}
-	// A request that never got an answer is typed too — but not when we are the
-	// ones who walked away, since a cancelled context is our doing.
+
 	var urlErr *url.Error
 	if errors.As(err, &urlErr) && ctx.Err() == nil {
 		return &EmbeddingUnavailableError{Cause: err}
@@ -402,9 +355,6 @@ func geminiEmbedError(ctx context.Context, err error) error {
 	return fmt.Errorf("gemini embed: %w", err)
 }
 
-// geminiRetryDelay reads the wait out of a google.rpc.RetryInfo detail, which
-// is where Gemini and Vertex state it — the SDK discards response headers, so
-// Retry-After never reaches us on this path.
 func geminiRetryDelay(details []map[string]any) time.Duration {
 	for _, detail := range details {
 		delay, _ := detail["retryDelay"].(string)

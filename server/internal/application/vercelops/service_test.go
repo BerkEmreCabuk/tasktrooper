@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	vercelapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vercel"
+	vercelapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/vercel"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/vercelops"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"

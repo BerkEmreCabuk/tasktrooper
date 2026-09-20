@@ -13,7 +13,7 @@ const TERMINAL_STEP_TYPES = new Set([
   // not) kept polling and kept the "Live" badge up forever, because its last
   // step is neither an assistant_message nor any of the loop's endings.
   "claude_code_result",
-  "claude_code_quota_park",
+  "llm_provider_code_quota_park",
 ]);
 
 // Statuses the run row itself reports as over. The step stream cannot be

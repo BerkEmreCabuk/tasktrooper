@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/google/uuid"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/claudecode"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/claudecode"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/mcpserver"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"

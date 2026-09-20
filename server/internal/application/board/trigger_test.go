@@ -76,7 +76,7 @@ func TestTriggerMessageStatesStandingCriteriaForImplementers(t *testing.T) {
 // to write unit tests is telling it to do the implementer's job.
 func TestTriggerMessageOmitsStandingCriteriaForAnaliz(t *testing.T) {
 	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{
-		Title: "t", Column: domain.TaskColumnInProgress, TaskType: domain.TaskTypeAnaliz,
+		Title: "t", Column: domain.TaskColumnInProgress, TaskType: "analiz",
 	}}, analizWF, nil, nil)
 	if strings.Contains(msg, "Standing acceptance criteria") {
 		t.Errorf("analiz run was handed the implementer's build criteria:\n%s", msg)
@@ -140,7 +140,7 @@ func TestTriggerMessageOmitsTheCriteriaBlockWhenNoneAreOpen(t *testing.T) {
 // instruction.
 func TestTriggerMessageCarriesTheTaskType(t *testing.T) {
 	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{
-		Title: "t", Column: domain.TaskColumnTodo, TaskType: domain.TaskTypeAnaliz,
+		Title: "t", Column: domain.TaskColumnTodo, TaskType: "analiz",
 	}}, analizWF, nil, nil)
 
 	if !strings.Contains(msg, `"task_type":"analiz"`) {
@@ -152,7 +152,7 @@ func TestAnalizInstructionDoesNotAskForCodeOrACodeReviewHandoff(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
 	} {
-		instruction := columnInstruction(analizWF, domain.BoardTask{Column: col, TaskType: domain.TaskTypeAnaliz})
+		instruction := columnInstruction(analizWF, domain.BoardTask{Column: col, TaskType: "analiz"})
 		if strings.Contains(instruction, "the system moves the task to code_review") {
 			t.Errorf("column %s: an analiz run is promised a code_review hand-off it never gets:\n%s", col, instruction)
 		}
@@ -174,11 +174,11 @@ func TestAnalizInstructionDoesNotAskForCodeOrACodeReviewHandoff(t *testing.T) {
 // analiz_review and done are human moves; the run dispatched after them has a
 // different job in each, and neither is implementation.
 func TestAnalizInstructionSplitsTheHumanGateFromTheApproval(t *testing.T) {
-	waiting := columnInstruction(analizWF, domain.BoardTask{Column: domain.TaskColumnAnalizReview, TaskType: domain.TaskTypeAnaliz})
+	waiting := columnInstruction(analizWF, domain.BoardTask{Column: domain.TaskColumnAnalizReview, TaskType: "analiz"})
 	if !strings.Contains(waiting, "Take no action") {
 		t.Errorf("analiz_review is a human gate; the agent must stand down:\n%s", waiting)
 	}
-	approved := columnInstruction(analizWF, domain.BoardTask{Column: domain.TaskColumnDone, TaskType: domain.TaskTypeAnaliz})
+	approved := columnInstruction(analizWF, domain.BoardTask{Column: domain.TaskColumnDone, TaskType: "analiz"})
 	if !strings.Contains(approved, "released") || !strings.Contains(approved, "list_team") {
 		t.Errorf("an approved analiz must be decomposed and released:\n%s", approved)
 	}
@@ -187,7 +187,7 @@ func TestAnalizInstructionSplitsTheHumanGateFromTheApproval(t *testing.T) {
 // The type branch must not leak into implementation work: a task/bug keeps the
 // implementer instruction exactly as it was.
 func TestImplementationTasksKeepTheColumnInstruction(t *testing.T) {
-	for _, typ := range []domain.TaskType{domain.TaskTypeTask, domain.TaskTypeBug, ""} {
+	for _, typ := range []domain.TaskType{"task", "bug", ""} {
 		instruction := columnInstruction(taskWF, domain.BoardTask{Column: domain.TaskColumnInProgress, TaskType: typ})
 		if !strings.Contains(instruction, "code_review") {
 			t.Errorf("task type %q lost the implementer hand-off:\n%s", typ, instruction)

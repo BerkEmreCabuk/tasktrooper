@@ -465,56 +465,30 @@ func UpliftWorkspaceTools(p ToolPolicy) ToolPolicy {
 	return uplifted
 }
 
-// RestrictToolsForTaskType narrows a run's policy by what the TASK asks for,
-// after the role's policy has said what the AGENT may do. The two are different
-// questions: the architect holds the workspace writers because it also runs in
-// code_review and in chats, but on an analiz task there is nothing for them to
-// write — the deliverable is a document attached with add_task_document, the run
-// is never committed (Runner skips the post-run commit for analiz) and never
-// handed to code_review (advanceToCodeReview returns early for it).
+// RestrictToolsForStage narrows a run's policy by what the STAGE (task type +
+// column) asks for, after the role's policy has said what the AGENT may do —
+// the workflow-driven replacement for what used to be three separate literal
+// type/column switches (RestrictToolsForTaskType, RestrictToolsForVerdictColumn,
+// RestrictCodeToolsForVerification, retired in WP-B4). The three narrowings
+// below read off a WorkflowStage/TaskTypeDef instead, so a custom task type or
+// a custom stage narrows a policy exactly like task/analiz/bug do today,
+// without a line of engine code naming it.
 //
-// Until this existed the gap was only ever stated in the prompt, and the prompt
-// lost: dispatched on an analiz task whose description read like an instruction,
-// the architect called edit_file three times and delete_file once, reported the
-// feature as built, and every one of those edits died with the workspace.
+// The narrowings still apply in the order the old call chain applied them —
+// type first (no_workspace_writes), then the stage's own (strip_writers, then
+// no_code_reading/no_read_file) — because they are cumulative, not exclusive:
+// a stage could in principle carry more than one.
 //
-// An empty allowlist means unrestricted and stays unrestricted: the policy has
-// no deny list to express this in, and an agent with no allowlist is one the
-// operator has deliberately left unscoped.
-func RestrictToolsForTaskType(p ToolPolicy, t TaskType) ToolPolicy {
-	if t != TaskTypeAnaliz || len(p.AllowTools) == 0 {
-		return p
-	}
-	kept := make([]string, 0, len(p.AllowTools))
-	for _, name := range p.AllowTools {
-		if isWorkspaceWriteTool(name) {
-			continue
-		}
-		kept = append(kept, name)
-	}
-	restricted := p
-	restricted.AllowTools = kept
-	return restricted
-}
-
-// RestrictToolsForStage is RestrictToolsForTaskType, RestrictToolsForVerdictColumn
-// and RestrictCodeToolsForVerification collapsed into the workflow-driven
-// replacement release-b-plan.md calls for: the three literal type/column
-// switches below read off a WorkflowStage/TaskTypeDef instead, so a custom
-// task type or a custom stage narrows a policy exactly like task/analiz/bug do
-// today, without a line of engine code naming it.
-//
-// The three narrowings still apply in the same order the old call chain
-// applied them — type first (no_workspace_writes), then the stage's own
-// (strip_writers, then no_code_reading/no_read_file) — because they are
-// cumulative, not exclusive: a stage could in principle carry more than one.
-//
-// RestrictToolsForTaskType/RestrictToolsForVerdictColumn/
-// RestrictCodeToolsForVerification are kept below, unchanged, only because
-// application/catalog/role_tools_qa_test.go (outside WP-B2b's ownership)
-// still calls them directly; nothing in this package's own call path uses them
-// any more. See release-b-plan.md WP-B4 for retiring them once that test is
-// migrated.
+// The architect holds the workspace writers because it also runs in
+// code_review and in chats, but on an analiz stage (no_workspace_writes) there
+// is nothing for them to write — the deliverable is a document attached with
+// add_task_document, the run is never committed (Runner skips the post-run
+// commit for analiz) and never handed to code_review (advanceToCodeReview
+// returns early for it). Until this existed the gap was only ever stated in
+// the prompt, and the prompt lost: dispatched on an analiz task whose
+// description read like an instruction, the architect called edit_file three
+// times and delete_file once, reported the feature as built, and every one of
+// those edits died with the workspace.
 func RestrictToolsForStage(p ToolPolicy, stage WorkflowStage, typeDef TaskTypeDef) ToolPolicy {
 	if len(p.AllowTools) == 0 {
 		return p
@@ -574,146 +548,6 @@ func allowListNames(csv string) map[string]bool {
 		}
 	}
 	return out
-}
-
-// verdictColumns are the columns whose deliverable is a judgement about someone
-// else's work, not a change to it: review, QA and UAT — plus done, whose run
-// makes no judgement at all.
-//
-// done is here because the run dispatched into it merges the task's pull request
-// and deletes the branch. A writer or a commit in that run is worse than
-// pointless: `commit_task_changes` would push the task branch back to origin
-// moments after the merge deleted it, re-creating a branch whose content is
-// already on the default branch. (The runner refuses the post-run commit there
-// for the same reason — board.producesADiff — so this closes the tool-call half
-// of the same hole.) The merge tool itself survives the narrowing; see below.
-var verdictColumns = map[TaskColumn]bool{
-	TaskColumnCodeReview:   true,
-	TaskColumnAnalizReview: true,
-	TaskColumnReadyForQA:   true,
-	TaskColumnInQA:         true,
-	TaskColumnPMUAT:        true,
-	TaskColumnHumanUAT:     true,
-	TaskColumnDone:         true,
-}
-
-// RestrictToolsForVerdictColumn takes the workspace writers away from a run
-// whose job is to judge, not to change.
-//
-// The same lesson as RestrictToolsForTaskType, from the other end of the board.
-// A QA agent that found a mobile layout bug went and fixed it: it edited the
-// stylesheet and spent the rest of its run trying to boot the project to check
-// its own repair. That is wrong twice over. The change escapes review — the
-// post-run commit is skipped for these columns, so the edit either dies with the
-// workspace or rides along unreviewed — and the bug it was there to REPORT never
-// reaches the developer, because the card was never handed back. A reviewer that
-// edits the diff is reviewing its own code.
-//
-// run_terminal stays: QA has to start the product and run its tests, and that is
-// the evidence this column exists to produce. Only the writers, the commit and
-// (outside `done`) the merge go.
-//
-// merge_task_pull_request is stripped everywhere except `done` for the same
-// reason commit is: a run whose job is to judge a change must not be able to
-// LAND it. In `done` the board has already signed the task off and merging is
-// the only thing the run is dispatched for, so there the tool survives.
-//
-// An empty allowlist means unrestricted and stays unrestricted, exactly as in
-// RestrictToolsForTaskType: the policy has no deny list, and an agent left
-// unscoped was left unscoped deliberately.
-func RestrictToolsForVerdictColumn(p ToolPolicy, col TaskColumn) ToolPolicy {
-	if !verdictColumns[col] || len(p.AllowTools) == 0 {
-		return p
-	}
-	kept := make([]string, 0, len(p.AllowTools))
-	for _, name := range p.AllowTools {
-		if isWorkspaceWriteTool(name) || name == "commit_task_changes" {
-			continue
-		}
-		// The merge is the one write a run in `done` is there to make, and the
-		// one write no other column may make: a reviewer or a QA round must not
-		// be able to land the change it is judging.
-		if name == MergePullRequestToolName && col != TaskColumnDone {
-			continue
-		}
-		// The rollback changes what is running in production, so it is held to
-		// the same rule from the other side: it survives only in the columns a
-		// release can have happened in. A QA round in `in_qa` has nothing of its
-		// own in production; giving it a rollback there would let a run judging
-		// a change on stage undo somebody else's live release.
-		//
-		// `released` is not a verdict column and never reaches this function, so
-		// naming `done` here is what keeps the tool available across the whole
-		// merge → watch → rollback sequence.
-		if IsReleaseControlTool(name) && col != TaskColumnDone {
-			continue
-		}
-		kept = append(kept, name)
-	}
-	restricted := p
-	restricted.AllowTools = kept
-	return restricted
-}
-
-// pmUATColumns are the columns where the PM verifies rather than authors: the
-// backlog-grooming use of CodeExplorationTools ("verify a real file/endpoint
-// name before writing technical_description") does not apply here, so the
-// whole set goes away.
-var pmUATColumns = map[TaskColumn]bool{
-	TaskColumnPMUAT:    true,
-	TaskColumnHumanUAT: true,
-}
-
-// qaVerificationColumns are the columns where QA is expected to be black box.
-var qaVerificationColumns = map[TaskColumn]bool{
-	TaskColumnInQA:       true,
-	TaskColumnReadyForQA: true,
-}
-
-// RestrictCodeToolsForVerification takes source-reading tools away from a run
-// whose job is to exercise the running product, not to read the diff and
-// decide it looks right.
-//
-// PM loses every CodeExplorationTools name in pm_uat/human_uat: those are the
-// only columns PM signs a criterion off in, and its verdict must come from a
-// browser/mobile session run against the product, never from read_file on the
-// implementation. Outside those two columns PM keeps the set — it still needs
-// to verify a real file or endpoint name before writing technical_description
-// while grooming the backlog.
-//
-// QA loses only read_file in in_qa/ready_for_qa. get_repo_tree, grep_code and
-// get_task_pull_request survive there because QA's three legitimate reasons to
-// look at code before or during a round — debugging an observed failure from
-// its own surfaced output, scoping a resubmission's re-test from the diff, and
-// checking the case matrix is complete before execution — are tree-level and
-// diff-level, never "read this file's full body and decide from it".
-//
-// An empty allowlist means unrestricted and stays unrestricted, exactly as in
-// RestrictToolsForVerdictColumn: the policy has no deny list, and an agent
-// left unscoped was left unscoped deliberately.
-func RestrictCodeToolsForVerification(p ToolPolicy, col TaskColumn) ToolPolicy {
-	if len(p.AllowTools) == 0 {
-		return p
-	}
-	var strip []string
-	switch {
-	case pmUATColumns[col]:
-		strip = CodeExplorationTools
-	case qaVerificationColumns[col]:
-		strip = []string{"read_file"}
-	default:
-		return p
-	}
-	kept := make([]string, 0, len(p.AllowTools))
-	for _, name := range p.AllowTools {
-		if containsToolName(strip, name) {
-			continue
-		}
-		kept = append(kept, name)
-	}
-	restricted := p
-	restricted.AllowTools = kept
-	return restricted
 }
 
 func containsToolName(names []string, name string) bool {

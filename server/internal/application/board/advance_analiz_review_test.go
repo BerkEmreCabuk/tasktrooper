@@ -36,7 +36,7 @@ func documentedUsage() *registry.ToolUsage {
 
 func TestAdvanceToAnalizReviewMovesAFinishedAnalysis(t *testing.T) {
 	agentID := uuid.New()
-	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: domain.TaskTypeAnaliz, AssigneeAgentID: &agentID}
+	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: "analiz", AssigneeAgentID: &agentID}
 	updater := &fakeTaskUpdater{task: task}
 	r := analizRunner(updater)
 
@@ -52,7 +52,7 @@ func TestAdvanceToAnalizReviewMovesAFinishedAnalysis(t *testing.T) {
 
 func TestAdvanceToAnalizReviewHandsBackARevision(t *testing.T) {
 	agentID := uuid.New()
-	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnNeedRevision, TaskType: domain.TaskTypeAnaliz}
+	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnNeedRevision, TaskType: "analiz"}
 	updater := &fakeTaskUpdater{task: task}
 	r := analizRunner(updater)
 
@@ -64,7 +64,7 @@ func TestAdvanceToAnalizReviewHandsBackARevision(t *testing.T) {
 
 func TestAdvanceToAnalizReviewHandsBackARevisionRewrittenWithUpdateTaskDocument(t *testing.T) {
 	agentID := uuid.New()
-	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnNeedRevision, TaskType: domain.TaskTypeAnaliz}
+	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnNeedRevision, TaskType: "analiz"}
 	updater := &fakeTaskUpdater{task: task}
 	r := analizRunner(updater)
 
@@ -79,7 +79,7 @@ func TestAdvanceToAnalizReviewHandsBackARevisionRewrittenWithUpdateTaskDocument(
 
 func TestAdvanceToAnalizReviewHoldsARunWithNoDocument(t *testing.T) {
 	agentID := uuid.New()
-	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: domain.TaskTypeAnaliz}
+	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: "analiz"}
 	updater := &fakeTaskUpdater{task: task}
 	r := analizRunner(updater)
 
@@ -93,7 +93,7 @@ func TestAdvanceToAnalizReviewHoldsARunWithNoDocument(t *testing.T) {
 
 func TestAdvanceToAnalizReviewSkipsNonAnalizTasks(t *testing.T) {
 	agentID := uuid.New()
-	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: domain.TaskTypeTask}
+	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: "task"}
 	updater := &fakeTaskUpdater{task: task}
 	r := analizRunner(updater)
 
@@ -108,7 +108,7 @@ func TestAdvanceToAnalizReviewOnlyActsOnWorkingColumns(t *testing.T) {
 		domain.TaskColumnTodo, domain.TaskColumnAnalizReview,
 		domain.TaskColumnDone, domain.TaskColumnReleased,
 	} {
-		task := domain.BoardTask{ID: uuid.New(), Column: column, TaskType: domain.TaskTypeAnaliz}
+		task := domain.BoardTask{ID: uuid.New(), Column: column, TaskType: "analiz"}
 		updater := &fakeTaskUpdater{task: task}
 		r := analizRunner(updater)
 
@@ -120,7 +120,7 @@ func TestAdvanceToAnalizReviewOnlyActsOnWorkingColumns(t *testing.T) {
 
 func TestAdvanceToAnalizReviewRespectsAColumnChangedDuringTheRun(t *testing.T) {
 	agentID := uuid.New()
-	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: domain.TaskTypeAnaliz}
+	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: "analiz"}
 	updater := &readableUpdater{
 		fakeTaskUpdater: fakeTaskUpdater{task: task},
 		fresh:           domain.BoardTask{ID: task.ID, Column: domain.TaskColumnDone},
@@ -134,7 +134,7 @@ func TestAdvanceToAnalizReviewRespectsAColumnChangedDuringTheRun(t *testing.T) {
 
 func TestAdvanceToAnalizReviewCommentsWhenTheBoardRefuses(t *testing.T) {
 	agentID := uuid.New()
-	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: domain.TaskTypeAnaliz}
+	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: "analiz"}
 	updater := &commentingUpdater{fakeTaskUpdater: fakeTaskUpdater{task: task, err: errors.New("board refuses the move")}}
 	r := analizRunner(updater)
 
@@ -146,7 +146,7 @@ func TestAdvanceToAnalizReviewCommentsWhenTheBoardRefuses(t *testing.T) {
 
 func TestAdvanceToAnalizReviewIsNilSafe(t *testing.T) {
 	agentID := uuid.New()
-	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: domain.TaskTypeAnaliz}
+	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: "analiz"}
 
 	assert.NotPanics(t, func() {
 		(&Runner{}).advanceToAnalizReview(context.Background(), runJobFor(task, agentID), analizWF, documentedUsage())

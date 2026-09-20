@@ -19,8 +19,6 @@ import (
 const anthropicVersion = "2023-06-01"
 const anthropicDefaultMaxTokens = 8192
 
-// The claude-3 generation caps max_tokens at 4096, so sending the default made
-// the API reject every request to those models with a 400.
 const anthropicLegacyMaxTokens = 4096
 
 func anthropicMaxTokens(model string) int {
@@ -29,15 +27,6 @@ func anthropicMaxTokens(model string) int {
 	}
 	return anthropicDefaultMaxTokens
 }
-
-// resolveAnthropicMaxTokens is override (domain.AgentRequest.MaxTokens) when
-// the caller set one — the agent loop enforcing its context budget's output
-// reserve, or a utility call (the summarizer, a commit message rewrite)
-// capping its own short answer — and the adapter's own per-model default
-// otherwise, exactly the behaviour every request had before MaxTokens
-// existed. A pipeline stage that never sets it (planner, intake, verifier,
-// replanner, evolution) is unaffected: their schema output can legitimately
-// be long.
 func resolveAnthropicMaxTokens(model string, override int) int {
 	if override > 0 {
 		return override
@@ -45,7 +34,6 @@ func resolveAnthropicMaxTokens(model string, override int) int {
 	return anthropicMaxTokens(model)
 }
 
-// knownAnthropicModels is returned as fallback when the API models endpoint is unavailable.
 var knownAnthropicModels = []string{
 	"claude-opus-5",
 	"claude-sonnet-5",
@@ -81,30 +69,19 @@ func (c *anthropicClient) setHeaders(req *http.Request) {
 	req.Header.Set("anthropic-version", anthropicVersion)
 }
 
-// --- request/response types ---
 
 type anthropicRequest struct {
 	Model     string `json:"model"`
 	MaxTokens int    `json:"max_tokens"`
-	// System is a plain string when nothing caches it and the block form
-	// ([]anthropicSystemBlock) when a breakpoint lands on it — only the block
-	// form can carry cache_control. Both are valid wire shapes; keeping the
-	// string for the uncached case leaves every existing request byte-identical.
+
 	System       interface{}            `json:"system,omitempty"`
 	Messages     []anthropicMessage     `json:"messages"`
 	Tools        []anthropicTool        `json:"tools,omitempty"`
 	Stream       bool                   `json:"stream,omitempty"`
 	OutputConfig *anthropicOutputConfig `json:"output_config,omitempty"`
-	// ContextManagement asks the API to prune the transcript server-side. Nil
-	// omits the field, which is every request that did not opt in — see
-	// domain.AgentRequest.ClearToolResults for why that is the default.
 	ContextManagement *anthropicContextManagement `json:"context_management,omitempty"`
 }
 
-// anthropicContextManagement clears stale content from the transcript before
-// the model sees it. It PRUNES rather than summarizes — summarizing is
-// compaction, a separate feature behind a different beta and a different edit
-// type, and the two are easy to confuse by name.
 type anthropicContextManagement struct {
 	Edits []anthropicContextEdit `json:"edits"`
 }
@@ -114,21 +91,10 @@ type anthropicContextEdit struct {
 }
 
 const (
-	// clearToolUsesEdit drops old tool RESULTS and keeps the tool_use blocks
-	// that name what was called. The split is the point: the run keeps its
-	// ledger — which files it read, which commands it ran — and sheds only the
-	// payloads, so it does not rediscover what it already found.
 	clearToolUsesEdit = "clear_tool_uses_20250919"
-
-	// contextManagementBeta gates the field above. Sending the field without
-	// the header is rejected, so the two always travel together.
 	contextManagementBeta = "context-management-2025-06-27"
 )
 
-// anthropicCacheControl marks a prompt-cache breakpoint. "ephemeral" with no
-// ttl field is the 5-minute default; the 1h TTL costs twice as much to write
-// and only pays off across gaps longer than five minutes, which an agent run
-// does not have.
 type anthropicCacheControl struct {
 	Type string `json:"type"`
 }
@@ -145,11 +111,6 @@ type anthropicSystemBlock struct {
 
 type anthropicOutputConfig struct {
 	Format *anthropicOutputFormat `json:"format,omitempty"`
-	// Effort is how hard the model thinks before answering: low, medium, high,
-	// xhigh, max. Empty omits it and the model's own default stands.
-	//
-	// It shares output_config with Format because the API puts them there, not
-	// because they are related: a request can carry either, both, or neither.
 	Effort string `json:"effort,omitempty"`
 }
 
@@ -194,10 +155,6 @@ type anthropicResponse struct {
 	Usage      anthropicUsage     `json:"usage"`
 }
 
-// anthropicUsage reports input_tokens EXCLUDING anything the cache handled:
-// a fully cached turn comes back with input_tokens near zero and the real
-// prompt size sitting in cache_read_input_tokens. domain.Usage promises the
-// opposite (PromptTokens is the total), so toDomain adds them back.
 type anthropicUsage struct {
 	InputTokens              int `json:"input_tokens"`
 	OutputTokens             int `json:"output_tokens"`
@@ -216,11 +173,6 @@ func (u anthropicUsage) toDomain() domain.Usage {
 	}
 }
 
-// --- message translation ---
-
-// anthropicImageBlocks renders images as the base64 source blocks Anthropic
-// accepts. The shape is identical wherever an image can appear — inside a
-// tool_result and inside a user turn — so both paths share it.
 func anthropicImageBlocks(images []domain.ToolResultImage) []anthropicContent {
 	blocks := make([]anthropicContent, 0, len(images))
 	for _, img := range images {
@@ -236,14 +188,8 @@ func anthropicImageBlocks(images []domain.ToolResultImage) []anthropicContent {
 	return blocks
 }
 
-// maxAnthropicBreakpoints is an API limit, not a tuning knob: a request with a
-// fifth cache_control is rejected outright.
 const maxAnthropicBreakpoints = 4
 
-// markCacheable puts a breakpoint on a message's last content block and
-// reports whether it landed. A block with nothing in it can't anchor a cache
-// entry, so an empty message (or one ending in an empty text block) is skipped
-// and its breakpoint stays in the budget for the next candidate.
 func markCacheable(msg *anthropicMessage) bool {
 	if msg == nil || len(msg.Content) == 0 {
 		return false
@@ -257,25 +203,11 @@ func markCacheable(msg *anthropicMessage) bool {
 }
 
 func buildAnthropicRequest(model string, msgs []domain.Message, tools []domain.ToolDefinition, stream bool, respFormat *domain.ResponseFormat, cacheAnchor int) anthropicRequest {
-	// Callers stack several system messages (agent persona + skills + rules, KPI
-	// and memory blocks, workspace note, language rule, project context). Anthropic
-	// takes a single system string, so they must be joined — assigning would keep
-	// only the last one and silently drop the agent's whole instruction set.
-	//
-	// Only the ones that arrive BEFORE the first real turn are that persona head.
-	// A system message the loop injects mid-run (budget warning, empty-turn nudge)
-	// is an event at a point in the conversation, and hoisting it to the front
-	// both misrepresents it and rewrites the cached prefix — see systemReminder.
 	var systemParts []string
 	var anthMsgs []anthropicMessage
 	var pendingToolResults []anthropicContent
 	seenTurn := false
 
-	// Same invariant the OpenAI-compatible path enforces: every tool_use must be
-	// answered by a tool_result. Anthropic rejects an unanswered one with a 400,
-	// and the agent loop now trims mid-run to stay inside the context budget, so
-	// an orphan is something this path has to survive rather than something the
-	// caller can promise never to produce.
 	msgs = normalizeToolPairing(msgs)
 
 	flush := func() {
@@ -285,11 +217,6 @@ func buildAnthropicRequest(model string, msgs []domain.Message, tools []domain.T
 		}
 	}
 
-	// The caller's anchor indexes domain messages; breakpoints go on Anthropic
-	// ones, and the two don't line up — the leading system turns leave the array
-	// for the system field and consecutive tool results collapse into one
-	// message. So translate as we build: anchorMark ends up as the index of the
-	// last Anthropic message covering msgs[:cacheAnchor].
 	if cacheAnchor < 0 {
 		cacheAnchor = 0
 	}
@@ -298,8 +225,6 @@ func buildAnthropicRequest(model string, msgs []domain.Message, tools []domain.T
 	}
 	anchorMark := -1
 	markAnchor := func() {
-		// Tool results still pending will become one more message, so they
-		// belong to the head and the anchor sits on them.
 		anchorMark = len(anthMsgs) - 1
 		if len(pendingToolResults) > 0 {
 			anchorMark++
@@ -319,10 +244,6 @@ func buildAnthropicRequest(model string, msgs []domain.Message, tools []domain.T
 				systemParts = append(systemParts, m.Content)
 				break
 			}
-			// Mid-run injection: keep it where it happened, as a user turn the
-			// wrapper marks as machine-generated. Consecutive user messages are
-			// already routine here (a tool-result batch is followed by the next
-			// user turn), so this needs no merging.
 			flush()
 			anthMsgs = append(anthMsgs, anthropicMessage{
 				Role:    "user",
@@ -331,9 +252,6 @@ func buildAnthropicRequest(model string, msgs []domain.Message, tools []domain.T
 		case domain.RoleUser:
 			seenTurn = true
 			flush()
-			// A plain text block is the shape every user turn has always had;
-			// only a turn carrying image attachments grows the extra blocks, so
-			// the common case stays byte-for-byte identical on the wire.
 			if len(m.Images) == 0 {
 				anthMsgs = append(anthMsgs, anthropicMessage{
 					Role:    "user",
@@ -369,9 +287,7 @@ func buildAnthropicRequest(model string, msgs []domain.Message, tools []domain.T
 			}
 		case domain.RoleTool:
 			seenTurn = true
-			// A plain string keeps the wire format the API has always accepted;
-			// only a result that carries images needs the content-block form,
-			// where each image rides next to the text inside the tool_result.
+
 			var resultContent interface{} = m.Content
 			if len(m.Images) > 0 {
 				var blocks []anthropicContent
@@ -405,9 +321,6 @@ func buildAnthropicRequest(model string, msgs []domain.Message, tools []domain.T
 		})
 	}
 
-	// Anthropic's structured outputs take a schema via output_config; there is
-	// no schema-less JSON mode, so a bare json_object request becomes a system
-	// instruction instead of a request parameter (which would 400).
 	var outputConfig *anthropicOutputConfig
 	if respFormat != nil {
 		if respFormat.Schema != nil {
@@ -419,14 +332,8 @@ func buildAnthropicRequest(model string, msgs []domain.Message, tools []domain.T
 		}
 	}
 
-	// Breakpoints, in the order the request renders: tools, then system, then
-	// messages. Each one caches everything before it, so they are spent from
-	// the most stable boundary outward and the budget can only be exhausted by
-	// the last, least valuable candidate.
 	budget := maxAnthropicBreakpoints
 
-	// One breakpoint on the last tool definition caches the whole tool array —
-	// tools render first, so nothing before it can move.
 	if budget > 0 && len(anthTools) > 0 {
 		anthTools[len(anthTools)-1].CacheControl = ephemeralCache()
 		budget--
@@ -448,16 +355,11 @@ func buildAnthropicRequest(model string, msgs []domain.Message, tools []domain.T
 		systemField = system
 	}
 
-	// The stable head: everything the run promised not to rewrite. This is the
-	// breakpoint that survives a summarize, because StableTrim only ever cuts
-	// after it.
 	rolling := len(anthMsgs) - 1
 	if budget > 0 && anchorMark >= 0 && anchorMark < rolling && markCacheable(&anthMsgs[anchorMark]) {
 		budget--
 	}
 
-	// The rolling breakpoint: standard incremental multi-turn caching, where
-	// each turn reads back everything the previous one wrote.
 	if budget > 0 && rolling >= 0 {
 		if markCacheable(&anthMsgs[rolling]) {
 			budget--
@@ -475,16 +377,6 @@ func buildAnthropicRequest(model string, msgs []domain.Message, tools []domain.T
 	}
 }
 
-// applyRequestTuning folds the per-run knobs onto a built request.
-//
-// They are applied AFTER buildAnthropicRequest rather than passed into it on
-// purpose. That function already takes six positional parameters and is called
-// from a dozen cache tests; two more bools and strings at the end would be both
-// unreadable at the call site and a rewrite of every one of those tests, for
-// two fields that touch nothing the builder computes.
-//
-// Returns whether the request now needs a beta header, so the caller sets one
-// only when there is something to gate.
 func applyRequestTuning(payload *anthropicRequest, req domain.AgentRequest) (needsContextManagementBeta bool) {
 	if req.Effort != "" {
 		// output_config may not exist yet: effort and the structured-output
@@ -524,8 +416,6 @@ func parseAnthropicContent(content []anthropicContent) (string, []domain.ToolCal
 	}
 	return text.String(), toolCalls
 }
-
-// --- LLMClient implementation ---
 
 func (c *anthropicClient) Chat(ctx context.Context, req domain.AgentRequest) (domain.AgentResponse, error) {
 	model := c.model
@@ -645,8 +535,6 @@ func (c *anthropicClient) ChatStream(ctx context.Context, req domain.AgentReques
 	var streamUsage anthropicUsage
 
 	scanner := bufio.NewScanner(resp.Body)
-	// SSE frames carrying tool-call arguments routinely exceed bufio's 64 KB
-	// default, which aborted the stream with "token too long".
 	scanner.Buffer(make([]byte, 0, 64*1024), maxSSELineBytes)
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -665,9 +553,6 @@ func (c *anthropicClient) ChatStream(ctx context.Context, req domain.AgentReques
 
 		switch evt.Type {
 		case "message_start":
-			// The prompt side of the accounting — including both cache figures —
-			// is only ever reported here. Reading output_tokens alone left every
-			// streamed turn billing its cached prefix as fresh input.
 			streamUsage = evt.Message.Usage
 		case "content_block_start":
 			if evt.ContentBlock.Type == "tool_use" {
@@ -684,10 +569,6 @@ func (c *anthropicClient) ChatStream(ctx context.Context, req domain.AgentReques
 				}
 			}
 		case "message_delta":
-			// message_delta carries the final output count and, on newer API
-			// versions, repeats the cumulative prompt figures. Take each field
-			// only when the delta actually reports it, so a version that omits
-			// them doesn't zero out what message_start already told us.
 			streamUsage.OutputTokens = evt.Usage.OutputTokens
 			if evt.Usage.InputTokens > 0 {
 				streamUsage.InputTokens = evt.Usage.InputTokens
@@ -705,9 +586,6 @@ func (c *anthropicClient) ChatStream(ctx context.Context, req domain.AgentReques
 		return domain.AgentResponse{}, fmt.Errorf("stream read: %w", err)
 	}
 
-	// Content-block order, not map order. Ranging the map straight out handed
-	// the loop a turn's tool calls in a different order on every run, which the
-	// agent's repeat guards and the trace both read as a different plan.
 	indices := make([]int, 0, len(toolBlocks))
 	for idx := range toolBlocks {
 		indices = append(indices, idx)
@@ -754,7 +632,6 @@ func (c *anthropicClient) Models(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return knownAnthropicModels, nil
 	}
-	// Auth errors mean a bad API key — surface them so the user knows.
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return nil, httpError(resp, respBody)
 	}

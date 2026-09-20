@@ -6,13 +6,45 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
+// stageFor looks up one stage of the named workflowtest task type — a real
+// migration-143 fixture rather than a hand-built WorkflowStage, so these
+// tests exercise RestrictToolsForStage against the exact behaviour
+// combinations migration 143 seeds.
+func stageFor(t *testing.T, taskType domain.TaskType, column domain.TaskColumn) (domain.WorkflowStage, domain.TaskTypeDef) {
+	t.Helper()
+	wf, ok := workflowtest.Default().Workflows[taskType]
+	if !ok {
+		t.Fatalf("workflowtest.Default() has no workflow for type %q", taskType)
+	}
+	stage, ok := wf.Stage(column)
+	if !ok {
+		t.Fatalf("workflow %q has no stage for column %s", taskType, column)
+	}
+	return stage, wf.Type
+}
+
+// qaRunPolicyIn is exactly what board.Runner computes (runner.go:
+// upliftedPolicy) for a QA run entering column, task type "task".
+func qaRunPolicyIn(t *testing.T, column domain.TaskColumn) domain.ToolPolicy {
+	t.Helper()
+	stage, typeDef := stageFor(t, "task", column)
+	return domain.RestrictToolsForStage(
+		domain.UpliftWorkspaceTools(
+			domain.MergeToolPolicy(domain.ToolPolicy{}, qaToolPolicy()),
+		),
+		stage, typeDef,
+	)
+}
+
 // A QA run is dispatched into a verdict column (in_qa / ready_for_qa), and the
-// board runner narrows its policy twice on the way there. Both narrowings take
-// WRITERS away — the file tools and commit_task_changes — because a round that
-// judges someone else's work must not change it.
+// board runner narrows its policy via RestrictToolsForStage on the way there.
+// The stage's strip_writers behaviour takes WRITERS away — the file tools and
+// commit_task_changes — because a round that judges someone else's work must
+// not change it.
 //
 // The two tools a verdict is actually made of must survive that. A QA agent
 // without list_acceptance_criteria has no criterion ids to rule on, and without
@@ -26,16 +58,7 @@ func TestQARunPolicyKeepsTheVerdictTools(t *testing.T) {
 		domain.TaskColumnInQA,
 	} {
 		t.Run(string(column), func(t *testing.T) {
-			// Exactly what board.Runner computes (runner.go: upliftedPolicy).
-			policy := domain.RestrictToolsForVerdictColumn(
-				domain.RestrictToolsForTaskType(
-					domain.UpliftWorkspaceTools(
-						domain.MergeToolPolicy(domain.ToolPolicy{}, qaToolPolicy()),
-					),
-					domain.TaskTypeTask,
-				),
-				column,
-			)
+			policy := qaRunPolicyIn(t, column)
 			require.NotEmpty(t, policy.AllowTools)
 
 			allowed := func(name string) bool { return domain.ToolAllowedByPolicy(name, policy) }
@@ -63,15 +86,7 @@ func TestQARunPolicyKeepsTheVerdictTools(t *testing.T) {
 // could write to the branch is still taken away, since a commit there would push
 // the branch back to origin moments after the merge deleted it.
 func TestQARunPolicyKeepsTheMergeToolInDone(t *testing.T) {
-	policy := domain.RestrictToolsForVerdictColumn(
-		domain.RestrictToolsForTaskType(
-			domain.UpliftWorkspaceTools(
-				domain.MergeToolPolicy(domain.ToolPolicy{}, qaToolPolicy()),
-			),
-			domain.TaskTypeTask,
-		),
-		domain.TaskColumnDone,
-	)
+	policy := qaRunPolicyIn(t, domain.TaskColumnDone)
 	require.NotEmpty(t, policy.AllowTools)
 
 	assert.True(t, domain.ToolAllowedByPolicy(domain.MergePullRequestToolName, policy))
@@ -124,20 +139,7 @@ func TestWorkspaceUpliftDoesNotGrantTheMergeTool(t *testing.T) {
 // Three tools, one role, and one of them changes what is running in production.
 // The tests below pin who holds them and where, because both halves of that
 // have a cheap way to go wrong: a role list is a slice anyone can append to, and
-// the column narrowing is a loop that has to name the tool explicitly.
-
-func qaRunPolicyIn(column domain.TaskColumn) domain.ToolPolicy {
-	// Exactly what board.Runner computes (runner.go: upliftedPolicy).
-	return domain.RestrictToolsForVerdictColumn(
-		domain.RestrictToolsForTaskType(
-			domain.UpliftWorkspaceTools(
-				domain.MergeToolPolicy(domain.ToolPolicy{}, qaToolPolicy()),
-			),
-			domain.TaskTypeTask,
-		),
-		column,
-	)
-}
+// the column narrowing is a stage behaviour that has to name the tool explicitly.
 
 func TestQAHoldsTheDeployWatchTools(t *testing.T) {
 	policy := qaToolPolicy()
@@ -173,7 +175,7 @@ func TestOnlyQAHoldsTheRollback(t *testing.T) {
 // column. `released` is not a verdict column, so the narrowing never runs there
 // and the tool stays, which is what lets the health-window wake use it.
 func TestRollbackSurvivesOnlyInDone(t *testing.T) {
-	assert.Contains(t, qaRunPolicyIn(domain.TaskColumnDone).AllowTools, domain.RollbackReleaseToolName,
+	assert.Contains(t, qaRunPolicyIn(t, domain.TaskColumnDone).AllowTools, domain.RollbackReleaseToolName,
 		"the rollback must survive in done: merge → watch → roll back is one sequence")
 
 	for _, column := range []domain.TaskColumn{
@@ -183,7 +185,7 @@ func TestRollbackSurvivesOnlyInDone(t *testing.T) {
 		domain.TaskColumnCodeReview,
 	} {
 		t.Run(string(column), func(t *testing.T) {
-			assert.NotContains(t, qaRunPolicyIn(column).AllowTools, domain.RollbackReleaseToolName,
+			assert.NotContains(t, qaRunPolicyIn(t, column).AllowTools, domain.RollbackReleaseToolName,
 				"a run judging a change on stage must not be able to undo a live release")
 		})
 	}
@@ -199,7 +201,7 @@ func TestDeployWatchReadToolsSurviveEveryColumn(t *testing.T) {
 		domain.TaskColumnDone,
 	} {
 		t.Run(string(column), func(t *testing.T) {
-			allow := qaRunPolicyIn(column).AllowTools
+			allow := qaRunPolicyIn(t, column).AllowTools
 			assert.Contains(t, allow, domain.DeployStatusToolName)
 			assert.Contains(t, allow, domain.DeployLogsToolName)
 		})
@@ -216,32 +218,27 @@ func TestWorkspaceUpliftNeverGrantsTheRollback(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// RestrictCodeToolsForVerification, wired at the same call-site pattern
-// board.Runner uses (RestrictToolsForVerdictColumn then
-// RestrictCodeToolsForVerification, both keyed on job.Task.Column).
+// no_code_reading / no_read_file, wired through the same single
+// RestrictToolsForStage call board.Runner makes (upliftedPolicy).
 
-func pmRunPolicyIn(column domain.TaskColumn) domain.ToolPolicy {
-	return domain.RestrictCodeToolsForVerification(
-		domain.RestrictToolsForVerdictColumn(
-			domain.RestrictToolsForTaskType(
-				domain.UpliftWorkspaceTools(
-					domain.MergeToolPolicy(domain.ToolPolicy{}, productManagerToolPolicy()),
-				),
-				domain.TaskTypeTask,
-			),
-			column,
+func pmRunPolicyIn(t *testing.T, column domain.TaskColumn) domain.ToolPolicy {
+	t.Helper()
+	stage, typeDef := stageFor(t, "task", column)
+	return domain.RestrictToolsForStage(
+		domain.UpliftWorkspaceTools(
+			domain.MergeToolPolicy(domain.ToolPolicy{}, productManagerToolPolicy()),
 		),
-		column,
+		stage, typeDef,
 	)
 }
 
 // PM's whole reason to hold browser/mobile tools in pm_uat/human_uat is to
 // walk the product itself instead of reading the diff — so those columns must
-// take the code-exploration tools away, and only those two.
+// take the code-exploration tools away (no_code_reading), and only those two.
 func TestPMUATRunPolicyLosesCodeExplorationTools(t *testing.T) {
 	for _, column := range []domain.TaskColumn{domain.TaskColumnPMUAT, domain.TaskColumnHumanUAT} {
 		t.Run(string(column), func(t *testing.T) {
-			policy := pmRunPolicyIn(column)
+			policy := pmRunPolicyIn(t, column)
 			for _, name := range domain.CodeExplorationTools {
 				assert.NotContains(t, policy.AllowTools, name)
 			}
@@ -255,18 +252,18 @@ func TestPMUATRunPolicyLosesCodeExplorationTools(t *testing.T) {
 // file or endpoint name before writing technical_description while grooming
 // the backlog.
 func TestPMKeepsCodeExplorationToolsOutsideUATColumns(t *testing.T) {
-	policy := pmRunPolicyIn(domain.TaskColumnTodo)
+	policy := pmRunPolicyIn(t, domain.TaskColumnTodo)
 	for _, name := range domain.CodeExplorationTools {
 		assert.Contains(t, policy.AllowTools, name)
 	}
 }
 
-// QA loses only read_file in its two verdict columns; the tree/diff-level
-// tools its three named exceptions actually need survive.
+// QA loses only read_file (no_read_file) in its two verdict columns; the
+// tree/diff-level tools its three named exceptions actually need survive.
 func TestQARunPolicyLosesOnlyReadFileInVerdictColumns(t *testing.T) {
 	for _, column := range []domain.TaskColumn{domain.TaskColumnInQA, domain.TaskColumnReadyForQA} {
 		t.Run(string(column), func(t *testing.T) {
-			policy := domain.RestrictCodeToolsForVerification(qaRunPolicyIn(column), column)
+			policy := qaRunPolicyIn(t, column)
 			assert.NotContains(t, policy.AllowTools, "read_file")
 			assert.Contains(t, policy.AllowTools, "get_repo_tree")
 			assert.Contains(t, policy.AllowTools, "grep_code")

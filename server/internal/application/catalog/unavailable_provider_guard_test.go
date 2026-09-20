@@ -15,7 +15,7 @@ import (
 // provider with no executor is refused on the SERVER (CreateAgent, an attached
 // runner not helping, UpdateAgent) — all pointed at cursor_agent as the live
 // example of "declared but unbuilt". cursor_agent now has an executor (see
-// internal/adapter/agentcli/cursor), and so do antigravity and opencode: every
+// internal/adapter/cli/cursor), and so do antigravity and opencode: every
 // provider in the catalog is Available:true, leaving no declared-but-unbuilt
 // provider to exercise that guard with. An assertion with nothing left to
 // prove it true is not a test, so they were removed rather than left red.

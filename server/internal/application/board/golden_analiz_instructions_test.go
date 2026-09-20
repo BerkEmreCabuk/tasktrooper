@@ -8,7 +8,7 @@ import (
 )
 
 // These five strings are byte-for-byte copies of what
-// board.taskTypeInstruction(domain.BoardTask{TaskType: domain.TaskTypeAnaliz, ...})
+// board.taskTypeInstruction(domain.BoardTask{TaskType: "analiz", ...})
 // returned at each column, and of board.analizProducesDocuments, captured
 // immediately before both were deleted in favour of reading
 // domain.WorkflowStage.Instructions off the workflow. This file is the proof

@@ -22,24 +22,24 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/google/uuid"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/antigravity"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/claudecode"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/cursor"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/opencode"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/appstore"
-	desktopadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/desktop"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/deviceagent"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/gcloud"
-	gitadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/git"
-	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/github"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/googleplay"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/antigravity"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/claudecode"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/cursor"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/opencode"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/appstore"
+	desktopadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/local/desktop"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/deviceagent"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/gcloud"
+	gitadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/git"
+	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/googleplay"
 	httpadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/http"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/llm"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/localdevice"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/localtoolchain"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/local/localdevice"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/local/localtoolchain"
 	mcpadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/mcp"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/mcpserver"
-	pgstore "github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
+	pgstore "github.com/makifbaysal/tasktrooper/server/internal/adapter/storage/postgres"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/board"
 	boilerplatetools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/boilerplate"
 	browsertools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/browser"
@@ -53,7 +53,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/shell"
 	skilltools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/skill"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/web"
-	vercelapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vercel"
+	vercelapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/vercel"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agentcli"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/apikey"
@@ -446,7 +446,7 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 
 	log.Info().Str("addr", addr).Msg("listening")
 	if e.mcpServer != nil {
-		log.Info().Str("mcp_endpoint", e.mcpEndpoint.get()).Msg("tasktrooper tools reachable over mcp for claude code sessions")
+		log.Info().Str("mcp_endpoint", e.mcpEndpoint.get()).Msg("tasktrooper tools reachable over mcp for agent cli sessions")
 	}
 
 	llmTimeout := e.cfg.LLM.Timeout
@@ -1384,7 +1384,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			MCPProvider:           claudeMCP,
 			MaxConcurrentSessions: cfg.ClaudeCode.MaxConcurrentSessions,
 		}); ccErr != nil {
-			log.Info().Err(ccErr).Msg("claude code executor not registered; agents on the claude_code provider cannot run on this host")
+			log.Info().Err(ccErr).Msg("agent cli executor not registered; agents on the claude_code provider cannot run on this host")
 		} else {
 			claudeExecutor = executor
 			// toolReg, not the bare registry: the audit and action-ledger
@@ -1398,7 +1398,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			e.mcpServer.SetLoopbackOnly(true)
 			log.Info().
 				Str("mcp_endpoint", e.mcpEndpoint.get()).
-				Msg("claude code executor enabled, tasktrooper tools served over mcp")
+				Msg("agent cli executor enabled, tasktrooper tools served over mcp")
 		}
 
 		if executor, agErr := antigravity.New(antigravity.Config{
@@ -1579,6 +1579,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				scoreTracker.SetTestCases(testCaseStore)
 			}
 			scoreTracker.SetEvents(perfStore)
+			scoreTracker.SetWorkflows(workflowSvc)
 			repositorySvc.SetScorer(scoreTracker)
 		}
 		if taskSpanStore != nil {
@@ -1805,6 +1806,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				WorkspaceRoot: cfg.Storage.Sessions.WorkspaceRoot,
 				TaskPRs:       boardTaskStore,
 			})
+			pipelineRunner.SetWorkflows(workflowSvc)
 			if boardDispatcher != nil {
 				boardDispatcher.SetPipelineGate(true)
 				// …and the per-repository off switch for it. Without this the

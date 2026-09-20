@@ -230,44 +230,6 @@ func TestUpliftWorkspaceTools_UnrestrictedPolicyUntouched(t *testing.T) {
 	assert.Empty(t, domain.UpliftWorkspaceTools(domain.ToolPolicy{}).AllowTools)
 }
 
-// The architect holds the file writers for its other columns, and on an analiz
-// task it used them: three edit_file calls and a delete_file on a task whose
-// deliverable was a spec. The run is never committed, so the edits went nowhere
-// and the analysis was never written.
-func TestRestrictToolsForTaskType_AnalizLosesTheFileWriters(t *testing.T) {
-	policy := domain.ToolPolicy{AllowTools: append([]string{
-		"run_terminal", "grep_code", "add_task_document", "move_board_task",
-	}, domain.WorkspaceWriteTools...)}
-
-	got := domain.RestrictToolsForTaskType(policy, domain.TaskTypeAnaliz)
-
-	for _, tool := range domain.WorkspaceWriteTools {
-		assert.NotContains(t, got.AllowTools, tool)
-	}
-	// Reading the repo, cloning it and attaching the documents is the whole job.
-	assert.Contains(t, got.AllowTools, "run_terminal")
-	assert.Contains(t, got.AllowTools, "grep_code")
-	assert.Contains(t, got.AllowTools, "add_task_document")
-}
-
-func TestRestrictToolsForTaskType_ImplementationTasksKeepEverything(t *testing.T) {
-	policy := domain.ToolPolicy{AllowTools: append([]string{"run_terminal"}, domain.WorkspaceWriteTools...)}
-
-	for _, typ := range []domain.TaskType{domain.TaskTypeTask, domain.TaskTypeBug, domain.TaskTypeTechnical, ""} {
-		got := domain.RestrictToolsForTaskType(policy, typ)
-		for _, tool := range domain.WorkspaceWriteTools {
-			assert.Contains(t, got.AllowTools, tool, "task type %q lost %s", typ, tool)
-		}
-	}
-}
-
-// No allowlist means the operator left the agent unscoped; there is no deny list
-// to express a narrowing in, and materialising one here would widen nothing but
-// silently narrow everything else.
-func TestRestrictToolsForTaskType_UnrestrictedPolicyUntouched(t *testing.T) {
-	assert.Empty(t, domain.RestrictToolsForTaskType(domain.ToolPolicy{}, domain.TaskTypeAnaliz).AllowTools)
-}
-
 func TestDiffNeedsUIEvidence(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -305,47 +267,6 @@ func fullCodeToolsPolicy() domain.ToolPolicy {
 		"codebase_search", "grep_code", "get_repo_tree", "get_symbol_skeleton", "expand_symbol_context", "read_file",
 		"browser_navigate", "run_terminal", "get_task_pull_request", "move_board_task",
 	}}
-}
-
-func TestRestrictCodeToolsForVerification_PMUATStripsAllCodeTools(t *testing.T) {
-	for _, column := range []domain.TaskColumn{domain.TaskColumnPMUAT, domain.TaskColumnHumanUAT} {
-		t.Run(string(column), func(t *testing.T) {
-			got := domain.RestrictCodeToolsForVerification(fullCodeToolsPolicy(), column)
-			for _, name := range domain.CodeExplorationTools {
-				assert.NotContains(t, got.AllowTools, name)
-			}
-			assert.Contains(t, got.AllowTools, "browser_navigate")
-			assert.Contains(t, got.AllowTools, "run_terminal")
-		})
-	}
-}
-
-func TestRestrictCodeToolsForVerification_OtherColumnsKeepAllCodeTools(t *testing.T) {
-	for _, column := range []domain.TaskColumn{domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnCodeReview} {
-		t.Run(string(column), func(t *testing.T) {
-			got := domain.RestrictCodeToolsForVerification(fullCodeToolsPolicy(), column)
-			for _, name := range domain.CodeExplorationTools {
-				assert.Contains(t, got.AllowTools, name)
-			}
-		})
-	}
-}
-
-func TestRestrictCodeToolsForVerification_QAColumnsStripOnlyReadFile(t *testing.T) {
-	for _, column := range []domain.TaskColumn{domain.TaskColumnInQA, domain.TaskColumnReadyForQA} {
-		t.Run(string(column), func(t *testing.T) {
-			got := domain.RestrictCodeToolsForVerification(fullCodeToolsPolicy(), column)
-			assert.NotContains(t, got.AllowTools, "read_file")
-			assert.Contains(t, got.AllowTools, "get_repo_tree")
-			assert.Contains(t, got.AllowTools, "grep_code")
-			assert.Contains(t, got.AllowTools, "get_task_pull_request")
-		})
-	}
-}
-
-func TestRestrictCodeToolsForVerification_UnrestrictedPolicyUntouched(t *testing.T) {
-	got := domain.RestrictCodeToolsForVerification(domain.ToolPolicy{}, domain.TaskColumnPMUAT)
-	assert.Empty(t, got.AllowTools)
 }
 
 // wfStage looks up one stage of the named workflowtest task type — a real
@@ -398,7 +319,7 @@ func TestRestrictToolsForStage_ImplementationStagesKeepEverything(t *testing.T) 
 }
 
 // code_review carries strip_writers with no "allow" — every writer, the
-// commit and the merge tool must go, mirroring RestrictToolsForVerdictColumn.
+// commit and the merge tool must go.
 func TestRestrictToolsForStage_StripWritersOnCodeReview(t *testing.T) {
 	stage, typeDef := wfStage(t, "task", domain.TaskColumnCodeReview)
 	policy := domain.ToolPolicy{AllowTools: append([]string{

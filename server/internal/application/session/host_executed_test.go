@@ -198,11 +198,11 @@ func TestQuotaMessageFollowsTheTenantLanguage(t *testing.T) {
 	block := &domain.QuotaBlock{ResumeAt: time.Now().Add(time.Hour)}
 
 	tr := domain.NewQuotaNotice(block, "tr").Error()
-	assert.Contains(t, tr, "Claude Code kullanım limiti doldu")
+	assert.Contains(t, tr, "Kullanım limiti doldu")
 	assert.Contains(t, tr, "civarında yenilenecek")
 
 	en := domain.NewQuotaNotice(block, "en").Error()
-	assert.Contains(t, en, "Claude Code usage limit is spent")
+	assert.Contains(t, en, "usage limit is spent")
 }
 
 // A transcript is read back by the user AND replayed to the model, so a quota

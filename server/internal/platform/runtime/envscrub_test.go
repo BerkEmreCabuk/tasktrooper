@@ -11,7 +11,7 @@ import (
 //
 // Scrubbing what a child inherits does nothing about the bridge process's own
 // environment, and exec sites outside the hardened three still build
-// their child environment from os.Environ() (internal/adapter/git among them).
+// their child environment from os.Environ() (internal/adapter/vcs/git among them).
 // Removing the
 // values from the process once they are held in memory closes all of those at
 // once — and closes the exec site somebody adds next year without reading any

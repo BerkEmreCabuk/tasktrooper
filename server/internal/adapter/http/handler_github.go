@@ -7,7 +7,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
-	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/github"
+	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
 )
 
 // GitHub bağlantısı doğrudan yapıştırılan bir personal access token ile

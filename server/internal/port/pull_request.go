@@ -54,7 +54,7 @@ type PullRequestComment struct {
 
 // PullRequestClient is what the board needs from GitHub's pull-request API: read
 // a PR and the conversation on it, and answer that conversation. The concrete
-// implementation wraps the free functions in internal/adapter/github; this
+// implementation wraps the free functions in internal/adapter/vcs/github; this
 // interface exists so the task-PR service is testable without a token or a
 // network (same arrangement as ActionsClient).
 //

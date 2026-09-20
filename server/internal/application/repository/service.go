@@ -12,7 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/google/uuid"
-	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/github"
+	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/board"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/ci"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/indexer"
@@ -590,7 +590,6 @@ Once each workflow exists, save the job/workflow mapping under Repository Settin
 	return s.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
 		Title:           "Set up GitHub Actions CI/CD workflows",
 		Description:     desc,
-		TaskType:        domain.TaskTypeTask,
 		Priority:        domain.TaskPriorityHigh,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",

@@ -428,7 +428,7 @@ async function probeGit(override?: string): Promise<PreflightItem> {
       label: "git",
       required: true,
       status: "missing",
-      detail: "Claude Code clones, commits and pushes with git. Without it a task cannot start.",
+      detail: "Every task runs inside a headless agent session that clones, commits and pushes with git. Without it a task cannot start.",
       ...gitRemediation(),
     };
   }
@@ -464,7 +464,7 @@ async function probeClaude(override?: string): Promise<PreflightItem> {
       label: "Claude Code CLI",
       required: false,
       status: "missing",
-      detail: "Every task on this Mac runs as a headless Claude Code session, which is this binary.",
+      detail: "Agents on the Claude Code provider run as headless sessions driven by this binary.",
       remediation: "Install the Claude Code CLI, then press Connect again.",
       command: "npm install -g @anthropic-ai/claude-code",
     };
@@ -776,7 +776,7 @@ async function probeClaudeAccountByRunning(claudeBin: string): Promise<Partial<P
 
 /**
  * Binary-presence checks for the other local agent CLIs a task can run on
- * (`internal/adapter/agentcli/{antigravity,cursor,opencode}` on the server
+ * (`internal/adapter/cli/{antigravity,cursor,opencode}` on the server
  * side). Optional, like `claude` itself: this Mac is not required to have any
  * particular one, because which CLI a task uses is chosen per AGENT, not per
  * Mac, and blocking the backend on a binary nobody selected would stop someone

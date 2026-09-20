@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
 )
 
@@ -39,6 +40,7 @@ type ScoreTracker struct {
 	spans          SpanOwnerLookup
 	testCases      TestCaseScoreLookup
 	events         EventExistenceChecker
+	workflows      port.WorkflowReader
 	OnScoreUpdated func(agentID string, score float64, delta float64)
 }
 
@@ -63,6 +65,13 @@ func (st *ScoreTracker) SetTestCases(testCases TestCaseScoreLookup) {
 // completion credit idempotent. Without it that credit is never applied.
 func (st *ScoreTracker) SetEvents(events EventExistenceChecker) {
 	st.events = events
+}
+
+// SetWorkflows attaches the workflow reader isForwardExit asks whether a
+// column exit is a forward_exit out of a review round. Without it (or on a
+// lookup error) forward-exit credit never fires — see isForwardExit.
+func (st *ScoreTracker) SetWorkflows(w port.WorkflowReader) {
+	st.workflows = w
 }
 
 // blameColumns lists, per rejecting column, the columns whose owners are
@@ -124,11 +133,11 @@ func (st *ScoreTracker) OnColumnTransition(ctx context.Context, task domain.Boar
 		}
 	}
 
-	if fromQA && isQAForwardExit(to) {
+	if fromQA && st.isForwardExit(ctx, task.TaskType, to) {
 		st.scoreQARound(ctx, task, true)
 		st.creditRoleCompletion(ctx, task, "in_qa", domain.ScoreEventQATaskTested, domain.ScoreDeltaQATaskTested, "QA finished testing")
 	}
-	if from == domain.TaskColumnPMUAT && isQAForwardExit(to) {
+	if from == domain.TaskColumnPMUAT && st.isForwardExit(ctx, task.TaskType, to) {
 		st.creditRoleCompletion(ctx, task, "pm_uat", domain.ScoreEventPMUATCompleted, domain.ScoreDeltaPMUATCompleted, "PM finished UAT review")
 	}
 }
@@ -157,19 +166,24 @@ func (st *ScoreTracker) creditRoleCompletion(ctx context.Context, task domain.Bo
 	st.apply(ctx, task, agentID, evType, delta, reason)
 }
 
-// isQAForwardExit reports whether a task leaving ready_for_qa/in_qa for this
-// column means QA signed the round off. It mirrors
-// repository.isForwardReviewExit's column set, but is defined independently
-// here because board cannot import repository without a cycle — the two sets
-// must change together.
-func isQAForwardExit(to domain.TaskColumn) bool {
-	switch to {
-	case domain.TaskColumnPMUAT, domain.TaskColumnHumanUAT,
-		domain.TaskColumnDone, domain.TaskColumnReleased:
-		return true
-	default:
+// isForwardExit reports whether a task leaving ready_for_qa/in_qa (or
+// pm_uat) for column `to` means the round signed off forward, reading the
+// destination stage's forward_exit behaviour instead of a hardcoded column
+// set — the same behaviour repository.isForwardReviewExit reads via
+// wf.Has(target, domain.BehaviourForwardExit). An unreadable workflow (no
+// reader wired, or Workflow() itself errored) fails closed to false: a round
+// that cannot be classified is not credited.
+func (st *ScoreTracker) isForwardExit(ctx context.Context, taskType domain.TaskType, to domain.TaskColumn) bool {
+	if st.workflows == nil {
 		return false
 	}
+	wf, err := st.workflows.Workflow(ctx, taskType)
+	if err != nil {
+		log.Warn().Err(err).Str("task_type", string(taskType)).
+			Msg("scorer: workflow lookup failed, failing closed")
+		return false
+	}
+	return wf.Has(to, domain.BehaviourForwardExit)
 }
 
 // scoreQARound turns one QA round's unscored test cases into score events for

@@ -149,7 +149,7 @@ func TestCriteriaForRunKeepsAnalizBehaviourUnchanged(t *testing.T) {
 	r := NewRunner(RunnerDeps{})
 	r.SetTaskUpdater(&criteriaUpdater{criteria: []domain.AcceptanceCriterion{done, open}})
 	job := RunJob{Task: domain.BoardTask{
-		ID: uuid.New(), Title: "t", Column: domain.TaskColumnCodeReview, TaskType: domain.TaskTypeAnaliz,
+		ID: uuid.New(), Title: "t", Column: domain.TaskColumnCodeReview, TaskType: "analiz",
 	}, RepositoryID: uuid.New()}
 
 	require.False(t, listsEveryCriterion(analizWF, job.Task),

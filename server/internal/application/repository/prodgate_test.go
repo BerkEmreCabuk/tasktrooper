@@ -113,7 +113,7 @@ func TestAutoReleaseIfUndeployable(t *testing.T) {
 	t.Run("require_release_deploy refuses and comments, task stays in done", func(t *testing.T) {
 		repoID, taskID := uuid.New(), uuid.New()
 		tasks := &fakeReleaseTaskStore{task: domain.BoardTask{
-			ID: taskID, RepositoryID: repoID, TaskType: domain.TaskTypeTask, Column: domain.TaskColumnDone,
+			ID: taskID, RepositoryID: repoID, TaskType: "task", Column: domain.TaskColumnDone,
 		}}
 		comments := &fakeReleaseComments{}
 		svc := &Service{

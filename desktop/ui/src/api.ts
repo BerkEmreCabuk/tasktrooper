@@ -1136,7 +1136,7 @@ export interface BoardTask {
   blocked_session_id?: string;
   blocked_at?: string;
   /**
-   * The shared resource the task is parked on — "claude_code_quota",
+   * The shared resource the task is parked on — "llm_provider_code_quota",
    * "mobile_device", "deploy_watch", "work_order", "human_decision". Set
    * instead of blocked_session_id: nobody answers a resource block, a sweeper
    * releases it — except "human_decision", which only a human clears.

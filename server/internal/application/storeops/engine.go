@@ -589,7 +589,6 @@ func (s *Service) blockedReleaseTask(ctx context.Context, repo domain.Repository
 	task, err := s.tasks.CreateTask(ctx, repo.ID, domain.CreateBoardTaskRequest{
 		Title:       fmt.Sprintf("Release blocked: %s (%s)", app.Identifier, app.Platform),
 		Description: detail + "\n\n" + blockedReleaseRemedy,
-		TaskType:    domain.TaskTypeTask,
 		Priority:    domain.TaskPriorityHigh,
 		Column:      domain.TaskColumnTodo,
 		CreatedBy:   "system",

@@ -16,7 +16,7 @@ func usageWith(tools ...string) *registry.ToolUsage {
 }
 
 func TestIsUngroundedAnalysis(t *testing.T) {
-	analiz := domain.BoardTask{TaskType: domain.TaskTypeAnaliz}
+	analiz := domain.BoardTask{TaskType: "analiz"}
 	answered := domain.AgentResponse{Message: domain.Message{Content: "here is the spec"}}
 
 	cases := []struct {
@@ -42,7 +42,7 @@ func TestIsUngroundedAnalysis(t *testing.T) {
 		},
 		{
 			name:  "implementation task is not gated",
-			task:  domain.BoardTask{TaskType: domain.TaskTypeTask},
+			task:  domain.BoardTask{TaskType: "task"},
 			resp:  answered,
 			usage: usageWith("run_terminal"),
 			want:  false,
@@ -66,7 +66,7 @@ func TestIsUngroundedAnalysis(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			wf := taskWF
-			if tc.task.TaskType == domain.TaskTypeAnaliz {
+			if tc.task.TaskType == "analiz" {
 				wf = analizWF
 			}
 			if got := isUngroundedAnalysis(wf, tc.task, tc.resp, tc.usage); got != tc.want {

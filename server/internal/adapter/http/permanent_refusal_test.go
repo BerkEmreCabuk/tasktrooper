@@ -32,7 +32,7 @@ func TestPermanentProviderRefusalsAnswer409(t *testing.T) {
 		code   string
 	}{
 		// cursor_agent, antigravity and opencode all have executors now (see
-		// internal/adapter/agentcli/{cursor,antigravity,opencode}) and are
+		// internal/adapter/cli/{cursor,antigravity,opencode}) and are
 		// Available:true, so they fall through to the same HostExecuted check
 		// claude_code always has — codeProviderUnavailable no longer applies
 		// to any provider this route can be asked about.

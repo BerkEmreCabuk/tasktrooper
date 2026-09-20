@@ -151,9 +151,9 @@ func newOrderFixture(t *testing.T, keys ...string) *orderFixture {
 	documents := &memoryDocumentStore{byTask: map[uuid.UUID][]domain.TaskDocument{}}
 	for _, key := range keys {
 		id := uuid.New()
-		taskType := domain.TaskTypeTask
+		taskType := domain.TaskType("task")
 		if strings.HasPrefix(key, "A-") {
-			taskType = domain.TaskTypeAnaliz
+			taskType = "analiz"
 		}
 		tasks.tasks[id] = domain.BoardTask{
 			ID: id, RepositoryID: repoID, Key: key, Title: "work for " + key,

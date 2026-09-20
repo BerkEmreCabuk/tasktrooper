@@ -25,8 +25,7 @@ func TestOptionsFromEnv(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		// An empty DSN is a complete configuration: it means the embedded
-		// cluster, which is what a first run has.
+
 		if cfg.PostgresDSN != "" {
 			t.Fatalf("dsn = %q, want empty", cfg.PostgresDSN)
 		}
@@ -75,8 +74,6 @@ func TestOptionsFromEnv(t *testing.T) {
 		}
 	})
 
-	// PORT=0 is how the desktop avoids colliding with whatever else is running:
-	// it must survive as 0 rather than fall back to the default.
 	t.Run("port zero means pick one", func(t *testing.T) {
 		env := validEnv()
 		env["PORT"] = "0"
@@ -146,7 +143,7 @@ func TestShutdownGraceFromEnv(t *testing.T) {
 	}{
 		{"unset falls back", "", defaultShutdownGrace},
 		{"explicit duration", "3m", 3 * time.Minute},
-		// A typo must not keep the server from booting.
+
 		{"garbage falls back", "banana", defaultShutdownGrace},
 		{"non-positive falls back", "0s", defaultShutdownGrace},
 	}

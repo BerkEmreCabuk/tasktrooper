@@ -39,7 +39,7 @@ func (s *storedDocumentTaskManager) UpdateDocument(ctx context.Context, reposito
 }
 
 func newStoredDocumentKit(docs ...domain.TaskDocument) (*ToolKit, *storedDocumentTaskManager, uuid.UUID) {
-	kit, tasks, taskID := newDocumentKit(domain.TaskTypeTask)
+	kit, tasks, taskID := newDocumentKit("task")
 	stored := &storedDocumentTaskManager{documentTaskManager: tasks}
 	for _, doc := range docs {
 		doc.TaskID = taskID

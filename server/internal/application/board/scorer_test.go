@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/board"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/stretchr/testify/suite"
 )
@@ -91,6 +92,7 @@ func (s *ScorerSuite) owners() *fakeOwners {
 func (s *ScorerSuite) TestHumanUATFailurePenalisesDevQAAndPM() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 	assignee := uuid.New() // deliberately nobody's span owner
 
@@ -113,6 +115,7 @@ func (s *ScorerSuite) TestHumanUATFailurePenalisesDevQAAndPM() {
 func (s *ScorerSuite) TestPMUATFailurePenalisesDevAndQAOnly() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 
 	tracker.OnColumnTransition(context.Background(), domain.BoardTask{ID: uuid.New()},
@@ -129,6 +132,7 @@ func (s *ScorerSuite) TestPMUATFailurePenalisesDevAndQAOnly() {
 func (s *ScorerSuite) TestArchitectRejectionPenalisesDevOnly() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 
 	tracker.OnColumnTransition(context.Background(), domain.BoardTask{ID: uuid.New()},
@@ -143,6 +147,7 @@ func (s *ScorerSuite) TestOneAgentHoldingTwoStagesIsChargedOnce() {
 	perf := &fakePerfStore{}
 	solo := uuid.New()
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(&fakeOwners{owners: map[string]uuid.UUID{
 		"in_progress": solo,
 		"in_qa":       solo,
@@ -159,6 +164,7 @@ func (s *ScorerSuite) TestOneAgentHoldingTwoStagesIsChargedOnce() {
 func (s *ScorerSuite) TestCompletionCreditsTheAssignee() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 	assignee := uuid.New()
 
@@ -174,6 +180,7 @@ func (s *ScorerSuite) TestCompletionCreditsTheAssignee() {
 func (s *ScorerSuite) TestReviewEscapeChargesTheApprovingReviewer() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 
 	tracker.ApplyReviewEscape(context.Background(), domain.BoardTask{ID: uuid.New()}, s.architect)
@@ -187,6 +194,7 @@ func (s *ScorerSuite) TestReviewEscapeChargesTheApprovingReviewer() {
 func (s *ScorerSuite) TestWithoutSpansFallsBackToAssignee() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	assignee := uuid.New()
 
 	tracker.OnColumnTransition(context.Background(),
@@ -200,6 +208,7 @@ func (s *ScorerSuite) TestWithoutSpansFallsBackToAssignee() {
 func (s *ScorerSuite) TestQABugFoundOnRevisionCreditsQA() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 	tc := &fakeTestCases{items: []domain.TaskTestCase{
 		{ID: uuid.New(), Status: domain.TestCaseStatusFailed},
@@ -231,6 +240,7 @@ func (s *ScorerSuite) TestQABugFoundOnRevisionCreditsQA() {
 func (s *ScorerSuite) TestQAForwardExitConfirmsValidAndInvalidScenarios() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 	tc := &fakeTestCases{items: []domain.TaskTestCase{
 		{ID: uuid.New(), Status: domain.TestCaseStatusPassed},
@@ -258,6 +268,7 @@ func (s *ScorerSuite) TestQAForwardExitConfirmsValidAndInvalidScenarios() {
 func (s *ScorerSuite) TestScoredTestCaseIsNeverCountedTwice() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 	already := time.Now()
 	tc := &fakeTestCases{items: []domain.TaskTestCase{
@@ -277,6 +288,7 @@ func (s *ScorerSuite) TestScoredTestCaseIsNeverCountedTwice() {
 func (s *ScorerSuite) TestQARoundForwardExitDoneAlsoCredits() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 	tc := &fakeTestCases{items: []domain.TaskTestCase{
 		{ID: uuid.New(), Status: domain.TestCaseStatusPassed},
@@ -299,6 +311,7 @@ func (s *ScorerSuite) TestQARoundForwardExitDoneAlsoCredits() {
 func (s *ScorerSuite) TestQARoundWithoutTestCaseStoreIsNoop() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 
 	s.NotPanics(func() {
@@ -314,6 +327,7 @@ func (s *ScorerSuite) TestQARoundWithoutTestCaseStoreIsNoop() {
 func (s *ScorerSuite) TestQAForwardExitCreditsQATaskTested() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 	tracker.SetEvents(&fakeEvents{perf: perf})
 	task := domain.BoardTask{ID: uuid.New()}
@@ -334,6 +348,7 @@ func (s *ScorerSuite) TestQAForwardExitCreditsQATaskTested() {
 func (s *ScorerSuite) TestPMUATForwardExitCreditsPMUATCompleted() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 	tracker.SetEvents(&fakeEvents{perf: perf})
 	task := domain.BoardTask{ID: uuid.New()}
@@ -354,6 +369,7 @@ func (s *ScorerSuite) TestPMUATForwardExitCreditsPMUATCompleted() {
 func (s *ScorerSuite) TestQATaskTestedIsNotCreditedTwiceAfterReEntry() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 	tracker.SetEvents(&fakeEvents{perf: perf})
 	task := domain.BoardTask{ID: uuid.New()}
@@ -374,6 +390,7 @@ func (s *ScorerSuite) TestQATaskTestedIsNotCreditedTwiceAfterReEntry() {
 func (s *ScorerSuite) TestQABounceToNeedRevisionDoesNotCreditQATaskTested() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 	tracker.SetEvents(&fakeEvents{perf: perf})
 
@@ -388,6 +405,7 @@ func (s *ScorerSuite) TestQABounceToNeedRevisionDoesNotCreditQATaskTested() {
 func (s *ScorerSuite) TestPMUATBounceToNeedRevisionDoesNotCreditPMUATCompleted() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 	tracker.SetEvents(&fakeEvents{perf: perf})
 
@@ -402,6 +420,7 @@ func (s *ScorerSuite) TestPMUATBounceToNeedRevisionDoesNotCreditPMUATCompleted()
 func (s *ScorerSuite) TestRoleCompletionWithoutEventsIsNoop() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
 
 	s.NotPanics(func() {
@@ -417,6 +436,7 @@ func (s *ScorerSuite) TestRoleCompletionWithoutEventsIsNoop() {
 func (s *ScorerSuite) TestQABugFoundWithoutSpansSkipsSilently() {
 	perf := &fakePerfStore{}
 	tracker := board.NewScoreTracker(perf)
+	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tc := &fakeTestCases{items: []domain.TaskTestCase{
 		{ID: uuid.New(), Status: domain.TestCaseStatusFailed},
 	}}

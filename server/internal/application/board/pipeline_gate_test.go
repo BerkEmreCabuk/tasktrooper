@@ -8,7 +8,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/github"
+	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -114,7 +115,7 @@ func newGateHarness(t *testing.T, age time.Duration, mappings []domain.Repositor
 		qa:    &fakeQADispatcher{},
 		tasks: &gateTaskStore{task: domain.BoardTask{
 			ID: taskID, RepositoryID: repoID, Key: "tt-1",
-			Column: domain.TaskColumnCodeReview, TaskType: domain.TaskTypeTask,
+			Column: domain.TaskColumnCodeReview, TaskType: "task",
 		}},
 		repos:  &gateRepos{repo: domain.Repository{ID: repoID, RemoteURL: "https://github.com/acme/widgets.git"}},
 		jobs:   &gateJobStore{mappings: mappings},
@@ -129,6 +130,7 @@ func newGateHarness(t *testing.T, age time.Duration, mappings []domain.Repositor
 		Tokens: func(context.Context) (string, error) { return "gh-token", nil },
 	})
 	h.runner.SetTaskReader(h.tasks)
+	h.runner.SetWorkflows(workflowtest.Default().Reader())
 
 	created, err := h.store.Create(context.Background(), domain.TaskPipeline{
 		TaskID:       taskID,

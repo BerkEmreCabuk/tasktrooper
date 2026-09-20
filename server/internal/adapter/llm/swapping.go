@@ -45,6 +45,4 @@ func (s *SwappingClient) Embed(ctx context.Context, input string, model string) 
 	return s.get().Embed(ctx, input, model)
 }
 
-// Unwrap exposes the current underlying client so callers can reach
-// capabilities beyond the port.LLMClient interface (e.g. MultiProviderClient).
 func (s *SwappingClient) Unwrap() port.LLMClient { return s.get() }

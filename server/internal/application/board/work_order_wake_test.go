@@ -69,14 +69,14 @@ func TestWakeDependentsOfDispatchesTheClearDependentAndLeavesTheStillBlockedOneP
 		RepositoryID:    uuid.New(),
 		Key:             "T-A",
 		Column:          domain.TaskColumnInProgress,
-		TaskType:        domain.TaskTypeTask,
+		TaskType:        "task",
 		AssigneeAgentID: &agentID,
 	}
 	stillBlockedDependent := domain.BoardTask{
 		ID:       uuid.New(),
 		Key:      "T-D",
 		Column:   domain.TaskColumnInProgress,
-		TaskType: domain.TaskTypeTask,
+		TaskType: "task",
 	}
 	otherBlockerID := uuid.New()
 

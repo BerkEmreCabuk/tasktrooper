@@ -1740,8 +1740,12 @@ func (r *Runner) parkOnQuota(ctx context.Context, job RunJob, run domain.TaskAge
 	run.Status = domain.TaskAgentRunStatusCompleted
 	run.CLISessionID = block.CLISessionID
 	run.QuotaResumeAt = &resumeAt
-	run.Summary = truncateHead(fmt.Sprintf("Claude Code usage limit reached — the task resumes automatically after %s. %s",
-		resumeAt.Format(time.RFC1123), block.Detail), 500)
+	head := "usage limit reached"
+	if label := block.ProviderLabel(); label != "" {
+		head = label + " usage limit reached"
+	}
+	run.Summary = truncateHead(fmt.Sprintf("%s — the task resumes automatically after %s. %s",
+		head, resumeAt.Format(time.RFC1123), block.Detail), 500)
 
 	pctx, cancelPersist := persistCtx(ctx)
 	defer cancelPersist()
@@ -1749,7 +1753,7 @@ func (r *Runner) parkOnQuota(ctx context.Context, job RunJob, run domain.TaskAge
 		// Without the row there is nothing to resume FROM: the sweeper reads
 		// the reset time off it. Fail the run so the reconciler retries the
 		// task rather than leaving it parked on a promise nobody recorded.
-		return fmt.Errorf("record the claude code quota park: %w", err)
+		return fmt.Errorf("record the agent cli quota park: %w", err)
 	}
 
 	if r.blocker != nil {
@@ -1762,7 +1766,7 @@ func (r *Runner) parkOnQuota(ctx context.Context, job RunJob, run domain.TaskAge
 			// the same limit. Logged rather than failed for the reason on
 			// parkOnResource: a queueing problem is not the task's fault.
 			log.Warn().Err(err).Str("task_id", job.Task.ID.String()).
-				Msg("parking a task on the claude code usage limit failed")
+				Msg("parking a task on the agent cli usage limit failed")
 		} else {
 			r.parks.Record(pctx, job.RepositoryID, job.Task, previous,
 				domain.ResourceClaudeCodeQuota, domain.MoveReasonQuotaExhausted)
@@ -1773,7 +1777,7 @@ func (r *Runner) parkOnQuota(ctx context.Context, job RunJob, run domain.TaskAge
 		Str("agent", agentRec.Name).
 		Str("cli_session_id", block.CLISessionID).
 		Time("resume_at", resumeAt).
-		Msg("task parked on the claude code usage limit")
+		Msg("task parked on the agent cli usage limit")
 	return nil
 }
 
@@ -1815,12 +1819,16 @@ func (r *Runner) quotaOrPark(
 	streak := quotaParkStreak(prevRuns, run.ID)
 	if streak >= maxConsecutiveQuotaParks {
 		log.Warn().Str("task_id", job.Task.ID.String()).Int("consecutive_parks", streak).
-			Msg("claude code quota park cap reached, failing the run instead of parking it again")
+			Msg("agent cli quota park cap reached, failing the run instead of parking it again")
+		label := block.ProviderLabel()
+		if label == "" {
+			label = "agent CLI"
+		}
 		return fail(fmt.Errorf(
-			"this task has parked on the Claude Code usage limit %d times in a row without completing a run (last: %v). "+
-				"Failing it instead of parking again: either the subscription has been exhausted for a long stretch, "+
+			"this task has parked on the %s usage limit %d times in a row without completing a run (last: %v). "+
+				"Failing it instead of parking again: either the limit has been exhausted for a long stretch, "+
 				"or the run keeps reporting a limit it is not actually hitting",
-			streak, block))
+			label, streak, block))
 	}
 	return r.parkOnQuota(ctx, job, run, agentRec, block, streak)
 }
@@ -3037,7 +3045,7 @@ func listsEveryCriterion(wf domain.Workflow, task domain.BoardTask) bool {
 // build to keep green, and telling it to write unit tests is telling it to do
 // the implementer's job on the wrong task.
 func standingCriteriaMessage(task domain.BoardTask) string {
-	if task.TaskType == domain.TaskTypeAnaliz {
+	if task.TaskType == "analiz" {
 		return ""
 	}
 	switch task.Column {
@@ -3178,7 +3186,7 @@ func criteriaMessage(wf domain.Workflow, task domain.BoardTask, criteria []domai
 	}
 	// An analiz task has no automatic hand-off to gate on: its criteria are what
 	// the analysis must answer, ticked when the documents answer them.
-	if task.TaskType == domain.TaskTypeAnaliz {
+	if task.TaskType == "analiz" {
 		switch task.Column {
 		case domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision:
 			sb.WriteString("These are what your spec and plan must answer. Tick each one your documents cover with set_criterion_completed, " +

@@ -76,32 +76,33 @@ type QuotaBlock struct {
 	// Detail is the CLI's own wording, kept for the board card so a human can
 	// see which limit was hit rather than a paraphrase of it.
 	Detail string
-	// Provider names which host-executed CLI hit the limit. Empty reads as
-	// Claude Code, the provider every QuotaBlock named before this field
-	// existed, so a literal that never set it keeps saying the same thing it
-	// always did.
+	// Provider names which host-executed CLI hit the limit. Every producer in
+	// the tree sets it; an empty value reads as an unnamed limit and renders as
+	// a generic sentence rather than a guess about which engine spent it.
 	Provider LLMProviderType
 }
 
-// providerLabel is the human name this block's messages use: the provider
-// catalog's own label, "Claude Code" for an unset Provider (see the field
-// comment), or the raw type string for one the catalog does not recognise.
-func (q *QuotaBlock) providerLabel() string {
-	if q == nil || q.Provider == "" {
-		return "Claude Code"
+// ProviderLabel is the human name this block's messages use: the provider
+// catalog's own label, or the raw type string for one the catalog does not
+// recognise. Empty when no provider is set, which the message functions render
+// generically — naming "Claude Code" here would lie to someone whose block
+// actually came from Cursor, AGY or OpenCode.
+func (q *QuotaBlock) ProviderLabel() string {
+	if q == nil {
+		return ""
 	}
-	if def, ok := LLMProviderDefinitionFor(q.Provider); ok && def.Label != "" {
-		return def.Label
-	}
-	return string(q.Provider)
+	return LLMProviderLabel(q.Provider)
 }
 
 func (q *QuotaBlock) Error() string {
 	if q == nil {
-		return "claude code usage limit reached"
+		return "usage limit reached"
 	}
-	return fmt.Sprintf("%s usage limit reached, resuming at %s",
-		strings.ToLower(q.providerLabel()), q.ResumeAt.UTC().Format(time.RFC3339))
+	when := q.ResumeAt.UTC().Format(time.RFC3339)
+	if label := strings.ToLower(q.ProviderLabel()); label != "" {
+		return fmt.Sprintf("%s usage limit reached, resuming at %s", label, when)
+	}
+	return fmt.Sprintf("usage limit reached, resuming at %s", when)
 }
 
 // QuotaBlockOf reports the usage-limit block behind err, anywhere in its wrap
@@ -132,13 +133,23 @@ func (q *QuotaBlock) UserMessage(lang string) string {
 	if q == nil {
 		switch lang {
 		case "tr":
-			return "Claude Code kullanım limiti doldu; limit yenilendikten sonra tekrar deneyin."
+			return "Kullanım limiti doldu; limit yenilendikten sonra tekrar deneyin."
 		default:
-			return "The Claude Code usage limit is spent; try again once it renews."
+			return "The usage limit is spent; try again once it renews."
 		}
 	}
 	when := q.resumeLabel()
-	label := q.providerLabel()
+	label := q.ProviderLabel()
+	if label == "" {
+		switch lang {
+		case "tr":
+			return fmt.Sprintf("Kullanım limiti doldu; %s civarında yenilenecek, sonra tekrar deneyin. "+
+				"Beklemek istemiyorsanız bu ajanı API üzerinden çalışan bir sağlayıcıya taşıyabilirsiniz.", when)
+		default:
+			return fmt.Sprintf("The usage limit is spent; it renews around %s — try again after that. "+
+				"If you would rather not wait, move this agent to an API-backed provider.", when)
+		}
+	}
 	switch lang {
 	case "tr":
 		return fmt.Sprintf("%s kullanım limiti doldu; %s civarında yenilenecek, sonra tekrar deneyin. "+
@@ -158,13 +169,23 @@ func (q *QuotaBlock) QueuedMessage(lang string) string {
 	if q == nil {
 		switch lang {
 		case "tr":
-			return "Claude Code kullanım limiti doldu; limit yenilenince mesajınız otomatik olarak gönderilecek."
+			return "Kullanım limiti doldu; limit yenilenince mesajınız otomatik olarak gönderilecek."
 		default:
-			return "The Claude Code usage limit is spent; your message will send automatically once it renews."
+			return "The usage limit is spent; your message will send automatically once it renews."
 		}
 	}
 	when := q.resumeLabel()
-	label := q.providerLabel()
+	label := q.ProviderLabel()
+	if label == "" {
+		switch lang {
+		case "tr":
+			return fmt.Sprintf("Kullanım limiti doldu; %s civarında yenilenince bu mesaj otomatik olarak gönderilecek, "+
+				"beklemenize gerek yok.", when)
+		default:
+			return fmt.Sprintf("The usage limit is spent; this message will send automatically once it renews around %s — "+
+				"no need to wait or resend.", when)
+		}
+	}
 	switch lang {
 	case "tr":
 		return fmt.Sprintf("%s kullanım limiti doldu; %s civarında yenilenince bu mesaj otomatik olarak gönderilecek, "+

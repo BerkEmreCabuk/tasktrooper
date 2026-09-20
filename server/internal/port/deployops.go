@@ -68,7 +68,7 @@ type ActionsRun struct {
 }
 
 // ActionsClient is what deployops needs from GitHub Actions. The concrete
-// implementation wraps the free functions in internal/adapter/github; this
+// implementation wraps the free functions in internal/adapter/vcs/github; this
 // interface exists so the service and monitor are testable against fakes.
 type ActionsClient interface {
 	// ListWorkflowRuns returns recent runs of workflowFile. An empty branch

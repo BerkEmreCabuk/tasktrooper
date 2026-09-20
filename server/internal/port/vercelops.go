@@ -15,7 +15,7 @@ import (
 // It exists so the application layer can tell "the token is there but Vercel
 // will not honour it" (revoked, expired, or scoped to nothing the caller asked
 // for) apart from "Vercel is down / the network broke", without importing
-// internal/adapter/vercel to reach that package's IsUnauthorized. The first is
+// internal/adapter/cloud/vercel to reach that package's IsUnauthorized. The first is
 // a stable answer the operator must go fix in Settings; the second is worth
 // retrying. Collapsing them would report a dead token as a 5xx and tell the
 // operator to wait for something that will never start working.

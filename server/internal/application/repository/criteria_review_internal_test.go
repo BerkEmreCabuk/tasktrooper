@@ -171,7 +171,7 @@ func TestCriteriaReviewGate(t *testing.T) {
 				requireCriteria: tc.require,
 				workflows:       workflowtest.Default().Reader(),
 			}
-			err := svc.criteriaReviewGate(context.Background(), taskID, domain.TaskTypeTask, tc.prev, tc.target)
+			err := svc.criteriaReviewGate(context.Background(), taskID, "task", tc.prev, tc.target)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("expected pass, got %v", err)
@@ -245,7 +245,7 @@ func TestCriteriaGateAcceptsAReviewerApprovalInPlaceOfTheImplementerTick(t *test
 				requireCriteria: true,
 				workflows:       workflowtest.Default().Reader(),
 			}
-			err := svc.criteriaGate(context.Background(), taskID, domain.TaskTypeTask, tc.target)
+			err := svc.criteriaGate(context.Background(), taskID, "task", tc.target)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("expected pass, got %v", err)
@@ -308,7 +308,7 @@ func TestCriteriaRefusalsCarryCriterionIDs(t *testing.T) {
 			workflows:       workflowtest.Default().Reader(),
 		}
 
-		err := svc.criteriaGate(context.Background(), taskID, domain.TaskTypeTask, domain.TaskColumnReadyForQA)
+		err := svc.criteriaGate(context.Background(), taskID, "task", domain.TaskColumnReadyForQA)
 
 		if err == nil {
 			t.Fatal("expected the gate to block")
@@ -326,7 +326,7 @@ func TestCriteriaRefusalsCarryCriterionIDs(t *testing.T) {
 			workflows:       workflowtest.Default().Reader(),
 		}
 
-		err := svc.criteriaReviewGate(context.Background(), taskID, domain.TaskTypeTask, domain.TaskColumnInQA, domain.TaskColumnDone)
+		err := svc.criteriaReviewGate(context.Background(), taskID, "task", domain.TaskColumnInQA, domain.TaskColumnDone)
 
 		if err == nil {
 			t.Fatal("expected the gate to block")
@@ -348,7 +348,7 @@ func TestCriteriaRefusalsCarryCriterionIDs(t *testing.T) {
 			workflows:       workflowtest.Default().Reader(),
 		}
 
-		err := svc.criteriaReviewGate(context.Background(), taskID, domain.TaskTypeTask, domain.TaskColumnInQA, domain.TaskColumnPMUAT)
+		err := svc.criteriaReviewGate(context.Background(), taskID, "task", domain.TaskColumnInQA, domain.TaskColumnPMUAT)
 
 		if err == nil {
 			t.Fatal("expected the gate to block")

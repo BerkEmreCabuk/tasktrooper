@@ -205,7 +205,7 @@ func TestEnterWorkingColumnTakesAQATaskIntoInQA(t *testing.T) {
 
 func TestEnterWorkingColumnLeavesAnalizOutOfInQA(t *testing.T) {
 	agentID := uuid.New()
-	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnReadyForQA, TaskType: domain.TaskTypeAnaliz}
+	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnReadyForQA, TaskType: "analiz"}
 	updater := &fakeTaskUpdater{task: task}
 	r := &Runner{taskUpdater: updater, workflows: workflowtest.Default().Reader()}
 

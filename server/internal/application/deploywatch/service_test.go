@@ -29,7 +29,7 @@ func releasedTask() domain.BoardTask {
 		RepositoryID:   repoID,
 		Key:            "T-7",
 		Title:          "New pricing tiers",
-		TaskType:       domain.TaskTypeTask,
+		TaskType:       "task",
 		Column:         domain.TaskColumnDone,
 		MergeCommitSHA: mergeSHA,
 		HasMigration:   true,

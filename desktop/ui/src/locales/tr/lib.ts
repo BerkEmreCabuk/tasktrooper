@@ -20,7 +20,7 @@ export const lib: LibDict = {
       gate_disabled: "Bu depoda CI kapısı kapalı",
     },
     blockedResource: {
-      claude_code_quota: "Claude kullanım limiti doldu",
+      llm_provider_code_quota: "LLM Provider kullanım limiti doldu",
       mobile_device: "Test cihazı bekleniyor",
       deploy_watch: "Deploy bekleniyor",
       work_order: "Bloke eden görevler bekleniyor",
@@ -57,7 +57,7 @@ export const lib: LibDict = {
       llm_request: "LLM isteği",
       claude_code_session: "Claude Code oturumu",
       claude_code_result: "Claude Code oturumu bitti",
-      claude_code_quota_park: "Claude Code kullanım limiti: görev beklemede",
+      llm_provider_code_quota_park: "LLM Provider kullanım limiti: görev beklemede",
       claude_code_slot_wait: "Boş Claude Code oturum yuvası beklendi",
     },
   },

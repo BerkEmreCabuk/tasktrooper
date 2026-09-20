@@ -19,7 +19,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/deviceagent"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/deviceagent"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 

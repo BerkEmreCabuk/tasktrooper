@@ -34,7 +34,7 @@ func (s *Service) runHostExecutedTurn(
 	workDir := strings.TrimSpace(turn.workspaceDir)
 
 	if workDir == "" {
-		return domain.AgentResponse{}, errNoChatWorkspace(turn.lang)
+		return domain.AgentResponse{}, errNoChatWorkspace(turn.lang, turn.provider)
 	}
 
 	result, err := s.chatExecutor.ExecuteChat(ctx, domain.ChatExecution{
@@ -56,7 +56,7 @@ func (s *Service) runHostExecutedTurn(
 				Str("session_id", sess.ID.String()).
 				Str("cli_session_id", result.CLISessionID).
 				Time("resume_at", block.ResumeAt).
-				Msg("claude code usage limit reached during a chat turn")
+				Msg("agent cli usage limit reached during a chat turn")
 			return domain.AgentResponse{}, domain.NewQuotaNotice(block, turn.lang)
 		}
 		return domain.AgentResponse{}, err
@@ -77,13 +77,24 @@ func (s *Service) rememberCLISession(ctx context.Context, sess domain.Session, c
 	}
 }
 
-func errNoChatWorkspace(lang string) error {
+func errNoChatWorkspace(lang string, provider domain.LLMProviderType) error {
+	label := domain.LLMProviderLabel(provider)
+	if label == "" {
+		switch lang {
+		case "tr":
+			return &chatSetupError{"Bu ajan yerel bir ajan CLI üzerinde çalışıyor ve bir çalışma dizini gerekiyor. " +
+				"Sohbeti bir depoya bağlayın (ya da bir görev sohbeti açın), sonra tekrar deneyin."}
+		default:
+			return &chatSetupError{"This agent runs on a local agent CLI, which needs a workspace to run in. " +
+				"Scope this chat to a repository (or open it from a task), then try again."}
+		}
+	}
 	switch lang {
 	case "tr":
-		return &chatSetupError{"Bu ajan Claude Code üzerinde çalışıyor ve bir çalışma dizini gerekiyor. " +
+		return &chatSetupError{"Bu ajan " + label + " üzerinde çalışıyor ve bir çalışma dizini gerekiyor. " +
 			"Sohbeti bir depoya bağlayın (ya da bir görev sohbeti açın), sonra tekrar deneyin."}
 	default:
-		return &chatSetupError{"This agent runs on Claude Code, which needs a workspace to run in. " +
+		return &chatSetupError{"This agent runs on " + label + ", which needs a workspace to run in. " +
 			"Scope this chat to a repository (or open it from a task), then try again."}
 	}
 }

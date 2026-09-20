@@ -26,7 +26,7 @@ func TestCreateTaskOverridesAssigneeForAnOverrideModeType(t *testing.T) {
 	f.svc.repos = &fakeReleaseRepoStore{repo: domain.Repository{ID: f.repoID, Kind: domain.RepoKindBackend}}
 
 	task := f.create(t, domain.CreateBoardTaskRequest{
-		TaskType:        domain.TaskTypeAnaliz,
+		TaskType:        "analiz",
 		AssigneeAgentID: &pmChoice,
 	})
 
@@ -41,7 +41,7 @@ func TestCreateTaskDoesNotOverrideAssigneeForANoneModeType(t *testing.T) {
 	f.svc.repos = &fakeReleaseRepoStore{repo: domain.Repository{ID: f.repoID, Kind: domain.RepoKindBackend}}
 
 	task := f.create(t, domain.CreateBoardTaskRequest{
-		TaskType:        domain.TaskTypeTask,
+		TaskType:        "task",
 		AssigneeAgentID: &pmChoiceID,
 	})
 
@@ -55,7 +55,7 @@ func TestCreateTaskLeavesAssigneeAloneWhenRoleResolverIsUnwired(t *testing.T) {
 	pmChoiceID := uuid.New()
 
 	task := f.create(t, domain.CreateBoardTaskRequest{
-		TaskType:        domain.TaskTypeTask,
+		TaskType:        "task",
 		AssigneeAgentID: &pmChoiceID,
 	})
 

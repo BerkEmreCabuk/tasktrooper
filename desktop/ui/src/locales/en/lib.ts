@@ -20,7 +20,7 @@ export const lib = {
     },
     // board_tasks.blocked_resource: what a parked task is waiting on.
     blockedResource: {
-      claude_code_quota: "Claude usage limit reached",
+      llm_provider_code_quota: "LLM Provider limit reached",
       mobile_device: "Waiting for a test device",
       deploy_watch: "Waiting for the deploy",
       work_order: "Waiting for blocking tasks",
@@ -59,7 +59,7 @@ export const lib = {
       // Same trace, same renderer; these four are the only step types it adds.
       claude_code_session: "Claude Code session",
       claude_code_result: "Claude Code session finished",
-      claude_code_quota_park: "Claude Code usage limit: task parked",
+      llm_provider_code_quota_park: "LLM Provider usage limit: task parked",
       claude_code_slot_wait: "Waited for a free Claude Code session slot",
     },
   },

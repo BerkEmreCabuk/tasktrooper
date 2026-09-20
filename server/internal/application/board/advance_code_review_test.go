@@ -162,7 +162,7 @@ func TestAdvanceToCodeReviewOnlyActsOnImplementationColumns(t *testing.T) {
 
 func TestAdvanceToCodeReviewSkipsAnalizTasks(t *testing.T) {
 	agentID := uuid.New()
-	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: domain.TaskTypeAnaliz}
+	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnInProgress, TaskType: "analiz"}
 	updater := &fakeTaskUpdater{task: task}
 	r := handoffRunner(updater, &handoffGit{diff: "diff"})
 

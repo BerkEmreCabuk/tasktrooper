@@ -88,7 +88,7 @@ func (s *SessionQuotaSweeper) sweep(ctx context.Context) {
 			log.Warn().Err(err).Str("session_id", pending.SessionID.String()).Msg("session quota sweeper: resuming a parked chat turn failed")
 			continue
 		}
-		log.Info().Str("session_id", pending.SessionID.String()).Msg("parked chat turn resumed: the claude code usage limit has reset")
+		log.Info().Str("session_id", pending.SessionID.String()).Msg("parked chat turn resumed: the agent cli usage limit has reset")
 	}
 	log.Info().Int("cap", quotaSweepBatchCap).
 		Msg("session quota sweeper: per-pass cap reached, any remaining parked turns resume on the next pass")

@@ -9,7 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/github"
+	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 

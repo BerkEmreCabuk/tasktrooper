@@ -9,7 +9,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/agentcli/claudecode"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/claudecode"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/mcpserver"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -112,7 +112,7 @@ func (m *claudeCodeMCP) ForRun(ctx context.Context, run claudecode.MCPRun) (clau
 		// for why the remote path deliberately does NOT set it.
 		if run.RequiresTools {
 			log.Error().Str("task_key", run.Label).
-				Msg("mcp endpoint address not published yet; refusing to start a claude code task run that would have no tasktrooper board tools")
+				Msg("mcp endpoint address not published yet; refusing to start an agent cli task run that would have no tasktrooper board tools")
 			return claudecode.MCPConfig{}, noop, fmt.Errorf(
 				"the tasktrooper tool endpoint is not serving yet, so this %s run would have no way to move its card, "+
 					"tick an acceptance criterion or record a verdict; it will be dispatched again once the server is up", run.Label)

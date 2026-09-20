@@ -28,7 +28,7 @@ import (
 // fixture the migration seeds — block_on_dependencies lives on todo/
 // in_progress there, which is the boundary these tests pin.
 func workOrderGateWorkflow() domain.Workflow {
-	return workflowtest.Default().Workflows[domain.TaskTypeTask]
+	return workflowtest.Default().Workflows["task"]
 }
 
 type stubBlockerReader struct {
@@ -80,7 +80,7 @@ func workOrderTask(col domain.TaskColumn) domain.BoardTask {
 		Key:          "T-2",
 		Title:        "web export button",
 		Column:       col,
-		TaskType:     domain.TaskTypeTask,
+		TaskType:     "task",
 	}
 }
 
@@ -90,7 +90,7 @@ func openBlocker() domain.BoardTask {
 		Key:      "T-1",
 		Title:    "API migration",
 		Column:   domain.TaskColumnInProgress,
-		TaskType: domain.TaskTypeTask,
+		TaskType: "task",
 	}
 }
 

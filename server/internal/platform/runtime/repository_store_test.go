@@ -12,7 +12,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/secrets"
 
-	pgstore "github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
+	pgstore "github.com/makifbaysal/tasktrooper/server/internal/adapter/storage/postgres"
 )
 
 // wireRepositoryStore is the composition buildHandler used to skip: construct

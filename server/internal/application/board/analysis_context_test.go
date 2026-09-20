@@ -31,7 +31,7 @@ func (a *analysisUpdater) AnalysisReferences(context.Context, uuid.UUID) ([]doma
 func implementationJob() RunJob {
 	return runJobFor(domain.BoardTask{
 		ID: uuid.New(), Key: "T-20", Title: "web export button",
-		Column: domain.TaskColumnTodo, TaskType: domain.TaskTypeTask,
+		Column: domain.TaskColumnTodo, TaskType: "task",
 	}, uuid.New())
 }
 

@@ -14,7 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/store/postgres"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/storage/postgres"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/database"
