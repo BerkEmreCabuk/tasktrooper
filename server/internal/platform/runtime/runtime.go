@@ -39,6 +39,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/local/localtoolchain"
 	mcpadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/mcp"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/mcpserver"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/catalogrepo"
 	pgstore "github.com/makifbaysal/tasktrooper/server/internal/adapter/storage/postgres"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/board"
 	boilerplatetools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/boilerplate"
@@ -656,6 +657,7 @@ func applyLocalOverrides(cfg *domain.Config, opts Options) {
 		cfg.Storage.Sessions.WorkspaceRoot = filepath.Join(opts.DataDir, "workspaces")
 		cfg.RAG.StorageDir = filepath.Join(opts.DataDir, "files")
 		cfg.Tools.Terminal.WorkingDir = filepath.Join(opts.DataDir, "workspaces")
+		cfg.AgentCatalog.CacheDir = filepath.Join(opts.DataDir, "catalog")
 	}
 	if len(opts.AllowedRoots) > 0 {
 		cfg.Indexer.AllowedRoots = append(cfg.Indexer.AllowedRoots, opts.AllowedRoots...)
@@ -1075,6 +1077,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var orchSvc *orchestrator.Service
 	if catalogStore != nil {
 		catalogSvc = catalog.NewService(catalogStore, llmClient, embeddingModel)
+		catalogSvc.SetSkillBudget(cfg.Evolution.MaxSkillsPerAgent)
 		if e.pgDB != nil {
 			catalogSvc.SetTemplateStore(pgstore.NewAgentTemplateStore(e.pgDB))
 		}
@@ -2468,6 +2471,42 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	}
 	if initiativeStore != nil {
 		initiativeSvc = initiative.NewService(initiativeStore)
+	}
+
+	// External agents & skills catalog: a git repo (or a local directory) the
+	// app pulls agent and skill definitions from. Boot sync runs before the
+	// first tick so a fresh install sees the repo's agents immediately; the
+	// manual button on the UI's Catalog page shares the same SyncFromCatalog
+	// and the same mutex, so the three never interleave.
+	if strings.TrimSpace(cfg.AgentCatalog.Source) != "" && e.pgDB != nil && catalogSvc != nil {
+		catalogSyncStore := pgstore.NewCatalogSyncStore(e.pgDB)
+		reader := &catalogrepo.Reader{Source: cfg.AgentCatalog.Source, CacheDir: cfg.AgentCatalog.CacheDir}
+		go func(runCtx context.Context) {
+			syncOnce := func() {
+				syncCtx, cancel := context.WithTimeout(runCtx, 10*time.Minute)
+				defer cancel()
+				res, err := catalogSvc.SyncFromCatalog(syncCtx, reader, catalogSyncStore)
+				if err != nil {
+					log.Warn().Err(err).Msg("agent catalog sync failed")
+					return
+				}
+				log.Info().Str("ref", res.RepoRef).
+					Int("created", res.Created).Int("updated", res.Updated).
+					Int("merged", res.Merged).Int("pending", res.Pending).
+					Msg("agent catalog synced")
+			}
+			syncOnce()
+			ticker := time.NewTicker(cfg.AgentCatalog.Interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					syncOnce()
+				case <-runCtx.Done():
+					return
+				}
+			}
+		}(ctx)
 	}
 
 	var settingsSvc *settings.Service

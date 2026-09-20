@@ -60,6 +60,17 @@ const emptyAgent = (): AgentInput => ({
   self_evolution_enabled: false,
 });
 
+// The settings page is the two toggle gates' owner, so its draft carries them
+// unconditionally even though AgentInput leaves them optional for partial-save
+// callers that must never touch them (performance page's model swap).
+type AgentDraft = AgentInput & Pick<Agent, "auto_pull_agent_updates" | "keep_skills_updated">;
+
+const emptyAgentDraft = (): AgentDraft => ({
+  ...emptyAgent(),
+  auto_pull_agent_updates: true,
+  keep_skills_updated: true,
+});
+
 
 type AgentOutletContext = {
   agent: Agent | null;
@@ -72,7 +83,11 @@ export function AgentSettingsPage() {
   const navigate = useNavigate();
   const isNew = agentId === "new";
   const outlet = useOutletContext<AgentOutletContext | undefined>();
-  const [form, setForm] = useState<AgentInput>(emptyAgent());
+  const [form, setForm] = useState<AgentDraft>(emptyAgentDraft());
+  // Whether this agent's definition came from the external agent catalog. The
+  // two sync gates below are only meaningful then; a hand-made agent owns its
+  // own prompt and no upstream will ever reach it.
+  const [catalogManaged, setCatalogManaged] = useState(false);
   const [policy, setPolicy] = useState<ToolPolicy>({});
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
@@ -205,7 +220,12 @@ export function AgentSettingsPage() {
         tool_policy: agent.tool_policy ?? {},
         enabled: agent.enabled,
         self_evolution_enabled: agent.self_evolution_enabled ?? false,
+        // Born connected to the catalog is the server's own default; a load
+        // from an older server that predates these fields reads as "on".
+        auto_pull_agent_updates: agent.auto_pull_agent_updates ?? true,
+        keep_skills_updated: agent.keep_skills_updated ?? true,
       });
+      setCatalogManaged(Boolean(agent.catalog_slug));
       setPolicy(agent.tool_policy ?? {});
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("agentArea.settings.toast.loadFailed"));
@@ -572,6 +592,30 @@ export function AgentSettingsPage() {
           />
         </div>
         <ToolPolicyForm value={policy} onChange={setPolicy} />
+        {catalogManaged && (
+          <div className="space-y-4 border-t border-border pt-4">
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <Label>{t("agentArea.settings.catalog.autoPull.label")}</Label>
+                <p className="text-xs text-muted-foreground">{t("agentArea.settings.catalog.autoPull.help")}</p>
+              </div>
+              <Switch
+                checked={form.auto_pull_agent_updates}
+                onCheckedChange={(v) => setForm((f) => ({ ...f, auto_pull_agent_updates: v }))}
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-1">
+                <Label>{t("agentArea.settings.catalog.keepUpdated.label")}</Label>
+                <p className="text-xs text-muted-foreground">{t("agentArea.settings.catalog.keepUpdated.help")}</p>
+              </div>
+              <Switch
+                checked={form.keep_skills_updated}
+                onCheckedChange={(v) => setForm((f) => ({ ...f, keep_skills_updated: v }))}
+              />
+            </div>
+          </div>
+        )}
         <div className="flex items-center gap-2">
           <Switch checked={form.enabled} onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))} />
           <Label>{t("agentArea.settings.enabled")}</Label>

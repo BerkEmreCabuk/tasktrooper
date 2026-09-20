@@ -180,6 +180,12 @@ func applyDefaults(cfg *domain.Config) {
 	if cfg.Evolution.EvidenceMaxChars <= 0 {
 		cfg.Evolution.EvidenceMaxChars = 24000
 	}
+	if cfg.AgentCatalog.CacheDir == "" {
+		cfg.AgentCatalog.CacheDir = "./data/catalog"
+	}
+	if cfg.AgentCatalog.Interval <= 0 {
+		cfg.AgentCatalog.Interval = 15 * time.Minute
+	}
 	if cfg.Storeops.PollInterval <= 0 {
 		cfg.Storeops.PollInterval = 5 * time.Minute
 	}

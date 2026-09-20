@@ -41,6 +41,7 @@ export const frame: FrameDict = {
       usage: "Kullanım",
       roles: "Roller",
       workflows: "İş Akışları",
+      catalog: "Katalog",
     },
     sidebar: {
       workspace: "Çalışma Alanı",

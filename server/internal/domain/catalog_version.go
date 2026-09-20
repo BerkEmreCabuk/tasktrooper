@@ -18,6 +18,8 @@ const (
 	CatalogVersionSourceUser      = "user"
 	CatalogVersionSourceEvolution = "evolution"
 	CatalogVersionSourceSeed      = "seed"
+	CatalogVersionSourceUpstream  = "upstream"
+	CatalogVersionSourceMerge     = "merge"
 )
 
 // CatalogVersion is one immutable snapshot of a skill or a rule, appended on

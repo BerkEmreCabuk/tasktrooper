@@ -25,6 +25,7 @@ import { RolesSettingsPage } from "@/pages/RolesSettingsPage";
 import { WorkflowSettingsPage } from "@/pages/WorkflowSettingsPage";
 import { LLMSettingsPage } from "@/pages/LLMSettingsPage";
 import { UsageSettingsPage } from "@/pages/UsageSettingsPage";
+import { CatalogPage } from "@/pages/CatalogPage";
 import { SkillsPage } from "@/pages/SkillsPage";
 import { ProjectsPage } from "@/pages/ProjectsPage";
 import { WorkspaceLayout } from "@/components/layout/WorkspaceLayout";
@@ -105,6 +106,7 @@ export default function App() {
                   <Route path="runner" element={<Navigate to="/settings/llm" replace />} />
                   <Route path="team" element={<Navigate to="/settings" replace />} />
                   <Route path="usage" element={<UsageSettingsPage />} />
+                  <Route path="catalog" element={<CatalogPage />} />
                 </Route>
                 <Route path="workspace-settings" element={<Navigate to="/settings/board" replace />} />
               </Route>

@@ -12,6 +12,7 @@ type CatalogStore interface {
 	GetSkill(ctx context.Context, id uuid.UUID) (domain.Skill, error)
 	ListSkills(ctx context.Context) ([]domain.Skill, error)
 	ListSkillsByAgent(ctx context.Context, agentID uuid.UUID) ([]domain.Skill, error)
+	GetSkillByAgentAndName(ctx context.Context, agentID uuid.UUID, name string) (domain.Skill, error)
 	UpdateSkill(ctx context.Context, skill domain.Skill) (domain.Skill, error)
 	DeleteSkill(ctx context.Context, id uuid.UUID) error
 	SearchSkills(ctx context.Context, queryEmbedding []float32, topK int, agentID *uuid.UUID) ([]domain.Skill, error)

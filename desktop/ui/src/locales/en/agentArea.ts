@@ -240,6 +240,16 @@ export const agentArea = {
     subagentType: "Subagent type",
     systemPrompt: "System prompt",
     enabled: "Enabled",
+    catalog: {
+      autoPull: {
+        label: "Pull definition updates from the catalog",
+        help: "On: the catalog's prompt, roles and models overwrite this agent's own. Off: only skills are pulled, the definition stays as you edited it.",
+      },
+      keepUpdated: {
+        label: "Keep skills updated (merge my edits)",
+        help: "On: when the catalog changes a skill you also edited, the two are merged automatically. Off: your copy always wins, and a change made both here and upstream is parked for you instead of merged.",
+      },
+    },
     create: "Create",
     update: "Update",
   },

@@ -453,5 +453,27 @@ export const settingsPages: SettingsPagesDict = {
       terminal: "Bitiş",
     },
   },
+  catalog: {
+    title: "Dış Ajan Kataloğu",
+    loadFailed: "Katalog durumu yüklenemedi",
+    syncFailed: "Katalog senkronizasyonu başarısız",
+    syncToast: "Katalog senkronize edildi",
+    syncNow: "Şimdi senkronize et",
+    syncing: "Senkronize ediliyor…",
+    notConfigured: "Harici bir ajan kataloğu yapılandırılmamış",
+    notConfiguredHelp:
+      "Sunucu ortamında AGENT_CATALOG_REPO değişkenini bir git deposuna (veya yerel bir dizin yoluna) işaret edin ve bu sayfayı kullanmak için yeniden başlatın.",
+    lastSync: "Son senkronizasyon",
+    repoRef: "Kaynak",
+    created: "Oluşturulan",
+    updated: "Güncellenen",
+    merged: "Birleştirilen",
+    skipped: "Atlanan",
+    pendingCount: "Bekleyen",
+    pendingTitle: "Seni bekleyen değişiklikler",
+    pendingEmpty: "Bekleyen yok — katalogdaki her değişiklik uygulandı.",
+    error: "Son hata",
+    dismiss: "Kapat",
+  },
 
 };

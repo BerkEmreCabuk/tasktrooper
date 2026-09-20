@@ -1,4 +1,4 @@
-import { BarChart3, Bot, GitBranch, Globe, Kanban, Plug, Server, Users } from "lucide-react";
+import { BarChart3, Bot, Boxes, GitBranch, Globe, Kanban, Plug, Server, Users } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 import { PageContent } from "@/components/layout/PageContent";
 import { PageHeader } from "@/components/admin/PageHeader";
@@ -26,6 +26,7 @@ export function SettingsLayout() {
       end: true,
     },
     { to: "/settings/usage", label: t("frame.layout.settingsTabs.usage"), icon: BarChart3, end: true },
+    { to: "/settings/catalog", label: t("frame.layout.settingsTabs.catalog"), icon: Boxes, end: true },
   ];
 
   return (

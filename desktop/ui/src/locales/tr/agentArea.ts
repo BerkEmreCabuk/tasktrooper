@@ -240,6 +240,16 @@ export const agentArea: AgentAreaDict = {
     subagentType: "Alt ajan tipi",
     systemPrompt: "Sistem istemi",
     enabled: "Etkin",
+    catalog: {
+      autoPull: {
+        label: "Tanım güncellemelerini katalogdan çek",
+        help: "Açık: katalogdaki prompt, rollar ve modeller bu ajanın kendi değerlerinin üzerine yazılır. Kapalı: yalnızca yetenekler çekilir; tanım senin düzenlediğin halde kalır.",
+      },
+      keepUpdated: {
+        label: "Yetenekleri güncel tut (kendi düzenlemelerimle birleştir)",
+        help: "Açık: katalog senin de düzenlediğin bir yeteneği değiştirdiğinde ikisi otomatik birleştirilir. Kapalı: senin kopyan her zaman kazanır ve hem burada hem katalogda değişen kayıt birleştirilmek yerine beklemeye alınır.",
+      },
+    },
     create: "Oluştur",
     update: "Güncelle",
   },

@@ -203,6 +203,22 @@ evolution:
   # Bos birakilirsa reflection ve judge, ajanin zor isler icin ayarlanan
   # model_heavy'si ile calisir (model_heavy da bossa ajanin normal modeli).
 
+# External agents & skills catalog. Disabled until source is set: source is
+# either a git URL (fetched into cache_dir at every sync) or a local directory
+# (used in place, cache_dir ignored). Sync runs at boot, on the interval below,
+# and from the manual button in the UI's Catalog page. Two per-agent toggles
+# decide what the sync may apply automatically:
+#   auto_pull_agent_updates - overwrite the agent's own prompt/roles/etc from
+#                             the catalog (off = "I hand-edited this agent")
+#   keep_skills_updated     - LLM-merge when a skill changed BOTH upstream and
+#                             locally ("guncel tut")
+# New upstream agents and new upstream skills are always applied; deletion is
+# gated on keep_skills_updated.
+agent_catalog:
+  source: "${AGENT_CATALOG_REPO}"
+  cache_dir: "./data/catalog"
+  interval: "15m"
+
 # The other agent CLIs. An empty binary resolves on PATH.
 antigravity:
   binary: "${ANTIGRAVITY_BIN}"

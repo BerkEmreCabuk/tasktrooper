@@ -40,6 +40,7 @@ export const frame = {
       usage: "Usage",
       roles: "Roles",
       workflows: "Workflows",
+      catalog: "Catalog",
     },
     sidebar: {
       workspace: "Workspace",

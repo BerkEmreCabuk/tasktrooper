@@ -21,6 +21,9 @@ type Service struct {
 	versions       port.CatalogVersionStore
 	roleAdmin      RoleAdmin
 	seeding        atomic.Bool
+	// skillBudget is the per-agent skill ceiling the catalog sync shares with
+	// evolution's max_skills_per_agent; set by runtime wiring (SetSkillBudget).
+	skillBudget int
 	// hostExecutor answers "can a run on this provider actually be executed
 	// here". Nil means no runner is attached, which is the correct answer on
 	// every host that has no agent CLI installed — including the cloud pod.
@@ -72,7 +75,7 @@ func (s *Service) SeedingInProgress() bool {
 }
 
 func NewService(store port.CatalogStore, llm port.LLMClient, embeddingModel string) *Service {
-	return &Service{store: store, llm: llm, embeddingModel: embeddingModel}
+	return &Service{store: store, llm: llm, embeddingModel: embeddingModel, skillBudget: 25}
 }
 
 func (s *Service) SetTemplateStore(store port.AgentTemplateStore) {
@@ -379,6 +382,10 @@ func (s *Service) CreateAgent(ctx context.Context, req domain.CreateAgentRequest
 		Name: req.Name, Description: req.Description, SubagentType: req.SubagentType,
 		SystemPrompt: req.SystemPrompt, ProviderType: req.ProviderType, Model: req.Model, ModelHeavy: req.ModelHeavy, MaxTurns: req.MaxTurns, Effort: req.Effort, ToolPolicy: req.ToolPolicy, Enabled: req.Enabled,
 		SelfEvolutionEnabled: req.SelfEvolutionEnabled,
+		// A new agent is born connected to the catalog (toggles on); turning
+		// either off is a settings-time decision on an existing agent.
+		AutoPullAgentUpdates: true,
+		KeepSkillsUpdated:    true,
 	})
 }
 
@@ -409,11 +416,27 @@ func (s *Service) UpdateAgent(ctx context.Context, id uuid.UUID, req domain.Upda
 	if err := s.checkHostExecutor(req.ProviderType); err != nil {
 		return domain.Agent{}, err
 	}
-	req = dropStaleModels(ctx, s.store, id, req)
+	existing, err := s.store.GetAgent(ctx, id)
+	if err != nil {
+		return domain.Agent{}, err
+	}
+	req = dropStaleModels(existing, req)
+	autoPull := existing.AutoPullAgentUpdates
+	if req.AutoPullAgentUpdates != nil {
+		autoPull = *req.AutoPullAgentUpdates
+	}
+	keepUpdated := existing.KeepSkillsUpdated
+	if req.KeepSkillsUpdated != nil {
+		keepUpdated = *req.KeepSkillsUpdated
+	}
 	return s.store.UpdateAgent(ctx, domain.Agent{
 		ID: id, Name: req.Name, Description: req.Description, SubagentType: req.SubagentType,
 		SystemPrompt: req.SystemPrompt, ProviderType: req.ProviderType, Model: req.Model, ModelHeavy: req.ModelHeavy, MaxTurns: req.MaxTurns, Effort: req.Effort, ToolPolicy: req.ToolPolicy, Enabled: req.Enabled,
 		SelfEvolutionEnabled: req.SelfEvolutionEnabled,
+		AutoPullAgentUpdates: autoPull,
+		KeepSkillsUpdated:    keepUpdated,
+		CatalogSlug:          existing.CatalogSlug,
+		CatalogEtag:          existing.CatalogEtag,
 	})
 }
 
@@ -424,9 +447,8 @@ func (s *Service) UpdateAgent(ctx context.Context, id uuid.UUID, req domain.Upda
 // whose provider was one vendor and whose (heavy) model was another's — every
 // run on it died with the provider's "invalid model" 400. A name the caller
 // actually changed is left alone: that one was picked for the new provider.
-func dropStaleModels(ctx context.Context, store port.CatalogStore, id uuid.UUID, req domain.UpdateAgentRequest) domain.UpdateAgentRequest {
-	existing, err := store.GetAgent(ctx, id)
-	if err != nil || existing.ProviderType == "" || req.ProviderType == "" || existing.ProviderType == req.ProviderType {
+func dropStaleModels(existing domain.Agent, req domain.UpdateAgentRequest) domain.UpdateAgentRequest {
+	if existing.ProviderType == "" || req.ProviderType == "" || existing.ProviderType == req.ProviderType {
 		return req
 	}
 	if req.Model == existing.Model {

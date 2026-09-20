@@ -17,6 +17,7 @@ type Config struct {
 	Embedding     EmbeddingConfig     `koanf:"embedding"`
 	Graph         GraphConfig         `koanf:"graph"`
 	Evolution     EvolutionConfig     `koanf:"evolution"`
+	AgentCatalog  AgentCatalogConfig  `koanf:"agent_catalog"`
 	ProdOps       ProdOpsConfig       `koanf:"prod_ops"`
 	Storeops      StoreopsConfig      `koanf:"storeops"`
 	DeployOps     DeployOpsConfig     `koanf:"deploy_ops"`
@@ -185,6 +186,20 @@ type EvolutionConfig struct {
 	MaxMemoryChanges  int    `koanf:"max_memory_changes"`
 	MemoryMaxCount    int    `koanf:"memory_max_count"`
 	EvidenceMaxChars  int    `koanf:"evidence_max_chars"`
+}
+
+// AgentCatalogConfig drives the external agents/skills catalog: a git clone
+// (or a local directory) the app watches and pulls agent definitions from, so
+// a new agent or a skill edit ships without a desktop release. Disabled by
+// an empty Source.
+type AgentCatalogConfig struct {
+	Source string `koanf:"source"`
+	// CacheDir is where a git Source is cloned into. A Source that is a
+	// directory is used in place, CacheDir ignored.
+	CacheDir string `koanf:"cache_dir"`
+	// Interval between background syncs after the boot-time one. 0 = the
+	// 15m default.
+	Interval time.Duration `koanf:"interval"`
 }
 
 type BoardConfig struct {

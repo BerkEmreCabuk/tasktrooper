@@ -86,18 +86,22 @@ type Handler struct {
 	apiKeySvc     *apikey.Service
 	// bootSeed retries a board seed that failed at boot and reports whether the
 	// boot steps are still running. Nil on a build with no database.
-	bootSeed          BootSeed
-	sessionSvc        *session.Service
-	settingsSvc       *settings.Service
-	mobileDeviceSvc   *mobiledevice.Service
-	githubTokens      port.GitHubTokenStore
-	llmProviderSvc    *llmprovider.Service
-	agentCLISvc       *agentcliapp.Service
-	jobSvc            *job.Service
-	ragSvc            *rag.Service
-	attachmentSvc     *attachment.Service
-	catalogSvc        *catalog.Service
-	mcpSvc            *mcp.Service
+	bootSeed        BootSeed
+	sessionSvc      *session.Service
+	settingsSvc     *settings.Service
+	mobileDeviceSvc *mobiledevice.Service
+	githubTokens    port.GitHubTokenStore
+	llmProviderSvc  *llmprovider.Service
+	agentCLISvc     *agentcliapp.Service
+	jobSvc          *job.Service
+	ragSvc          *rag.Service
+	attachmentSvc   *attachment.Service
+	catalogSvc      *catalog.Service
+	mcpSvc          *mcp.Service
+	// catalogRepo / catalogSyncStore back the external-catalog endpoints; both
+	// nil disables them the way a nil catalogSvc disables the agent endpoints.
+	catalogRepo       port.CatalogRepoReader
+	catalogSyncStore  port.CatalogSyncStore
 	auditStore        port.AuditLogger
 	mcpManager        *mcpadapter.Manager
 	reloadFn          func() error
@@ -156,6 +160,8 @@ type Config struct {
 	AttachmentSvc     *attachment.Service
 	CatalogSvc        *catalog.Service
 	MCPSvc            *mcp.Service
+	CatalogRepo       port.CatalogRepoReader
+	CatalogSyncStore  port.CatalogSyncStore
 	AuditStore        port.AuditLogger
 	MCPManager        *mcpadapter.Manager
 	ReloadFn          func() error
@@ -213,6 +219,8 @@ func NewHandler(cfg Config) *Handler {
 		attachmentSvc:     cfg.AttachmentSvc,
 		catalogSvc:        cfg.CatalogSvc,
 		mcpSvc:            cfg.MCPSvc,
+		catalogRepo:       cfg.CatalogRepo,
+		catalogSyncStore:  cfg.CatalogSyncStore,
 		auditStore:        cfg.AuditStore,
 		mcpManager:        cfg.MCPManager,
 		reloadFn:          cfg.ReloadFn,
@@ -295,6 +303,7 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	h.registerEvolutionRoutes(app)
 
 	h.registerSettingsRoutes(app)
+	h.registerCatalogRoutes(app)
 	h.registerHostingRoutes(app)
 	h.registerRepoDependencyRoutes(app)
 	h.registerVercelOpsRoutes(app)

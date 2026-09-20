@@ -166,6 +166,17 @@ func (m *memCatalogStore) ListSkillsByAgent(ctx context.Context, agentID uuid.UU
 	return out, nil
 }
 
+func (m *memCatalogStore) GetSkillByAgentAndName(ctx context.Context, agentID uuid.UUID, name string) (domain.Skill, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, sk := range m.skills {
+		if sk.AgentID == agentID && sk.Name == name {
+			return sk, nil
+		}
+	}
+	return domain.Skill{}, assert.AnError
+}
+
 // Persisted like UpdateRule below. A no-op here made every seed reconcile look
 // like it had landed while the store still held the old row, so a test could
 // not tell "the reconcile wrote it" from "the reconcile skipped it".
@@ -182,6 +193,14 @@ func (m *memCatalogStore) UpdateSkill(ctx context.Context, skill domain.Skill) (
 }
 
 func (m *memCatalogStore) DeleteSkill(ctx context.Context, id uuid.UUID) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, sk := range m.skills {
+		if sk.ID == id {
+			m.skills = append(m.skills[:i], m.skills[i+1:]...)
+			return nil
+		}
+	}
 	return nil
 }
 
@@ -300,7 +319,14 @@ func (m *memCatalogStore) CreateRule(ctx context.Context, rule domain.Orchestrat
 }
 
 func (m *memCatalogStore) GetRule(ctx context.Context, id uuid.UUID) (domain.OrchestratorRule, error) {
-	return domain.OrchestratorRule{}, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, r := range m.rules {
+		if r.ID == id {
+			return r, nil
+		}
+	}
+	return domain.OrchestratorRule{}, assert.AnError
 }
 
 func (m *memCatalogStore) ListRules(ctx context.Context) ([]domain.OrchestratorRule, error) {

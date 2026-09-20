@@ -32,9 +32,9 @@ func (s *CatalogStore) CreateSkill(ctx context.Context, skill domain.Skill) (dom
 	err = s.pool.QueryRow(ctx, `
 		INSERT INTO skills (agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, created_at
+		RETURNING id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, catalog_sha, created_at
 	`, skill.AgentID, skill.Name, skill.Description, skill.Category, tags, skill.Content, embJSON, skill.Enabled, skill.TechStackID).Scan(
-		&out.ID, &out.AgentID, &out.Name, &out.Description, &out.Category, &out.Tags, &out.Content, &embJSON, &out.Enabled, &out.TechStackID, &out.CreatedAt,
+		&out.ID, &out.AgentID, &out.Name, &out.Description, &out.Category, &out.Tags, &out.Content, &embJSON, &out.Enabled, &out.TechStackID, &out.CatalogSha, &out.CreatedAt,
 	)
 	if err != nil {
 		return domain.Skill{}, fmt.Errorf("create skill: %w", err)
@@ -47,9 +47,9 @@ func (s *CatalogStore) GetSkill(ctx context.Context, id uuid.UUID) (domain.Skill
 	var out domain.Skill
 	var embJSON []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, created_at
+		SELECT id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, catalog_sha, created_at
 		FROM skills WHERE id = $1
-	`, id).Scan(&out.ID, &out.AgentID, &out.Name, &out.Description, &out.Category, &out.Tags, &out.Content, &embJSON, &out.Enabled, &out.TechStackID, &out.CreatedAt)
+	`, id).Scan(&out.ID, &out.AgentID, &out.Name, &out.Description, &out.Category, &out.Tags, &out.Content, &embJSON, &out.Enabled, &out.TechStackID, &out.CatalogSha, &out.CreatedAt)
 	if err != nil {
 		return domain.Skill{}, fmt.Errorf("get skill: %w", err)
 	}
@@ -59,7 +59,7 @@ func (s *CatalogStore) GetSkill(ctx context.Context, id uuid.UUID) (domain.Skill
 
 func (s *CatalogStore) ListSkills(ctx context.Context) ([]domain.Skill, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, created_at
+		SELECT id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, catalog_sha, created_at
 		FROM skills ORDER BY name ASC
 	`)
 	if err != nil {
@@ -71,7 +71,7 @@ func (s *CatalogStore) ListSkills(ctx context.Context) ([]domain.Skill, error) {
 
 func (s *CatalogStore) ListSkillsByAgent(ctx context.Context, agentID uuid.UUID) ([]domain.Skill, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, created_at
+		SELECT id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, catalog_sha, created_at
 		FROM skills WHERE agent_id = $1 ORDER BY name ASC
 	`, agentID)
 	if err != nil {
@@ -79,6 +79,20 @@ func (s *CatalogStore) ListSkillsByAgent(ctx context.Context, agentID uuid.UUID)
 	}
 	defer rows.Close()
 	return scanSkills(rows)
+}
+
+func (s *CatalogStore) GetSkillByAgentAndName(ctx context.Context, agentID uuid.UUID, name string) (domain.Skill, error) {
+	var out domain.Skill
+	var embJSON []byte
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, catalog_sha, created_at
+		FROM skills WHERE agent_id = $1 AND name = $2
+	`, agentID, name).Scan(&out.ID, &out.AgentID, &out.Name, &out.Description, &out.Category, &out.Tags, &out.Content, &embJSON, &out.Enabled, &out.TechStackID, &out.CatalogSha, &out.CreatedAt)
+	if err != nil {
+		return domain.Skill{}, fmt.Errorf("get skill by agent and name: %w", err)
+	}
+	_ = json.Unmarshal(embJSON, &out.Embedding)
+	return out, nil
 }
 
 func (s *CatalogStore) UpdateSkill(ctx context.Context, skill domain.Skill) (domain.Skill, error) {
@@ -92,11 +106,11 @@ func (s *CatalogStore) UpdateSkill(ctx context.Context, skill domain.Skill) (dom
 	}
 	var out domain.Skill
 	err = s.pool.QueryRow(ctx, `
-		UPDATE skills SET name=$2, description=$3, category=$4, tags=$5, content=$6, embedding=$7, enabled=$8, tech_stack_id=$10
+		UPDATE skills SET name=$2, description=$3, category=$4, tags=$5, content=$6, embedding=$7, enabled=$8, tech_stack_id=$10, catalog_sha=$11
 		WHERE id=$1 AND agent_id=$9
-		RETURNING id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, created_at
-	`, skill.ID, skill.Name, skill.Description, skill.Category, tags, skill.Content, embJSON, skill.Enabled, skill.AgentID, skill.TechStackID).Scan(
-		&out.ID, &out.AgentID, &out.Name, &out.Description, &out.Category, &out.Tags, &out.Content, &embJSON, &out.Enabled, &out.TechStackID, &out.CreatedAt,
+		RETURNING id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, catalog_sha, created_at
+	`, skill.ID, skill.Name, skill.Description, skill.Category, tags, skill.Content, embJSON, skill.Enabled, skill.AgentID, skill.TechStackID, skill.CatalogSha).Scan(
+		&out.ID, &out.AgentID, &out.Name, &out.Description, &out.Category, &out.Tags, &out.Content, &embJSON, &out.Enabled, &out.TechStackID, &out.CatalogSha, &out.CreatedAt,
 	)
 	if err != nil {
 		return domain.Skill{}, fmt.Errorf("update skill: %w", err)
@@ -129,12 +143,12 @@ func (s *CatalogStore) SearchSkills(ctx context.Context, queryEmbedding []float3
 	var err error
 	if agentID != nil {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, created_at
+			SELECT id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, catalog_sha, created_at
 			FROM skills WHERE enabled = true AND embedding IS NOT NULL AND agent_id = $1
 		`, *agentID)
 	} else {
 		rows, err = s.pool.Query(ctx, `
-			SELECT id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, created_at
+			SELECT id, agent_id, name, description, category, tags, content, embedding, enabled, tech_stack_id, catalog_sha, created_at
 			FROM skills WHERE enabled = true AND embedding IS NOT NULL
 		`)
 	}
@@ -151,7 +165,7 @@ func (s *CatalogStore) SearchSkills(ctx context.Context, queryEmbedding []float3
 	for rows.Next() {
 		var sk domain.Skill
 		var embJSON []byte
-		if err := rows.Scan(&sk.ID, &sk.AgentID, &sk.Name, &sk.Description, &sk.Category, &sk.Tags, &sk.Content, &embJSON, &sk.Enabled, &sk.TechStackID, &sk.CreatedAt); err != nil {
+		if err := rows.Scan(&sk.ID, &sk.AgentID, &sk.Name, &sk.Description, &sk.Category, &sk.Tags, &sk.Content, &embJSON, &sk.Enabled, &sk.TechStackID, &sk.CatalogSha, &sk.CreatedAt); err != nil {
 			return nil, err
 		}
 		var emb []float32
@@ -251,11 +265,11 @@ func (s *CatalogStore) CreateAgent(ctx context.Context, agent domain.Agent) (dom
 	}
 	var out domain.Agent
 	err = s.pool.QueryRow(ctx, `
-		INSERT INTO agents (name, description, subagent_type, system_prompt, provider_type, model, model_heavy, max_turns, effort, tool_policy, enabled, self_evolution_enabled)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-		RETURNING id, name, description, subagent_type, system_prompt, provider_type, model, model_heavy, max_turns, effort, tool_policy, enabled, self_evolution_enabled, created_at
-	`, agent.Name, agent.Description, agent.SubagentType, agent.SystemPrompt, agent.ProviderType, agent.Model, agent.ModelHeavy, agent.MaxTurns, agent.Effort, policyJSON, agent.Enabled, agent.SelfEvolutionEnabled).Scan(
-		&out.ID, &out.Name, &out.Description, &out.SubagentType, &out.SystemPrompt, &out.ProviderType, &out.Model, &out.ModelHeavy, &out.MaxTurns, &out.Effort, &policyJSON, &out.Enabled, &out.SelfEvolutionEnabled, &out.CreatedAt,
+		INSERT INTO agents (name, description, subagent_type, system_prompt, provider_type, model, model_heavy, max_turns, effort, tool_policy, enabled, self_evolution_enabled, catalog_slug, auto_pull_agent_updates, keep_skills_updated)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		RETURNING id, name, description, subagent_type, system_prompt, provider_type, model, model_heavy, max_turns, effort, tool_policy, enabled, self_evolution_enabled, catalog_slug, catalog_etag, auto_pull_agent_updates, keep_skills_updated, created_at
+	`, agent.Name, agent.Description, agent.SubagentType, agent.SystemPrompt, agent.ProviderType, agent.Model, agent.ModelHeavy, agent.MaxTurns, agent.Effort, policyJSON, agent.Enabled, agent.SelfEvolutionEnabled, agent.CatalogSlug, agent.AutoPullAgentUpdates, agent.KeepSkillsUpdated).Scan(
+		&out.ID, &out.Name, &out.Description, &out.SubagentType, &out.SystemPrompt, &out.ProviderType, &out.Model, &out.ModelHeavy, &out.MaxTurns, &out.Effort, &policyJSON, &out.Enabled, &out.SelfEvolutionEnabled, &out.CatalogSlug, &out.CatalogEtag, &out.AutoPullAgentUpdates, &out.KeepSkillsUpdated, &out.CreatedAt,
 	)
 	if err != nil {
 		return domain.Agent{}, fmt.Errorf("create agent: %w", err)
@@ -285,9 +299,9 @@ func (s *CatalogStore) GetAgent(ctx context.Context, id uuid.UUID) (domain.Agent
 	var out domain.Agent
 	var policyJSON []byte
 	err := s.pool.QueryRow(ctx, `
-		SELECT id, name, description, subagent_type, system_prompt, provider_type, model, model_heavy, max_turns, effort, tool_policy, enabled, self_evolution_enabled, created_at
+		SELECT id, name, description, subagent_type, system_prompt, provider_type, model, model_heavy, max_turns, effort, tool_policy, enabled, self_evolution_enabled, catalog_slug, catalog_etag, auto_pull_agent_updates, keep_skills_updated, created_at
 		FROM agents WHERE id = $1
-	`, id).Scan(&out.ID, &out.Name, &out.Description, &out.SubagentType, &out.SystemPrompt, &out.ProviderType, &out.Model, &out.ModelHeavy, &out.MaxTurns, &out.Effort, &policyJSON, &out.Enabled, &out.SelfEvolutionEnabled, &out.CreatedAt)
+	`, id).Scan(&out.ID, &out.Name, &out.Description, &out.SubagentType, &out.SystemPrompt, &out.ProviderType, &out.Model, &out.ModelHeavy, &out.MaxTurns, &out.Effort, &policyJSON, &out.Enabled, &out.SelfEvolutionEnabled, &out.CatalogSlug, &out.CatalogEtag, &out.AutoPullAgentUpdates, &out.KeepSkillsUpdated, &out.CreatedAt)
 	if err != nil {
 		return domain.Agent{}, fmt.Errorf("get agent: %w", err)
 	}
@@ -302,7 +316,7 @@ func (s *CatalogStore) GetAgent(ctx context.Context, id uuid.UUID) (domain.Agent
 
 func (s *CatalogStore) ListAgents(ctx context.Context) ([]domain.Agent, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, name, description, subagent_type, system_prompt, provider_type, model, model_heavy, max_turns, effort, tool_policy, enabled, self_evolution_enabled, created_at
+		SELECT id, name, description, subagent_type, system_prompt, provider_type, model, model_heavy, max_turns, effort, tool_policy, enabled, self_evolution_enabled, catalog_slug, catalog_etag, auto_pull_agent_updates, keep_skills_updated, created_at
 		FROM agents ORDER BY name ASC
 	`)
 	if err != nil {
@@ -313,7 +327,7 @@ func (s *CatalogStore) ListAgents(ctx context.Context) ([]domain.Agent, error) {
 	for rows.Next() {
 		var a domain.Agent
 		var policyJSON []byte
-		if err := rows.Scan(&a.ID, &a.Name, &a.Description, &a.SubagentType, &a.SystemPrompt, &a.ProviderType, &a.Model, &a.ModelHeavy, &a.MaxTurns, &a.Effort, &policyJSON, &a.Enabled, &a.SelfEvolutionEnabled, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.Description, &a.SubagentType, &a.SystemPrompt, &a.ProviderType, &a.Model, &a.ModelHeavy, &a.MaxTurns, &a.Effort, &policyJSON, &a.Enabled, &a.SelfEvolutionEnabled, &a.CatalogSlug, &a.CatalogEtag, &a.AutoPullAgentUpdates, &a.KeepSkillsUpdated, &a.CreatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(policyJSON, &a.ToolPolicy)
@@ -334,11 +348,11 @@ func (s *CatalogStore) UpdateAgent(ctx context.Context, agent domain.Agent) (dom
 	}
 	var out domain.Agent
 	err = s.pool.QueryRow(ctx, `
-		UPDATE agents SET name=$2, description=$3, subagent_type=$4, system_prompt=$5, provider_type=$6, model=$7, model_heavy=$8, max_turns=$9, effort=$10, tool_policy=$11, enabled=$12, self_evolution_enabled=$13
+		UPDATE agents SET name=$2, description=$3, subagent_type=$4, system_prompt=$5, provider_type=$6, model=$7, model_heavy=$8, max_turns=$9, effort=$10, tool_policy=$11, enabled=$12, self_evolution_enabled=$13, catalog_slug=$14, catalog_etag=$15, auto_pull_agent_updates=$16, keep_skills_updated=$17
 		WHERE id=$1
-		RETURNING id, name, description, subagent_type, system_prompt, provider_type, model, model_heavy, max_turns, effort, tool_policy, enabled, self_evolution_enabled, created_at
-	`, agent.ID, agent.Name, agent.Description, agent.SubagentType, agent.SystemPrompt, agent.ProviderType, agent.Model, agent.ModelHeavy, agent.MaxTurns, agent.Effort, policyJSON, agent.Enabled, agent.SelfEvolutionEnabled).Scan(
-		&out.ID, &out.Name, &out.Description, &out.SubagentType, &out.SystemPrompt, &out.ProviderType, &out.Model, &out.ModelHeavy, &out.MaxTurns, &out.Effort, &policyJSON, &out.Enabled, &out.SelfEvolutionEnabled, &out.CreatedAt,
+		RETURNING id, name, description, subagent_type, system_prompt, provider_type, model, model_heavy, max_turns, effort, tool_policy, enabled, self_evolution_enabled, catalog_slug, catalog_etag, auto_pull_agent_updates, keep_skills_updated, created_at
+	`, agent.ID, agent.Name, agent.Description, agent.SubagentType, agent.SystemPrompt, agent.ProviderType, agent.Model, agent.ModelHeavy, agent.MaxTurns, agent.Effort, policyJSON, agent.Enabled, agent.SelfEvolutionEnabled, agent.CatalogSlug, agent.CatalogEtag, agent.AutoPullAgentUpdates, agent.KeepSkillsUpdated).Scan(
+		&out.ID, &out.Name, &out.Description, &out.SubagentType, &out.SystemPrompt, &out.ProviderType, &out.Model, &out.ModelHeavy, &out.MaxTurns, &out.Effort, &policyJSON, &out.Enabled, &out.SelfEvolutionEnabled, &out.CatalogSlug, &out.CatalogEtag, &out.AutoPullAgentUpdates, &out.KeepSkillsUpdated, &out.CreatedAt,
 	)
 	if err != nil {
 		return domain.Agent{}, fmt.Errorf("update agent: %w", err)
@@ -625,7 +639,7 @@ func scanSkills(rows interface {
 	for rows.Next() {
 		var sk domain.Skill
 		var embJSON []byte
-		if err := rows.Scan(&sk.ID, &sk.AgentID, &sk.Name, &sk.Description, &sk.Category, &sk.Tags, &sk.Content, &embJSON, &sk.Enabled, &sk.TechStackID, &sk.CreatedAt); err != nil {
+		if err := rows.Scan(&sk.ID, &sk.AgentID, &sk.Name, &sk.Description, &sk.Category, &sk.Tags, &sk.Content, &embJSON, &sk.Enabled, &sk.TechStackID, &sk.CatalogSha, &sk.CreatedAt); err != nil {
 			return nil, err
 		}
 		_ = json.Unmarshal(embJSON, &sk.Embedding)

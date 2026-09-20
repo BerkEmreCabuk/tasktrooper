@@ -53,7 +53,12 @@ type Skill struct {
 	// Nil is the general skill, which is a different thing from "unset" and is
 	// why the field is always rendered.
 	TechStackID *uuid.UUID `json:"tech_stack_id"`
-	CreatedAt   time.Time  `json:"created_at"`
+	// CatalogSha is the content hash of the external-catalog revision this
+	// skill was last applied from. Empty means the skill never came from the
+	// external catalog (seeded, template copy, or user-written), so nothing
+	// reconciles it.
+	CatalogSha string    `json:"catalog_sha,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type Agent struct {
@@ -86,7 +91,24 @@ type Agent struct {
 	SkillIDs             []uuid.UUID `json:"skill_ids"`
 	Enabled              bool        `json:"enabled"`
 	SelfEvolutionEnabled bool        `json:"self_evolution_enabled"`
-	CreatedAt            time.Time   `json:"created_at"`
+	// CatalogSlug names this agent's definition in the external catalog
+	// (agents/<slug>). Empty means the agent does not come from there, so no
+	// sync touches it.
+	CatalogSlug string `json:"catalog_slug,omitempty"`
+	// CatalogEtag is the hash of the catalog revision applied to this agent.
+	// The sync compares it against the repo's current hash to decide whether a
+	// definition changed, and only rewrites it when an update was actually
+	// applied.
+	CatalogEtag string `json:"catalog_etag,omitempty"`
+	// AutoPullAgentUpdates lets the user say "I edited this agent, do not
+	// overwrite my prompt/roles/etc from the catalog" without losing the other
+	// skills the catalog still supplies.
+	AutoPullAgentUpdates bool `json:"auto_pull_agent_updates"`
+	// KeepSkillsUpdated gates LLM-merged skill conflict resolution: when both
+	// the catalog and this agent's own copy changed, the two are merged (and a
+	// version logged) only while this is true.
+	KeepSkillsUpdated bool `json:"keep_skills_updated"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 type OrchestratorRule struct {
@@ -224,6 +246,12 @@ type UpdateAgentRequest struct {
 	ToolPolicy           ToolPolicy `json:"tool_policy"`
 	Enabled              bool       `json:"enabled"`
 	SelfEvolutionEnabled bool       `json:"self_evolution_enabled"`
+	// AutoPullAgentUpdates / KeepSkillsUpdated are pointers: nil keeps the
+	// current value, so a PUT from a client that predates the toggle (or does
+	// not send it) cannot silently switch a synced agent's sync off. CatalogSlug/
+	// CatalogEtag are not writable here at all — the catalog sync owns them.
+	AutoPullAgentUpdates *bool `json:"auto_pull_agent_updates"`
+	KeepSkillsUpdated    *bool `json:"keep_skills_updated"`
 }
 
 type CreateOrchestratorRuleRequest struct {

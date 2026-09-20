@@ -2061,6 +2061,50 @@ export interface Agent {
   skill_ids: string[];
   enabled: boolean;
   self_evolution_enabled: boolean;
+  catalog_slug?: string;
+  catalog_etag?: string;
+  // Optional because a server older than this feature omits them; absent reads
+  // as "born connected to the catalog" in the settings page.
+  auto_pull_agent_updates?: boolean;
+  keep_skills_updated?: boolean;
+  created_at: string;
+}
+
+// The two catalog sync gates are optional on write so a partial save that never
+// meant to touch them (e.g. the performance page's model swap) cannot quietly
+// switch a synced agent back to "auto-pull everything".
+export type AgentInput = Omit<
+  Agent,
+  "id" | "created_at" | "skill_ids" | "auto_pull_agent_updates" | "keep_skills_updated"
+> &
+  Partial<Pick<Agent, "auto_pull_agent_updates" | "keep_skills_updated">>;
+
+export interface CatalogSyncResult {
+  repo_ref: string;
+  created: number;
+  updated: number;
+  merged: number;
+  skipped: number;
+  pending: number;
+}
+
+export interface CatalogSyncState {
+  repo_ref: string;
+  last_sync_at: string;
+  last_error?: string;
+  last_summary?: CatalogSyncResult | null;
+  pending_count: number;
+  updated_at: string;
+}
+
+export interface CatalogPending {
+  id: string;
+  agent_slug: string;
+  agent_name: string;
+  kind: string;
+  name: string;
+  action: string;
+  reason: string;
   created_at: string;
 }
 
@@ -2340,7 +2384,6 @@ export interface OrchestrationPlan {
 export type SkillInput = Omit<Skill, "id" | "created_at" | "agent_id">;
 export type TechStackInput = Omit<TechStack, "id" | "created_at" | "agent_id">;
 export type TechStackPatch = Partial<TechStackInput>;
-export type AgentInput = Omit<Agent, "id" | "created_at" | "skill_ids">;
 export type OrchestratorRuleInput = Omit<OrchestratorRule, "id" | "created_at" | "agent_id">;
 
 export const MASKED_SECRET_VALUE = "••••••";
@@ -3142,6 +3185,16 @@ export const api = {
     request<Agent>(`/admin/agents/${id}`, { method: "PUT", body: JSON.stringify(agent) }),
 
   deleteAgent: (id: string) => request<void>(`/admin/agents/${id}`, { method: "DELETE" }),
+
+  getCatalogStatus: () => request<{ configured: boolean; state?: CatalogSyncState }>("/v1/catalog/status"),
+
+  syncCatalog: () =>
+    request<{ result: CatalogSyncResult; state: CatalogSyncState }>("/v1/catalog/sync", { method: "POST" }),
+
+  listCatalogPending: () => request<{ items: CatalogPending[]; count: number }>("/v1/catalog/pending"),
+
+  dismissCatalogPending: (id: string) =>
+    request<void>(`/v1/catalog/pending/${id}`, { method: "DELETE" }),
 
   listAgentTemplates: () => request<{ templates: AgentTemplate[] }>("/admin/agent-templates"),
 

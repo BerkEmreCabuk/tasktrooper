@@ -459,7 +459,7 @@ export const settingsPages = {
     removeParticipant: "Remove",
     participantInstructionsPlaceholder: "Extra instructions for this participant at this stage (optional)",
     noSubscriberWarning: "No agent holding “{role}” is subscribed to this column — it will never get this work.",
-    kind: {
+kind: {
       intake: "Intake",
       queue: "Queue",
       work: "Work",
@@ -469,6 +469,28 @@ export const settingsPages = {
       parked: "Parked",
       terminal: "Terminal",
     },
+  },
+  catalog: {
+    title: "External Agent Catalog",
+    loadFailed: "Failed to load catalog status",
+    syncFailed: "Catalog sync failed",
+    syncToast: "Catalog synced",
+    syncNow: "Sync now",
+    syncing: "Syncing…",
+    notConfigured: "No external agent catalog is configured",
+    notConfiguredHelp:
+      "Point AGENT_CATALOG_REPO at a git repository (or a local directory path) in the server's environment and restart to use this page.",
+    lastSync: "Last sync",
+    repoRef: "Source",
+    created: "Created",
+    updated: "Updated",
+    merged: "Merged",
+    skipped: "Skipped",
+    pendingCount: "Waiting",
+    pendingTitle: "Changes waiting for you",
+    pendingEmpty: "Nothing pending — every catalog change was applied.",
+    error: "Last error",
+    dismiss: "Dismiss",
   },
 
 };
