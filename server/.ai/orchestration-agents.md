@@ -11,18 +11,24 @@ Skills and orchestrator rules are **agent-scoped**. Each skill and rule belongs 
 
 ## Default role agents
 
-Role agents are never created automatically. At boot `EnsureRoleTemplates` only
-upserts the six built-in agent templates (by name) — it touches the
-`agent_templates` gallery, not `agents`. A role agent exists once the user
-creates it from the template gallery (`CreateAgentFromTemplate`); nothing
-reconciles it against its template afterward, so self-evolution's (or an
-admin's) edits to a created agent survive every restart instead of being
-reverted by the next boot. `seedSkill` still stores a copied skill without an
-embedding, so it never waits on the embedder; `catalog.BackfillSkillEmbeddings`
-embeds them in the background (retried for up to 30 min). `/admin/agents`
-reports `seeding: true` only for the brief `EnsureRoleTemplates` upsert;
-`bootseed.Booting` can still hold it true a little longer for other boot
-steps.
+Role agents arrive through the **catalog sync**, not the template gallery and
+not a boot seed. At boot (and on the `agent_catalog.interval`, and from the
+Catalog page button) `SyncFromCatalog` reads the six role agents from
+`AGENT_CATALOG_REPO` — the repo-root `catalog/` in dev, a copy bundled inside
+the app in production — and creates or merges them into `agents` by name.
+Adoption is name-based: an existing agent with the same `Name` and no catalog
+slug yet is stamped with the upstream content. When the existing content IS the
+catalog's definition, the agent is stamped with slug + etag and stays on
+`auto_pull_agent_updates`; a hand-edited agent gets the slug too, but with
+`auto_pull` switched off and the etag left blank, so the next sync surfaces the
+diff as a parked update instead of silently keeping them apart. Skills, tech
+stacks and KPIs reconcile either way without touching a byte of hand-written
+content. `seedSkill` stores a synced skill without an embedding, so the sync
+never waits on the embedder; `catalog.BackfillSkillEmbeddings` embeds them in
+the background (retried for up to 30 min). `/admin/agents` reports
+`seeding: true` only while `bootseed.Booting` still holds for its own boot
+steps — the role-agent seeding itself is a constant false now that agents
+arrive through the sync.
 
 | Name | Subagent type | Effort | Purpose |
 |------|---------------|--------|---------|
@@ -33,23 +39,56 @@ steps.
 | `qa-agent` | `generalPurpose` | medium | Manual test rounds, QA columns, read-only code tools |
 | `system-architect` | `system-architect` | high | Analysis (`analiz`) tasks, code review, task decomposition |
 
-Each role template carries 6–17 skills and 3–10 rules, copied onto a new agent when it is created from the template. Skill embeddings are filled in after creation by the backfill above. Changing the markdown under `internal/application/catalog/seeddata/` only changes what the NEXT agent created from a template gets — `EnsureRoleTemplates` re-upserts the templates on every boot, but nothing re-syncs an already-created agent against them. Tool policies and effort are applied on agent CREATE only, from the template.
+Each role agent carries 6–17 skills and 3–10 rules. Skill embeddings are
+filled in after sync by the backfill above. Changing the files under
+`catalog/agents/<name>/` changes what the NEXT sync applies to an agent that
+still has `auto_pull_agent_updates` on; an agent the user has edited is parked,
+not overwritten. Tool policies and effort are applied by the sync from the
+catalog, and afterwards belong to the agent row like any other field.
 
-### Seeded models
+### Provider and model defaults
 
 | Field | Value | Used for |
 |-------|-------|----------|
-| `provider_type` | `claude_code` | the CLI session a run is handed to |
-| `model` | `sonnet` | every run and every subtask by default |
-| `model_heavy` | `opus` | subtasks the planner rates `hard`, plus self-reflection and the golden judge |
+| `provider_type` | the connected CLI, else the active configured API provider | the session a run is handed to |
+| `model` / `model_heavy` | `ProviderDefaultModels(provider)` | every run / subtasks the planner rates `hard` + self-reflection and the golden judge |
 
-Declared as one triple in `role_seed.go` (`roleAgentProvider` / `roleAgentModel` / `roleAgentModelHeavy`): a model name is only valid for the provider it was picked from, so the seed never writes a name without its provider. Both are aliases from `domain.ClaudeCodeModels()` rather than pinned ids, so a model release cannot stale them silently.
+The provider is not pinned by the catalog: `ReconcileAgentRuntimes`
+(`catalog/agent_runtime.go`) picks the target after the set of available
+providers changes — the preferred connected CLI on this host (`cliPreference`,
+derived from `AllLLMProviderDefinitions` in declaration order), falling back to
+the install's active HTTP provider when it is configured. Model and heavy model
+come from `ProviderDefaultModels`, which is empty for every host-executed CLI
+(they are aliases from the definition's curated `ModelOptions` where one is
+declared — see `domain.ModelsForHostExecutedProvider` — or the CLI decides
+live), so a model release cannot stale them silently.
 
-`fillTemplateAgentModels` (`templates.go`) applies the pair when `CreateAgentFromTemplate` creates an agent from a **built-in** template that names no provider/model itself. It fills the pair only when **both** `model` and `model_heavy` are empty and `provider_type` is `claude_code` or still empty — either name set (by an override the caller passed), or any other provider, and the request is left untouched. The provider is stamped only where the `checkHostExecutor` probe (`claudeCodeRunnable`) says the CLI can run here; a host with no runner keeps empty models, because `CreateAgent` refuses that provider there.
+`fillTemplateAgentModels` (`templates.go`) applies the pair when
+`CreateAgentFromTemplate` creates an agent from a **built-in** template that
+names no provider/model itself — a legacy `BuiltIn: true` row from before the
+seed removal; user-saved templates carry their own provider/model. It fills the
+pair only when **both** `model` and `model_heavy` are empty and
+`provider_type` is still empty. The provider is stamped only where
+`firstRunnableCLI` (the same question `checkHostExecutor` asks, in
+`cliPreference` order) says a CLI can run here; a host with no runner keeps
+empty models, because `CreateAgent` refuses that provider there.
 
-### QA test flow (seeded skill set)
+### QA test flow (parked skill set)
 
-**QA runs manual tests only.** The automation phase is deferred, not deleted: four skills (`e2e-automation-project`, `automation-pipeline-integration`, `test-doubles-wiremock`, `test-database-seeding`) are seeded through `mdSkillDisabled` and two rules (`e2e-automation-project`, `deterministic-test-env`) through `disabledRule`, so they are **disabled** — files and seed lines stay in place, but the prompt builder injects only enabled entries. `manual-only-testing` replaced the `manual-before-automation` rule. Re-enabling is `mdSkillDisabled` → `mdSkill`, no migration — but, like every other change under `seeddata/`, it only reaches the NEXT agent created from the `qa-agent` template, not one that already exists. The `mobile-manual-testing` skill defines which layer of a mobile task can actually run in this environment (build, the repo's own lint/tests, the API side of the flow) and how to report what cannot run **without approving it** — a Linux runner has no simulator.
+**QA runs manual tests only.** The automation phase is deferred, not deleted:
+four skills (`e2e-automation-project`, `automation-pipeline-integration`,
+`test-doubles-wiremock`, `test-database-seeding`) and two rules
+(`e2e-automation-project`, `deterministic-test-env`) are **parked** by the
+catalog sync — applied to the `qa-agent` row as disabled entries (`enabled =
+false`, content retained), so the prompt builder injects only enabled entries.
+`manual-only-testing` replaced the `manual-before-automation` rule. Re-enabling
+is per-agent in the UI, no migration — and because the parked items live on the
+existing agent row, it takes effect immediately, not on the next agent from a
+template (the park is pinned by `deferred_capability_test.go`). The
+`mobile-manual-testing` skill defines which layer of a mobile task can actually
+run in this environment (build, the repo's own lint/tests, the API side of the
+flow) and how to report what cannot run **without approving it** — a Linux
+runner has no simulator.
 
 `qa-agent` is designed for the two-phase flow below; phase 2 is currently off. It never tests in prod (`never-test-in-prod` rule):
 
@@ -118,7 +157,7 @@ like every other, so omitting it files the skill as general.
 
 ## Agent templates
 
-`agent_templates` (migration 030) stores read-only agent snapshots: agent fields + `skills`/`rules` JSONB. The six role agents exist only as built-in templates (`BuiltIn: true`) until a user creates one, upserted by name on every boot by `EnsureRoleTemplates` — `CreateAgentFromTemplate` is what actually inserts into `agents`.
+`agent_templates` (migration 030) stores read-only agent snapshots: agent fields + `skills`/`rules` JSONB. The templates gallery is populated by **user** saves now — the six role agents live in `agents` directly (created by the catalog sync), not as built-in templates. `CreateAgentFromTemplate` is what actually inserts into `agents` from a saved snapshot; legacy `BuiltIn: true` rows from before the seed removal are still honoured by `fillTemplateAgentModels` (see above).
 
 | Method | Path | Purpose |
 |--------|------|---------|
@@ -156,7 +195,7 @@ There were several ways for a single chat request to open more than one board ta
 |---|---|
 | Intake/planner did not see the record already opened in the conversation, so a "move" request was planned as "create" | `pipelineConversationHistory` preserves the session action ledger (the system message matching `domain.IsSessionActionDigest`); intake and planner prompts carry the rule "if this is one of those records, act on that id" |
 | Planner split one job into "pick the location" → "pick the image" → "add", opening a task per step | `validateSingleTaskCreator`: at most one subtask in the **whole** plan may create a board task (`validateDisjointWrites` only looks inside one `parallel_group`, which `depends_on` chains slipped past). The prompt also says a subtask produces a CHANGE, not a decision or information: what only the stakeholder can know → `ready=false` + `questions`; what can be looked up in the repo/board/live site → the implementing subtask looks it up with its own tools |
-| A subtask with empty `tool_names` was invisible to every check, yet the executor gave it the agent's whole policy | `subtaskMayCreateTasks` resolves empty `tool_names` against the agent's `ToolPolicy` (`domain.ToolAllowedByPolicy`). In the seed only `product-manager` has `create_board_task`, so developer/QA subtasks are unaffected |
+| A subtask with empty `tool_names` was invisible to every check, yet the executor gave it the agent's whole policy | `subtaskMayCreateTasks` resolves empty `tool_names` against the agent's `ToolPolicy` (`domain.ToolAllowedByPolicy`). In the catalog only `product-manager` has `create_board_task`, so developer/QA subtasks are unaffected |
 | The verifier marked a correctly delegated run `passed:false` because "the feature is not live yet", and the replanner opened a second (analiz) task | `buildVerifierSystemPrompt` states that the run's deliverable is the **record**, and board latency (not live / code unchanged / QA not run) is not a finding |
 | A repair plan was valid on its own, so it could add a second creator | `validatePlannerOutput` takes `priorTasks`; the replanner passes the original plan's subtasks, so creators are counted across the run |
 
@@ -192,9 +231,9 @@ A task's record, and the agents working on it, multiplied from several places; e
 
 | Layer | Change |
 |---|---|
-| `catalog/seeddata/agents/qa-agent.md` + `role_seed.go` | Step 0 of the QA flow: `ready_for_qa` → `in_qa` before testing. Rule `qa-enter-in-qa-before-testing` (priority 100); `qa-pass-to-pm-uat` / `qa-fail-to-need-revision` exit from `in_qa` |
+| `catalog/agents/qa-agent/prompt.md` | Step 0 of the QA flow: `ready_for_qa` → `in_qa` before testing. Rule `qa-enter-in-qa-before-testing` (priority 100); `qa-pass-to-pm-uat` / `qa-fail-to-need-revision` exit from `in_qa` |
 | `board/runner.go` `columnInstruction` | Separate cases for `ready_for_qa` and `in_qa`. The general preamble says "moving to a column is not work, do not make it the plan's first item"; the `ready_for_qa` instruction keeps that and positions the move as **the opening act of the first test step** |
-| `catalog/templates.go` (`setRoleSubscriptionsIfDefault`) + migrations 070 / 104 | `qa-agent` subscribes to `ready_for_qa`, `in_qa` **and** `done` (`done` = PR merge, not testing), set the moment `CreateAgentFromTemplate` creates it under that exact name. Only writes subscriptions when the agent has none, so a later admin customization survives; installs from before this existed were backfilled by migration |
+| `catalog/templates.go` (`applySuggestedSubscriptions`) + migrations 070 / 104 | `qa-agent` subscribes to `ready_for_qa`, `in_qa` **and** `done` (`done` = PR merge, not testing), set when the agent is created from a template that suggests them. Only writes subscriptions when the agent has none, so a later admin customization survives; installs from before this existed were backfilled by migration |
 | `board/dispatcher.go` `isHandoffGateColumn` | `in_qa` + `human_uat` added |
 
 In a column that is not a hand-off gate, `task.moved` resolves to the **assignee**. That woke the wrong agent in three places:
@@ -302,7 +341,7 @@ A run in the review column passes judgment on someone else's diff; it is not the
 | `board/runner.go` `columnInstruction` | `code_review` case: **read** the PR diff; do not run the app/build/tests, do not fix it yourself. Three axes: (1) is the requested work done (AC), (2) is the code itself sound, (3) what else in the domain does the change break — for the third, surrounding code the diff touches may be read freely |
 | `board/review.go` `isReviewColumn` | `code_review` / `analiz_review` / `pm_uat` runs skip the build gate (`verifyAndFix`) and commit/push. When a review run entered a fix round, the architect became the implementer and approved its own patch at the same gate; a verify failure pushed the task back to `in_progress` in the reviewer's name |
 | `board/review.go` `reviewDiffMessage` | The review run's diff budget is 24 KB instead of 8 KB. "Read the whole diff" was unfulfillable at an 8 KB cut |
-| `catalog/seeddata/agents/system-architect.md` + `code-review-rubric.md` + `role_seed.go` | Prompt, skill and rule say the same: review is reading; the "Domain impact" heading requires reading callers outside the diff and naming the affected `file:line`. Rule: `code-review-reads-never-runs` |
+| `catalog/agents/system-architect/prompt.md` + its `code-review-rubric` skill | Prompt, skill and rule say the same: review is reading; the "Domain impact" heading requires reading callers outside the diff and naming the affected `file:line`. Rule: `code-review-reads-never-runs` |
 
 ### No code review without a PR
 
@@ -333,14 +372,14 @@ Legacy `/orchestration/skills` and `/orchestration/rules` redirect to the agents
 - `agents.self_evolution_enabled` (031): gates whether the reflection engine may apply skill/rule changes for the agent. Toggle in AgentSettingsPage. Templates carry the flag + `kpis` JSONB (035).
 - **Memory** (`agent_memories`, 032 + 065): memories with JSONB embeddings, in four buckets from two nullable columns — `agent_id NULL` = team memory, `repository_id NULL` = global (see [Memory scopes](#memory-scopes-migration-065)). Inline tools for all role agents: `save_memory`, `search_memory`, `delete_memory` (`internal/adapter/tools/memory`). Injected into board runs and agent chats via `memory.Recall` + `prompt.MemoryContextMessage` (8 project + 8 global, rendered as separate sections). Service: `internal/application/memory`.
 - **Lazy skills**: `BuildSystemPrompt` injects a skill **index** (name + description) instead of full content; agents fetch full instructions at use time via the `load_skill` tool (`internal/adapter/tools/skill`).
-- **KPIs** (`agent_kpis` + `agent_kpi_results`, 035): definitions live on the agent, measured per agent per period (daily/weekly ISO/monthly). Only metrics in the Go registry (`internal/application/kpi/registry.go`) are accepted: `tasks_completed`, `revisions_received`, `uat_failures`, `failed_runs`, `bugs_assigned`, `first_pass_rate`, plus the column-time metrics below. Attainment: full target → 1.0, half target → 0.5, else 0. Composite = weighted mean × 100. KPI context is injected into agent prompts ("your objective: meet these KPIs"). Admin CRUD: `/admin/agents/:id/kpis`; registry list: `GET /v1/kpi-metrics`. Role agents get default KPIs on seed (`defaultRoleKPIs`).
+- **KPIs** (`agent_kpis` + `agent_kpi_results`, 035): definitions live on the agent, measured per agent per period (daily/weekly ISO/monthly). Only metrics in the Go registry (`internal/application/kpi/registry.go`) are accepted: `tasks_completed`, `revisions_received`, `uat_failures`, `failed_runs`, `bugs_assigned`, `first_pass_rate`, plus the column-time metrics below. Attainment: full target → 1.0, half target → 0.5, else 0. Composite = weighted mean × 100. KPI context is injected into agent prompts ("your objective: meet these KPIs"). Admin CRUD: `/admin/agents/:id/kpis`; registry list: `GET /v1/kpi-metrics`. Role agents get their default KPIs from the catalog sync (`ensureKPIs`, `catalogsync.go`).
 
 ### Evolution engine (migration 033)
 
 - **Triggers and evidence** (`agent_reflections` + `agent_evolution_events`; `internal/application/evolution`): triggers = periodic ticker (`reflect_interval`), task moved to `need_revision` (debounced), manual `POST /v1/agents/:agentId/reflect`. Incremental: each reflection covers only the window since the previous one and compares against the prior reflection's `performance_snapshot` baseline. Evidence = window chat messages, task runs, revision comments, score events, KPI attainment, current skills/rules/memories, and a regression report. Output = strict JSON (skills/rules/memories/reverts + self-assessment); skills/rules are applied only when `self_evolution_enabled`, with before/after snapshots recorded per change. With `evolution.allow_web_research` the reflection runs through agent.Loop with `{web_search, fetch_url}`.
 - **Golden gate (auto-revert)**: with `evolution.golden_gate` on, when a reflection proposes skill/rule changes the golden suite runs **before** and **after** the change. The decision is made not by the model that wrote the reflection but by an independent judge LLM (`evolution.judge_model` / `judge_provider_type`; the reflection model when empty): it gets the before/after pass rate, which golden task missed what, and the list of applied changes, and returns `{"keep":bool,"reason":string}`. If the rate dropped, revert without consulting the judge; if the judge is unreachable, fall back to "keep unless regressed". Revert is **all-or-nothing**: every skill/rule change in the set is undone in reverse order, a `change_type=revert` event is written for each, and the original event is marked `impact=regressed` without waiting for the impact window. The outcome lands in the reflection summary as a `Golden gate: %X → %Y | verdict ...` line; `performance_snapshot.golden_pass_rate_before` is stored too.
 - **Skill/rule budget**: `evolution.max_skills_per_agent` (25) and `max_rules_per_agent` (15) are per-agent totals. The reflection prompt carries a "merge/update first" instruction plus used/total budget; on the apply side a `create` at budget is rejected (a "rejected" line in the applied log), and a `create` with an existing name is converted into an `update` of that skill. The agent's own `create_skill` tool applies the same cap.
-- **Versioning / restore**: **every** write to a skill or rule is appended to `catalog_versions` (095) — create/update/delete/restore, with its source (`user` | `evolution` | `seed`; for evolution, the `reflection_id`). Deleted content is written too, so it can be brought back. API: `GET /admin/agents/:id/skills/:skillId/versions`, `POST .../skills/:skillId/restore` `{"version":N}` (same for rules under `rules/:ruleId`). A restore produces a new version; history is never rewritten.
+- **Versioning / restore**: **every** write to a skill or rule is appended to `catalog_versions` (095) — create/update/delete/restore, with its source (`user` | `evolution` | `seed` | `upstream` | `merge`; for evolution, the `reflection_id`). Deleted content is written too, so it can be brought back. API: `GET /admin/agents/:id/skills/:skillId/versions`, `POST .../skills/:skillId/restore` `{"version":N}` (same for rules under `rules/:ruleId`). A restore produces a new version; history is never rewritten.
 - **Impact tracking**: pending events older than `impact_window` are classified `effective` / `regressed` / `neutral` / `insufficient_data` by comparing score events before vs after the change. Regressed unreverted changes are surfaced to the agent's next reflection; the agent decides to revert (before-snapshot restored, `change_type=revert`). Impact alone never auto-reverts — the golden gate above is the only automatic revert.
 
 ### Memory scopes (migration 065)

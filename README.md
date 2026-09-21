@@ -59,8 +59,12 @@ agent carries on from where it stopped instead of starting over.
 
 ### Role agents
 
-Six agents ship with a library of 95 seeded skills plus rules. They run on
-Claude Code with `sonnet` by default and `opus` for subtasks rated hard.
+Six role agents ship with a catalog-driven library of skills, rules and tool
+policies — the repo's `catalog/` directory is the source of truth and the
+backend syncs it into the database at boot and on an interval. They run on the
+connected agent CLI (Claude Code, Cursor, Antigravity or OpenCode) or on a
+configured API provider, each taking that runtime's default model unless an
+agent is given its own.
 
 | Agent | Works on |
 |---|---|
@@ -101,8 +105,8 @@ Agents rewrite their own playbooks from how their work actually went.
   put in front of the agent's next reflection, which decides whether to revert.
 - **Budgets and history.** Skills and rules are capped per agent (25 and 15 by
   default), so an agent merges and updates instead of piling up. Every write to
-  a skill or rule is versioned with its source (you, self-evolution or the seed)
-  and any version can be restored.
+  a skill or rule is versioned with its source (you, self-evolution or the
+  upstream catalog) and any version can be restored.
 - **KPIs.** Each agent has targets such as tasks completed, first-pass rate,
   revisions received, UAT failures, failed runs and time spent per column,
   measured per day, week or month. The targets are part of the agent's prompt,

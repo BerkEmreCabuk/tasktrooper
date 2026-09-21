@@ -69,6 +69,7 @@ Optional:
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:<port>` | The origin a Claude Code session calls TaskTrooper's tools back on |
 | `CLAUDE_CODE_BIN` | `claude` | The Claude Code CLI |
 | `CHROME_BIN` | — | Chromium for the `browser_*` tools |
+| `AGENT_CATALOG_REPO` | — | Where the six role agents sync from, at boot and on the `agent_catalog.interval`. A local directory is read in place; a git URL is fetched into `agent_catalog.cache_dir`. Set, catalogsync creates/merges the role agents by name; unset, no role agents are created. Dev defaults to `<repo>/catalog`; the desktop ships its own copy. See "Role agent catalog". |
 | `CONFIG_PATH` | `resources/config.yml` | Config file; falls back to the copy compiled into the binary when the file is absent |
 | `SHUTDOWN_GRACE` | `9m` | How long to keep working after SIGTERM before in-flight runs are cancelled |
 
@@ -78,8 +79,31 @@ process environment once read
 so an agent's child process cannot reach them.
 
 `resources/config.yml` substitutes further `${VAR}` values, all optional and
-feature-scoped: the `MOBILE_*` Appium/device-agent settings, `BRIDGE_KEY_CI`,
+feature-scoped: the `MOBILE_*` Appium/device-agent settings, the agent-CLI
+binaries (`ANTIGRAVITY_BIN`, `CURSOR_AGENT_BIN`, `OPENCODE_BIN`, and
+`CLAUDE_CODE_BIN` above), `AGENT_CATALOG_REPO`, `BRIDGE_KEY_CI`,
 `BRIDGE_KEY_CURSOR`. See [.ai/config-reference.md](.ai/config-reference.md).
+
+## Role agent catalog
+
+The six role agents (product-manager, system-architect, backend-developer,
+frontend-developer, mobile-developer, qa-agent) no longer ship inside the
+binary or as boot-time seed data. They live as plain files — agent, skills,
+rules, tool policy — in `catalog/` at the repository root, and the server
+syncs them into the database when `AGENT_CATALOG_REPO` points at a source:
+once at boot, every `agent_catalog.interval`, and from the manual button on
+the UI's Catalog page. A directory source is read in place; a git URL is
+fetched into `agent_catalog.cache_dir` on each sync.
+
+Adoption is by name: an existing agent with the same `Name` and no catalog
+slug yet takes the upstream content, and agents the user has hand-edited are
+left alone (`auto_pull_agent_updates` and `keep_skills_updated` decide how
+far a sync may overwrite or merge). Unset source means no role agents are
+created — the board starts empty and the sync stays idle.
+
+The desktop bundles this directory under `Contents/Resources/catalog` and
+passes it as `AGENT_CATALOG_REPO`; `make dev` defaults it to the checkout's
+`catalog/`.
 
 ## Startup contract
 

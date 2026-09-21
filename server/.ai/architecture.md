@@ -1014,7 +1014,7 @@ the product: row-level security, every `tenant_id` column and tenant-scoped key,
 | auth | `adapter/http/handler.go` (`authMiddleware`) | bearer `SERVER_API_KEY` check only — no identity is stamped on the request afterward |
 | db access | `adapter/store/postgres/db.go` | every statement goes straight to the pool; no session-scoped setting |
 | board seed | `application/bootseed` | seeds the default board once per install, gated by `install_state.board_seeded_at` so a board the user has since edited is never reseeded; `bootSeedMiddleware` retries a failed seed on every non-public request until it succeeds |
-| boot steps | `application/bootseed` (`Step`) | seed mcp servers, the built-in role agent templates, llm providers, mobile devices; run once per process, idempotent |
+| boot steps | `application/bootseed` (`Step`) | seed mcp servers, llm providers, mobile devices, and kick off the skill-embedding backfill; run once per process, idempotent |
 | background loops | `platform/runtime` `Run` | the root context carries no identity; every loop calls its tick directly on it |
 
 There is no role system: every request that clears `authMiddleware` can do everything the

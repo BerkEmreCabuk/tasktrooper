@@ -37,8 +37,8 @@ type SeedStore interface {
 }
 
 // Step is "ensure the defaults exist" work that needs the database and must not
-// hold up the listener: the mcp server seed, the role agent seed, the llm
-// provider bootstrap, the mobile device list.
+// hold up the listener: the mcp server seed, the llm provider bootstrap, the
+// mobile device list, the skill-embedding backfill.
 type Step struct {
 	// Name is what a failure is logged under: it has to say which seed did not
 	// happen.
@@ -108,17 +108,17 @@ func (s *Service) Booting() bool {
 }
 
 // stepTimeout bounds the whole step run. It is generous because the steps are
-// seeds rather than requests — the role agent seed alone writes a dozen rows —
-// and it exists only so a wedged database cannot leave the goroutine alive for
-// the life of the process.
+// default-ensuring writes rather than requests, and it exists only so a wedged
+// database cannot leave the goroutine alive for the life of the process.
 const stepTimeout = 2 * time.Minute
 
 // runSteps runs the registered steps once per process, in the background.
 //
-// Background, not inline: the role agent seed is a dozen writes, and nothing
-// should wait for them. The BOARD seed above is still synchronous — a first page
-// load with no columns is a broken page, whereas an mcp catalog that appears a
-// second later is a settings screen nobody has opened yet.
+// Background, not inline: the steps are a handful of small writes plus the
+// skill-embedding backfill, and nothing should wait for them. The BOARD seed
+// above is still synchronous — a first page load with no columns is a broken
+// page, whereas an mcp catalog that appears a second later is a settings screen
+// nobody has opened yet.
 //
 // The context keeps the caller's values but not its cancellation: the request
 // that happened to trigger the steps ends long before they do.

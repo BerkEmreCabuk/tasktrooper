@@ -437,7 +437,7 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 
 	handler := e.buildHandler(runCtx, opts)
 	// Seed now rather than on the first request, so the board exists and the
-	// role agents are already being written when the desktop's first /health
+	// role catalog sync is already underway when the desktop's first /health
 	// answers and the window opens.
 	if e.bootSeed != nil {
 		if err := e.bootSeed.Ensure(context.Background()); err != nil {
