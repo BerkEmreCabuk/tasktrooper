@@ -29,6 +29,25 @@ type agentManifest struct {
 	ToolPolicy    toolPolicyYAM `yaml:"tool_policy"`
 	Roles         []roleYAM     `yaml:"roles"`
 	Subscriptions []string      `yaml:"subscriptions"`
+	TechStacks    []techStackYAM `yaml:"tech_stacks"`
+	KPIs          []kpiYAM       `yaml:"kpis"`
+}
+
+type techStackYAM struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+	Position    int    `yaml:"position"`
+}
+
+type kpiYAM struct {
+	MetricKey   string  `yaml:"metric_key"`
+	Name        string  `yaml:"name"`
+	Description string  `yaml:"description"`
+	Period      string  `yaml:"period"`
+	TargetFull  float64 `yaml:"target_full"`
+	TargetHalf  float64 `yaml:"target_half"`
+	Weight      float64 `yaml:"weight"`
+	Enabled     bool    `yaml:"enabled"`
 }
 
 type toolPolicyYAM struct {
@@ -82,6 +101,18 @@ func readAgentDir(dir, slug string) (domain.UpstreamAgent, string, error) {
 	}
 	for _, sub := range m.Subscriptions {
 		agent.Subscriptions = append(agent.Subscriptions, domain.TaskColumn(sub))
+	}
+	for _, st := range m.TechStacks {
+		agent.TechStacks = append(agent.TechStacks, domain.CreateTechStackRequest{
+			Name: st.Name, Description: st.Description, Position: st.Position,
+		})
+	}
+	for _, k := range m.KPIs {
+		agent.KPIs = append(agent.KPIs, domain.CreateKPIRequest{
+			MetricKey: k.MetricKey, Name: k.Name, Description: k.Description,
+			Period: k.Period, TargetFull: k.TargetFull, TargetHalf: k.TargetHalf,
+			Weight: k.Weight, Enabled: k.Enabled,
+		})
 	}
 
 	files, err := collectFiles(dir)
@@ -138,11 +169,19 @@ func readSkillsDir(dir string) ([]domain.UpstreamSkill, error) {
 			Category:    meta["category"],
 			TechStack:   strings.TrimSpace(meta["tech_stack"]),
 			Content:     body,
+			Enabled:     frontmatterEnabled(meta),
 			Sha:         hashContent(body),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// frontmatterEnabled is the document's `enabled:` switch: absent
+// (or anything but the literal "false") means enabled. A deferred capability
+// ships `enabled: false` and must round-trip exactly.
+func frontmatterEnabled(meta map[string]string) bool {
+	return !(strings.TrimSpace(meta["enabled"]) == "false")
 }
 
 func readRulesDir(dir string) ([]domain.UpstreamRule, error) {
@@ -166,10 +205,7 @@ func readRulesDir(dir string) ([]domain.UpstreamRule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("catalog rule %s: %w", d.Name(), err)
 		}
-		enabled := true
-		if v, ok := meta["enabled"]; ok && strings.TrimSpace(v) == "false" {
-			enabled = false
-		}
+		enabled := frontmatterEnabled(meta)
 		priority := 0
 		if n, err := strconv.Atoi(meta["priority"]); err == nil {
 			priority = n

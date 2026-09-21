@@ -181,55 +181,6 @@ func (s *Service) SaveAgentAsTemplate(ctx context.Context, agentID uuid.UUID) (d
 	return s.templates.UpsertByName(ctx, tpl)
 }
 
-func (s *Service) EnsureRoleTemplates(ctx context.Context) error {
-	if s.templates == nil {
-		return nil
-	}
-	s.seeding.Store(true)
-	defer s.seeding.Store(false)
-	for _, def := range roleAgentDefinitions() {
-		tpl := domain.AgentTemplate{
-			Name:          def.agent.Name,
-			Description:   def.agent.Description,
-			SubagentType:  def.agent.SubagentType,
-			SystemPrompt:  def.agent.SystemPrompt,
-			ProviderType:  def.agent.ProviderType,
-			Model:         def.agent.Model,
-			ToolPolicy:    def.agent.ToolPolicy,
-			TechStacks:    def.techStacks,
-			Skills:        templateSkillsFromSeeds(def.skills),
-			Rules:         def.rules,
-			KPIs:          def.kpis,
-			Roles:         def.roles,
-			Subscriptions: def.subscriptions,
-			BuiltIn:       true,
-		}
-		if _, err := s.templates.UpsertByName(ctx, tpl); err != nil {
-			return fmt.Errorf("template %s: %w", def.agent.Name, err)
-		}
-	}
-	return nil
-}
-
-// templateSkillsFromSeeds is domain.TemplateSkillsFrom for the built-in role
-// seeds: it carries each skill's parsed tech_stack name onto the template the
-// same way SaveAgentAsTemplate does from a live agent's stacks, so
-// CreateAgentFromTemplate can recreate the same stacks and refile the same
-// skills under them (recreateTechStacks). domain.TemplateSkillsFrom itself
-// stays as it is — it has no stack name to carry because it lifts requests
-// that never had one.
-func templateSkillsFromSeeds(skills []skillSeed) []domain.TemplateSkill {
-	out := make([]domain.TemplateSkill, 0, len(skills))
-	for _, sk := range skills {
-		out = append(out, domain.TemplateSkill{
-			Name: sk.req.Name, Description: sk.req.Description, Category: sk.req.Category,
-			Tags: sk.req.Tags, Content: sk.req.Content, Enabled: sk.req.Enabled,
-			TechStack: sk.techStack,
-		})
-	}
-	return out
-}
-
 // recreateTechStacks gives the new agent its own copy of the template's stacks
 // and returns their ids by name, so each skill can be filed under the stack it
 // was saved in. A stack named by a skill but missing from the list is created
@@ -281,27 +232,20 @@ func (s *Service) fillTemplateAgentModels(req *domain.CreateAgentRequest) {
 	if req.Model != "" || req.ModelHeavy != "" {
 		return
 	}
-	switch req.ProviderType {
-	case roleAgentProvider:
-		// Already the seeded provider; only the names are missing.
-	case "":
+	if req.ProviderType == "" {
 		if !s.claudeCodeRunnable() {
 			return
 		}
-		req.ProviderType = roleAgentProvider
-	default:
-		// The template (or an override) chose another provider deliberately;
-		// these aliases mean nothing there.
-		return
+		req.ProviderType = domain.LLMProviderClaudeCode
 	}
-	req.Model, req.ModelHeavy = roleAgentModel, roleAgentModelHeavy
+	req.Model, req.ModelHeavy = domain.ProviderDefaultModels(req.ProviderType)
 }
 
 // claudeCodeRunnable asks the same question checkHostExecutor does — may an
 // agent be saved onto the CLI provider here — and asks it first, so a
 // built-in template never proposes a configuration that guard would refuse.
 func (s *Service) claudeCodeRunnable() bool {
-	return s.hostExecutor != nil && s.hostExecutor(roleAgentProvider)
+	return s.hostExecutor != nil && s.hostExecutor(domain.LLMProviderClaudeCode)
 }
 
 // applySuggestedSubscriptions subscribes a newly created agent to its

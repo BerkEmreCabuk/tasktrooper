@@ -1,0 +1,140 @@
+name: mobile-developer
+description: Flutter and native (SwiftUI / Jetpack Compose) mobile development with atomic components
+subagent_type: mobile-dev-engineer
+effort: high
+max_turns: 0
+self_evolution: false
+enabled: true
+tool_policy:
+    allow_tools:
+        - run_terminal
+        - write_file
+        - edit_file
+        - edit_lines
+        - delete_file
+        - move_file
+        - download_file
+        - web_search
+        - fetch_url
+        - codebase_search
+        - grep_code
+        - get_repo_tree
+        - get_symbol_skeleton
+        - expand_symbol_context
+        - read_file
+        - browser_navigate
+        - browser_screenshot
+        - browser_click
+        - browser_fill
+        - browser_read_dom
+        - browser_wait_for
+        - browser_set_viewport
+        - list_board_tasks
+        - list_ready_tasks
+        - move_board_task
+        - update_board_task
+        - add_task_comment
+        - list_task_comments
+        - list_task_documents
+        - list_acceptance_criteria
+        - set_criterion_completed
+        - cancel_criterion
+        - list_test_cases
+        - list_projects
+        - list_repositories
+        - get_board_summary
+        - list_team
+        - claim_board_task
+        - save_memory
+        - search_memory
+        - delete_memory
+        - load_skill
+        - create_skill
+        - update_project_profile
+        - get_task_pull_request
+        - comment_on_pull_request
+        - commit_task_changes
+        - mobile_launch_app
+        - mobile_screenshot
+        - mobile_read_ui
+        - mobile_tap
+        - mobile_type_text
+        - mobile_swipe
+        - mobile_wait_for
+        - mobile_press_button
+        - mobile_rotate
+        - mobile_unlock_device
+        - mobile_release_device
+    allow_mcp_servers: []
+roles:
+    - key: developer
+      areas:
+        - mobile
+subscriptions: []
+tech_stacks:
+    - name: Flutter
+      description: 'Cross-platform Flutter app: widget architecture, atomic components, state management'
+      position: 1
+    - name: Swift
+      description: Native iOS built with SwiftUI
+      position: 2
+    - name: Kotlin
+      description: Native Android built with Jetpack Compose
+      position: 3
+kpis:
+    - metric_key: tasks_completed
+      name: Weekly tasks completed
+      description: ""
+      period: weekly
+      target_full: 10
+      target_half: 4
+      weight: 1
+      enabled: true
+    - metric_key: revisions_received
+      name: Weekly revisions
+      description: ""
+      period: weekly
+      target_full: 1
+      target_half: 3
+      weight: 1
+      enabled: true
+    - metric_key: first_pass_rate
+      name: First-pass rate
+      description: ""
+      period: weekly
+      target_full: 90
+      target_half: 75
+      weight: 2
+      enabled: true
+    - metric_key: uat_failures
+      name: Weekly UAT rejections
+      description: ""
+      period: weekly
+      target_full: 0
+      target_half: 2
+      weight: 1.5
+      enabled: true
+    - metric_key: bugs_assigned
+      name: Weekly bugs
+      description: ""
+      period: weekly
+      target_full: 2
+      target_half: 5
+      weight: 1
+      enabled: true
+    - metric_key: clean_time_in_progress
+      name: Clean cycle time (in progress)
+      description: ""
+      period: weekly
+      target_full: 1.5
+      target_half: 4
+      weight: 1
+      enabled: true
+    - metric_key: tool_error_rate
+      name: Tool error rate
+      description: ""
+      period: weekly
+      target_full: 3
+      target_half: 6
+      weight: 0.5
+      enabled: true

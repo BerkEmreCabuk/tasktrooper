@@ -5,60 +5,57 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-func TestRoleToolPolicies(t *testing.T) {
-	defs := roleAgentDefinitions()
-	byName := make(map[string]roleAgentDef, len(defs))
-	for _, d := range defs {
-		byName[d.agent.Name] = d
+// The catalog is the source of truth for who holds which tools now. The
+// builder functions below are the code's own contract for those lists; this
+// test pins the two to each other, so a catalog rewrite cannot silently
+// remove a tool the merge/rollback/deploy invariants depend on (see
+// role_tools_qa_test.go) and a code edit cannot drift ahead of the shipped
+// catalog.
+func TestCatalogRoleToolPolicies(t *testing.T) {
+	catalog := repoCatalogAgents(t)
+
+	byName := map[string]string{
+		"backend-developer":  "developerToolPolicy",
+		"frontend-developer": "developerToolPolicy",
+		"mobile-developer":   "mobileDeveloperToolPolicy",
+		"product-manager":    "productManagerToolPolicy",
+		"qa-agent":           "qaToolPolicy",
+		"system-architect":   "architectToolPolicy",
+	}
+	expected := map[string]domain.ToolPolicy{
+		"backend-developer":  developerToolPolicy(),
+		"frontend-developer": developerToolPolicy(),
+		"mobile-developer":   mobileDeveloperToolPolicy(),
+		"product-manager":    productManagerToolPolicy(),
+		"qa-agent":           qaToolPolicy(),
+		"system-architect":   architectToolPolicy(),
+	}
+	for slug, want := range expected {
+		agent, ok := catalog[slug]
+		require.Truef(t, ok, "catalog is missing agent %q", slug)
+		assert.Truef(t, toolPolicyEqual(agent.ToolPolicy, want),
+			"%s tool policy drifted from %s", slug, byName[slug])
 	}
 
-	dev := byName["backend-developer"].agent.ToolPolicy
-	assert.Contains(t, dev.AllowTools, "run_terminal")
-	assert.Contains(t, dev.AllowTools, "web_search")
-	assert.Contains(t, dev.AllowTools, "list_board_tasks")
-	assert.Contains(t, dev.AllowTools, "move_board_task")
-	assert.NotContains(t, dev.AllowTools, "create_board_task")
-
-	pm := byName["product-manager"].agent.ToolPolicy
-	assert.Contains(t, pm.AllowTools, "create_board_task")
-	assert.Contains(t, pm.AllowTools, "list_board_tasks")
-	assert.Contains(t, pm.AllowTools, "web_search")
-	assert.Contains(t, pm.AllowTools, "grep_code")
-	assert.Contains(t, pm.AllowTools, "browser_navigate")
-	assert.Contains(t, pm.AllowTools, "browser_screenshot")
-	assert.Contains(t, pm.AllowTools, "get_deploy_target")
-	assert.Contains(t, pm.AllowTools, "update_deploy_target")
-	assert.NotContains(t, pm.AllowTools, "run_terminal")
-
-	qa := byName["qa-agent"].agent.ToolPolicy
-	assert.Contains(t, qa.AllowTools, "list_board_tasks")
-	assert.Contains(t, qa.AllowTools, "move_board_task")
-	assert.Contains(t, qa.AllowTools, "run_terminal")
-	assert.Contains(t, qa.AllowTools, "grep_code")
-	assert.Contains(t, qa.AllowTools, "browser_navigate")
-	assert.Contains(t, qa.AllowTools, "browser_wait_for")
-	assert.Contains(t, qa.AllowTools, "update_deploy_target")
-	assert.NotContains(t, qa.AllowTools, "create_board_task")
-	assert.NotContains(t, qa.AllowTools, "claim_board_task")
-
-	require.Equal(t, dev.AllowTools, byName["frontend-developer"].agent.ToolPolicy.AllowTools)
-
-	// The mobile developer is the one developer role that is NOT the shared
-	// policy: it also holds the device tools. The other two must not, because
-	// there is one physical phone and putting three roles in the queue for it
-	// only makes them wait on hardware two of them cannot use.
-	mobileDev := byName["mobile-developer"].agent.ToolPolicy
-	require.Equal(t, append(append([]string{}, dev.AllowTools...), roleMobileTools...), mobileDev.AllowTools)
+	// The one place a developer policy differs: the device tools belong to the
+	// mobile developer alone. There is one physical phone, and putting three
+	// roles in the queue for it only makes them wait on hardware two of them
+	// cannot use.
+	dev := expected["backend-developer"]
+	mob := expected["mobile-developer"]
 	assert.NotContains(t, dev.AllowTools, "mobile_tap")
-	assert.NotContains(t, byName["frontend-developer"].agent.ToolPolicy.AllowTools, "mobile_tap")
+	assert.Contains(t, mob.AllowTools, "mobile_tap")
 
 	// QA and PM test the app on the device too — QA runs the round, PM signs
 	// off on it in UAT.
+	qa := expected["qa-agent"]
 	assert.Contains(t, qa.AllowTools, "mobile_launch_app")
 	assert.Contains(t, qa.AllowTools, "mobile_screenshot")
-	assert.Contains(t, pm.AllowTools, "mobile_screenshot")
+	assert.Contains(t, expected["product-manager"].AllowTools, "mobile_screenshot")
 }
 
 func TestToolPolicyEqual(t *testing.T) {

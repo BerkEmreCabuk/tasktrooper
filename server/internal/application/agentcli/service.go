@@ -254,6 +254,21 @@ func (s *Service) reconcileRuntimes(ctx context.Context) {
 	}
 }
 
+// ConnectedProviders lists the provider types whose CLI is currently connected,
+// so a caller reconciling agent runtimes after some other provider change can
+// pass them the same set this service reconciles with.
+func (s *Service) ConnectedProviders(ctx context.Context) ([]domain.LLMProviderType, error) {
+	conns, err := s.store.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	providers := make([]domain.LLMProviderType, 0, len(conns))
+	for _, conn := range conns {
+		providers = append(providers, conn.ProviderType)
+	}
+	return providers, nil
+}
+
 func (s *Service) snapshotRoot(flavor domain.AgentCLIFlavor) (string, error) {
 	if s.workspaceRoot == "" {
 		return "", errors.New("this server has no workspace root configured, so there is nowhere it owns to write the agent catalog")

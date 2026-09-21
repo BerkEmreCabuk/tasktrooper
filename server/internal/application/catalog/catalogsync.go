@@ -51,7 +51,9 @@ func (s *Service) SyncFromCatalog(ctx context.Context, reader port.CatalogRepoRe
 		return nil, err
 	}
 	bySlug := make(map[string]domain.Agent, len(agents))
+	byName := make(map[string]domain.Agent, len(agents))
 	for _, a := range agents {
+		byName[a.Name] = a
 		if a.CatalogSlug != "" {
 			bySlug[a.CatalogSlug] = a
 		}
@@ -61,6 +63,19 @@ func (s *Service) SyncFromCatalog(ctx context.Context, reader port.CatalogRepoRe
 	for _, def := range defs {
 		existing, ok := bySlug[def.Slug]
 		if !ok {
+			// Name-based adoption: an agent created from the old built-in
+			// templates predates catalog slugs. When one with the same name
+			// exists and has never been stamped, adopt it instead of creating
+			// a duplicate next to it.
+			if unnamed, found := byName[def.Name]; found && unnamed.CatalogSlug == "" {
+				adopted, err := s.adoptByName(ctx, unnamed, def, syncStore, res)
+				if err != nil {
+					s.recordSync(ctx, syncStore, ref, res, fmt.Sprintf("agent %s: %v", def.Slug, err))
+					return nil, err
+				}
+				bySlug[def.Slug] = adopted
+				continue
+			}
 			if err := s.ingestNewAgent(ctx, def, syncStore, res); err != nil {
 				s.recordSync(ctx, syncStore, ref, res, fmt.Sprintf("agent %s: %v", def.Slug, err))
 				return nil, err
@@ -84,7 +99,16 @@ func (s *Service) SyncFromCatalog(ctx context.Context, reader port.CatalogRepoRe
 			})
 			res.Skipped++
 		}
-		if err := s.reconcileSkills(ctx, existing, def, syncStore, res); err != nil {
+		stackIDs, err := s.ensureTechStacks(ctx, existing.ID, def)
+		if err != nil {
+			s.recordSync(ctx, syncStore, ref, res, fmt.Sprintf("agent %s: %v", def.Slug, err))
+			return nil, err
+		}
+		if err := s.ensureKPIs(ctx, existing.ID, def); err != nil {
+			s.recordSync(ctx, syncStore, ref, res, fmt.Sprintf("agent %s: %v", def.Slug, err))
+			return nil, err
+		}
+		if err := s.reconcileSkills(ctx, existing, def, stackIDs, syncStore, res); err != nil {
 			s.recordSync(ctx, syncStore, ref, res, err.Error())
 			return nil, err
 		}
@@ -139,7 +163,14 @@ func (s *Service) ingestNewAgent(ctx context.Context, def domain.UpstreamAgent, 
 			return fmt.Errorf("create rule %s: %w", r.Name, err)
 		}
 	}
-	if err := s.reconcileSkills(ctx, agent, def, syncStore, res); err != nil {
+	stackIDs, err := s.ensureTechStacks(ctx, agent.ID, def)
+	if err != nil {
+		return err
+	}
+	if err := s.ensureKPIs(ctx, agent.ID, def); err != nil {
+		return err
+	}
+	if err := s.reconcileSkills(ctx, agent, def, stackIDs, syncStore, res); err != nil {
 		return err
 	}
 	res.Created++
@@ -160,6 +191,19 @@ func (s *Service) applyUpstreamAgent(ctx context.Context, existing domain.Agent,
 	}
 	if strings.TrimSpace(req.Name) == "" {
 		req.Name = existing.Name
+	}
+	// The catalog manifest deliberately leaves provider/model_model/model_heavy
+	// empty: those are runtime choices bound to which CLI is connected here
+	// (ReconcileAgentRuntimes fills them). Empty must mean "preserve", not
+	// "clear", or an update would detach an adopted agent from its runner.
+	if def.ProviderType == "" {
+		req.ProviderType = existing.ProviderType
+	}
+	if def.Model == "" {
+		req.Model = existing.Model
+	}
+	if def.ModelHeavy == "" {
+		req.ModelHeavy = existing.ModelHeavy
 	}
 	autoPull := existing.AutoPullAgentUpdates
 	keepUpdated := existing.KeepSkillsUpdated
@@ -215,10 +259,12 @@ func (s *Service) upsertRules(ctx context.Context, agent domain.Agent, rules []d
 	return nil
 }
 
-// reconcileSkills applies the skill rules onto one agent and is only called
-// when that agent's definition changed (its Etag drives it), so an untouched
-// agent is not touched.
-func (s *Service) reconcileSkills(ctx context.Context, agent domain.Agent, def domain.UpstreamAgent, syncStore port.CatalogSyncStore, res *domain.CatalogSyncResult) error {
+// reconcileSkills applies the skill rules onto one agent. stackIDs maps a
+// skill's front-matter tech_stack name to the stack created on this agent, so
+// a new catalog skill lands under the same stack its source files under; it is
+// only called when that agent's definition changed (its Etag drives it), so an
+// untouched agent is not touched.
+func (s *Service) reconcileSkills(ctx context.Context, agent domain.Agent, def domain.UpstreamAgent, stackIDs map[string]uuid.UUID, syncStore port.CatalogSyncStore, res *domain.CatalogSyncResult) error {
 	dbSkills, err := s.store.ListSkillsByAgent(ctx, agent.ID)
 	if err != nil {
 		return err
@@ -241,7 +287,8 @@ func (s *Service) reconcileSkills(ctx context.Context, agent domain.Agent, def d
 				res.Skipped++
 				continue
 			}
-			if err := s.ingestSkill(ctx, agent.ID, usk); err != nil {
+			stackID := stackIDs[stackKey(usk.TechStack)]
+			if err := s.ingestSkill(ctx, agent.ID, usk, &stackID); err != nil {
 				return fmt.Errorf("create skill %s: %w", usk.Name, err)
 			}
 			res.Created++
@@ -251,11 +298,17 @@ func (s *Service) reconcileSkills(ctx context.Context, agent domain.Agent, def d
 
 		switch {
 		case local.CatalogSha == usk.Sha:
-			// Already exactly this revision.
+			// Already exactly this revision; only the enable flag may differ.
+			if err := s.syncSkillEnabled(ctx, local, usk); err != nil {
+				return err
+			}
 			continue
 		case hashContent(local.Content) == usk.Sha:
 			// Same content under different marker (re-applied repo): adopt.
 			if err := s.stampSkillSHA(ctx, local, usk.Sha); err != nil {
+				return err
+			}
+			if err := s.syncSkillEnabled(ctx, local, usk); err != nil {
 				return err
 			}
 			continue
@@ -339,10 +392,14 @@ func (s *Service) mergeOrPark(ctx context.Context, agent domain.Agent, local dom
 	return nil
 }
 
-func (s *Service) ingestSkill(ctx context.Context, agentID uuid.UUID, usk domain.UpstreamSkill) error {
+func (s *Service) ingestSkill(ctx context.Context, agentID uuid.UUID, usk domain.UpstreamSkill, stackID *uuid.UUID) error {
+	var techStackID *uuid.UUID
+	if stackID != nil && *stackID != uuid.Nil {
+		techStackID = stackID
+	}
 	created, err := s.CreateSkillForAgent(ctx, agentID, domain.CreateSkillRequest{
 		Name: usk.Name, Description: usk.Description, Category: usk.Category,
-		Tags: []string{}, Content: usk.Content, Enabled: true,
+		Tags: []string{}, Content: usk.Content, Enabled: usk.Enabled, TechStackID: techStackID,
 	})
 	if err != nil {
 		return err
@@ -350,10 +407,14 @@ func (s *Service) ingestSkill(ctx context.Context, agentID uuid.UUID, usk domain
 	return s.stampSkillSHA(ctx, created, usk.Sha)
 }
 
+// applyUpstreamSkill keeps the skill's current tech stack (its filing is the
+// user's organisation, not the upstream's) and carries the upstream's enable
+// flag over — a skill deferred in the catalog (enabled: false) must not come
+// back on because its content was synced.
 func (s *Service) applyUpstreamSkill(ctx context.Context, agent domain.Agent, local domain.Skill, usk domain.UpstreamSkill) error {
 	_, err := s.UpdateSkillForAgent(ctx, agent.ID, local.ID, domain.UpdateSkillRequest{
 		Name: usk.Name, Description: usk.Description, Category: usk.Category,
-		Tags: local.Tags, Content: usk.Content, Enabled: true,
+		Tags: local.Tags, Content: usk.Content, Enabled: usk.Enabled,
 		TechStackID: local.TechStackID,
 	})
 	if err != nil {
@@ -364,6 +425,91 @@ func (s *Service) applyUpstreamSkill(ctx context.Context, agent domain.Agent, lo
 		return err
 	}
 	return s.stampSkillSHA(ctx, updated, usk.Sha)
+}
+
+// syncSkillEnabled flips a skill's enable flag without touching its content or
+// its embedding. A changed flag on an otherwise identical revision (a
+// capability deferred in the catalog) must not force an embedding pass.
+func (s *Service) syncSkillEnabled(ctx context.Context, local domain.Skill, usk domain.UpstreamSkill) error {
+	if local.Enabled == usk.Enabled {
+		return nil
+	}
+	local.Enabled = usk.Enabled
+	_, err := s.store.UpdateSkill(ctx, local)
+	return err
+}
+
+// ensureTechStacks creates any stack the upstream def names — either in
+// tech_stacks or in a skill's front-matter — that this agent does not already
+// have, and returns the agent's stack ids by name. Existing stacks are left
+// alone: this is the catalog granting a missing stack, not an admin UI editing
+// someone's organisation.
+func (s *Service) ensureTechStacks(ctx context.Context, agentID uuid.UUID, def domain.UpstreamAgent) (map[string]uuid.UUID, error) {
+	existing, err := s.store.ListTechStacksByAgent(ctx, agentID)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]uuid.UUID, len(existing)+len(def.TechStacks))
+	for _, st := range existing {
+		ids[stackKey(st.Name)] = st.ID
+	}
+	wanted := make([]domain.CreateTechStackRequest, 0, len(def.TechStacks))
+	seen := make(map[string]bool, len(def.TechStacks))
+	add := func(req domain.CreateTechStackRequest) {
+		key := stackKey(req.Name)
+		if key == "" || seen[key] || ids[key] != uuid.Nil {
+			return
+		}
+		seen[key] = true
+		wanted = append(wanted, req)
+	}
+	for _, st := range def.TechStacks {
+		add(st)
+	}
+	// A stack a skill names but the manifest does not list still has to exist
+	// for the skill to be filed under it, mirroring recreateTechStacks.
+	for _, sk := range def.Skills {
+		add(domain.CreateTechStackRequest{Name: strings.TrimSpace(sk.TechStack), Position: len(wanted) + 1})
+	}
+	for _, req := range wanted {
+		created, err := s.CreateTechStackForAgent(ctx, agentID, req)
+		if err != nil {
+			return nil, fmt.Errorf("create tech stack %s: %w", req.Name, err)
+		}
+		ids[stackKey(created.Name)] = created.ID
+	}
+	return ids, nil
+}
+
+// ensureKPIs creates any KPI the upstream def names that this agent does not
+// already have, matched by metric_key as role_kpis_v2 migration did. Existing
+// KPIs (and their targets/weights) are the user's, left alone.
+func (s *Service) ensureKPIs(ctx context.Context, agentID uuid.UUID, def domain.UpstreamAgent) error {
+	if s.kpis == nil || len(def.KPIs) == 0 {
+		return nil
+	}
+	existing, err := s.kpis.ListByAgent(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	have := make(map[string]bool, len(existing))
+	for _, k := range existing {
+		have[k.MetricKey] = true
+	}
+	for _, kpiReq := range def.KPIs {
+		if have[kpiReq.MetricKey] {
+			continue
+		}
+		if _, err := s.kpis.CreateKPI(ctx, domain.AgentKPI{
+			AgentID: agentID, MetricKey: kpiReq.MetricKey, Name: kpiReq.Name,
+			Description: kpiReq.Description, Period: kpiReq.Period,
+			TargetFull: kpiReq.TargetFull, TargetHalf: kpiReq.TargetHalf,
+			Weight: kpiReq.Weight, Enabled: kpiReq.Enabled,
+		}); err != nil {
+			return fmt.Errorf("create kpi %s: %w", kpiReq.MetricKey, err)
+		}
+	}
+	return nil
 }
 
 // stampSkillSHA rewrites only the revision marker, keeping the embedding
@@ -425,4 +571,110 @@ func skillByName(skills []domain.UpstreamSkill, name string) (domain.UpstreamSki
 		}
 	}
 	return domain.UpstreamSkill{}, false
+}
+
+// adoptByName slides the catalog identity under an agent an existing install
+// created before slugs existed, instead of creating a duplicate next to it.
+//
+// The decision between auto_pull on and off is the user's own content: when the
+// existing agent already IS the catalog's definition (contentMatch), the agent
+// is stamped with slug and etag and stays on auto_pull — a hand-edited agent
+// gets the slug too, but with auto_pull switched off and the stamp etag left
+// empty, so the next sync surfaces the diff as a parked update instead of
+// silently keeping them separate. Skills, stacks and KPIs reconcile either way;
+// the adoption hands the agent its full catalog inheritance without touching a
+// single byte of hand-written content.
+func (s *Service) adoptByName(ctx context.Context, existing domain.Agent, def domain.UpstreamAgent, syncStore port.CatalogSyncStore, res *domain.CatalogSyncResult) (domain.Agent, error) {
+	identical, err := s.agentContentMatches(ctx, existing, def)
+	if err != nil {
+		return domain.Agent{}, err
+	}
+	adopted := existing
+	adopted.CatalogSlug = def.Slug
+	adopted.CatalogEtag = def.Etag
+	if !identical {
+		adopted.CatalogEtag = ""
+		adopted.AutoPullAgentUpdates = false
+		s.park(ctx, syncStore, domain.CatalogPending{
+			AgentSlug: def.Slug, AgentName: existing.Name,
+			Kind: domain.CatalogPendingKindAgent, Name: def.Slug,
+			Action: domain.CatalogPendingActionUpdate,
+			Reason: "mevcut agent catalog ile ayni degil; slug atandi, auto_pull kapali",
+		})
+	}
+	if _, err := s.store.UpdateAgent(ctx, adopted); err != nil {
+		return domain.Agent{}, err
+	}
+	stackIDs, err := s.ensureTechStacks(ctx, adopted.ID, def)
+	if err != nil {
+		return domain.Agent{}, err
+	}
+	if err := s.ensureKPIs(ctx, adopted.ID, def); err != nil {
+		return domain.Agent{}, err
+	}
+	if err := s.reconcileSkills(ctx, adopted, def, stackIDs, syncStore, res); err != nil {
+		return domain.Agent{}, err
+	}
+	if identical {
+		res.Updated++
+	} else {
+		res.Skipped++
+	}
+	log.Info().Str("agent", existing.Name).Str("slug", def.Slug).Bool("identical", identical).
+		Msg("catalog: existing agent adopted by name")
+	return adopted, nil
+}
+
+// agentContentMatches is the pre-catalog install's judgement of "this agent IS
+// the catalog's definition": every field a hand-edit could change — prompt,
+// description, subagent type, tool policy, enabled flag, and the full skill
+// and rule sets. Provider, models, effort and max_turns are deliberately left
+// out: they are operational runtime fields (which CLI can run it, how hard it
+// runs) and an install's choices must survive the adoption.
+func (s *Service) agentContentMatches(ctx context.Context, existing domain.Agent, def domain.UpstreamAgent) (bool, error) {
+	if existing.Description != def.Description ||
+		existing.SubagentType != def.SubagentType ||
+		existing.SystemPrompt != def.SystemPrompt ||
+		existing.Enabled != def.Enabled ||
+		existing.SelfEvolutionEnabled != def.SelfEvolution {
+		return false, nil
+	}
+	if !toolPolicyEqual(existing.ToolPolicy, def.ToolPolicy) {
+		return false, nil
+	}
+	skills, err := s.store.ListSkillsByAgent(ctx, existing.ID)
+	if err != nil {
+		return false, err
+	}
+	byName := make(map[string]domain.Skill, len(skills))
+	for _, sk := range skills {
+		byName[sk.Name] = sk
+	}
+	if len(skills) != len(def.Skills) {
+		return false, nil
+	}
+	for _, usk := range def.Skills {
+		local, ok := byName[usk.Name]
+		if !ok || hashContent(local.Content) != usk.Sha || local.Enabled != usk.Enabled {
+			return false, nil
+		}
+	}
+	rules, err := s.store.ListRulesByAgent(ctx, existing.ID)
+	if err != nil {
+		return false, err
+	}
+	if len(rules) != len(def.Rules) {
+		return false, nil
+	}
+	ruleByName := make(map[string]domain.OrchestratorRule, len(rules))
+	for _, r := range rules {
+		ruleByName[r.Name] = r
+	}
+	for _, ur := range def.Rules {
+		local, ok := ruleByName[ur.Name]
+		if !ok || local.Content != ur.Content || local.Priority != ur.Priority || local.Enabled != ur.Enabled {
+			return false, nil
+		}
+	}
+	return true, nil
 }

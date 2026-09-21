@@ -1078,6 +1078,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	if catalogStore != nil {
 		catalogSvc = catalog.NewService(catalogStore, llmClient, embeddingModel)
 		catalogSvc.SetSkillBudget(cfg.Evolution.MaxSkillsPerAgent)
+		if llmProviderStore != nil {
+			catalogSvc.SetLLMProviders(llmProviderStore)
+		}
 		if e.pgDB != nil {
 			catalogSvc.SetTemplateStore(pgstore.NewAgentTemplateStore(e.pgDB))
 		}
@@ -1104,19 +1107,14 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			e.reg.Register(tool)
 		}
 		// Orchestration is always on, but the role agents it dispatches to are
-		// no longer created here: they exist only once the user creates one
-		// from the built-in template gallery, so self-evolution's edits to an
-		// agent are never reverted by a restart. What boot still does is keep
-		// that gallery current — upsert the six built-in templates from the
-		// role definitions — as a background step, because a dozen writes
-		// must not hold up anything.
-		e.bootSeed.AddStep("agent_templates", func(stepCtx context.Context) error {
-			err := catalogSvc.EnsureRoleTemplates(stepCtx)
-			// A template-created agent's skills are stored without vectors too
-			// (seedSkill, shared with the old boot seed), so this backfill is
-			// still what fills them in — it just now runs over whatever the
-			// user has created by the time this boot happens to catch it,
-			// rather than over agents this very step just inserted. It
+		// no longer created here: the six built-in agents now arrive through
+		// the external catalog sync (they are files under AGENT_CATALOG_REPO),
+		// and the template gallery is populated from the live agents, not a
+		// boot-time upsert. What boot still does is backfill embeddings for
+		// skills a user-saved template created without a vector.
+		e.bootSeed.AddStep("skill_embeddings", func(stepCtx context.Context) error {
+			// A template-created agent's skills are stored without vectors
+			// (seedSkill), so this backfill is what fills them in. It
 			// outlives the boot step's deadline on purpose: a first launch is
 			// still downloading the model.
 			go func() {
@@ -1138,7 +1136,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					}
 				}
 			}()
-			return err
+			return nil
 		})
 		orchSvc = orchestrator.NewService(llmClient, catalogStore, nil, e.agentRouter, cfg.Orchestration, contextBuilder)
 		// Intake and the planner run without tools; the snapshot is what keeps
@@ -2544,6 +2542,17 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		llmProviderSvc = llmprovider.NewService(llmProviderStore, llmEndpointStore, e.secretsCipher, llmTimeout, providers.Invalidate)
 		if e.multiLLM != nil {
 			e.multiLLM.SetResolver(providers)
+		}
+		if catalogSvc != nil && agentCLISvc != nil {
+			llmProviderSvc.SetAfterChange(func(changeCtx context.Context) {
+				connected, err := agentCLISvc.ConnectedProviders(changeCtx)
+				if err != nil {
+					return
+				}
+				if _, err := catalogSvc.ReconcileAgentRuntimes(changeCtx, connected); err != nil {
+					log.Warn().Err(err).Msg("llm provider: reconciling agent runtimes failed")
+				}
+			})
 		}
 		// The operator and the user are the same person here, so
 		// config.yml's llm.base_url and ANTHROPIC_API_KEY/OPENAI_API_KEY/

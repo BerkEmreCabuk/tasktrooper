@@ -25,6 +25,11 @@ set -a
 source "$ENV_FILE"
 set +a
 
+# The six built-in role agents ship as the monorepo's plain catalog directory,
+# not inside the binary. Point the server at them unless an operator already
+# chose a source (a git URL for their own catalog).
+export AGENT_CATALOG_REPO="${AGENT_CATALOG_REPO:-$ROOT/catalog}"
+
 if [[ ! -d "$UI_DIR/node_modules" ]]; then
   echo "UI dependencies missing — run: make setup" >&2
   exit 1

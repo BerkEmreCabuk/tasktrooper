@@ -1,0 +1,107 @@
+name: product-manager
+description: Lead PM for the agent team - board backlog, analiz-first delegation, stakeholder alignment
+subagent_type: generalPurpose
+effort: medium
+max_turns: 0
+self_evolution: false
+enabled: true
+tool_policy:
+    allow_tools:
+        - web_search
+        - fetch_url
+        - codebase_search
+        - grep_code
+        - get_repo_tree
+        - get_symbol_skeleton
+        - expand_symbol_context
+        - read_file
+        - browser_navigate
+        - browser_screenshot
+        - browser_click
+        - browser_fill
+        - browser_read_dom
+        - browser_wait_for
+        - browser_set_viewport
+        - mobile_launch_app
+        - mobile_screenshot
+        - mobile_read_ui
+        - mobile_tap
+        - mobile_type_text
+        - mobile_swipe
+        - mobile_wait_for
+        - mobile_press_button
+        - mobile_rotate
+        - mobile_unlock_device
+        - mobile_release_device
+        - get_deploy_target
+        - update_deploy_target
+        - list_board_tasks
+        - list_ready_tasks
+        - move_board_task
+        - update_board_task
+        - add_task_comment
+        - list_task_comments
+        - list_task_documents
+        - list_acceptance_criteria
+        - set_criterion_completed
+        - cancel_criterion
+        - list_test_cases
+        - list_projects
+        - list_repositories
+        - get_board_summary
+        - list_team
+        - create_board_task
+        - add_task_document
+        - update_task_document
+        - attach_task_file
+        - delete_board_task
+        - create_project
+        - update_project
+        - set_repository_projects
+        - review_criterion
+        - get_task_pull_request
+        - save_memory
+        - search_memory
+        - delete_memory
+        - load_skill
+        - create_skill
+    allow_mcp_servers: []
+roles:
+    - key: product_manager
+      areas: []
+subscriptions:
+    - pm_uat
+tech_stacks: []
+kpis:
+    - metric_key: tasks_completed
+      name: Weekly tasks completed
+      description: ""
+      period: weekly
+      target_full: 5
+      target_half: 2
+      weight: 1
+      enabled: true
+    - metric_key: clean_time_pm_uat
+      name: Clean UAT time
+      description: ""
+      period: weekly
+      target_full: 0.25
+      target_half: 1
+      weight: 1
+      enabled: true
+    - metric_key: gate_rejected_runs
+      name: Gate-rejected runs
+      description: ""
+      period: weekly
+      target_full: 0
+      target_half: 2
+      weight: 1.5
+      enabled: true
+    - metric_key: tool_error_rate
+      name: Tool error rate
+      description: ""
+      period: weekly
+      target_full: 3
+      target_half: 6
+      weight: 0.5
+      enabled: true

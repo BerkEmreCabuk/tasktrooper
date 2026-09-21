@@ -21,7 +21,7 @@ import (
 // into done on a task whose PR is unmerged (board.doneMergeWake).
 //
 // This exercises the path a user actually takes now: creating the agent from
-// its built-in template (CreateAgentFromTemplate), not a boot-time reconcile.
+// its template (CreateAgentFromTemplate), not a boot-time reconcile.
 func TestCreateAgentFromTemplate_QAOwnsItsFourColumns(t *testing.T) {
 	store := newMemCatalogStore()
 	templates := &memTemplateStore{}
@@ -31,8 +31,15 @@ func TestCreateAgentFromTemplate_QAOwnsItsFourColumns(t *testing.T) {
 	svc.SetBoardConfigStore(board)
 	ctx := context.Background()
 
-	require.NoError(t, svc.EnsureRoleTemplates(ctx))
-	agent, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "qa-agent"), domain.CreateAgentRequest{})
+	qaTpl, err := templates.UpsertByName(ctx, domain.AgentTemplate{
+		Name: "qa-agent", Description: "built-in role", BuiltIn: true,
+		Subscriptions: []domain.TaskColumn{
+			domain.TaskColumnReadyForQA, domain.TaskColumnInQA,
+			domain.TaskColumnDone, domain.TaskColumnReleased,
+		},
+	})
+	require.NoError(t, err)
+	agent, err := svc.CreateAgentFromTemplate(ctx, qaTpl.ID, domain.CreateAgentRequest{})
 	require.NoError(t, err)
 
 	assert.ElementsMatch(t,
@@ -54,13 +61,21 @@ func TestCreateAgentFromTemplate_ArchitectAndPMGetTheirColumn(t *testing.T) {
 	svc.SetBoardConfigStore(board)
 	ctx := context.Background()
 
-	require.NoError(t, svc.EnsureRoleTemplates(ctx))
-
-	architect, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "system-architect"), domain.CreateAgentRequest{})
+	architectTpl, err := templates.UpsertByName(ctx, domain.AgentTemplate{
+		Name: "system-architect", Description: "built-in role", BuiltIn: true,
+		Subscriptions: []domain.TaskColumn{domain.TaskColumnCodeReview},
+	})
+	require.NoError(t, err)
+	architect, err := svc.CreateAgentFromTemplate(ctx, architectTpl.ID, domain.CreateAgentRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, []string{string(domain.TaskColumnCodeReview)}, board.subs[architect.ID])
 
-	pm, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "product-manager"), domain.CreateAgentRequest{})
+	pmTpl, err := templates.UpsertByName(ctx, domain.AgentTemplate{
+		Name: "product-manager", Description: "built-in role", BuiltIn: true,
+		Subscriptions: []domain.TaskColumn{domain.TaskColumnPMUAT},
+	})
+	require.NoError(t, err)
+	pm, err := svc.CreateAgentFromTemplate(ctx, pmTpl.ID, domain.CreateAgentRequest{})
 	require.NoError(t, err)
 	assert.Equal(t, []string{string(domain.TaskColumnPMUAT)}, board.subs[pm.ID])
 }
@@ -81,12 +96,19 @@ func TestCreateAgentFromTemplate_SecondAgentFindsColumnsAlreadyOccupied(t *testi
 	svc.SetBoardConfigStore(board)
 	ctx := context.Background()
 
-	require.NoError(t, svc.EnsureRoleTemplates(ctx))
-	first, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "qa-agent"), domain.CreateAgentRequest{})
+	qaTpl, err := templates.UpsertByName(ctx, domain.AgentTemplate{
+		Name: "qa-agent", Description: "built-in role", BuiltIn: true,
+		Subscriptions: []domain.TaskColumn{
+			domain.TaskColumnReadyForQA, domain.TaskColumnInQA,
+			domain.TaskColumnDone, domain.TaskColumnReleased,
+		},
+	})
+	require.NoError(t, err)
+	first, err := svc.CreateAgentFromTemplate(ctx, qaTpl.ID, domain.CreateAgentRequest{})
 	require.NoError(t, err)
 	assert.NotEmpty(t, board.subs[first.ID])
 
-	second, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "qa-agent"), domain.CreateAgentRequest{Name: "qa-agent-2"})
+	second, err := svc.CreateAgentFromTemplate(ctx, qaTpl.ID, domain.CreateAgentRequest{Name: "qa-agent-2"})
 	require.NoError(t, err)
 
 	assert.Empty(t, board.subs[second.ID], "the columns are already claimed by the first agent")
@@ -151,17 +173,6 @@ func TestApplySuggestedRoles_SkipsUnknownRole(t *testing.T) {
 		[]domain.TemplateRoleSuggestion{{Key: "no-such-role"}})
 
 	require.NoError(t, err)
-}
-
-func findTemplateID(t *testing.T, templates *memTemplateStore, name string) uuid.UUID {
-	t.Helper()
-	for _, tpl := range templates.templates {
-		if tpl.Name == name {
-			return tpl.ID
-		}
-	}
-	t.Fatalf("no built-in template named %q", name)
-	return uuid.Nil
 }
 
 // memRoleAdmin is an in-memory catalog.RoleAdmin, and also

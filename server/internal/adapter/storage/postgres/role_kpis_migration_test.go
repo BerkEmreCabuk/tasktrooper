@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/catalogrepo"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/storage/postgres"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/catalog"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -16,18 +17,21 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/migrations"
 )
 
+// monorepoRootCatalog is the repo-root catalog the six role agents live in
+// now that they are no longer compiled into the binary.
+const monorepoRootCatalog = "../../../../../catalog"
+
 // RoleKPIsMigrationSuite checks that migrations/142_role_kpis_v2.up.sql stays
-// in sync with catalog.defaultRoleKPIs. Rather than duplicating the target
-// table a third time in Go, it takes defaultRoleKPIs' own output — reached by
-// upserting the built-in role templates and creating one agent from each,
-// which is what actually writes those values for a new install now that boot
-// no longer creates role agents directly — as the golden set, corrupts it to
-// look like a pre-recalibration install, replays the migration's own SQL by
-// hand (the schema_migrations ledger already marked 140 applied when the
-// suite's shared database was first migrated), and asserts the corrupted rows
-// come back exactly to golden. A hand-authored SQL VALUES table that drifted
-// from defaultRoleKPIs would fail this without anyone having to remember to
-// update it by hand.
+// in sync with the role agents' KPI definitions in the catalog. Rather than
+// duplicating the target table a third time in Go, it takes a catalog sync's
+// own output — the same SyncFromCatalog call a new install runs to create its
+// agents and their KPIs — as the golden set, corrupts it to look like a
+// pre-recalibration install, replays the migration's own SQL by hand (the
+// schema_migrations ledger already marked 140 applied when the suite's shared
+// database was first migrated), and asserts the corrupted rows come back
+// exactly to golden. A hand-authored SQL VALUES table that drifted from the
+// catalog would fail this without anyone having to remember to update it by
+// hand.
 type RoleKPIsMigrationSuite struct {
 	suite.Suite
 	ctx    context.Context
@@ -79,19 +83,13 @@ type roleKPISnapshot struct {
 
 func (s *RoleKPIsMigrationSuite) TestMigrationReconcilesToCurrentDefaults() {
 	agentsStore := postgres.NewCatalogStore(s.db)
-	templateStore := postgres.NewAgentTemplateStore(s.db)
+	syncStore := postgres.NewCatalogSyncStore(s.db)
 	svc := catalog.NewService(agentsStore, noopLLM{}, "")
 	svc.SetKPIStore(s.kpis)
-	svc.SetTemplateStore(templateStore)
-	s.Require().NoError(svc.EnsureRoleTemplates(s.ctx))
-
-	templates, err := templateStore.List(s.ctx)
+	reader := &catalogrepo.Reader{Source: monorepoRootCatalog}
+	res, err := svc.SyncFromCatalog(s.ctx, reader, syncStore)
 	s.Require().NoError(err)
-	s.Require().Len(templates, 6)
-	for _, tpl := range templates {
-		_, err := svc.CreateAgentFromTemplate(s.ctx, tpl.ID, domain.CreateAgentRequest{})
-		s.Require().NoError(err, tpl.Name)
-	}
+	s.Require().GreaterOrEqual(res.Created, 6, "catalog sync must create the six role agents")
 
 	agents, err := agentsStore.ListAgents(s.ctx)
 	s.Require().NoError(err)

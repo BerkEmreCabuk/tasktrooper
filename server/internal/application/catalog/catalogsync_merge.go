@@ -46,7 +46,7 @@ func (s *Service) mergeSkill(ctx context.Context, agent domain.Agent, local doma
 	}
 	_, err = s.UpdateSkillForAgent(ctx, agent.ID, local.ID, domain.UpdateSkillRequest{
 		Name: name, Description: meta["description"], Category: meta["category"],
-		Tags: local.Tags, Content: body, Enabled: true, TechStackID: local.TechStackID,
+		Tags: local.Tags, Content: body, Enabled: usk.Enabled, TechStackID: local.TechStackID,
 	})
 	if err != nil {
 		return err

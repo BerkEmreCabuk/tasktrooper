@@ -58,6 +58,22 @@ type Service struct {
 	// invalidate tells the resolver cache that the answer changed. Nil is
 	// valid and means nothing caches.
 	invalidate InvalidateFunc
+	// afterChange runs after a write that changes which providers can serve
+	// work, so agent runtimes can be reconciled onto the new active provider.
+	// Nil is valid and means nothing listens.
+	afterChange func(ctx context.Context)
+}
+
+// SetAfterChange registers the callback invoked after Connect, Activate and
+// Disconnect settle. Optional.
+func (s *Service) SetAfterChange(fn func(ctx context.Context)) {
+	s.afterChange = fn
+}
+
+func (s *Service) notifyChange(ctx context.Context) {
+	if s.afterChange != nil {
+		s.afterChange(ctx)
+	}
 }
 
 func NewService(store port.LLMProviderStore, endpoints port.LLMEndpointStore, cipher *secrets.Cipher, timeout time.Duration, invalidate InvalidateFunc) *Service {
@@ -276,6 +292,7 @@ func (s *Service) Connect(ctx context.Context, providerType domain.LLMProviderTy
 	if err := s.reloadAllConfigured(ctx); err != nil {
 		return domain.LLMProvidersResponse{}, err
 	}
+	s.notifyChange(ctx)
 	return s.List(ctx)
 }
 
@@ -415,6 +432,7 @@ func (s *Service) Activate(ctx context.Context, providerType domain.LLMProviderT
 	if err := s.reloadAllConfigured(ctx); err != nil {
 		return domain.LLMProvidersResponse{}, err
 	}
+	s.notifyChange(ctx)
 	return s.List(ctx)
 }
 
@@ -448,6 +466,7 @@ func (s *Service) Disconnect(ctx context.Context, providerType domain.LLMProvide
 	if err := s.reloadAllConfigured(ctx); err != nil {
 		return domain.LLMProvidersResponse{}, err
 	}
+	s.notifyChange(ctx)
 	return s.List(ctx)
 }
 

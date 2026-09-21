@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -20,7 +19,9 @@ type Service struct {
 	boardConfig    port.BoardConfigStore
 	versions       port.CatalogVersionStore
 	roleAdmin      RoleAdmin
-	seeding        atomic.Bool
+	// providers lets the runtime reconciler fall back to the install's active
+	// HTTP provider; nil means CLI-only.
+	providers LLMProviders
 	// skillBudget is the per-agent skill ceiling the catalog sync shares with
 	// evolution's max_skills_per_agent; set by runtime wiring (SetSkillBudget).
 	skillBudget int
@@ -63,15 +64,12 @@ func invalidInput(format string, a ...any) error {
 	return invalidInputError{msg: fmt.Sprintf(format, a...)}
 }
 
-// SeedingInProgress reports whether EnsureRoleTemplates is still upserting the
-// built-in agent templates. Agents themselves are no longer created at boot —
-// only the user creates one, from the template gallery — so this is brief and
-// touches no skill-embedding calls; it is kept, rather than hardcoded false,
-// so the /admin/agents handler's existing "seeding" response field stays
-// truthful instead of becoming a constant the frontend's poll can no longer
-// learn anything from.
+// SeedingInProgress is a constant false now that agents arrive through the
+// external catalog sync rather than a boot-time template upsert. It survives so
+// the /admin/agents handler's existing "seeding" response field stays a stable
+// contract for the UI's poll.
 func (s *Service) SeedingInProgress() bool {
-	return s.seeding.Load()
+	return false
 }
 
 func NewService(store port.CatalogStore, llm port.LLMClient, embeddingModel string) *Service {

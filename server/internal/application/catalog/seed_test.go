@@ -2,9 +2,6 @@ package catalog
 
 import (
 	"context"
-	"io/fs"
-	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,106 +11,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestRoleAgentDefinitions_CountAndSkills(t *testing.T) {
-	defs := roleAgentDefinitions()
-	assert.Len(t, defs, 6)
-	names := map[string]bool{}
-	for _, d := range defs {
-		names[d.agent.Name] = true
-		assert.GreaterOrEqual(t, len(d.skills), 6)
-		assert.GreaterOrEqual(t, len(d.rules), 2)
-		assert.True(t, d.agent.Enabled)
-	}
-	assert.True(t, names["system-architect"])
-	assert.True(t, names["backend-developer"])
-	assert.True(t, names["frontend-developer"])
-	assert.True(t, names["mobile-developer"])
-	assert.True(t, names["product-manager"])
-	assert.True(t, names["qa-agent"])
-}
-
-func TestSeedData_AllFilesParseAndAreReferenced(t *testing.T) {
-	referenced := map[string]bool{}
-	for _, def := range roleAgentDefinitions() {
-		require.NotEmpty(t, def.agent.SystemPrompt, def.agent.Name)
-		require.NotEmpty(t, def.agent.Description, def.agent.Name)
-		referenced["seeddata/agents/"+def.agent.Name+".md"] = true
-		for _, sk := range def.skills {
-			require.NotEmpty(t, sk.req.Name)
-			require.NotEmpty(t, sk.req.Category, sk.req.Name)
-			require.NotEmpty(t, sk.req.Description, sk.req.Name)
-			require.NotEmpty(t, sk.req.Content, sk.req.Name)
-		}
-	}
-
-	err := fs.WalkDir(seedData, "seeddata", func(path string, d fs.DirEntry, err error) error {
-		require.NoError(t, err)
-		if d.IsDir() {
-			return nil
-		}
-		// The catalog is its own repository now, so it carries documentation of
-		// its own. Those files describe the seeds rather than being one, and
-		// holding them to a seed's frontmatter would fail the build for a
-		// README that is doing its job.
-		if !isSeedDoc(path) {
-			return nil
-		}
-		require.True(t, strings.HasSuffix(path, ".md"), "unexpected seed file %s", path)
-		raw, readErr := seedData.ReadFile(path)
-		require.NoError(t, readErr, path)
-		meta, body, parseErr := parseSeedDoc(string(raw))
-		require.NoError(t, parseErr, path)
-		require.NotEmpty(t, body, path)
-		// A skill is a directory holding SKILL.md, so its name is the
-		// directory's; an agent is still one file named after the role.
-		base := strings.TrimSuffix(filepath.Base(path), ".md")
-		if base == "SKILL" {
-			base = filepath.Base(filepath.Dir(path))
-		}
-		require.Equal(t, base, meta["name"], path)
-		require.NotContains(t, strings.ToLower(string(raw)), "superpowers", path)
-		if strings.HasPrefix(path, "seeddata/agents/") {
-			require.True(t, referenced[path], "agent %s is not used by any role agent", path)
-		}
-		return nil
-	})
-	require.NoError(t, err)
-}
-
-// isSeedDoc reports whether an embedded path is a seed the loader reads, as
-// opposed to the repository's own documentation.
-//
-// Stated as a positive list of the two directories that hold seeds, rather than
-// as an exclusion of README.md. The catalog is a repository people are meant to
-// read and contribute to, so it will grow a docs/ or a LICENSE eventually, and
-// a rule that named the one file we happen to have today would fail the build
-// on the next one.
-func isSeedDoc(path string) bool {
-	return strings.HasPrefix(path, "seeddata/agents/") || strings.HasPrefix(path, "seeddata/skills/")
-}
-
-func TestSeedData_EverySkillFileIsReferenced(t *testing.T) {
-	used := map[string]int{}
-	for _, def := range roleAgentDefinitions() {
-		for _, sk := range def.skills {
-			used[sk.req.Name]++
-		}
-	}
-	err := fs.WalkDir(seedData, "seeddata/skills", func(path string, d fs.DirEntry, err error) error {
-		require.NoError(t, err)
-		if d.IsDir() {
-			return nil
-		}
-		// A skill is a DIRECTORY holding SKILL.md, so the skill's name is the
-		// directory's. Taking it from the file would compare every skill in the
-		// tree against the literal "SKILL".
-		name := filepath.Base(filepath.Dir(path))
-		require.Positive(t, used[name], "skill file %s is not referenced by any role agent", path)
-		return nil
-	})
-	require.NoError(t, err)
-}
 
 type memCatalogStore struct {
 	mu     sync.Mutex
@@ -420,96 +317,96 @@ func claudeCodeAttached(p domain.LLMProviderType) bool {
 	return p == domain.LLMProviderClaudeCode
 }
 
-// Boot no longer creates any agent — only EnsureRoleTemplates runs, which
-// upserts the six built-in templates and nothing in the agents table. This is
-// the decision this file used to exercise through EnsureRoleAgents at boot;
-// there is no boot-time agent creation left to test.
-func TestEnsureRoleTemplates_CreatesNoAgents(t *testing.T) {
-	store := newMemCatalogStore()
-	templates := &memTemplateStore{}
-	svc := NewService(store, stubLLMClient{}, "")
-	svc.SetTemplateStore(templates)
-	svc.SetHostExecutorProbe(claudeCodeAttached)
-
-	require.NoError(t, svc.EnsureRoleTemplates(context.Background()))
-
-	agents, err := store.ListAgents(context.Background())
+// seedBuiltinTemplate adds one built-in template for CreateAgentFromTemplate
+// to consume. Templates are no longer boot-time seeded — they are rows the
+// user saved, or freshly upserted from the catalog — so the tests wire them in
+// directly and only exercise what CreateAgentFromTemplate does with them.
+func seedBuiltinTemplate(t *testing.T, store *memTemplateStore, name string) domain.AgentTemplate {
+	t.Helper()
+	tpl, err := store.UpsertByName(context.Background(), domain.AgentTemplate{
+		Name: name, Description: "built-in role", BuiltIn: true,
+	})
 	require.NoError(t, err)
-	assert.Empty(t, agents)
-	assert.Len(t, templates.templates, len(roleAgentDefinitions()))
-	for _, tpl := range templates.templates {
-		assert.True(t, tpl.BuiltIn, tpl.Name)
+	return tpl
+}
+
+// fillTemplateAgentModels derives the default model pair from the provider the
+// new agent is being saved onto: Claude Code leaves both empty (the CLI knows
+// its own defaults), an HTTP provider gets the two names its definition
+// carries, and a template that names no provider at all gets Claude Code only
+// when this host can actually run it.
+func TestCreateAgentFromTemplate_ProviderDefaults(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		probe     func(domain.LLMProviderType) bool
+		template  domain.AgentTemplate
+		override  domain.CreateAgentRequest
+		wantType  domain.LLMProviderType
+		wantModel string
+		wantHeavy string
+	}{
+		{
+			name: "host can run Claude Code", probe: claudeCodeAttached,
+			template:  domain.AgentTemplate{},
+			wantType:  domain.LLMProviderClaudeCode,
+			wantModel: "", wantHeavy: "",
+		},
+		{
+			name:     "no CLI on the host",
+			template: domain.AgentTemplate{},
+			wantType: "", wantModel: "", wantHeavy: "",
+		},
+		{
+			name:      "HTTP provider override gets its definitions models",
+			template:  domain.AgentTemplate{},
+			override:  domain.CreateAgentRequest{ProviderType: domain.LLMProviderAnthropic},
+			wantType:  domain.LLMProviderAnthropic,
+			wantModel: "claude-sonnet-5", wantHeavy: "claude-opus-5",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newMemCatalogStore()
+			templates := &memTemplateStore{}
+			svc := NewService(store, stubLLMClient{}, "")
+			svc.SetTemplateStore(templates)
+			if tc.probe != nil {
+				svc.SetHostExecutorProbe(tc.probe)
+			}
+			tpl := seedBuiltinTemplate(t, templates, "system-architect")
+			tpl.Model = tc.template.Model
+
+			agent, err := svc.CreateAgentFromTemplate(context.Background(), tpl.ID, tc.override)
+			require.NoError(t, err)
+			assert.Equal(t, tc.wantType, agent.ProviderType)
+			assert.Equal(t, tc.wantModel, agent.Model)
+			assert.Equal(t, tc.wantHeavy, agent.ModelHeavy)
+		})
 	}
 }
 
-// Creating a role agent from its built-in template does what the old
-// boot-time seed used to do on CREATE: fill the Claude Code provider/model
-// pair when the host can actually run it.
-func TestCreateAgentFromTemplate_FillsClaudeCodeModelsWhenHostCanRun(t *testing.T) {
+// A model an operator chose on create — the override, since a built-in
+// template itself never names one — is left alone entirely: the helper fills
+// the pair only when neither half is set.
+func TestCreateAgentFromTemplate_LeavesAnOverriddenModelAlone(t *testing.T) {
 	store := newMemCatalogStore()
 	templates := &memTemplateStore{}
 	svc := NewService(store, stubLLMClient{}, "")
 	svc.SetTemplateStore(templates)
 	svc.SetHostExecutorProbe(claudeCodeAttached)
-	ctx := context.Background()
-	require.NoError(t, svc.EnsureRoleTemplates(ctx))
+	tpl := seedBuiltinTemplate(t, templates, "system-architect")
 
-	for _, tpl := range templates.templates {
-		agent, err := svc.CreateAgentFromTemplate(ctx, tpl.ID, domain.CreateAgentRequest{})
-		require.NoError(t, err)
-		// The provider is asserted with the names, not beside them: these two
-		// aliases are Claude Code CLI values and mean nothing anywhere else.
-		assert.Equal(t, domain.LLMProviderClaudeCode, agent.ProviderType, agent.Name)
-		assert.Equal(t, "sonnet", agent.Model, agent.Name)
-		assert.Equal(t, "opus", agent.ModelHeavy, agent.Name)
-	}
-}
-
-// A host with no CLI attached gets no model names at all. CreateAgent refuses
-// an agent on a provider it cannot execute, so filling the pair there would
-// not produce a mildly wrong agent — it would produce no agent at all.
-func TestCreateAgentFromTemplate_NoModelsWhenHostCannotRun(t *testing.T) {
-	store := newMemCatalogStore()
-	templates := &memTemplateStore{}
-	svc := NewService(store, stubLLMClient{}, "")
-	svc.SetTemplateStore(templates)
-	ctx := context.Background()
-	require.NoError(t, svc.EnsureRoleTemplates(ctx))
-
-	for _, tpl := range templates.templates {
-		agent, err := svc.CreateAgentFromTemplate(ctx, tpl.ID, domain.CreateAgentRequest{})
-		require.NoError(t, err)
-		assert.Empty(t, agent.ProviderType, agent.Name)
-		assert.Empty(t, agent.Model, agent.Name)
-		assert.Empty(t, agent.ModelHeavy, agent.Name)
-	}
-}
-
-// A provider the caller chose on create — the override, since a built-in
-// template itself never names one — is left alone entirely. `sonnet` is a CLI
-// alias; sending it to api.anthropic.com is the "Invalid model" failure
-// TestUpdateAgent_ProviderSwitchDropsTheOldProvidersModels records.
-func TestCreateAgentFromTemplate_LeavesAnOverriddenProviderAlone(t *testing.T) {
-	store := newMemCatalogStore()
-	templates := &memTemplateStore{}
-	svc := NewService(store, stubLLMClient{}, "")
-	svc.SetTemplateStore(templates)
-	svc.SetHostExecutorProbe(claudeCodeAttached)
-	ctx := context.Background()
-	require.NoError(t, svc.EnsureRoleTemplates(ctx))
-
-	agent, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "system-architect"), domain.CreateAgentRequest{
-		ProviderType: domain.LLMProviderAnthropic,
+	agent, err := svc.CreateAgentFromTemplate(context.Background(), tpl.ID, domain.CreateAgentRequest{
+		ProviderType: domain.LLMProviderAnthropic, Model: "custom-model",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, domain.LLMProviderAnthropic, agent.ProviderType)
-	assert.Empty(t, agent.Model)
-	assert.Empty(t, agent.ModelHeavy)
+	assert.Equal(t, "custom-model", agent.Model)
+	assert.Empty(t, agent.ModelHeavy, "a half-set pair is not topped up")
 }
 
-// Creating from the built-in qa-agent template also gets its default KPIs —
-// the template carries defaultRoleKPIs the same way the old boot seed did.
-func TestCreateAgentFromTemplate_SetsDefaultKPIs(t *testing.T) {
+// Creating from a built-in template copies its KPIs onto the new agent the
+// same way it carries skills and subscriptions.
+func TestCreateAgentFromTemplate_CopiesDefaultKPIs(t *testing.T) {
 	store := newMemCatalogStore()
 	templates := &memTemplateStore{}
 	kpis := &memKPIStore{}
@@ -517,52 +414,38 @@ func TestCreateAgentFromTemplate_SetsDefaultKPIs(t *testing.T) {
 	svc.SetTemplateStore(templates)
 	svc.SetKPIStore(kpis)
 	ctx := context.Background()
-	require.NoError(t, svc.EnsureRoleTemplates(ctx))
+	tpl, err := templates.UpsertByName(ctx, domain.AgentTemplate{
+		Name: "qa-agent", Description: "built-in role", BuiltIn: true,
+		KPIs: []domain.CreateKPIRequest{{
+			MetricKey: "qa_strictness", Name: "Strictness", Description: "d",
+			Period: "month", TargetFull: 100, TargetHalf: 50, Weight: 1, Enabled: true,
+		}},
+	})
+	require.NoError(t, err)
 
-	agent, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "qa-agent"), domain.CreateAgentRequest{})
+	agent, err := svc.CreateAgentFromTemplate(ctx, tpl.ID, domain.CreateAgentRequest{})
 	require.NoError(t, err)
 
 	got, err := kpis.ListByAgent(ctx, agent.ID)
 	require.NoError(t, err)
-	want := defaultRoleKPIs("qa-agent")
-	require.Len(t, got, len(want))
-	gotKeys := make(map[string]bool, len(got))
-	for _, k := range got {
-		gotKeys[k.MetricKey] = true
-	}
-	for _, w := range want {
-		assert.True(t, gotKeys[w.MetricKey], "missing KPI %s", w.MetricKey)
-	}
+	require.Len(t, got, 1)
+	assert.Equal(t, "qa_strictness", got[0].MetricKey)
+	assert.Equal(t, agent.ID, got[0].AgentID)
 }
 
-// EnsureRoleTemplates runs again on every boot (it upserts the built-in
-// templates by name); an agent already created from one, and since edited by
-// a user (or by self-evolution), must not be touched by that re-run — nothing
-// reconciles an existing agent against its template any more.
-func TestEnsureRoleTemplates_DoesNotRevertAUserEditedAgentSkill(t *testing.T) {
-	store := newMemCatalogStore()
-	templates := &memTemplateStore{}
-	svc := NewService(store, stubLLMClient{}, "")
-	svc.SetTemplateStore(templates)
-	ctx := context.Background()
-	require.NoError(t, svc.EnsureRoleTemplates(ctx))
+// parseSeedDoc is the frontmatter reader shared by catalog files and the
+// merge flow's model responses; the generator's round-trip test covered it
+// against every real agent, this keeps the parser itself honest in CI.
+func TestParseSeedDoc(t *testing.T) {
+	meta, body, err := parseSeedDoc("---\nname: tally\ncategory: check\n---\n\nDo the sums.\n")
+	require.NoError(t, err)
+	assert.Equal(t, map[string]string{"name": "tally", "category": "check"}, meta)
+	assert.Equal(t, "Do the sums.", body)
 
-	agent, err := svc.CreateAgentFromTemplate(ctx, findTemplateID(t, templates, "qa-agent"), domain.CreateAgentRequest{})
-	require.NoError(t, err)
-	skills, err := svc.ListSkillsByAgent(ctx, agent.ID)
-	require.NoError(t, err)
-	require.NotEmpty(t, skills)
-	edited := skills[0]
-	edited.Content = "an operator rewrote this skill by hand"
-	_, err = store.UpdateSkill(ctx, edited)
-	require.NoError(t, err)
-
-	// A second boot re-upserts the templates from the same role definitions.
-	require.NoError(t, svc.EnsureRoleTemplates(ctx))
-
-	got, err := svc.GetSkillForAgent(ctx, agent.ID, edited.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "an operator rewrote this skill by hand", got.Content)
+	for _, raw := range []string{"no opener", "---\nname: x\n", "---\ninvalid line\n---\nbody\n", "---\nname: x\n---\n\n"} {
+		_, _, err := parseSeedDoc(raw)
+		assert.Error(t, err, "input %q must fail to parse", raw)
+	}
 }
 
 type memKPIStore struct {
@@ -626,15 +509,4 @@ func (m *memKPIStore) ListResults(context.Context, uuid.UUID, time.Time, time.Ti
 
 func (m *memKPIStore) LatestResults(context.Context, uuid.UUID) ([]domain.AgentKPIResult, error) {
 	return nil, nil
-}
-
-// Every seeded name is one the CLI was actually probed with, so the picker the
-// admin UI serves and the value the seed writes cannot drift apart.
-func TestSeededModelsAreOfferedByTheClaudeCodePicker(t *testing.T) {
-	offered := map[string]bool{}
-	for _, opt := range domain.ClaudeCodeModels() {
-		offered[opt.ID] = true
-	}
-	assert.True(t, offered[roleAgentModel], "seeded model %q is not a probed Claude Code alias", roleAgentModel)
-	assert.True(t, offered[roleAgentModelHeavy], "seeded heavy model %q is not a probed Claude Code alias", roleAgentModelHeavy)
 }

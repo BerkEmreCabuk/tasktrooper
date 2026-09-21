@@ -68,6 +68,7 @@ type LLMProviderDefinition struct {
 	Description           string          `json:"description"`
 	DefaultBaseURL        string          `json:"default_base_url"`
 	DefaultModel          string          `json:"default_model"`
+	DefaultHeavyModel     string          `json:"default_heavy_model"`
 	DefaultTimeoutSeconds int             `json:"default_timeout_seconds"`
 	RequiresAPIKey        bool            `json:"requires_api_key"`
 	BaseURLRequired       bool            `json:"base_url_required"`
@@ -208,7 +209,11 @@ func AllLLMProviderDefinitions() []LLMProviderDefinition {
 			DefaultBaseURL: "https://api.anthropic.com/v1",
 			// Same tier as the previous default, newer, cheaper per token, and
 			// thinking is adaptive by default (no explicit config needed).
-			DefaultModel:          "claude-sonnet-5",
+			DefaultModel: "claude-sonnet-5",
+			// What a subtask the planner rated "hard" escalates to. Declared
+			// here rather than in code so every provider carries its own pair
+			// and adding a provider is a data change.
+			DefaultHeavyModel:     "claude-opus-5",
 			DefaultTimeoutSeconds: 120,
 			RequiresAPIKey:        true,
 			BaseURLRequired:       true,
@@ -424,6 +429,19 @@ func EmbeddingProvenanceStale(indexModel string, indexDimensions int, configured
 		return true
 	}
 	return false
+}
+
+// ProviderDefaultModels is the model pair an agent inherits when it is put on a
+// provider that names none of its own: the provider's declared default and,
+// when it has one, the stronger model a hard subtask escalates to. Both are
+// empty for a host-executed provider that names none — the CLI then runs on
+// whatever the operator configured it with, which is the subscription default.
+func ProviderDefaultModels(t LLMProviderType) (model, heavy string) {
+	def, ok := LLMProviderDefinitionFor(t)
+	if !ok {
+		return "", ""
+	}
+	return def.DefaultModel, def.DefaultHeavyModel
 }
 
 func LLMProviderDefinitionFor(t LLMProviderType) (LLMProviderDefinition, bool) {

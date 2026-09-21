@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -32,25 +34,27 @@ func (r *readyEmbedLLM) Embed(context.Context, string, string) ([]float32, error
 	return []float32{0.25, 0.5}, nil
 }
 
-// createAllRoleAgentsFromTemplates is what the UI's "set up the ready-made
-// team" action does: upsert the built-in templates, then create one agent per
-// role from them — the only path that creates a role agent today.
-func createAllRoleAgentsFromTemplates(t *testing.T, ctx context.Context, svc *Service, templates *memTemplateStore) {
+// seedTemplatesWithSkills wires the built-in templates a test creates agents
+// from. Templates are no longer boot-time seeded — they are rows the user
+// saved, or freshly upserted from the catalog — so each test states its own.
+func seedTemplatesWithSkills(t *testing.T, templates *memTemplateStore, names ...string) {
 	t.Helper()
-	if err := svc.EnsureRoleTemplates(ctx); err != nil {
-		t.Fatalf("EnsureRoleTemplates: %v", err)
-	}
-	for _, tpl := range templates.templates {
-		if _, err := svc.CreateAgentFromTemplate(ctx, tpl.ID, domain.CreateAgentRequest{}); err != nil {
-			t.Fatalf("CreateAgentFromTemplate %s: %v", tpl.Name, err)
-		}
+	ctx := context.Background()
+	for _, name := range names {
+		_, err := templates.UpsertByName(ctx, domain.AgentTemplate{
+			Name: name, Description: "built-in role", BuiltIn: true,
+			Skills: []domain.TemplateSkill{
+				{Name: name + "-skill-1", Description: "d", Content: "body", Enabled: true},
+				{Name: name + "-skill-2", Description: "d", Content: "body", Enabled: true},
+			},
+		})
+		require.NoError(t, err, "%s", name)
 	}
 }
 
-// Creating the role agents from their built-in templates must never wait on
-// the embedder: seedSkill (used by CreateAgentFromTemplate to copy a
-// template's skills onto the new agent) stores every skill without a vector,
-// the same way the old boot-time seed did.
+// Creating agents from templates must never wait on the embedder: seedSkill
+// copies every skill without a vector, the same way the template-creation
+// path always has.
 func TestCreateAgentFromTemplate_NeverWaitsOnTheEmbedder(t *testing.T) {
 	store := newMemCatalogStore()
 	templates := &memTemplateStore{}
@@ -63,7 +67,12 @@ func TestCreateAgentFromTemplate_NeverWaitsOnTheEmbedder(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	createAllRoleAgentsFromTemplates(t, ctx, svc, templates)
+	seedTemplatesWithSkills(t, templates, "qa-agent", "backend-developer")
+	for _, tpl := range templates.templates {
+		if _, err := svc.CreateAgentFromTemplate(ctx, tpl.ID, domain.CreateAgentRequest{}); err != nil {
+			t.Fatalf("CreateAgentFromTemplate %s: %v", tpl.Name, err)
+		}
+	}
 
 	if got := llm.calls.Load(); got != 0 {
 		t.Fatalf("creating the role agents asked the embedder %d times, want none", got)
@@ -72,7 +81,7 @@ func TestCreateAgentFromTemplate_NeverWaitsOnTheEmbedder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAgents: %v", err)
 	}
-	if want := len(roleAgentDefinitions()); len(agents) != want {
+	if want := len(templates.templates); len(agents) != want {
 		t.Fatalf("created %d agents, want %d", len(agents), want)
 	}
 }
@@ -85,7 +94,12 @@ func TestBackfillSkillEmbeddings_FillsOnlyTheSkillsWithoutAVector(t *testing.T) 
 	templates := &memTemplateStore{}
 	setupSvc := NewService(store, &notReadyEmbedLLM{}, "")
 	setupSvc.SetTemplateStore(templates)
-	createAllRoleAgentsFromTemplates(t, ctx, setupSvc, templates)
+	seedTemplatesWithSkills(t, templates, "qa-agent", "backend-developer")
+	for _, tpl := range templates.templates {
+		if _, err := setupSvc.CreateAgentFromTemplate(ctx, tpl.ID, domain.CreateAgentRequest{}); err != nil {
+			t.Fatalf("CreateAgentFromTemplate %s: %v", tpl.Name, err)
+		}
+	}
 
 	ready := &readyEmbedLLM{}
 	svc := NewService(store, ready, "")
@@ -93,8 +107,9 @@ func TestBackfillSkillEmbeddings_FillsOnlyTheSkillsWithoutAVector(t *testing.T) 
 	if err != nil {
 		t.Fatalf("BackfillSkillEmbeddings: %v", err)
 	}
-	if updated == 0 || int(ready.calls.Load()) != updated {
-		t.Fatalf("updated %d skills with %d embed calls; want one call per skill and at least one skill", updated, ready.calls.Load())
+	want := 4 // two templates, two skills each
+	if updated != want || int(ready.calls.Load()) != updated {
+		t.Fatalf("updated %d skills with %d embed calls; want %d calls", updated, ready.calls.Load(), want)
 	}
 
 	agents, _ := store.ListAgents(ctx)

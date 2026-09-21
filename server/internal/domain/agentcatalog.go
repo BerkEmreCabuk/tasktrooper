@@ -26,6 +26,13 @@ type UpstreamAgent struct {
 	Subscriptions []TaskColumn
 	Skills        []UpstreamSkill
 	Rules         []UpstreamRule
+	// TechStacks are the stacks the agent's skills are filed under, created on
+	// the agent at ingest and resolved by name when a skill's front-matter
+	// tech_stack names one.
+	TechStacks []CreateTechStackRequest
+	// KPIs are the agent's default scoreboard, created at ingest the same way
+	// the built-in templates used to carry them.
+	KPIs []CreateKPIRequest
 	// Etag is a stable hash of this agent's whole definition, so a sync can
 	// tell an unchanged agent apart from a changed one at a glance.
 	Etag string
@@ -37,6 +44,10 @@ type UpstreamSkill struct {
 	Category    string
 	TechStack   string
 	Content     string
+	// Enabled mirrors the skill's `enabled:` front-matter; a deferred
+	// capability ships disabled so the row exists while the prompt builder
+	// skips it, and the sync must carry that flag onto the live skill.
+	Enabled bool
 	// Sha hashes just this skill's content, the revision marker stored back on
 	// the live skill as CatalogSha.
 	Sha string
