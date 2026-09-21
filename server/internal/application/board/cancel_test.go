@@ -123,7 +123,7 @@ func TestWorkerSkipsRunsThatAlreadyStopped(t *testing.T) {
 			if ran != tc.wantRun {
 				t.Fatalf("run started = %v, want %v", ran, tc.wantRun)
 			}
-			if !tc.wantRun && !r.beginTask(jobFor(taskID)) {
+			if !tc.wantRun && !r.beginTask(context.Background(), jobFor(taskID)) {
 				t.Fatal("a skipped job must not have claimed the task")
 			}
 		})

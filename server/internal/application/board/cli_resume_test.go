@@ -33,7 +33,7 @@ func TestCriteriaSweepFollowUpResumesTheMainRunsCLISession(t *testing.T) {
 	updater := &settlingCriteriaUpdater{criteria: criteria, settleAfter: 2}
 	r, job := criteriaSweepRunner(t, runs, ex, updater)
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 
 	reqs := ex.requests()
 	require.Len(t, reqs, 2, "one main call plus exactly one settling sweep round")
@@ -68,7 +68,7 @@ func TestQuotaBlockInACriteriaSweepParksTheTaskInsteadOfFailingIt(t *testing.T) 
 	blocker := &blockRecorder{}
 	r.SetTaskBlocker(blocker)
 
-	require.NoError(t, r.execute(context.Background(), job), "a quota park is not a run failure")
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job), "a quota park is not a run failure")
 
 	row := runs.row()
 	require.NotEqual(t, domain.TaskAgentRunStatusFailed, row.Status, "parking must not spend a consecutive-failure life")
@@ -132,7 +132,7 @@ func TestParkOnQuotaEscalatesTheWindowOnRepeatedParksWithNoUsableResetTime(t *te
 	r.SetTaskBlocker(&blockRecorder{})
 
 	before := time.Now()
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 
 	row := runs.row()
 	require.NotNil(t, row.QuotaResumeAt)
@@ -163,7 +163,7 @@ func TestHTTPLoopRunRespectsTheAgentRecordsSessionLimits(t *testing.T) {
 		Task: domain.BoardTask{ID: taskID, RepositoryID: uuid.New(), Key: "tt-50", Title: "loop run", Column: domain.TaskColumnInProgress},
 	}
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 
 	require.NotEmpty(t, llm.requests)
 	require.Equal(t, "high", llm.requests[0].Effort,

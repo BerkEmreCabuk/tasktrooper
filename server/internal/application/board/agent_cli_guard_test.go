@@ -40,7 +40,7 @@ func TestRunIsRefusedWhenNoAgentCLIIsConnected(t *testing.T) {
 	r, job := executorRunner(t, claudeCodeAgent(), runs, ex)
 	r.SetAgentCLIConnections(connectedCLI{})
 
-	err := r.execute(context.Background(), job)
+	err := r.execute(context.Background(), context.Background(), func() {}, job)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, domain.ErrAgentCLINotConnected)
 	assert.Zero(t, ex.callCount(), "an unverified CLI must never be handed a task")
@@ -58,7 +58,7 @@ func TestRunIsRefusedWhenADifferentFlavorIsConnected(t *testing.T) {
 	r, job := executorRunner(t, claudeCodeAgent(), runs, ex)
 	r.SetAgentCLIConnections(connectedCLI{conn: cursorConnection()})
 
-	err := r.execute(context.Background(), job)
+	err := r.execute(context.Background(), context.Background(), func() {}, job)
 	require.Error(t, err)
 	assert.ErrorIs(t, err, domain.ErrAgentCLINotConnected)
 	assert.Zero(t, ex.callCount())
@@ -75,7 +75,7 @@ func TestRunProceedsWhenItsOwnFlavorIsConnectedAlongsideAnother(t *testing.T) {
 	r, job := executorRunner(t, agent, runs, ex)
 	r.SetAgentCLIConnections(connectedCLI{conn: cursorConnection()})
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 	assert.Equal(t, 1, ex.callCount())
 }
 
@@ -88,7 +88,7 @@ func TestRunProceedsWhenItsFlavorIsConnected(t *testing.T) {
 	r, job := executorRunner(t, claudeCodeAgent(), runs, ex)
 	r.SetAgentCLIConnections(connectedCLI{conn: claudeConnection()})
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 	assert.Equal(t, 1, ex.callCount())
 	assert.Equal(t, domain.TaskAgentRunStatusCompleted, runs.row().Status)
 }
@@ -99,7 +99,7 @@ func TestUnreadableConnectionRefusesRatherThanDispatches(t *testing.T) {
 	r, job := executorRunner(t, claudeCodeAgent(), runs, ex)
 	r.SetAgentCLIConnections(connectedCLI{err: errors.New("connection refused")})
 
-	err := r.execute(context.Background(), job)
+	err := r.execute(context.Background(), context.Background(), func() {}, job)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "could not be read")
 	assert.Zero(t, ex.callCount())
@@ -113,6 +113,6 @@ func TestUnwiredGuardLeavesDispatchAlone(t *testing.T) {
 	}
 	r, job := executorRunner(t, claudeCodeAgent(), runs, ex)
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 	assert.Equal(t, 1, ex.callCount())
 }

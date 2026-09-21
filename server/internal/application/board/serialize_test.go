@@ -1,6 +1,7 @@
 package board
 
 import (
+	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -24,10 +25,10 @@ func TestSecondRunOnSameTaskWaitsForTheFirst(t *testing.T) {
 	taskID := uuid.New()
 	first, second := jobFor(taskID), jobFor(taskID)
 
-	if !r.beginTask(first) {
+	if !r.beginTask(context.Background(), first) {
 		t.Fatal("first run on an idle task must start")
 	}
-	if r.beginTask(second) {
+	if r.beginTask(context.Background(), second) {
 		t.Fatal("second run started while the first still holds the task")
 	}
 	if got := len(r.queue); got != 0 {
@@ -51,10 +52,10 @@ func TestSecondRunOnSameTaskWaitsForTheFirst(t *testing.T) {
 func TestRunsOnDifferentTasksDoNotBlockEachOther(t *testing.T) {
 	r := NewRunner(RunnerDeps{Runs: &countingRunStore{}})
 
-	if !r.beginTask(jobFor(uuid.New())) {
+	if !r.beginTask(context.Background(), jobFor(uuid.New())) {
 		t.Fatal("first task must start")
 	}
-	if !r.beginTask(jobFor(uuid.New())) {
+	if !r.beginTask(context.Background(), jobFor(uuid.New())) {
 		t.Fatal("a run on a different task must not wait")
 	}
 }
@@ -67,9 +68,9 @@ func TestParkedRunsAreReleasedOneAtATimeInOrder(t *testing.T) {
 	taskID := uuid.New()
 	first, second, third := jobFor(taskID), jobFor(taskID), jobFor(taskID)
 
-	r.beginTask(first)
-	r.beginTask(second)
-	r.beginTask(third)
+	r.beginTask(context.Background(), first)
+	r.beginTask(context.Background(), second)
+	r.beginTask(context.Background(), third)
 
 	r.endTask(taskID)
 	released := <-r.queue
@@ -81,7 +82,7 @@ func TestParkedRunsAreReleasedOneAtATimeInOrder(t *testing.T) {
 	}
 
 	// The released job claims the task, and only its own end releases the next.
-	if !r.beginTask(released) {
+	if !r.beginTask(context.Background(), released) {
 		t.Fatal("released job must be able to claim the idle task")
 	}
 	r.endTask(taskID)
@@ -96,13 +97,13 @@ func TestEndTaskWithoutParkedRunsIsANoOp(t *testing.T) {
 	r := NewRunner(RunnerDeps{Runs: &countingRunStore{}})
 	taskID := uuid.New()
 
-	r.beginTask(jobFor(taskID))
+	r.beginTask(context.Background(), jobFor(taskID))
 	r.endTask(taskID)
 
 	if got := len(r.queue); got != 0 {
 		t.Fatalf("queue = %d, want 0", got)
 	}
-	if !r.beginTask(jobFor(taskID)) {
+	if !r.beginTask(context.Background(), jobFor(taskID)) {
 		t.Fatal("task must be claimable again once its run ended")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 
 	"github.com/jackc/pgx/v5"
@@ -74,6 +75,10 @@ func (s *SettingsStore) Get(ctx context.Context) (domain.AppSettings, error) {
 			if value != "" {
 				out.BoilerplateCatalogRepo = value
 			}
+		case "max_concurrent_agents":
+			out.MaxConcurrentAgents = parseIntSetting(value)
+		case "max_concurrent_tasks":
+			out.MaxConcurrentTasks = parseIntSetting(value)
 		}
 	}
 	return out, rows.Err()
@@ -116,7 +121,35 @@ func (s *SettingsStore) Update(ctx context.Context, req domain.UpdateSettingsReq
 			return domain.AppSettings{}, fmt.Errorf("update %s: %w", key, err)
 		}
 	}
+	for key, limit := range map[string]*int{
+		"max_concurrent_agents": req.MaxConcurrentAgents,
+		"max_concurrent_tasks":  req.MaxConcurrentTasks,
+	} {
+		if limit == nil {
+			continue
+		}
+		if *limit < 0 {
+			return domain.AppSettings{}, fmt.Errorf("update %s: negative limit %d", key, *limit)
+		}
+		_, err := s.pool.Exec(ctx, `
+			INSERT INTO app_settings (key, value, updated_at) VALUES ($1, $2, now())
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+		`, key, strconv.Itoa(*limit))
+		if err != nil {
+			return domain.AppSettings{}, fmt.Errorf("update %s: %w", key, err)
+		}
+	}
 	return s.Get(ctx)
+}
+
+// parseIntSetting decodes one integer app_settings value. "", absent values and
+// garbage all read as 0 (unlimited) rather than breaking the whole Get.
+func parseIntSetting(value string) int {
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 const githubTokenKey = "github_token"

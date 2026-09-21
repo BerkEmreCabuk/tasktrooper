@@ -1413,6 +1413,9 @@ export interface AppSettings {
   default_language: string;
   pipeline_container_runtime?: string;
   boilerplate_catalog_repo?: string;
+  /** Concurrency caps for the board runner; 0 (or absent) means unlimited. */
+  max_concurrent_agents?: number;
+  max_concurrent_tasks?: number;
 }
 
 export interface GitHubConnectionStatus {

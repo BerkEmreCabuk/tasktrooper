@@ -189,7 +189,7 @@ func TestClaudeCodeAgentIsRunByTheExecutor(t *testing.T) {
 	}
 	r, job := executorRunner(t, claudeCodeAgent(), runs, ex)
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 
 	assert.Equal(t, 1, ex.callCount(), "the executor must have been used")
 	req := ex.request()
@@ -245,7 +245,7 @@ func TestRunExhaustingTheCriteriaSweepIsRecordedAsFailed(t *testing.T) {
 		{ID: uuid.New(), Text: "the export includes archived rows"},
 	}})
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 
 	row := runs.row()
 	assert.Equal(t, domain.TaskAgentRunStatusFailed, row.Status,
@@ -267,7 +267,7 @@ func TestRunSettlingEveryCriterionStaysCompleted(t *testing.T) {
 		settleAfter: 1,
 	})
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 
 	row := runs.row()
 	assert.Equal(t, domain.TaskAgentRunStatusCompleted, row.Status, "no regression: a settled sweep still completes")
@@ -280,7 +280,7 @@ func TestClaudeCodeAgentWithoutAnExecutorFailsClearly(t *testing.T) {
 	runs := &recordingRunStore{}
 	r, job := executorRunner(t, claudeCodeAgent(), runs, nil)
 
-	err := r.execute(context.Background(), job)
+	err := r.execute(context.Background(), context.Background(), func() {}, job)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "binary not available on this host")
 	assert.Contains(t, err.Error(), "claude_code provider")
@@ -299,7 +299,7 @@ func TestClaudeCodeAgentWithAnUnsupportedExecutorFailsClearly(t *testing.T) {
 	ex := &fakeExecutor{supports: "some-other-cli"}
 	r, job := executorRunner(t, claudeCodeAgent(), runs, ex)
 
-	err := r.execute(context.Background(), job)
+	err := r.execute(context.Background(), context.Background(), func() {}, job)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "binary not available on this host")
 	assert.Contains(t, err.Error(), "claude_code provider")
@@ -332,7 +332,7 @@ func TestOtherProvidersNeverReachTheExecutor(t *testing.T) {
 			// consulted; the panic is recovered here.
 			func() {
 				defer func() { _ = recover() }()
-				_ = r.execute(context.Background(), job)
+				_ = r.execute(context.Background(), context.Background(), func() {}, job)
 			}()
 
 			assert.Zero(t, ex.callCount(), "%s must not be routed to the claude code executor", provider)
@@ -358,7 +358,7 @@ func TestQuotaBlockParksTheTaskInsteadOfFailingIt(t *testing.T) {
 	blocker := &blockRecorder{}
 	r.SetTaskBlocker(blocker)
 
-	require.NoError(t, r.execute(context.Background(), job), "a park is not an error the worker should log as a failed run")
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job), "a park is not an error the worker should log as a failed run")
 
 	row := runs.row()
 	assert.NotEqual(t, domain.TaskAgentRunStatusFailed, row.Status, "parking must not spend a consecutive-failure life")
@@ -390,7 +390,7 @@ func TestQuotaParkIsRecordedOnTheBoard(t *testing.T) {
 	r.SetTaskBlocker(&blockRecorder{previous: domain.TaskColumnNeedRevision})
 	r.SetParkJournal(NewParkJournal(events, spans))
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 
 	payloads := events.payloads()
 	require.Len(t, payloads, 1, "exactly one move, written directly and never through the dispatcher")
@@ -421,7 +421,7 @@ func TestResourceParkIsRecordedOnTheBoard(t *testing.T) {
 	r.SetTaskBlocker(&blockRecorder{previous: domain.TaskColumnInQA})
 	r.SetParkJournal(NewParkJournal(events, spans))
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 
 	payloads := events.payloads()
 	require.Len(t, payloads, 1)
@@ -447,7 +447,7 @@ func TestAFailedParkRecordsNoMove(t *testing.T) {
 	r.SetTaskBlocker(&blockRecorder{err: errors.New("board unavailable")})
 	r.SetParkJournal(NewParkJournal(events, spans))
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 	assert.Empty(t, events.all(), "the card never moved, so the timeline must not say it did")
 	assert.Empty(t, spans.recorded())
 	assert.Equal(t, "sess-x", runs.row().CLISessionID, "the durable half still lands")
@@ -472,7 +472,7 @@ func TestResumeSessionComesFromTheTasksPreviousRuns(t *testing.T) {
 	r, job := executorRunner(t, agent, runs, ex)
 	job.Run.ID = currentID
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 	assert.Equal(t, "sess-newest", ex.request().ResumeSessionID)
 }
 
@@ -545,7 +545,7 @@ func TestRepeatedQuotaParksEventuallyFailTheRun(t *testing.T) {
 	blocker := &blockRecorder{}
 	r.SetTaskBlocker(blocker)
 
-	err := r.execute(context.Background(), job)
+	err := r.execute(context.Background(), context.Background(), func() {}, job)
 	require.Error(t, err, "past the cap a park is an ordinary failure")
 
 	row := runs.row()
@@ -578,7 +578,7 @@ func TestQuotaParksBelowTheCapStillPark(t *testing.T) {
 	blocker := &blockRecorder{}
 	r.SetTaskBlocker(blocker)
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 	resource, _ := blocker.parked()
 	assert.Equal(t, domain.ResourceClaudeCodeQuota, resource)
 	assert.NotEqual(t, domain.TaskAgentRunStatusFailed, runs.row().Status)
@@ -612,7 +612,7 @@ func TestQuotaParkKeepsTheRunRowEvenIfTheCardCannotBeParked(t *testing.T) {
 	r, job := executorRunner(t, claudeCodeAgent(), runs, ex)
 	r.SetTaskBlocker(&blockRecorder{err: errors.New("board unavailable")})
 
-	require.NoError(t, r.execute(context.Background(), job))
+	require.NoError(t, r.execute(context.Background(), context.Background(), func() {}, job))
 	assert.Equal(t, "sess-x", runs.row().CLISessionID)
 	assert.True(t, strings.Contains(runs.row().Summary, "usage limit"))
 }

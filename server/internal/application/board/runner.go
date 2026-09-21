@@ -295,6 +295,14 @@ type Runner struct {
 	// the jobs waiting for it to let go. See beginTask.
 	activeTasks map[uuid.UUID]uuid.UUID
 	parked      map[uuid.UUID][]RunJob
+	// agentSlots/taskSlots enforce the max-concurrent-agents / -tasks settings
+	// from app_settings. See concurrencyLimits: each limit is read per run, so
+	// a Settings change applies to the next dispatch with no restart. 0 means
+	// unlimited, which is the desktop default. taskSlotHeld is the per-task
+	// track of which claim already pays for a slot, alongside activeTasks.
+	agentSlots   *slotGate
+	taskSlots    *slotGate
+	taskSlotHeld map[uuid.UUID]bool
 	// cancels reaches ONE run's goroutine: a human pressing stop cancels that
 	// run's context, not the pool's. Guarded by activeMu together with the maps
 	// above — every one of them is written at the same two moments of a run's
@@ -407,6 +415,9 @@ func NewRunner(deps RunnerDeps) *Runner {
 		queued:            make(map[uuid.UUID]struct{}),
 		activeTasks:       make(map[uuid.UUID]uuid.UUID),
 		parked:            make(map[uuid.UUID][]RunJob),
+		agentSlots:        newSlotGate(),
+		taskSlots:         newSlotGate(),
+		taskSlotHeld:      make(map[uuid.UUID]bool),
 		cancels:           make(map[uuid.UUID]context.CancelFunc),
 	}
 }
@@ -424,6 +435,21 @@ func (r *Runner) language(ctx context.Context) string {
 		return r.defaultLang
 	}
 	return settings.DefaultLanguage
+}
+
+// concurrencyLimits reads the board's run caps from app_settings, per run, so a
+// change applies to the next dispatch instead of requiring a restart. Absent,
+// unreadable or zero limits all mean unlimited, which is the unconfigured
+// behaviour and so needs no migration to seed a default row.
+func (r *Runner) concurrencyLimits(ctx context.Context) (agents, tasks int) {
+	if r.settings == nil {
+		return 0, 0
+	}
+	settings, err := r.settings.Get(ctx)
+	if err != nil {
+		return 0, 0
+	}
+	return max(settings.MaxConcurrentAgents, 0), max(settings.MaxConcurrentTasks, 0)
 }
 
 // SetTaskUpdater wires the repository service in after construction.
@@ -664,28 +690,48 @@ func stopRequested(parent, runCtx context.Context) bool {
 // agent stops talking: verification, up to N fix rounds, the commit and the
 // push all come after. The architect dispatched into code_review used to start
 // during that tail and review a tree the developer was still writing.
-func (r *Runner) beginTask(job RunJob) bool {
+//
+// The first run to claim a task also pays for one task slot (concurrencyLimits'
+// MaxConcurrentTasks); parked runs never pay — the task is already in flight.
+// ctx cancelling mid-wait undoes the claim, exactly as if the run had been
+// parked and cancelled while queued.
+func (r *Runner) beginTask(ctx context.Context, job RunJob) bool {
 	taskID := job.Task.ID
 	if taskID == uuid.Nil {
 		// No task to serialize on (tests, synthetic jobs): let it run.
 		return true
 	}
 	r.activeMu.Lock()
-	defer r.activeMu.Unlock()
 	if holder, busy := r.activeTasks[taskID]; busy {
 		r.parked[taskID] = append(r.parked[taskID], job)
 		log.Info().Str("task_id", taskID.String()).Str("run_id", job.Run.ID.String()).
 			Str("waiting_for_run_id", holder.String()).
 			Msg("board run parked: another run holds this task")
+		r.activeMu.Unlock()
 		return false
 	}
 	r.activeTasks[taskID] = job.Run.ID
+	needSlot := !r.taskSlotHeld[taskID]
+	r.activeMu.Unlock()
+
+	if needSlot {
+		if !r.taskSlots.acquire(ctx) {
+			r.endTask(taskID)
+			return false
+		}
+		// Only our own endTask can clear activeTasks[taskID], so the slot we
+		// just won cannot have been released in between.
+		r.activeMu.Lock()
+		r.taskSlotHeld[taskID] = true
+		r.activeMu.Unlock()
+	}
 	return true
 }
 
 // endTask releases the task and hands it to the job that has waited longest,
 // one at a time — releasing the whole queue at once would recreate the
-// concurrency beginTask exists to prevent.
+// concurrency beginTask exists to prevent. The task's slot is repaid only when
+// the task is truly idle again, or two runs of one task would each owe one.
 func (r *Runner) endTask(taskID uuid.UUID) {
 	if taskID == uuid.Nil {
 		return
@@ -702,7 +748,14 @@ func (r *Runner) endTask(taskID uuid.UUID) {
 			r.parked[taskID] = waiting
 		}
 	}
+	releaseSlot := len(waiting) == 0 && r.taskSlotHeld[taskID]
+	if releaseSlot {
+		delete(r.taskSlotHeld, taskID)
+	}
 	r.activeMu.Unlock()
+	if releaseSlot {
+		r.taskSlots.release()
+	}
 	if next.Run.ID != uuid.Nil {
 		r.Enqueue(next)
 	}
@@ -820,7 +873,14 @@ func (r *Runner) dispatch(ctx context.Context) {
 	}
 }
 
-func (r *Runner) runJob(ctx context.Context, job RunJob) {
+func (r *Runner) runJob(parent context.Context, job RunJob) {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	// The gates between the queue and the claim can hold a run for a long
+	// time, so a stop aimed at a gated run must find its cancel here, before
+	// the row says 'running': registration used to happen in execute.
+	defer r.registerCancel(job.Run.ID, cancel)()
+
 	// A job can sit in the queue for a moment, and a stop that arrived meanwhile
 	// was recorded on the row, not in this queue. Read the row before claiming
 	// anything: a run stopped while it waited must not start now.
@@ -828,12 +888,26 @@ func (r *Runner) runJob(ctx context.Context, job RunJob) {
 		r.unmarkQueued(job.Run.ID)
 		return
 	}
-	// A job for a task that already has a run is parked and comes back through
-	// the queue when that task frees up.
-	if !r.beginTask(job) {
+	agents, tasks := r.concurrencyLimits(ctx)
+	r.agentSlots.setLimit(agents)
+	r.taskSlots.setLimit(tasks)
+
+	// The caps are applied to the least scarce resource first: an agent slot is
+	// held only while a run is executing or about to, and a park never pays for
+	// one, because endTask hands the task to the next parked job directly.
+	if !r.agentSlots.acquire(ctx) {
+		r.unmarkQueued(job.Run.ID)
 		return
 	}
-	err := r.execute(ctx, job)
+	// A job for a task that already has a run is parked (and its claim of an
+	// agent slot returned) and comes back through the queue when the task lets
+	// go of it.
+	if !r.beginTask(ctx, job) {
+		r.agentSlots.release()
+		return
+	}
+	err := r.execute(parent, ctx, cancel, job)
+	r.agentSlots.release()
 	r.endTask(job.Task.ID)
 	if err != nil {
 		log.Warn().Err(err).Str("run_id", job.Run.ID.String()).Msg("board agent run failed")
@@ -862,16 +936,15 @@ func (r *Runner) alreadyStopped(ctx context.Context, runID uuid.UUID) bool {
 	return true
 }
 
-func (r *Runner) execute(parent context.Context, job RunJob) error {
+func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc, job RunJob) error {
 	run := job.Run
 
 	// Everything this run touches hangs off ctx — the agent loop, the tools it
 	// spawns, the git work around them — so cancelling it is what makes the run
-	// stoppable at all. Registered before the row says 'running': a stop that
-	// arrives in the first millisecond must still find the run it is aimed at.
-	ctx, cancelRun := context.WithCancel(parent)
-	defer cancelRun()
-	defer r.registerCancel(run.ID, cancelRun)()
+	// stoppable at all. ctx is runJob's run context, and the cancel for it is
+	// registered there so it reaches the run even while it waits at a gate;
+	// a stop that arrives in the first millisecond must still find the run it
+	// is aimed at.
 
 	// The claim, and the only way a run becomes 'running'.
 	//
@@ -902,7 +975,7 @@ func (r *Runner) execute(parent context.Context, job RunJob) error {
 	}
 	run.Status = domain.TaskAgentRunStatusRunning
 	defer r.markActive(run.ID)()
-	defer r.startHeartbeat(ctx, run.ID, cancelRun)()
+	defer r.startHeartbeat(ctx, run.ID, cancel)()
 
 	// A run a human stopped is not a failed run, so every failure below reports
 	// through this: wherever the stop caught the run, it leaves no verdict on
