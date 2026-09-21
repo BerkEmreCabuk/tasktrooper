@@ -202,7 +202,7 @@ export const chatArea = {
     noAgents: {
       title: "No agents yet",
       description:
-        "Set up the ready-made team of six role agents, or add one from a template or from scratch.",
+        "Your role team is created from the catalog during boot. You can also add an agent from a saved template or from scratch.",
       cta: "Add an agent",
     },
     wizard: {
@@ -225,16 +225,9 @@ export const chatArea = {
       createBlank: "Create from scratch",
       fromTemplate: "From template",
       noTemplates: "No saved templates.",
-      builtIn: "Built-in",
       skillsRules: "{skills} skills · {rules} rules",
       creating: "Creating…",
       create: "Create",
-      setupTeam: "Set up the ready-made team",
-      settingUpTeam: "Setting up the team…",
-      setupTeamCreated: "Ready-made team created ({count} agents)",
-      setupTeamPartial: "Created {created} of {total} agents — open this dialog again to add the rest",
-      setupTeamFailed: "Could not set up the ready-made team",
-      orPickOne: "Or add one agent",
     },
   },
   rag: {

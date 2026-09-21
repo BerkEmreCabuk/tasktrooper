@@ -6,13 +6,12 @@ import { useCachedState, useFirstLoad } from "@/hooks/useCachedState";
 import { CACHE_CONFIG } from "@/lib/project-board";
 import { cn } from "@/lib/utils";
 
-// Boot only upserts the built-in agent TEMPLATES in the background (no
-// embedding calls, and nothing in `agents`) — a brand-new install has zero
-// agents until the user creates one, which is the empty state
-// WorkspaceSidebar renders. `seeding` still briefly covers that upsert (and
-// general boot), so poll until the backend reports it done rather than
-// painting the roster mid-boot. Cap the polling so a stuck/unreachable boot
-// step can't spin the sidebar forever.
+// Boot syncs the role catalog in the background (no embedding calls, and
+// nothing in `agents` while it runs) — a brand-new install has zero agents
+// until that sync lands, which is the empty state WorkspaceSidebar renders.
+// `seeding` still briefly covers that sync (and general boot), so poll until
+// the backend reports it done rather than painting the roster mid-boot. Cap
+// the polling so a stuck/unreachable boot step can't spin the sidebar forever.
 const SEED_POLL_INTERVAL_MS = 1500;
 const SEED_POLL_MAX_ATTEMPTS = 20;
 

@@ -202,7 +202,7 @@ export const chatArea: ChatAreaDict = {
     noAgents: {
       title: "Henüz ajan yok",
       description:
-        "Altı rol ajanından oluşan hazır ekibi kurun ya da bir şablondan veya sıfırdan tek bir ajan ekleyin.",
+        "Rol ekibiniz açılışta katalogdan oluşturulur. Ayrıca kayıtlı bir şablondan ya da sıfırdan ajan ekleyebilirsiniz.",
       cta: "Ajan ekle",
     },
     wizard: {
@@ -225,16 +225,9 @@ export const chatArea: ChatAreaDict = {
       createBlank: "Sıfırdan oluştur",
       fromTemplate: "Şablondan",
       noTemplates: "Kayıtlı şablon yok.",
-      builtIn: "Yerleşik",
       skillsRules: "{skills} yetenek · {rules} kural",
       creating: "Oluşturuluyor…",
       create: "Oluştur",
-      setupTeam: "Hazır ekibi kur",
-      settingUpTeam: "Ekip kuruluyor…",
-      setupTeamCreated: "Hazır ekip kuruldu ({count} ajan)",
-      setupTeamPartial: "{total} ajandan {created} tanesi oluşturuldu — kalanları eklemek için bu pencereyi tekrar açın",
-      setupTeamFailed: "Hazır ekip kurulamadı",
-      orPickOne: "Ya da tek bir ajan ekleyin",
     },
   },
   rag: {
