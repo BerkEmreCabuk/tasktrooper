@@ -353,6 +353,9 @@ export const settingsPages: SettingsPagesDict = {
       frontend: "Frontend",
       mobile: "Mobile",
     },
+    areaCustomPlaceholder: "Alan ekle…",
+    addArea: "Ekle",
+    removeArea: "Alanı kaldır",
 
     dutiesTitle: "Sistem görevleri",
     dutiesSubtitle:

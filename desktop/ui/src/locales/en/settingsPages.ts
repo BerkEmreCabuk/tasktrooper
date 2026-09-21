@@ -370,6 +370,9 @@ export const settingsPages = {
       frontend: "Frontend",
       mobile: "Mobile",
     },
+    areaCustomPlaceholder: "Add area…",
+    addArea: "Add",
+    removeArea: "Remove area",
 
     dutiesTitle: "System duties",
     dutiesSubtitle:
