@@ -15,13 +15,18 @@ type LLMProviders interface {
 }
 
 // cliPreference orders the agent CLIs when several are connected. Any CLI beats
-// an HTTP fallback; among CLIs, Claude Code wins a tie.
-var cliPreference = []domain.LLMProviderType{
-	domain.LLMProviderClaudeCode,
-	domain.LLMProviderCursorAgent,
-	domain.LLMProviderAntigravity,
-	domain.LLMProviderOpencode,
-}
+// an HTTP fallback; among CLIs, declaration order breaks a tie, so the first
+// host-executed provider in the registry is the default. A new CLI joins the
+// race by being declared — nothing here has to name it.
+var cliPreference = func() []domain.LLMProviderType {
+	var out []domain.LLMProviderType
+	for _, def := range domain.AllLLMProviderDefinitions() {
+		if def.HostExecuted {
+			out = append(out, def.Type)
+		}
+	}
+	return out
+}()
 
 // ReconcileAgentRuntimes points agents at a provider that can run them after the
 // set of available providers changes, and returns how many it moved.

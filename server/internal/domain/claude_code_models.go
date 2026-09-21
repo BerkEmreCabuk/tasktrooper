@@ -84,20 +84,20 @@ func ClaudeCodeModels() []LLMModelOption {
 // as a local process, and false for every provider that is reachable over HTTP
 // and can therefore be asked for its own model list.
 //
-// It is the switch the /v1/models handler makes: a host-executed provider has no
-// endpoint to query, so listing its models is a lookup here rather than a
-// request anywhere.
+// It is the lookup the /v1/models handler makes: a host-executed provider has no
+// endpoint to query, so listing its models reads the definition's curated
+// ModelOptions rather than making a request anywhere. A provider that has not
+// declared any gets an empty list — the picker shows nothing to choose rather
+// than the endpoint 502-ing on a client that cannot be dialled — so adding a
+// curated picker for a new CLI is a data change in its definition, not a new
+// arm here.
 func ModelsForHostExecutedProvider(t LLMProviderType) ([]LLMModelOption, bool) {
 	if !RequiresHostExecutor(t) {
 		return nil, false
 	}
-	switch t {
-	case LLMProviderClaudeCode:
-		return ClaudeCodeModels(), true
-	default:
-		// A host-executed provider that has not declared its models yet. An
-		// empty list is the honest answer — the picker shows nothing to choose
-		// rather than the endpoint 502-ing on a client that cannot be dialled.
+	def, ok := LLMProviderDefinitionFor(t)
+	if !ok || len(def.ModelOptions) == 0 {
 		return []LLMModelOption{}, true
 	}
+	return def.ModelOptions, true
 }

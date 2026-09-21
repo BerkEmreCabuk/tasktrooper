@@ -219,13 +219,13 @@ func stackKey(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
-// fillTemplateAgentModels puts the Claude Code provider/model pair on a
+// fillTemplateAgentModels puts the preferred CLI provider/model pair on a
 // built-in-role create request that names none, the same thing the old
 // boot-time seed did on CREATE (fillRoleAgentModels, before this became the
 // only path that creates a role agent). Filled as a pair: an override that
 // set either name on its own is left alone rather than getting an escalation
 // bolted onto a choice made to stay cheap. The provider is stamped only when
-// claudeCodeRunnable says this host can actually execute it — CreateAgent
+// firstRunnableCLI says this host can actually execute it — CreateAgent
 // refuses the provider otherwise, and every role agent creation would fail
 // instead of merely lacking a model.
 func (s *Service) fillTemplateAgentModels(req *domain.CreateAgentRequest) {
@@ -233,19 +233,30 @@ func (s *Service) fillTemplateAgentModels(req *domain.CreateAgentRequest) {
 		return
 	}
 	if req.ProviderType == "" {
-		if !s.claudeCodeRunnable() {
+		p := s.firstRunnableCLI()
+		if p == "" {
 			return
 		}
-		req.ProviderType = domain.LLMProviderClaudeCode
+		req.ProviderType = p
 	}
 	req.Model, req.ModelHeavy = domain.ProviderDefaultModels(req.ProviderType)
 }
 
-// claudeCodeRunnable asks the same question checkHostExecutor does — may an
-// agent be saved onto the CLI provider here — and asks it first, so a
-// built-in template never proposes a configuration that guard would refuse.
-func (s *Service) claudeCodeRunnable() bool {
-	return s.hostExecutor != nil && s.hostExecutor(domain.LLMProviderClaudeCode)
+// firstRunnableCLI names the most preferred host-executed CLI this host can
+// actually run, or empty when it can run none. It asks the same question
+// checkHostExecutor does — may an agent be saved onto this CLI provider here —
+// in cliPreference order, so a built-in template never proposes a
+// configuration that guard would refuse.
+func (s *Service) firstRunnableCLI() domain.LLMProviderType {
+	if s.hostExecutor == nil {
+		return ""
+	}
+	for _, p := range cliPreference {
+		if s.hostExecutor(p) {
+			return p
+		}
+	}
+	return ""
 }
 
 // applySuggestedSubscriptions subscribes a newly created agent to its

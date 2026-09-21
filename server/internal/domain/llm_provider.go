@@ -82,6 +82,12 @@ type LLMProviderDefinition struct {
 	// chat provider, because a chat turn is an HTTP call and this one cannot
 	// serve it.
 	HostExecuted bool `json:"host_executed"`
+	// ModelOptions is the curated model picker for a HOST-EXECUTED provider —
+	// the list /v1/models serves for it, because such a provider is a local
+	// process with no endpoint to ask (see ModelsForHostExecutedProvider). Empty
+	// for HTTP providers and for a host-executed one whose models are discovered
+	// live by its CLI adapter instead (see application/agentcli.DefaultModels).
+	ModelOptions []LLMModelOption `json:"model_options,omitempty"`
 	// Available reports that this provider can actually run work today. It is
 	// true for every provider whose engine exists, and false for one that is
 	// DECLARED but not yet built.
@@ -240,7 +246,10 @@ func AllLLMProviderDefinitions() []LLMProviderDefinition {
 			// bounds a run (claude_code.run_timeout).
 			DefaultTimeoutSeconds: 3600,
 			HostExecuted:          true,
-			Available:             true,
+			// The curated picker lives here as data, not in a switch anywhere —
+			// see ModelsForHostExecutedProvider for who reads it.
+			ModelOptions: ClaudeCodeModels(),
+			Available:    true,
 		},
 		{
 			Type:  LLMProviderCursorAgent,
