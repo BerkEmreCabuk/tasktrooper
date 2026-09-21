@@ -62,6 +62,17 @@ extraResources:
     to: web
     filter:
       - "**/*"
+  # The role agents: the six-agent catalog the backend syncs at boot
+  # (server/resources/config.yml: agent_catalog.source), handed to it as
+  # AGENT_CATALOG_REPO via services/app-scheme.ts catalogRoot(). It sits next
+  # to the server's own binary so the two halves of the product travel
+  # together. `to: catalog` is the same name catalogRoot() resolves in a
+  # packaged copy; the two have to agree or boot reports an unreadable catalog
+  # and no role agents are created.
+  - from: ../catalog
+    to: catalog
+    filter:
+      - "**/*"
   # The embedder: its JS bundle plus onnxruntime-web's staged .wasm/.mjs runtime
   # files, built by `npm run build:embedder` into this package's own dist/ — no
   # model weights here, those download into userData at runtime. A flat

@@ -5,6 +5,13 @@ vi.mock("electron", () => ({
   app: { getAppPath: () => "/app", getPath: () => "/userData", isPackaged: false },
 }));
 
+// Root-level /catalog does not exist on this machine, but catalogRoot()
+// resolves to it in dev; pretending it is there lets a test pin that the
+// backend is always handed the bundled catalog path.
+vi.mock("node:fs", () => ({
+  existsSync: (p: string) => p === "/catalog",
+}));
+
 const { agentServerEnv, appiumArgs, childEnv } = await import("./env.js");
 const { APPIUM_BASE_URL } = await import("../services/detect.js");
 
@@ -114,6 +121,15 @@ describe("agentServerEnv", () => {
   });
 
   /**
+   * The catalog ships with the app (Resources/catalog, or the monorepo's
+   * catalog/ in dev). Leaving the backend without it is an install with no
+   * role agents at all.
+   */
+  it("hands the backend the bundled role catalog path", () => {
+    expect(env().AGENT_CATALOG_REPO).toBe("/catalog");
+  });
+
+  /**
    * A shell with DATABASE_URL exported must not steer the backend away from
    * its embedded database, nor may any other key the backend reads leak in.
    */
@@ -122,12 +138,16 @@ describe("agentServerEnv", () => {
     vi.stubEnv("PUBLIC_BASE_URL", "https://example.invalid");
     vi.stubEnv("CONFIG_PATH", "/etc/elsewhere.yml");
     vi.stubEnv("CORS_ORIGINS", "*");
+    vi.stubEnv("AGENT_CATALOG_REPO", "/operator-picked/catalog");
     try {
       const e = env();
       expect(e.DATABASE_URL).toBeUndefined();
       expect(e.PUBLIC_BASE_URL).toBeUndefined();
       expect(e.CONFIG_PATH).toBeUndefined();
       expect(e.CORS_ORIGINS).toBeUndefined();
+      // The parent shell's choice is discarded in favour of the bundled copy;
+      // see "hands the backend the bundled role catalog path".
+      expect(e.AGENT_CATALOG_REPO).toBe("/catalog");
       expect(e.PORT).toBe("0");
       expect(e.SERVER_API_KEY).toBe("token-1");
     } finally {

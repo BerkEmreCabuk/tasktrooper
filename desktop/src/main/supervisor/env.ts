@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import type { PreflightReport } from "../../ipc/types.js";
+import { catalogRoot } from "../services/app-scheme.js";
 import { androidRootFrom, APPIUM_BASE_URL, itemById } from "../services/detect.js";
 
 /**
@@ -81,9 +83,10 @@ export const SERVER_CONTRACT_KEYS = [
   "EMBEDDINGS_BASE_URL",
   "EMBEDDED_POSTGRES_CACHE_DIR",
   "CHROME_BIN",
-  "MOBILE_APPIUM_HUB_URL",
-  "ALLOWED_ROOTS",
-] as const;
+"MOBILE_APPIUM_HUB_URL",
+   "ALLOWED_ROOTS",
+   "AGENT_CATALOG_REPO",
+ ] as const;
 
 export interface AgentServerEnvInputs {
   preflight: PreflightReport;
@@ -145,6 +148,11 @@ export function agentServerEnv(inputs: AgentServerEnvInputs): NodeJS.ProcessEnv 
     ...(opencode?.status === "ok" && opencode.path ? { OPENCODE_BIN: toEnvPath(opencode.path) } : {}),
     ...(inputs.embeddingsBaseURL ? { EMBEDDINGS_BASE_URL: inputs.embeddingsBaseURL } : {}),
     ...(chrome?.status === "ok" && chrome.path ? { CHROME_BIN: toEnvPath(chrome.path) } : {}),
+    // The six role agents ship as the bundled catalog (Resources/catalog, or
+    // the monorepo's catalog/ in dev) and the backend syncs them from it at
+    // boot. Omitted when a checkout has no catalog yet — same "optional path
+    // omitted, never empty" convention as the rest of this map.
+    ...(existsSync(catalogRoot()) ? { AGENT_CATALOG_REPO: catalogRoot() } : {}),
     // Sent whenever Appium is INSTALLED, whether this app started the hub or
     // adopted one already on the port — it is the same hub either way.
     ...(appium?.status === "ok" ? { MOBILE_APPIUM_HUB_URL: APPIUM_BASE_URL } : {}),

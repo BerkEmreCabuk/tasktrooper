@@ -24,7 +24,7 @@ vi.mock("electron", () => ({
   protocol: { registerSchemesAsPrivileged: () => {}, handle: () => {} },
 }));
 
-const { APP_ORIGIN, originOf } = await import("./app-scheme.js");
+const { APP_ORIGIN, catalogRoot, originOf } = await import("./app-scheme.js");
 
 describe("originOf", () => {
   it("gives the app scheme a comparable origin, which URL.origin does not", () => {
@@ -51,5 +51,11 @@ describe("originOf", () => {
   it("is null rather than throwing for something that is not a URL", () => {
     expect(originOf("")).toBeNull();
     expect(originOf("not a url")).toBeNull();
+  });
+});
+
+describe("catalogRoot", () => {
+  it("resolves to the monorepo catalog next to the app in dev", () => {
+    expect(catalogRoot()).toBe("/catalog");
   });
 });

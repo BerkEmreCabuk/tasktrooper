@@ -85,6 +85,20 @@ export function webRoot(): string {
 }
 
 /**
+ * Where the role agent catalog is.
+ *
+ * Packaged: `Contents/Resources/catalog`, the extraResources staging agreed
+ * with electron-builder.yml's `to: catalog`. Dev: the monorepo's `catalog/`
+ * next to this package. Either way the backend is handed this path as
+ * `AGENT_CATALOG_REPO` and syncs its six role agents from it at boot
+ * (server/resources/config.yml: agent_catalog.source).
+ */
+export function catalogRoot(): string {
+  if (app.isPackaged) return path.join(process.resourcesPath, "catalog");
+  return path.resolve(app.getAppPath(), "..", "catalog");
+}
+
+/**
  * Serve the bundle. Call once, after the app is ready.
  *
  * Two rules, and the second is the one that matters:
