@@ -32,6 +32,8 @@ func (h *Handler) registerWorkspaceRoutes(app fiber.Router) {
 	app.Get("/v1/tasks/released", h.ListReleasedArchive)
 	app.Get("/v1/agents/:agentId/subscriptions", h.GetAgentSubscriptions)
 	app.Put("/v1/agents/:agentId/subscriptions", h.SetAgentSubscriptions)
+	app.Get("/v1/agents/:agentId/column-instructions", h.GetAgentColumnInstructions)
+	app.Put("/v1/agents/:agentId/column-instructions", h.SetAgentColumnInstructions)
 }
 
 // agentSubscriptionJSON is one column an agent subscribes to, with its
@@ -89,6 +91,66 @@ func (h *Handler) SetAgentSubscriptions(c *fiber.Ctx) error {
 		}
 	}
 	if err := h.workspaceSvc.SetAgentSubscriptionsDetailed(h.enrichContext(c), agentID, subs); err != nil {
+		return badRequest(c, err.Error())
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// GetAgentColumnInstructions serves an agent's per-column prompts ("what to do
+// when a task arrives in this column").
+func (h *Handler) GetAgentColumnInstructions(c *fiber.Ctx) error {
+	agentID, err := uuid.Parse(c.Params("agentId"))
+	if err != nil {
+		return badRequest(c, "invalid agent id")
+	}
+	instructions, err := h.workspaceSvc.ListAgentColumnInstructions(h.enrichContext(c), agentID)
+	if err != nil {
+		return internalError(c, err)
+	}
+	out := make([]struct {
+		ColumnSlug  string `json:"column_slug"`
+		Instruction string `json:"instruction"`
+	}, 0, len(instructions))
+	for _, ins := range instructions {
+		out = append(out, struct {
+			ColumnSlug  string `json:"column_slug"`
+			Instruction string `json:"instruction"`
+		}{ColumnSlug: ins.ColumnSlug, Instruction: ins.Instruction})
+	}
+	if out == nil {
+		out = []struct {
+			ColumnSlug  string `json:"column_slug"`
+			Instruction string `json:"instruction"`
+		}{}
+	}
+	return c.JSON(fiber.Map{"instructions": out})
+}
+
+// SetAgentColumnInstructions writes an agent's per-column prompts from the
+// body. Columns not present are left as they are; an empty instruction clears
+// the row, so the UI's "send every column, empty means none" is the delete.
+func (h *Handler) SetAgentColumnInstructions(c *fiber.Ctx) error {
+	agentID, err := uuid.Parse(c.Params("agentId"))
+	if err != nil {
+		return badRequest(c, "invalid agent id")
+	}
+	var req struct {
+		Instructions []struct {
+			ColumnSlug  string `json:"column_slug"`
+			Instruction string `json:"instruction"`
+		} `json:"instructions"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return badRequest(c, "invalid request body")
+	}
+	instructions := make([]domain.AgentColumnInstruction, 0, len(req.Instructions))
+	for _, ins := range req.Instructions {
+		if ins.ColumnSlug == "" {
+			continue
+		}
+		instructions = append(instructions, domain.AgentColumnInstruction{ColumnSlug: ins.ColumnSlug, Instruction: ins.Instruction})
+	}
+	if err := h.workspaceSvc.SetAgentColumnInstructions(h.enrichContext(c), agentID, instructions); err != nil {
 		return badRequest(c, err.Error())
 	}
 	return c.SendStatus(fiber.StatusNoContent)

@@ -26,6 +26,13 @@ type UpstreamAgent struct {
 	Subscriptions []TaskColumn
 	Skills        []UpstreamSkill
 	Rules         []UpstreamRule
+	// ColumnInstructions are the agent's per-column defaults from
+	// agents/<slug>/columns/<column_slug>.md: what the agent is told to do when
+	// a task arrives in that column, delivered as a prompt append at dispatch.
+	// They are seeded into agent_column_instructions, never into
+	// subscriptions, so a column that dispatches the agent without being
+	// watched still gets its instruction.
+	ColumnInstructions []UpstreamColumnInstruction
 	// TechStacks are the stacks the agent's skills are filed under, created on
 	// the agent at ingest and resolved by name when a skill's front-matter
 	// tech_stack names one.
@@ -58,6 +65,13 @@ type UpstreamRule struct {
 	Content  string
 	Priority int
 	Enabled  bool
+}
+
+// UpstreamColumnInstruction is one per-column default prompt from the
+// catalog's agents/<slug>/columns/ directory.
+type UpstreamColumnInstruction struct {
+	Column      TaskColumn
+	Instruction string
 }
 
 // CatalogSyncState is the one-row status of the last external-catalog sync.

@@ -156,6 +156,9 @@ func (s *Service) ingestNewAgent(ctx context.Context, def domain.UpstreamAgent, 
 	if err := s.applySuggestedRoles(ctx, agent, def.Roles); err != nil {
 		return err
 	}
+	if err := s.reconcileColumnInstructions(ctx, agent.ID, def); err != nil {
+		return err
+	}
 	for _, r := range def.Rules {
 		if _, err := s.CreateRuleForAgent(ctx, agent.ID, domain.CreateOrchestratorRuleRequest{
 			Name: r.Name, Content: r.Content, Priority: r.Priority, Enabled: r.Enabled,
@@ -222,6 +225,9 @@ func (s *Service) applyUpstreamAgent(ctx context.Context, existing domain.Agent,
 		return domain.Agent{}, err
 	}
 	if err := s.applySuggestedRoles(ctx, agent, def.Roles); err != nil {
+		return domain.Agent{}, err
+	}
+	if err := s.reconcileColumnInstructions(ctx, agent.ID, def); err != nil {
 		return domain.Agent{}, err
 	}
 	if err := s.upsertRules(ctx, agent, def.Rules); err != nil {
@@ -519,6 +525,36 @@ func (s *Service) stampSkillSHA(ctx context.Context, skill domain.Skill, sha str
 	skill.CatalogSha = sha
 	_, err := s.store.UpdateSkill(ctx, skill)
 	return err
+}
+
+// reconcileColumnInstructions seeds the catalog's per-column default prompts
+// into agent_column_instructions, the store that rides along with dispatch but
+// not with column subscriptions. A prompt the operator wrote is never
+// clobbered: an existing value that is non-empty and differs from the
+// catalog's is left alone. SetAgentColumnInstruction deletes on an empty
+// value, so an operator clearing a catalog default back to nothing restores
+// the default on the next sync — the "reset to catalog" move.
+func (s *Service) reconcileColumnInstructions(ctx context.Context, agentID uuid.UUID, def domain.UpstreamAgent) error {
+	if s.boardConfig == nil || len(def.ColumnInstructions) == 0 {
+		return nil
+	}
+	stored, err := s.boardConfig.ListAgentColumnInstructions(ctx, agentID)
+	if err != nil {
+		return fmt.Errorf("list column instructions for %s: %w", def.Name, err)
+	}
+	current := make(map[string]string, len(stored))
+	for _, ins := range stored {
+		current[ins.ColumnSlug] = ins.Instruction
+	}
+	for _, ci := range def.ColumnInstructions {
+		if have := current[string(ci.Column)]; have != "" && have != ci.Instruction {
+			continue
+		}
+		if err := s.boardConfig.SetAgentColumnInstruction(ctx, agentID, string(ci.Column), ci.Instruction); err != nil {
+			return fmt.Errorf("set column instruction %s/%s: %w", def.Name, ci.Column, err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) park(ctx context.Context, syncStore port.CatalogSyncStore, pending domain.CatalogPending) {

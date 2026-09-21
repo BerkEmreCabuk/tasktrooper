@@ -245,10 +245,11 @@ func (d *Dispatcher) Dispatch(ctx context.Context, input DispatchInput) error {
 		}
 
 		d.runner.Enqueue(RunJob{
-			Run:          run,
-			Event:        event,
-			Task:         input.Task,
-			RepositoryID: input.RepositoryID,
+			Run:               run,
+			Event:             event,
+			Task:              input.Task,
+			RepositoryID:      input.RepositoryID,
+			ColumnInstruction: d.columnInstructionForAgent(ctx, agentID, input.Task.Column),
 		})
 	}
 	return nil
@@ -364,6 +365,24 @@ func isHandoffGateColumn(wf domain.Workflow, wfOK bool, col domain.TaskColumn) b
 		return true
 	}
 	return wf.Has(col, domain.BehaviourRouteToSubscribers)
+}
+
+// columnInstructionForAgent is the per-agent per-column prompt the run should
+// carry, keyed by the column the task was in when this run was dispatched.
+// It is a config append, never an override, and a missing row is "no text".
+func (d *Dispatcher) columnInstructionForAgent(ctx context.Context, agentID uuid.UUID, column domain.TaskColumn) string {
+	instructions, err := d.board.ListAgentColumnInstructions(ctx, agentID)
+	if err != nil {
+		log.Warn().Err(err).Str("agent_id", agentID.String()).Str("column", string(column)).
+			Msg("dispatch: column instruction lookup failed")
+		return ""
+	}
+	for _, ins := range instructions {
+		if ins.ColumnSlug == string(column) {
+			return ins.Instruction
+		}
+	}
+	return ""
 }
 
 func (d *Dispatcher) resolveAgents(ctx context.Context, wf domain.Workflow, wfOK bool, input DispatchInput) ([]uuid.UUID, error) {

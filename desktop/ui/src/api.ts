@@ -66,8 +66,15 @@ export interface AgentSubscriptionsResponse {
   subscriptions: AgentColumnSubscription[];
 }
 
-export type RoleArea = "backend" | "frontend" | "mobile";
+/** Per-agent prompt handed to the agent when a task arrives in a column. */
+export interface AgentColumnInstruction {
+  column_slug: string;
+  instruction: string;
+}
 
+export type RoleArea = string;
+
+/** Well-known repo areas offered as presets; any other string is a valid area too. */
 export const ROLE_AREAS: RoleArea[] = ["backend", "frontend", "mobile"];
 
 /** One behaviour attached to a task type or a workflow stage; params keyed by BehaviourSpec.params[].name. */

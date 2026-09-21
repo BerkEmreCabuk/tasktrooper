@@ -130,6 +130,11 @@ func readAgentDir(dir, slug string) (domain.UpstreamAgent, string, error) {
 	} else {
 		agent.Rules = rules
 	}
+	if columns, err := readColumnInstructionsDir(filepath.Join(dir, columnsDir)); err != nil {
+		return domain.UpstreamAgent{}, "", err
+	} else {
+		agent.ColumnInstructions = columns
+	}
 
 	etag, err := hashFiles(dir, files)
 	if err != nil {
@@ -217,6 +222,50 @@ func readRulesDir(dir string) ([]domain.UpstreamRule, error) {
 			Enabled:  enabled,
 		})
 	}
+	return out, nil
+}
+
+// readColumnInstructionsDir reads columns/<column_slug>.md — the per-agent
+// default prompt handed to the agent when a task arrives in that column (see
+// domain.AgentColumnInstruction). The file's own name is the column; front
+// matter is honoured the same way rules read it (enabled: false unpublishes)
+// but only when present — the file is otherwise plain markdown on purpose, so
+// catalog authors write these like prompt.md, not like a SKILL.
+func readColumnInstructionsDir(dir string) ([]domain.UpstreamColumnInstruction, error) {
+	if st, err := os.Stat(dir); err != nil || !st.IsDir() {
+		return nil, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	var out []domain.UpstreamColumnInstruction
+	for _, d := range entries {
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, d.Name()))
+		if err != nil {
+			return nil, err
+		}
+		content := string(raw)
+		meta, body, err := parseDoc(content)
+		if err != nil {
+			if strings.HasPrefix(strings.TrimSpace(content), "---") {
+				return nil, fmt.Errorf("catalog column instruction %s: %w", d.Name(), err)
+			}
+			meta, body = nil, content
+		}
+		body = strings.TrimSpace(body)
+		if body == "" || !frontmatterEnabled(meta) {
+			continue
+		}
+		out = append(out, domain.UpstreamColumnInstruction{
+			Column:      domain.TaskColumn(strings.TrimSuffix(d.Name(), ".md")),
+			Instruction: body,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Column < out[j].Column })
 	return out, nil
 }
 

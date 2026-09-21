@@ -39,6 +39,11 @@ type RunJob struct {
 	// (correctly) been moved to in_progress: the instruction, the reviewer's
 	// comments and the failed pipeline are all chosen from it.
 	EnteredFrom domain.TaskColumn
+	// ColumnInstruction is the per-agent per-column prompt the dispatcher read
+	// for (agent, the column the task was in when this run was dispatched). It
+	// is appended to the trigger message after the generic column instruction,
+	// so a column an agent works without watching still gets its text.
+	ColumnInstruction string
 }
 
 // isRevision reports whether this run is fixing review feedback, whether the
@@ -3230,6 +3235,14 @@ func buildTriggerMessage(job RunJob, wf domain.Workflow, criteria []domain.Accep
 		"event_type":  string(job.Event.EventType),
 		"payload":     json.RawMessage(job.Event.Payload),
 	})
+	runIns := runInstruction(wf, job)
+	if job.ColumnInstruction != "" {
+		// Agent-configured per-column text sits AFTER the generic column
+		// instruction and never replaces it: the workflow defaults (environment,
+		// build gate, hand-off mechanics) stay true for every agent, and the
+		// append is the operator's own guidance for this column.
+		runIns += "\n\nColumn-specific instructions for you, for a task that arrives in this column:\n" + job.ColumnInstruction
+	}
 	return fmt.Sprintf(`A kanban board event occurred. Evaluate the task and take action using board tools when appropriate.
 
 %s
@@ -3259,7 +3272,7 @@ A run that skips any of 1-3 has its hand-off refused and its finished work parke
 
 Task snapshot:
 %s
-%s`, runInstruction(wf, job), closingStep(wf, job), string(taskJSON), criteriaMessage(wf, job.Task, criteria, changedSince))
+%s`, runIns, closingStep(wf, job), string(taskJSON), criteriaMessage(wf, job.Task, criteria, changedSince))
 }
 
 // closingStep is step 4 of the pre-finish checklist. For a run whose hand-off

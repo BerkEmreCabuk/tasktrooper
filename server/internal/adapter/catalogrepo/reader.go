@@ -15,6 +15,7 @@ const (
 	promptFile   = "prompt.md"
 	skillsDir    = "skills"
 	rulesDir     = "rules"
+	columnsDir   = "columns"
 )
 
 // LocalDirMarker distinguishes a source read straight from a directory from one

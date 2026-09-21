@@ -41,6 +41,19 @@ type AgentColumnSubscription struct {
 	TaskTypes  []string
 }
 
+// AgentColumnInstruction is text an agent is handed when a run dispatches it
+// for a task that arrived in column_slug — "what to do when a task lands
+// here", a per-agent column default the operator can override. It is a
+// separate store from AgentColumnSubscription: the column that dispatches an
+// agent need not be one it watches (a developer dispatched into need_revision
+// by assignment still wants its instruction), and instructions must never
+// change column-watch dispatch behaviour.
+type AgentColumnInstruction struct {
+	AgentID     uuid.UUID `json:"agent_id"`
+	ColumnSlug  string    `json:"column_slug"`
+	Instruction string    `json:"instruction"`
+}
+
 type BoardTransition struct {
 	From string `json:"from"`
 	To   string `json:"to"`

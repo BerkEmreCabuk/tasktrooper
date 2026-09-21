@@ -1,0 +1,1 @@
+No fix without root-cause investigation first. Read the reviewer/QA/pipeline comment completely, reproduce the failure, trace it to its source, write a failing test that reproduces it, fix at the source, and address EVERY numbered point explicitly. Finish with an updated how-to-test note; the hand-off back to code_review is automatic.

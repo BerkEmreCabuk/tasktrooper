@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -243,6 +244,47 @@ func (s *BoardConfigStore) SetAgentSubscriptionsDetailed(ctx context.Context, ag
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// ListAgentColumnInstructions reads an agent's per-column prompts, sorted by
+// column slug. SetAgentColumnInstruction upserts one; an empty instruction
+// deletes the row, so "reset to none" and "not configured" are the same answer
+// for dispatch.
+func (s *BoardConfigStore) ListAgentColumnInstructions(ctx context.Context, agentID uuid.UUID) ([]domain.AgentColumnInstruction, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT column_slug, instruction FROM agent_column_instructions WHERE agent_id = $1 ORDER BY column_slug
+	`, agentID)
+	if err != nil {
+		return nil, fmt.Errorf("list agent column instructions: %w", err)
+	}
+	defer rows.Close()
+	var out []domain.AgentColumnInstruction
+	for rows.Next() {
+		var ins domain.AgentColumnInstruction
+		if err := rows.Scan(&ins.ColumnSlug, &ins.Instruction); err != nil {
+			return nil, err
+		}
+		out = append(out, ins)
+	}
+	return out, rows.Err()
+}
+
+func (s *BoardConfigStore) SetAgentColumnInstruction(ctx context.Context, agentID uuid.UUID, columnSlug, instruction string) error {
+	if strings.TrimSpace(instruction) == "" {
+		if _, err := s.pool.Exec(ctx, `
+			DELETE FROM agent_column_instructions WHERE agent_id = $1 AND column_slug = $2
+		`, agentID, columnSlug); err != nil {
+			return fmt.Errorf("delete agent column instruction: %w", err)
+		}
+		return nil
+	}
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO agent_column_instructions (agent_id, column_slug, instruction) VALUES ($1, $2, $3)
+		ON CONFLICT (agent_id, column_slug) DO UPDATE SET instruction = EXCLUDED.instruction
+	`, agentID, columnSlug, instruction); err != nil {
+		return fmt.Errorf("upsert agent column instruction: %w", err)
+	}
+	return nil
 }
 
 func (s *BoardConfigStore) ListTransitions(ctx context.Context) ([]domain.BoardTransition, error) {

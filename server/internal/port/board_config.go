@@ -33,6 +33,14 @@ type BoardConfigStore interface {
 	ListAgentSubscriptionsDetailed(ctx context.Context, agentID uuid.UUID) ([]domain.AgentColumnSubscription, error)
 	SetAgentSubscriptionsDetailed(ctx context.Context, agentID uuid.UUID, subs []domain.AgentColumnSubscription) error
 
+	// ListAgentColumnInstructions/SetAgentColumnInstruction read and write one
+	// per-agent per-column prompt ("what to do when a task arrives here"). The
+	// pair is deliberately NOT tied to subscriptions: a column that dispatches
+	// an agent need not be one it watches. AgentColumnInstruction is the
+	// single-cell shape dispatch reads per (agent, entry column).
+	ListAgentColumnInstructions(ctx context.Context, agentID uuid.UUID) ([]domain.AgentColumnInstruction, error)
+	SetAgentColumnInstruction(ctx context.Context, agentID uuid.UUID, columnSlug, instruction string) error
+
 	ListTransitions(ctx context.Context) ([]domain.BoardTransition, error)
 	SetTransitions(ctx context.Context, transitions []domain.BoardTransition) error
 

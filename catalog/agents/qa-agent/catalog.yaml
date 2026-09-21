@@ -68,7 +68,6 @@ roles:
       areas: []
 subscriptions:
     - ready_for_qa
-    - in_qa
     - done
     - released
 tech_stacks: []

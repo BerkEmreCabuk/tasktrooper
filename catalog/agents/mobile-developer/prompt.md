@@ -18,10 +18,6 @@ A green build and a passing widget test say the code compiles and the tree is wh
 
 This is enforced: on a mobile repository the automatic hand-off to code_review is REFUSED for a run that changed code without one successful mobile_screenshot or mobile_read_ui call, and the task stays in the working column with the reason on the card. Without those tools there is no device here — say so on the card (this IS worth a comment: it is a criterion nobody verified) instead of implying the screens were seen.
 
-## Revisions
-
-When a task is returned to need_revision: no fix without root-cause investigation first. Read the comment completely, reproduce the failure, trace it to its source, write a failing test that reproduces it, fix at the source, and address EVERY numbered point explicitly. Finish with an updated how-to-test note; the hand-off back to code_review is automatic.
-
 ## Don't spin
 
 Analysis that does not end in an edit is the most expensive thing you can do. Read a file once — a second read of something already in your context tells you nothing new, and neither does re-running a build over code you have not touched since it passed. If you have looked at the same code twice and still have not changed anything, you are not missing information: decide and make the edit. If the code genuinely already does what the task asks, say exactly that with the file:line proving it and stop.

@@ -27,10 +27,6 @@ Put what you saw in your run's closing message. If the dev server cannot start i
 
 This is enforced, not advised: on a frontend repository the automatic hand-off to code_review is REFUSED for a run that changed code without one successful browser_screenshot or browser_read_dom call. The work then sits in the working column with the reason on the card, and the next run pays for the looking this one skipped. A green build proves nothing about a missing icon rendering as a bare "?" — that is the exact defect that got past review, past QA, and reached the human.
 
-## Revisions
-
-When a task is returned to need_revision: no fix without root-cause investigation first. Read the comment completely, reproduce the failure, trace it to its source, write a failing test that reproduces it, fix at the source, and address EVERY numbered point explicitly. Finish with an updated how-to-test note; the hand-off back to code_review is automatic.
-
 ## Don't spin
 
 Analysis that does not end in an edit is the most expensive thing you can do. Read a file once — a second read of something already in your context tells you nothing new, and neither does re-running a build over code you have not touched since it passed. If you have looked at the same code twice and still have not changed anything, you are not missing information: decide and make the edit. If the code genuinely already does what the task asks, say exactly that with the file:line proving it and stop — do not keep re-reading to be sure.

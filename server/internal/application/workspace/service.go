@@ -203,6 +203,19 @@ func (s *Service) SetAgentSubscriptionsDetailed(ctx context.Context, agentID uui
 	return s.board.SetAgentSubscriptionsDetailed(ctx, agentID, subs)
 }
 
+func (s *Service) ListAgentColumnInstructions(ctx context.Context, agentID uuid.UUID) ([]domain.AgentColumnInstruction, error) {
+	return s.board.ListAgentColumnInstructions(ctx, agentID)
+}
+
+func (s *Service) SetAgentColumnInstructions(ctx context.Context, agentID uuid.UUID, instructions []domain.AgentColumnInstruction) error {
+	for _, ins := range instructions {
+		if err := s.board.SetAgentColumnInstruction(ctx, agentID, ins.ColumnSlug, ins.Instruction); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) IsMember(ctx context.Context, agentID uuid.UUID) (bool, error) {
 	members, err := s.board.ListMembers(ctx)
 	if err != nil {

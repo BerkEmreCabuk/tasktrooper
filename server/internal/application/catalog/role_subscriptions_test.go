@@ -210,7 +210,8 @@ func (m *memRoleAdmin) ListAssignmentsByAgent(_ context.Context, agentID uuid.UU
 }
 
 type memBoardConfigStore struct {
-	subs map[uuid.UUID][]string
+	subs         map[uuid.UUID][]string
+	instructions map[uuid.UUID]map[string]string
 }
 
 func (m *memBoardConfigStore) GetSettings(context.Context) (domain.BoardSettings, error) {
@@ -278,6 +279,30 @@ func (m *memBoardConfigStore) SetAgentSubscriptionsDetailed(_ context.Context, a
 
 func (m *memBoardConfigStore) ListTransitions(context.Context) ([]domain.BoardTransition, error) {
 	return nil, nil
+}
+
+func (m *memBoardConfigStore) ListAgentColumnInstructions(_ context.Context, agentID uuid.UUID) ([]domain.AgentColumnInstruction, error) {
+	per := m.instructions[agentID]
+	out := make([]domain.AgentColumnInstruction, 0, len(per))
+	for slug, text := range per {
+		out = append(out, domain.AgentColumnInstruction{ColumnSlug: slug, Instruction: text})
+	}
+	return out, nil
+}
+
+func (m *memBoardConfigStore) SetAgentColumnInstruction(_ context.Context, agentID uuid.UUID, columnSlug, instruction string) error {
+	if m.instructions == nil {
+		m.instructions = map[uuid.UUID]map[string]string{}
+	}
+	if m.instructions[agentID] == nil {
+		m.instructions[agentID] = map[string]string{}
+	}
+	if instruction == "" {
+		delete(m.instructions[agentID], columnSlug)
+		return nil
+	}
+	m.instructions[agentID][columnSlug] = instruction
+	return nil
 }
 
 func (m *memBoardConfigStore) SetTransitions(context.Context, []domain.BoardTransition) error {

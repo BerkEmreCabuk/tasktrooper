@@ -17,6 +17,7 @@ import (
 
 type fakeBoardConfigStore struct {
 	agentsByColumn map[string][]uuid.UUID
+	instructions   map[string]string
 }
 
 func (f *fakeBoardConfigStore) GetSettings(context.Context) (domain.BoardSettings, error) {
@@ -51,6 +52,16 @@ func (f *fakeBoardConfigStore) ListAgentSubscriptionsDetailed(context.Context, u
 	return nil, nil
 }
 func (f *fakeBoardConfigStore) SetAgentSubscriptionsDetailed(context.Context, uuid.UUID, []domain.AgentColumnSubscription) error {
+	return nil
+}
+func (f *fakeBoardConfigStore) ListAgentColumnInstructions(context.Context, uuid.UUID) ([]domain.AgentColumnInstruction, error) {
+	var out []domain.AgentColumnInstruction
+	for slug, text := range f.instructions {
+		out = append(out, domain.AgentColumnInstruction{ColumnSlug: slug, Instruction: text})
+	}
+	return out, nil
+}
+func (f *fakeBoardConfigStore) SetAgentColumnInstruction(context.Context, uuid.UUID, string, string) error {
 	return nil
 }
 func (f *fakeBoardConfigStore) ListTransitions(context.Context) ([]domain.BoardTransition, error) {
