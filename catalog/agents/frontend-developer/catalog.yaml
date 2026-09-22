@@ -59,7 +59,9 @@ roles:
     - key: developer
       areas:
         - frontend
-subscriptions: []
+subscriptions:
+    - todo
+    - need_revision
 tech_stacks:
     - name: React
       description: React + TypeScript SPA built with Vite, Tailwind, and Radix

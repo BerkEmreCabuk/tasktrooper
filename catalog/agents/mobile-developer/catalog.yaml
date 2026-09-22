@@ -70,7 +70,9 @@ roles:
     - key: developer
       areas:
         - mobile
-subscriptions: []
+subscriptions:
+    - todo
+    - need_revision
 tech_stacks:
     - name: Flutter
       description: 'Cross-platform Flutter app: widget architecture, atomic components, state management'

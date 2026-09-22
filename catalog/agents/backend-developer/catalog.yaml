@@ -59,7 +59,9 @@ roles:
     - key: developer
       areas:
         - backend
-subscriptions: []
+subscriptions:
+    - todo
+    - need_revision
 tech_stacks:
     - name: Go
       description: 'Go services: Fiber HTTP handlers, hexagonal architecture, Mockery-generated tests'
