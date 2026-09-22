@@ -52,7 +52,7 @@ func (s *CatalogSyncStore) SaveCatalogSyncState(ctx context.Context, state domai
 	}
 	_, err := s.pool.Exec(ctx, `
 		UPDATE catalog_sync_state
-		SET repo_ref=$2, last_sync_at=$3, last_error=$4, last_summary=$5, pending_count=$6, updated_at=now()
+		SET repo_ref=$1, last_sync_at=$2, last_error=$3, last_summary=$4, pending_count=$5, updated_at=now()
 		WHERE id=1
 	`, state.RepoRef, state.LastSyncAt, state.LastError, summaryJSON, state.PendingCount)
 	if err != nil {

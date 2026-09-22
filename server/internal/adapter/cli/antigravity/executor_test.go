@@ -15,6 +15,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
 // newTestExecutor builds an executor pointed at testdata/fake-agy.sh and a
@@ -344,4 +345,26 @@ func TestCallerCancellationIsNotReportedAsATimeout(t *testing.T) {
 	require.Error(t, err)
 	assert.NotContains(t, err.Error(), "did not finish within")
 	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+// A chat turn must run through the exact same spawn/parse/finish flow as a
+// board task and come back as an answer, not the "host-executed provider
+// cannot serve this call" refusal a missing ExecuteChat used to produce.
+func TestExecuteChatReturnsTheSessionsAnswer(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "success.jsonl")
+
+	req := domain.ChatExecution{
+		History: []domain.Message{
+			{Role: domain.RoleSystem, Content: "You are the backend developer."},
+			{Role: domain.RoleUser, Content: "Implement the executor seam."},
+		},
+		Provider:  domain.LLMProviderAntigravity,
+		WorkDir:   workDir,
+		SessionID: "chat-1",
+	}
+	result, err := ex.ExecuteChat(context.Background(), req, port.ChatStream{})
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.RoleAssistant, result.Response.Message.Role)
+	assert.Equal(t, "Added the executor seam and wired it in. Build and vet are green.", result.Response.Message.Content)
 }

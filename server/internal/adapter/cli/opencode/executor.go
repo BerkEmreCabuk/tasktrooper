@@ -35,7 +35,10 @@ type Executor struct {
 	now    func() time.Time
 }
 
-var _ port.TaskExecutor = (*Executor)(nil)
+var (
+	_ port.TaskExecutor = (*Executor)(nil)
+	_ port.ChatExecutor = (*Executor)(nil)
+)
 
 var familySpec = core.FamilySpec{
 	ProcessName:            "opencode",
@@ -128,6 +131,45 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 		e.armQuotaGate(block)
 	}
 	return resp, err
+}
+
+func (e *Executor) gatedChatQuotaBlock(req domain.ChatExecution) *domain.QuotaBlock {
+	until, detail, armed := e.gate.State()
+	if !armed || !e.now().Before(until) {
+		return nil
+	}
+	log.Info().
+		Str("session_id", req.SessionID).
+		Time("resume_at", until).
+		Msg(familySpec.GateLogMsg)
+	return &domain.QuotaBlock{
+		ResumeAt:     until,
+		CLISessionID: req.ResumeSessionID,
+		Detail:       fmt.Sprintf(familySpec.GateDetailFmt, detail),
+		Provider:     domain.LLMProviderOpencode,
+	}
+}
+
+func (e *Executor) ExecuteChat(ctx context.Context, req domain.ChatExecution, out port.ChatStream) (domain.ChatResult, error) {
+	if e == nil {
+		return domain.ChatResult{}, errors.New(familySpec.NotConfigured)
+	}
+	if strings.TrimSpace(req.WorkDir) == "" {
+		return domain.ChatResult{}, errors.New(familySpec.NoWorkDir)
+	}
+	if block := e.gatedChatQuotaBlock(req); block != nil {
+		return domain.ChatResult{}, block
+	}
+
+	result, err := e.family.ExecuteChat(ctx, req, out, e.now)
+	if err == nil {
+		e.clearQuotaGate()
+		return result, nil
+	}
+	if block, ok := domain.QuotaBlockOf(err); ok {
+		e.armQuotaGate(block)
+	}
+	return result, err
 }
 
 // buildArgs is the invocation contract with opencode: the prompt is a

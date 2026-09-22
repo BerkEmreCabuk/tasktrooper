@@ -13,6 +13,7 @@ import (
 
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
 // StderrTailMax is how much of a child's stderr is kept for quoting when the
@@ -113,6 +114,38 @@ func (f *Family) Execute(ctx context.Context, req domain.TaskExecution, now func
 		return domain.AgentResponse{}, err
 	}
 	return f.finishInner(ctx, req.TaskKey, s, now)
+}
+
+// ExecuteChat runs one chat turn. None of these CLIs has a session-resume
+// flag wired into BuildArgs (see Execute), so — like a board task — every
+// turn resends the full flattened history instead of continuing a live CLI
+// session; req.ResumeSessionID is therefore unused here.
+func (f *Family) ExecuteChat(ctx context.Context, req domain.ChatExecution, out port.ChatStream, now func() time.Time) (domain.ChatResult, error) {
+	mcpCfg, releaseMCP, err := ResolveMCP(ctx, f.mcpProvider, f.mcp, MCPRun{Policy: req.Policy, Label: req.SessionID})
+	defer releaseMCP()
+	if err != nil {
+		return domain.ChatResult{}, err
+	}
+	extraEnv, cleanupMCP, err := f.spec.ApplyMCP(ctx, req.WorkDir, mcpCfg)
+	if err != nil {
+		return domain.ChatResult{}, err
+	}
+	defer cleanupMCP()
+
+	inv := Invocation{
+		Trace:   NewTrace(ctx, req.SessionID, f.spec.TraceStep, f.spec.SinceOwnTool, f.spec.LedgerTool),
+		WorkDir: req.WorkDir,
+		Prompt:  FlattenHistory(req.History),
+		Model:   req.Model,
+		Label:   req.SessionID,
+		Stream:  out,
+	}
+	s, err := f.spawn(ctx, inv, extraEnv)
+	if err != nil {
+		return domain.ChatResult{}, err
+	}
+	resp, err := f.finishInner(ctx, req.SessionID, s, now)
+	return domain.ChatResult{Response: resp}, err
 }
 
 func (f *Family) spawn(ctx context.Context, inv Invocation, extraEnv []string) (Session, error) {

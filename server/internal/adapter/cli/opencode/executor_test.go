@@ -14,6 +14,7 @@ import (
 
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
 // newTestExecutor builds an executor pointed at testdata/fake-opencode.sh and a
@@ -280,4 +281,27 @@ func TestRateLimitWatcherOnlyCancelsItsOwnRun(t *testing.T) {
 	_, err := w.Write([]byte("some unrelated log line\n"))
 	require.NoError(t, err)
 	assert.False(t, cancelled)
+}
+
+// A chat turn must run through the exact same spawn/parse/finish flow as a
+// board task and come back as an answer, not the "host-executed provider
+// cannot serve this call" refusal a missing ExecuteChat used to produce.
+func TestExecuteChatReturnsTheSessionsAnswer(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "success.jsonl")
+
+	req := domain.ChatExecution{
+		History: []domain.Message{
+			{Role: domain.RoleSystem, Content: "You are the backend developer."},
+			{Role: domain.RoleUser, Content: "Implement the executor seam."},
+		},
+		Provider:  domain.LLMProviderOpencode,
+		WorkDir:   workDir,
+		SessionID: "chat-1",
+	}
+	result, err := ex.ExecuteChat(context.Background(), req, port.ChatStream{})
+	require.NoError(t, err)
+
+	assert.Equal(t, domain.RoleAssistant, result.Response.Message.Role)
+	assert.Equal(t, "Reading the runner to see how the task is dispatched. Fixed the undefined symbol and the build is green.",
+		result.Response.Message.Content)
 }

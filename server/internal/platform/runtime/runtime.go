@@ -2621,10 +2621,9 @@ func (m *muxExecutor) Execute(ctx context.Context, req domain.TaskExecution) (do
 }
 
 // ExecuteChat routes a chat turn by provider, the same map Execute reads.
-// Not every stored executor answers chat — the local opencode.Executor has
-// no ExecuteChat — so the type assertion makes that difference explicit: a
-// provider with an executor that cannot chat gets the same refusal a
-// provider with none does, instead of a panic.
+// Not every stored executor answers chat, so the type assertion makes that
+// difference explicit: a provider with an executor that cannot chat gets the
+// same refusal a provider with none does, instead of a panic.
 func (m *muxExecutor) ExecuteChat(ctx context.Context, req domain.ChatExecution, out port.ChatStream) (domain.ChatResult, error) {
 	ex, ok := m.executors[req.Provider]
 	if !ok || ex == nil {
