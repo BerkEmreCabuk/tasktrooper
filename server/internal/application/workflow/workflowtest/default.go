@@ -118,7 +118,6 @@ func Default() Fixture {
 			Key: taskTypeAnaliz, Label: "Analysis", KeyPrefix: "A", Position: 1, BuiltIn: true,
 			AssigneeRoleID: &analystID, AssigneeMode: domain.AssigneeModeOverride,
 			Behaviours: []domain.BehaviourRef{
-				ref(domain.BehaviourDocumentDeliverable),
 				ref(domain.BehaviourNoWorkspaceWrites),
 				ref(domain.BehaviourRequireRepoGrounding),
 			},

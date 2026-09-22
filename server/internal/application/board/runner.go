@@ -2061,8 +2061,13 @@ func (r *Runner) changedSinceByVerifiedSHA(ctx context.Context, workspacePath st
 	return out
 }
 
+// A stage that judges work needs the settled criteria in front of it — that
+// is what it is being asked to check. Everywhere else gets the open list and
+// the instruction to tick them off, which is only actionable while the work
+// is still being done. Derived, not a knob: a stage that records criterion
+// verdicts is reviewing by definition, whatever its kind says.
 func listsEveryCriterion(wf domain.Workflow, task domain.BoardTask) bool {
-	return wf.Has(task.Column, domain.BehaviourShowAllCriteria)
+	return isReviewColumn(wf, task.Column) || wf.Has(task.Column, domain.BehaviourCriterionVerdict)
 }
 
 func standingCriteriaMessage(task domain.BoardTask) string {

@@ -1445,6 +1445,9 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 	if err := s.validateColumn(ctx, col); err != nil {
 		return domain.BoardTask{}, err
 	}
+	if err := s.validateStageConfigured(ctx, taskType, col); err != nil {
+		return domain.BoardTask{}, err
+	}
 	if err := s.validateMoveAllowed(ctx, uuid.Nil, taskType, col); err != nil {
 		return domain.BoardTask{}, err
 	}
@@ -1620,6 +1623,11 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 			return domain.BoardTask{}, fmt.Errorf("invalid task type: %s", *req.TaskType)
 		}
 		task.TaskType = *req.TaskType
+		if req.Column == nil {
+			if err := s.validateStageConfigured(ctx, task.TaskType, prevColumn); err != nil {
+				return domain.BoardTask{}, err
+			}
+		}
 	}
 	if req.Description != nil {
 		task.Description = *req.Description
@@ -1647,6 +1655,9 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 	}
 	if req.Column != nil {
 		if err := s.validateColumn(ctx, *req.Column); err != nil {
+			return domain.BoardTask{}, err
+		}
+		if err := s.validateStageConfigured(ctx, task.TaskType, *req.Column); err != nil {
 			return domain.BoardTask{}, err
 		}
 		if err := validateAgentSelfMove(task, req, prevColumn); err != nil {
@@ -2427,6 +2438,26 @@ func (s *Service) validateColumn(ctx context.Context, col domain.TaskColumn) err
 		return nil
 	}
 	return s.columns.ValidateColumn(ctx, string(col))
+}
+
+// validateStageConfigured refuses a column no more than validateColumn does
+// for a column the board doesn't have — scoped to the task's own type. It
+// runs on every move and creation, including a repository/deployment that
+// never wired workflows at all, so unlike the sibling gates that only run
+// once relations/criteria are already known to be configured, an
+// unavailable workflow reader here is treated the same as a type with zero
+// stages: unscoped/legacy-open, not a lock-out.
+func (s *Service) validateStageConfigured(ctx context.Context, taskType domain.TaskType, target domain.TaskColumn) error {
+	wf, err := s.workflow(ctx, taskType)
+	if err != nil || len(wf.Stages) == 0 {
+		return nil
+	}
+	if _, ok := wf.Stage(target); ok {
+		return nil
+	}
+	return domain.NewStageNotOnWorkflowError(taskType, target, fmt.Sprintf(
+		"%s tasks don't use the %s column — this task type's workflow has no stage configured for it",
+		taskType, target))
 }
 
 func (s *Service) emit(ctx context.Context, repo domain.Repository, task domain.BoardTask, eventType domain.BoardEventType, payload map[string]interface{}) error {

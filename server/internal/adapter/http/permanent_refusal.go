@@ -61,6 +61,10 @@ const codeCriteriaNotApproved = "criteria_not_approved"
 // workOrderGateBadRequest.
 const codeTaskBlockedByDependency = "task_blocked_by_dependency"
 
+// codeStageNotOnWorkflow: a move or task-type change targeted a column this
+// task's type has no workflow_stages row for. See stageNotOnWorkflowBadRequest.
+const codeStageNotOnWorkflow = "stage_not_on_workflow"
+
 // permanentRefusals maps each sentinel to the code clients switch on.
 var permanentRefusals = []struct {
 	sentinel error
@@ -148,6 +152,20 @@ func workOrderGateBadRequest(c *fiber.Ctx, err error) (bool, error) {
 	return true, c.Status(fiber.StatusBadRequest).JSON(codedErrorResponse{
 		Error: errorDetail{Message: gateErr.Error(), Type: codeTaskBlockedByDependency},
 		Code:  codeTaskBlockedByDependency,
+	})
+}
+
+// stageNotOnWorkflowBadRequest writes the 400 for a move or task-type change
+// refused by domain.StageNotOnWorkflowError. Its Error() is already the human
+// sentence, so this is a straight rendering, same shape as workOrderGateBadRequest.
+func stageNotOnWorkflowBadRequest(c *fiber.Ctx, err error) (bool, error) {
+	var gateErr *domain.StageNotOnWorkflowError
+	if !errors.As(err, &gateErr) {
+		return false, nil
+	}
+	return true, c.Status(fiber.StatusBadRequest).JSON(codedErrorResponse{
+		Error: errorDetail{Message: gateErr.Error(), Type: codeStageNotOnWorkflow},
+		Code:  codeStageNotOnWorkflow,
 	})
 }
 

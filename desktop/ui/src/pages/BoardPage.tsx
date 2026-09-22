@@ -10,6 +10,7 @@ import {
   type InitiativeProject,
   type Repository,
   type TaskColumn,
+  type TaskTypeWorkflow,
   type WorkspaceConfig,
 } from "@/api";
 import { BoardLane } from "@/components/board/BoardLane";
@@ -32,6 +33,7 @@ import {
   CACHE_PROJECTS,
   CACHE_REPOS,
   CACHE_TASKS,
+  CACHE_WORKFLOWS,
   blockedResourceLabel,
   boardColumnsSplit,
   boardLanes,
@@ -83,6 +85,7 @@ export function BoardPage() {
   );
   const [config, setConfig] = useCachedState<WorkspaceConfig | null>(CACHE_CONFIG, null);
   const [agents, setAgents] = useCachedState<Agent[]>(CACHE_AGENTS, []);
+  const [workflows, setWorkflows] = useCachedState<TaskTypeWorkflow[]>(CACHE_WORKFLOWS, []);
   const [loading, setLoading] = useFirstLoad(CACHE_TASKS, CACHE_CONFIG);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [defaultRepositoryId, setDefaultRepositoryId] = useState("");
@@ -167,12 +170,13 @@ export function BoardPage() {
 
   const load = useCallback(async () => {
     const seen = boardVersion.current;
-    const [taskData, cfg, repoData, projectData, agentData] = await Promise.allSettled([
+    const [taskData, cfg, repoData, projectData, agentData, workflowData] = await Promise.allSettled([
       api.listAllTasks(),
       api.getWorkspaceConfig(),
       api.listRepositories(),
       api.listInitiativeProjects(),
       api.listAgents(),
+      api.listWorkflows(),
     ]);
     // Cards only: a local change made while this was in flight (a second drag,
     // a delete) wins over what the server said before it happened.
@@ -189,6 +193,7 @@ export function BoardPage() {
     }
     if (projectData.status === "fulfilled") setInitiativeProjects(projectData.value.projects ?? []);
     if (agentData.status === "fulfilled") setAgents(agentData.value.agents ?? []);
+    if (workflowData.status === "fulfilled") setWorkflows(workflowData.value.workflows ?? []);
 
     const firstFailure = [taskData, cfg, repoData, projectData, agentData].find(
       (r) => r.status === "rejected",
@@ -198,7 +203,16 @@ export function BoardPage() {
       toast.error(reason instanceof Error ? reason.message : tStatic("boardArea.board.loadFailed"));
     }
     setLoading(false);
-  }, [setTasks, setConfig, setRepositories, setInitiativeProjects, setAgents, setLoading, setDefaultRepositoryId]);
+  }, [
+    setTasks,
+    setConfig,
+    setRepositories,
+    setInitiativeProjects,
+    setAgents,
+    setWorkflows,
+    setLoading,
+    setDefaultRepositoryId,
+  ]);
 
   useEffect(() => {
     load();
@@ -245,6 +259,31 @@ export function BoardPage() {
     (id?: string) => (id ? agents.find((a) => a.id === id)?.name : undefined),
     [agents],
   );
+
+  // Per task type, the column slugs its workflow has a stage for — undefined
+  // for a type with no curated stages at all (unscoped, matches the server's
+  // own gate: every column stays a valid target). Mirrors validateStageConfigured
+  // (server/internal/application/repository/service.go) client-side so a
+  // doomed drag never even highlights before the server would reject it.
+  const allowedColumnsByType = useMemo(() => {
+    const map = new Map<string, Set<string>>();
+    for (const wf of workflows) {
+      if (wf.stages.length === 0) continue;
+      map.set(wf.task_type, new Set(wf.stages.map((s) => s.column_slug)));
+    }
+    return map;
+  }, [workflows]);
+
+  const draggedTask = dragTaskId ? tasks.find((task) => task.id === dragTaskId) : undefined;
+  const draggedAllowedColumns = draggedTask ? allowedColumnsByType.get(draggedTask.task_type) : undefined;
+  const invalidStages = useMemo(() => {
+    if (!draggedAllowedColumns) return undefined;
+    const invalid = new Set<string>();
+    for (const col of columns) {
+      if (!draggedAllowedColumns.has(col.slug)) invalid.add(col.slug);
+    }
+    return invalid;
+  }, [columns, draggedAllowedColumns]);
 
   const boardTasks = useMemo(() => {
     const grouped: Record<string, BoardTask[]> = {};
@@ -322,7 +361,13 @@ export function BoardPage() {
   const onDrop = (column: TaskColumn) => {
     if (!dragTaskId) return;
     const task = tasks.find((item) => item.id === dragTaskId);
-    if (task) moveTask(task, column);
+    // BoardLane already refuses the drop when the zone is marked invalid, but
+    // a task can be dropped via other paths (tests, future keyboard support),
+    // so the same check is re-applied here as the real guard — the server's
+    // own gate is still the source of truth either way.
+    if (task && (!draggedAllowedColumns || draggedAllowedColumns.has(column))) {
+      moveTask(task, column);
+    }
     setDragTaskId(null);
     setDropColumn(null);
   };
@@ -587,6 +632,7 @@ export function BoardPage() {
                 dropColumn={dropColumn}
                 onDropColumnChange={(slug) => setDropColumn((c) => (c === slug ? c : slug))}
                 onDropTask={onDrop}
+                invalidStages={invalidStages}
                 renderStage={(stage) => {
                   const stageTasks = boardTasks[stage.slug] ?? [];
                   return stageTasks.length === 0 ? (

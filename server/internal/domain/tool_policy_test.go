@@ -356,12 +356,15 @@ func TestRestrictToolsForStage_NoCodeReadingOnPMUATAndHumanUAT(t *testing.T) {
 
 // ready_for_qa/in_qa carry no_read_file only: QA keeps the tree/diff-level code
 // tools, it just loses read_file.
-func TestRestrictToolsForStage_NoReadFileOnQAColumns(t *testing.T) {
+// QA keeps its code tools. read_file used to be stripped here, which enforced
+// nothing — grep_code and expand_symbol_context return the same source — so
+// the restriction is a line in the QA stage's instructions now, not a flag.
+func TestRestrictToolsForStage_QAKeepsItsCodeTools(t *testing.T) {
 	for _, col := range []domain.TaskColumn{domain.TaskColumnReadyForQA, domain.TaskColumnInQA} {
 		t.Run(string(col), func(t *testing.T) {
 			stage, typeDef := wfStage(t, "task", col)
 			got := domain.RestrictToolsForStage(fullCodeToolsPolicy(), stage, typeDef)
-			assert.NotContains(t, got.AllowTools, "read_file")
+			assert.Contains(t, got.AllowTools, "read_file")
 			assert.Contains(t, got.AllowTools, "get_repo_tree")
 			assert.Contains(t, got.AllowTools, "grep_code")
 			assert.Contains(t, got.AllowTools, "get_task_pull_request")
@@ -384,7 +387,7 @@ func TestRestrictToolsForStage_OtherStagesKeepAllCodeTools(t *testing.T) {
 }
 
 func TestRestrictToolsForStage_UnrestrictedPolicyUntouched(t *testing.T) {
-	stage, typeDef := wfStage(t, "analiz", domain.TaskColumnPMUAT)
+	stage, typeDef := wfStage(t, "analiz", domain.TaskColumnTodo)
 	got := domain.RestrictToolsForStage(domain.ToolPolicy{}, stage, typeDef)
 	assert.Empty(t, got.AllowTools)
 }

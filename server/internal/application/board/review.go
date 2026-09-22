@@ -15,13 +15,16 @@ const reviewDiffLimit = 24000
 
 var ErrReviewPRMissing = errors.New("code review has no pull request for the task branch")
 
+// A reviewing stage is one whose whole job is to judge work someone else did
+// — its kind, not a flag of its own: there is no such thing as a review or
+// approval stage that is not one.
 func isReviewColumn(wf domain.Workflow, column domain.TaskColumn) bool {
-	return wf.Has(column, domain.BehaviourReviewOnly)
-}
-
-// A run in done exists to MERGE and delete the branch; the post-run commit would push that branch back onto origin seconds later.
-func producesADiff(wf domain.Workflow, column domain.TaskColumn) bool {
-	return !isReviewColumn(wf, column) && column != domain.TaskColumnDone
+	switch wf.KindOf(column) {
+	case domain.StageKindReview, domain.StageKindApproval:
+		return true
+	default:
+		return false
+	}
 }
 
 func (r *Runner) ensureReviewPR(ctx context.Context, workspace string) (string, error) {

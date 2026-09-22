@@ -69,26 +69,24 @@ var columns = []column{
 // allTypesBehaviours is the behaviour set every task type carries for a
 // column — release-b-plan.md §3's "all types" cells.
 var allTypesBehaviours = map[domain.TaskColumn][]domain.BehaviourRef{
-	domain.TaskColumnBacklog: {ref(domain.BehaviourDispatchSuspended), ref(domain.BehaviourCommitOnFinish)},
+	domain.TaskColumnBacklog: {},
 	domain.TaskColumnTodo: {
 		ref(domain.BehaviourAutoEnter, "to", "in_progress", "assignee_only", "true"),
 		ref(domain.BehaviourBlockOnDependencies),
-		ref(domain.BehaviourCriteriaSweep),
 		ref(domain.BehaviourCommitOnFinish),
 	},
 	domain.TaskColumnInProgress: {
 		ref(domain.BehaviourBlockOnDependencies, "refuse_move", "true"),
-		ref(domain.BehaviourCriteriaSweep),
 		ref(domain.BehaviourCommitOnFinish),
 	},
 	domain.TaskColumnAnalizReview: {
-		ref(domain.BehaviourRouteToSubscribers), ref(domain.BehaviourReviewOnly), ref(domain.BehaviourStripWriters),
+		ref(domain.BehaviourRouteToSubscribers), ref(domain.BehaviourStripWriters),
 	},
 	domain.TaskColumnCodeReview: {
 		ref(domain.BehaviourRouteToSubscribers), ref(domain.BehaviourWaitForCI), ref(domain.BehaviourEnsurePROnEnter),
 		ref(domain.BehaviourDetectMigrationOnEnter),
 		ref(domain.BehaviourStageDeployOnEnter, "when", "per_step"),
-		ref(domain.BehaviourHoldForHumanApproval), ref(domain.BehaviourReviewOnly), ref(domain.BehaviourRequirePRForReview),
+		ref(domain.BehaviourRequirePRForReview),
 		ref(domain.BehaviourRequireCriteriaComplete), ref(domain.BehaviourStripWriters),
 	},
 	domain.TaskColumnReadyForQA: {
@@ -96,39 +94,35 @@ var allTypesBehaviours = map[domain.TaskColumn][]domain.BehaviourRef{
 		ref(domain.BehaviourStageDeployOnEnter, "when", "qa"),
 		ref(domain.BehaviourRequireCriteriaComplete),
 		ref(domain.BehaviourCriterionVerdict, "channel", "qa"),
-		ref(domain.BehaviourRequireTestCases), ref(domain.BehaviourStripWriters), ref(domain.BehaviourNoReadFile),
-		ref(domain.BehaviourCommitOnFinish),
+		ref(domain.BehaviourRequireTestCases), ref(domain.BehaviourStripWriters), ref(domain.BehaviourCommitOnFinish),
 	},
 	domain.TaskColumnInQA: {
 		ref(domain.BehaviourRouteToSubscribers),
 		ref(domain.BehaviourCriterionVerdict, "channel", "qa"),
-		ref(domain.BehaviourRequireTestCases), ref(domain.BehaviourStripWriters), ref(domain.BehaviourNoReadFile),
-		ref(domain.BehaviourCommitOnFinish),
+		ref(domain.BehaviourRequireTestCases), ref(domain.BehaviourStripWriters), ref(domain.BehaviourCommitOnFinish),
 	},
 	domain.TaskColumnNeedRevision: {
 		ref(domain.BehaviourAutoEnter, "to", "in_progress", "assignee_only", "true"),
-		ref(domain.BehaviourCriteriaSweep),
 		ref(domain.BehaviourCommitOnFinish),
 	},
 	domain.TaskColumnPMUAT: {
 		ref(domain.BehaviourRouteToSubscribers), ref(domain.BehaviourEnsurePROnEnter), ref(domain.BehaviourForwardExit),
 		ref(domain.BehaviourCriterionVerdict, "channel", "pm"),
-		ref(domain.BehaviourRequireProductCheck), ref(domain.BehaviourReviewOnly), ref(domain.BehaviourStripWriters),
+		ref(domain.BehaviourRequireProductCheck), ref(domain.BehaviourStripWriters),
 		ref(domain.BehaviourNoCodeReading),
 	},
 	domain.TaskColumnHumanUAT: {
 		ref(domain.BehaviourRouteToSubscribers), ref(domain.BehaviourForwardExit), ref(domain.BehaviourStripWriters),
 		ref(domain.BehaviourNoCodeReading), ref(domain.BehaviourCommitOnFinish),
 	},
-	domain.TaskColumnBlocked: {ref(domain.BehaviourDispatchSuspended), ref(domain.BehaviourCommitOnFinish)},
+	domain.TaskColumnBlocked: {},
 	domain.TaskColumnDone: {
 		ref(domain.BehaviourEnsurePROnEnter), ref(domain.BehaviourForwardExit), ref(domain.BehaviourRequireCriteriaComplete),
-		ref(domain.BehaviourEnforceReviewChain),
 		ref(domain.BehaviourStripWriters, "allow", "merge_task_pull_request,release_control"),
 	},
 	domain.TaskColumnReleased: {
-		ref(domain.BehaviourDispatchSuspended), ref(domain.BehaviourForwardExit), ref(domain.BehaviourRequireCriteriaComplete),
-		ref(domain.BehaviourEnforceReviewChain), ref(domain.BehaviourCommitOnFinish),
+		ref(domain.BehaviourForwardExit), ref(domain.BehaviourRequireCriteriaComplete),
+		ref(domain.BehaviourCommitOnFinish),
 	},
 }
 
@@ -136,25 +130,21 @@ var allTypesBehaviours = map[domain.TaskColumn][]domain.BehaviourRef{
 // column, ON TOP of allTypesBehaviours — §3's "extra task/bug/technical"
 // cells, for task and bug exactly (technical overrides two cells below).
 var codingExtra = map[domain.TaskColumn][]domain.BehaviourRef{
-	domain.TaskColumnBacklog: {ref(domain.BehaviourBuildVerify)},
-	domain.TaskColumnTodo:    {ref(domain.BehaviourBuildVerify)},
+	domain.TaskColumnTodo: {ref(domain.BehaviourBuildVerify)},
 	domain.TaskColumnInProgress: {
 		ref(domain.BehaviourBuildVerify), ref(domain.BehaviourAdvanceOnDiff, "to", "code_review"),
 	},
 	domain.TaskColumnCodeReview: {
 		ref(domain.BehaviourReviewVerdictSweep, "pass_to", "ready_for_qa"),
-		ref(domain.BehaviourShowAllCriteria),
 		ref(domain.BehaviourReviewChainStage, "label", "code review", "remedy", "move it to code_review so the diff is reviewed"),
 	},
 	domain.TaskColumnReadyForQA: {
 		ref(domain.BehaviourBuildVerify),
 		ref(domain.BehaviourAutoEnter, "to", "in_qa", "assignee_only", "false"),
-		ref(domain.BehaviourRequireExecutionEvidence), ref(domain.BehaviourShowAllCriteria),
-		ref(domain.BehaviourReviewVerdictSweep, "pass_to", "pm_uat"),
+		ref(domain.BehaviourRequireExecutionEvidence), ref(domain.BehaviourReviewVerdictSweep, "pass_to", "pm_uat"),
 	},
 	domain.TaskColumnInQA: {
-		ref(domain.BehaviourBuildVerify), ref(domain.BehaviourRequireExecutionEvidence), ref(domain.BehaviourShowAllCriteria),
-		ref(domain.BehaviourReviewVerdictSweep, "pass_to", "pm_uat"),
+		ref(domain.BehaviourBuildVerify), ref(domain.BehaviourRequireExecutionEvidence), ref(domain.BehaviourReviewVerdictSweep, "pass_to", "pm_uat"),
 		ref(domain.BehaviourReviewChainStage, "label", "QA", "remedy", "move it to ready_for_qa; QA takes it into in_qa and tests it there"),
 	},
 	domain.TaskColumnNeedRevision: {
@@ -162,11 +152,9 @@ var codingExtra = map[domain.TaskColumn][]domain.BehaviourRef{
 	},
 	domain.TaskColumnPMUAT: {
 		ref(domain.BehaviourReviewVerdictSweep, "pass_to", "human_uat"),
-		ref(domain.BehaviourShowAllCriteria),
 		ref(domain.BehaviourReviewChainStage, "label", "UAT", "remedy", "move it to pm_uat so every acceptance criterion is verified against QA's evidence"),
 	},
-	domain.TaskColumnHumanUAT: {ref(domain.BehaviourBuildVerify), ref(domain.BehaviourShowAllCriteria)},
-	domain.TaskColumnBlocked:  {ref(domain.BehaviourBuildVerify)},
+	domain.TaskColumnHumanUAT: {ref(domain.BehaviourBuildVerify)},
 	domain.TaskColumnDone: {
 		ref(domain.BehaviourDispatchSuspended), ref(domain.BehaviourMergePROnEnter), ref(domain.BehaviourWatchDeployOnResume),
 	},
@@ -215,14 +203,34 @@ func onPath(taskType domain.TaskType, col domain.TaskColumn) bool {
 	return col != domain.TaskColumnAnalizReview
 }
 
-// stagesFor builds every one of the 13 default-column stages for taskType,
-// in column order (which is also fallback position order — see column
-// above). Positions are dense 0..12: a fresh install has no board_columns
-// rows yet for the migration to read a position from, so the migration and
-// this builder both fall back to this same order.
+// analizRemovedColumns are the 5 columns migration 148 deletes for analiz:
+// vestigial copy-paste rows from the coding task-type template that never
+// carried participants, never carried real instructions, and nothing in
+// analiz's own behaviour set (advance_on_document routes only through
+// in_progress/need_revision -> analiz_review) ever reaches. analiz's real
+// spine is backlog/todo/in_progress/analiz_review/need_revision/blocked/
+// done/released — 8 stages, not 13.
+var analizRemovedColumns = map[domain.TaskColumn]bool{
+	domain.TaskColumnCodeReview: true,
+	domain.TaskColumnReadyForQA: true,
+	domain.TaskColumnInQA:       true,
+	domain.TaskColumnPMUAT:      true,
+	domain.TaskColumnHumanUAT:   true,
+}
+
+// stagesFor builds the default-column stages for taskType, in column order
+// (which is also fallback position order — see column above; task/bug/
+// technical get all 13, analiz gets 8, see analizRemovedColumns). Position
+// stays the source column's index in the full 13-element list even when a
+// column is skipped, so it matches what migration 143 + 148 leave in a real
+// database (positions sparse, not renumbered) rather than a dense 0..N-1
+// over the surviving stages only.
 func stagesFor(taskType domain.TaskType) []domain.WorkflowStage {
 	stages := make([]domain.WorkflowStage, 0, len(columns))
 	for i, c := range columns {
+		if taskType == taskTypeAnaliz && analizRemovedColumns[c.Slug] {
+			continue
+		}
 		var behaviours []domain.BehaviourRef
 		behaviours = append(behaviours, allTypesBehaviours[c.Slug]...)
 		instructions := ""

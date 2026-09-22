@@ -261,6 +261,9 @@ func (d *Dispatcher) alreadyWorkingOn(ctx context.Context, eventType domain.Boar
 }
 
 // blocked/backlog/released are system columns every task passes through - a task must never dispatch work from its own event there.
+// done is the one that genuinely varies: a coding type is finished there and
+// only the merge wake may act, while an analiz card is dispatched so its
+// architect can decompose it - hence the flag rather than a fourth case.
 func isDispatchSuspendedTask(wf domain.Workflow, wfOK bool, task domain.BoardTask) bool {
 	switch task.Column {
 	case domain.TaskColumnBlocked, domain.TaskColumnBacklog, domain.TaskColumnReleased:

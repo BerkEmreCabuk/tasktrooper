@@ -21,6 +21,14 @@ interface BoardLaneProps {
   onDropTask: (slug: string) => void;
   /** Cards of one stage (or its empty state) — the caller owns card rendering. */
   renderStage: (stage: BoardLaneStage) => ReactNode;
+  /**
+   * Stage slugs the currently-dragged task's type has no workflow stage for —
+   * dropping there would only be refused server-side, so the zone is dimmed
+   * and neither highlights nor accepts the drop. Undefined (the default)
+   * means every stage is a valid target, unchanged from before this prop
+   * existed.
+   */
+  invalidStages?: Set<string>;
   className?: string;
 }
 
@@ -40,54 +48,63 @@ export function BoardLane({
   onDropColumnChange,
   onDropTask,
   renderStage,
+  invalidStages,
   className,
 }: BoardLaneProps) {
   const stacked = stages.length > 1;
 
   return (
     <div className={cn("flex h-full min-h-0 shrink-0 flex-col gap-3", className)}>
-      {stages.map((stage) => (
-        <div
-          key={stage.slug}
-          data-column-slug={stage.slug}
-          className={cn(
-            "flex min-h-0 flex-col rounded-xl border bg-background transition-colors",
-            // Stacked stages split the lane's height evenly (flex-1 basis-0)
-            // and scroll inside it, so the lane never grows with its longest
-            // queue; a lone stage still fills the lane exactly as before.
-            // No max height here: the lane is already bounded by the board's
-            // own height, and capping each stage left dead space under a
-            // stacked lane on any screen taller than the cap, while its
-            // single-stage neighbours ran the full height.
-            stacked ? "min-h-32 flex-1 basis-0" : "h-full flex-1",
-            dragging && dropColumn === stage.slug
-              ? "border-primary bg-primary/5 ring-2 ring-primary/20"
-              : "border-border",
-          )}
-          onDragOver={(e) => {
-            e.preventDefault();
-            onDropColumnChange(stage.slug);
-          }}
-          onDragLeave={(e) => {
-            // Moving onto a card *inside* this stage fires dragleave too; only
-            // a leave that actually exits the stage clears the highlight, which
-            // matters most between two stacked stages.
-            if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-            onDropColumnChange(null);
-          }}
-          onDrop={() => onDropTask(stage.slug)}
-        >
-          <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2.5">
-            <span className="truncate text-heading font-medium">{stage.label}</span>
-            <Badge variant="secondary" className="h-5 min-w-5 justify-center px-1.5 text-micro">
-              {stage.count}
-            </Badge>
+      {stages.map((stage) => {
+        const invalid = dragging && (invalidStages?.has(stage.slug) ?? false);
+        return (
+          <div
+            key={stage.slug}
+            data-column-slug={stage.slug}
+            className={cn(
+              "flex min-h-0 flex-col rounded-xl border bg-background transition-colors",
+              // Stacked stages split the lane's height evenly (flex-1 basis-0)
+              // and scroll inside it, so the lane never grows with its longest
+              // queue; a lone stage still fills the lane exactly as before.
+              // No max height here: the lane is already bounded by the board's
+              // own height, and capping each stage left dead space under a
+              // stacked lane on any screen taller than the cap, while its
+              // single-stage neighbours ran the full height.
+              stacked ? "min-h-32 flex-1 basis-0" : "h-full flex-1",
+              invalid && "opacity-40",
+              !invalid && dragging && dropColumn === stage.slug
+                ? "border-primary bg-primary/5 ring-2 ring-primary/20"
+                : "border-border",
+            )}
+            onDragOver={(e) => {
+              if (invalid) return;
+              e.preventDefault();
+              onDropColumnChange(stage.slug);
+            }}
+            onDragLeave={(e) => {
+              // Moving onto a card *inside* this stage fires dragleave too; only
+              // a leave that actually exits the stage clears the highlight, which
+              // matters most between two stacked stages.
+              if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+              onDropColumnChange(null);
+            }}
+            onDrop={() => {
+              if (invalid) return;
+              onDropTask(stage.slug);
+            }}
+          >
+            <div className="flex shrink-0 items-center justify-between border-b border-border px-3 py-2.5">
+              <span className="truncate text-heading font-medium">{stage.label}</span>
+              <Badge variant="secondary" className="h-5 min-w-5 justify-center px-1.5 text-micro">
+                {stage.count}
+              </Badge>
+            </div>
+            <ScrollArea className="min-h-0 flex-1">
+              <div className="p-2">{renderStage(stage)}</div>
+            </ScrollArea>
           </div>
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="p-2">{renderStage(stage)}</div>
-          </ScrollArea>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

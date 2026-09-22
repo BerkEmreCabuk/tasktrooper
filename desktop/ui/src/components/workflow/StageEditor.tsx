@@ -204,15 +204,33 @@ export function StageEditor({
                   </label>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-3">
                   <label className="text-xs text-muted-foreground">{t("settingsPages.workflows.behavioursLabel")}</label>
-                  <BehaviourPicker
-                    registry={stageBehaviours}
-                    columns={columns}
-                    selected={stage.behaviours}
-                    onChange={(behaviours) => updateStage(stage.column_slug, { behaviours })}
-                    disabled={disabled}
-                  />
+                  {(["entry", "exit", "other"] as const).map((group) => {
+                    const groupBehaviours = stageBehaviours.filter(
+                      (b) =>
+                        b.group === group &&
+                        // A behaviour that cannot fire on this kind of stage is
+                        // not offered here: ticking it would read as configured
+                        // and do nothing.
+                        (b.kinds.length === 0 || b.kinds.includes(stage.kind)),
+                    );
+                    if (groupBehaviours.length === 0) return null;
+                    return (
+                      <div key={group} className="space-y-1.5">
+                        <label className="text-xs font-medium text-muted-foreground">
+                          {t(`settingsPages.workflows.behaviourGroup.${group}`)}
+                        </label>
+                        <BehaviourPicker
+                          registry={groupBehaviours}
+                          columns={columns}
+                          selected={stage.behaviours}
+                          onChange={(behaviours) => updateStage(stage.column_slug, { behaviours })}
+                          disabled={disabled}
+                        />
+                      </div>
+                    );
+                  })}
                 </div>
 
                 <div className="space-y-1.5">

@@ -14,6 +14,23 @@ import (
 
 const criteriaSweepRounds = 3
 
+// The stages where a run is expected to move the task's own criteria forward:
+// the queue it is claimed from, the column the work happens in, and the
+// rework bounce. Not intake/parked/terminal (nothing runs there), not
+// review/approval, and not a stage that records verdicts — there the criteria
+// are someone else's work being judged, not the runner's to tick off.
+func sweepsOwnCriteria(wf domain.Workflow, column domain.TaskColumn) bool {
+	if wf.Has(column, domain.BehaviourCriterionVerdict) {
+		return false
+	}
+	switch wf.KindOf(column) {
+	case domain.StageKindQueue, domain.StageKindWork, domain.StageKindRework:
+		return true
+	default:
+		return false
+	}
+}
+
 func (r *Runner) sweepOpenCriteria(
 	ctx context.Context,
 	job RunJob,
@@ -23,11 +40,13 @@ func (r *Runner) sweepOpenCriteria(
 	model string,
 	policy domain.ToolPolicy,
 ) (domain.AgentResponse, bool, *domain.QuotaBlock) {
+	// Sweeping is for the stages where the work itself happens: a reviewer is
+	// judging someone else's criteria, and a terminal/parked card has nobody
+	// to nag. Derived from the stage's kind rather than carried as a flag —
+	// "should this stage chase its own open criteria" has exactly one right
+	// answer per kind, so it was never a decision worth exposing.
 	wf := r.workflowFor(ctx, job.Task.TaskType)
-	if isReviewColumn(wf, job.Task.Column) {
-		return resp, true, nil
-	}
-	if !wf.Has(job.Task.Column, domain.BehaviourCriteriaSweep) {
+	if !sweepsOwnCriteria(wf, job.Task.Column) {
 		return resp, true, nil
 	}
 	open := r.openCriteria(ctx, job)

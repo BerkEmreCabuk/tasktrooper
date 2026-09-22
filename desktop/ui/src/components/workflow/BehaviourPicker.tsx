@@ -30,6 +30,21 @@ export function BehaviourPicker({ registry, columns, selected, onChange, disable
   const { t } = useI18n();
   const byKey = new Map(selected.map((b) => [b.key, b]));
 
+  // The registry's label/description are the server's own (English) prose,
+  // read as a fallback only for a behaviour the locale files haven't caught
+  // up with yet — see settingsPages.workflows.behaviour.<key> for the
+  // translated pair every behaviour ships with today.
+  const localizedLabel = (spec: BehaviourSpec) => {
+    const key = `settingsPages.workflows.behaviour.${spec.key}.label`;
+    const translated = t(key);
+    return translated === key ? spec.label : translated;
+  };
+  const localizedDescription = (spec: BehaviourSpec) => {
+    const key = `settingsPages.workflows.behaviour.${spec.key}.description`;
+    const translated = t(key);
+    return translated === key ? spec.description : translated;
+  };
+
   const toggle = (spec: BehaviourSpec, checked: boolean) => {
     onChange(checked ? [...selected, { key: spec.key, params: {} }] : selected.filter((b) => b.key !== spec.key));
   };
@@ -57,8 +72,10 @@ export function BehaviourPicker({ registry, columns, selected, onChange, disable
                 className="mt-0.5"
               />
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">{spec.label}</span>
-                {spec.description && <span className="block text-xs text-muted-foreground">{spec.description}</span>}
+                <span className="block text-sm font-medium">{localizedLabel(spec)}</span>
+                {spec.description && (
+                  <span className="block text-xs text-muted-foreground">{localizedDescription(spec)}</span>
+                )}
               </span>
             </label>
             {checked && spec.params.length > 0 && (

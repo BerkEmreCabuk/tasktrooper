@@ -21,11 +21,11 @@ func TestValidateStages_UnknownBehaviour(t *testing.T) {
 }
 
 func TestValidateStages_WrongScope(t *testing.T) {
-	// document_deliverable is type-scoped (domain.BehaviourScopeType); attaching
+	// no_workspace_writes is type-scoped (domain.BehaviourScopeType); attaching
 	// it to a stage must be refused.
 	stages := []domain.WorkflowStage{{
 		Column: "in_progress", Kind: domain.StageKindWork,
-		Behaviours: []domain.BehaviourRef{{Key: domain.BehaviourDocumentDeliverable}},
+		Behaviours: []domain.BehaviourRef{{Key: domain.BehaviourNoWorkspaceWrites}},
 	}}
 	problems := workflow.ValidateStages(stages, nil)
 	assert.NotEmpty(t, problems)

@@ -17,6 +17,7 @@ export const CACHE_REPOS = "board.repositories";
 export const CACHE_PROJECTS = "board.initiativeProjects";
 export const CACHE_CONFIG = "board.config";
 export const CACHE_AGENTS = "board.agents";
+export const CACHE_WORKFLOWS = "board.workflows";
 
 
 

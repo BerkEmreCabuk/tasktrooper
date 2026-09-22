@@ -8,8 +8,10 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
+// commit_on_finish is the production rule the runner reads; asserting on it
+// directly keeps this honest about what actually decides whether a run pushes.
 func TestDoneRunNeverCommitsTheWorkspace(t *testing.T) {
-	assert.False(t, producesADiff(taskWF, domain.TaskColumnDone),
+	assert.False(t, taskWF.Has(domain.TaskColumnDone, domain.BehaviourCommitOnFinish),
 		"a run in done merges a finished change; committing its workspace would re-create the merged branch")
 
 	for _, column := range []domain.TaskColumn{
@@ -18,7 +20,7 @@ func TestDoneRunNeverCommitsTheWorkspace(t *testing.T) {
 		domain.TaskColumnTodo,
 		domain.TaskColumnInQA,
 	} {
-		assert.True(t, producesADiff(taskWF, column), "%s must still commit and push", column)
+		assert.True(t, taskWF.Has(column, domain.BehaviourCommitOnFinish), "%s must still commit and push", column)
 	}
 
 	for _, column := range []domain.TaskColumn{
@@ -26,7 +28,7 @@ func TestDoneRunNeverCommitsTheWorkspace(t *testing.T) {
 		domain.TaskColumnAnalizReview,
 		domain.TaskColumnPMUAT,
 	} {
-		assert.False(t, producesADiff(taskWF, column))
+		assert.False(t, taskWF.Has(column, domain.BehaviourCommitOnFinish))
 	}
 }
 

@@ -382,9 +382,6 @@ func RestrictToolsForStage(p ToolPolicy, stage WorkflowStage, typeDef TaskTypeDe
 	if stage.Has(BehaviourNoCodeReading) {
 		out = dropTools(out, func(name string) bool { return containsToolName(CodeExplorationTools, name) })
 	}
-	if stage.Has(BehaviourNoReadFile) {
-		out = dropTools(out, func(name string) bool { return name == "read_file" })
-	}
 	return out
 }
 

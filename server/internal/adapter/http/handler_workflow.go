@@ -243,8 +243,12 @@ type paramSpecJSON struct {
 }
 
 type behaviourSpecJSON struct {
-	Key         string          `json:"key"`
-	Scope       string          `json:"scope"`
+	Key   string `json:"key"`
+	Scope string `json:"scope"`
+	Group string `json:"group"`
+	// Kinds is empty for a behaviour that applies to every stage kind; the
+	// picker offers the rest only on the kinds they can actually fire on.
+	Kinds       []string        `json:"kinds"`
 	Label       string          `json:"label"`
 	Description string          `json:"description"`
 	Params      []paramSpecJSON `json:"params"`
@@ -257,8 +261,13 @@ func (h *Handler) ListWorkflowBehaviours(c *fiber.Ctx) error {
 		for _, p := range spec.Params {
 			params = append(params, paramSpecJSON{Name: p.Name, Type: string(p.Type), Options: p.Options, Required: p.Required})
 		}
+		kinds := make([]string, 0, len(spec.Kinds))
+		for _, k := range spec.Kinds {
+			kinds = append(kinds, string(k))
+		}
 		out = append(out, behaviourSpecJSON{
-			Key: string(key), Scope: string(spec.Scope), Label: spec.Label, Description: spec.Description, Params: params,
+			Key: string(key), Scope: string(spec.Scope), Group: string(spec.Group), Kinds: kinds,
+			Label: spec.Label, Description: spec.Description, Params: params,
 		})
 	}
 	kinds := []string{"intake", "queue", "work", "review", "approval", "rework", "parked", "terminal"}

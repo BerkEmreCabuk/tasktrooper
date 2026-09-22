@@ -37,8 +37,7 @@ func (g *ReviewGate) InterceptAgentMove(ctx context.Context, task domain.BoardTa
 	if g == nil || g.spans == nil || actor != domain.TaskActorAgent || !repo.RequireHumanReview {
 		return true
 	}
-	// pm_uat is not held: that made humans approve twice, and human_uat exists for exactly that signature.
-	if !g.holdsForHumanApproval(ctx, task.TaskType, from) {
+	if !holdsForHumanApproval(from) {
 		return true
 	}
 	verdict := domain.ReviewVerdictApprove
@@ -51,17 +50,13 @@ func (g *ReviewGate) InterceptAgentMove(ctx context.Context, task domain.BoardTa
 	return verdict == domain.ReviewVerdictReject
 }
 
-func (g *ReviewGate) holdsForHumanApproval(ctx context.Context, taskType domain.TaskType, from domain.TaskColumn) bool {
-	if g.workflows == nil {
-		return true
-	}
-	wf, err := g.workflows.Workflow(ctx, taskType)
-	if err != nil {
-		log.Warn().Err(err).Str("task_type", string(taskType)).
-			Msg("review gate: workflow lookup failed, holding for human approval")
-		return true
-	}
-	return wf.Has(from, domain.BehaviourHoldForHumanApproval)
+// code_review is the one column an agent can approve its way out of that a
+// human has not already seen, so it is the only one held when the repository
+// requires human review. Not a per-stage setting: pm_uat and human_uat are
+// human-facing by definition and holding them made humans approve twice, and
+// no other column has an agent-issued approval to hold in the first place.
+func holdsForHumanApproval(from domain.TaskColumn) bool {
+	return from == domain.TaskColumnCodeReview
 }
 
 func (g *ReviewGate) OnHumanRejection(ctx context.Context, task domain.BoardTask, from domain.TaskColumn) {

@@ -89,15 +89,19 @@ func TestReviewPRContext_NoOriginReviewsTheDiffAlone(t *testing.T) {
 	assert.Empty(t, msg)
 }
 
+// Reviewing is now read off the stage's kind rather than a flag, so every
+// review/approval stage counts — in_qa and human_uat included, which is what
+// they are: someone judging work they did not do.
 func TestIsReviewColumn(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnCodeReview, domain.TaskColumnAnalizReview, domain.TaskColumnPMUAT,
+		domain.TaskColumnInQA, domain.TaskColumnHumanUAT,
 	} {
 		assert.True(t, isReviewColumn(taskWF, col), "%s judges someone else's change", col)
 	}
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
-		domain.TaskColumnInQA, domain.TaskColumnReadyForQA,
+		domain.TaskColumnReadyForQA, domain.TaskColumnBacklog, domain.TaskColumnDone,
 	} {
 		assert.False(t, isReviewColumn(taskWF, col), "%s is not a review column", col)
 	}

@@ -267,9 +267,18 @@ export interface BehaviourParamSpec {
 
 export type BehaviourScope = "stage" | "type";
 
+// When a stage-scoped behaviour's effect fires — a presentation grouping for
+// the Settings UI, not a new firing rule; every behaviour already fires at
+// its own fixed point in the engine. A type-scoped behaviour has no
+// meaningful entry/exit and is always "other".
+export type BehaviourGroup = "entry" | "exit" | "other";
+
 export interface BehaviourSpec {
   key: string;
   scope: BehaviourScope;
+  group: BehaviourGroup;
+  /** Stage kinds this behaviour can fire on; empty means every kind. */
+  kinds: StageKind[];
   label: string;
   description: string;
   params: BehaviourParamSpec[];

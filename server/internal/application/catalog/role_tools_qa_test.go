@@ -187,11 +187,11 @@ func TestPMKeepsCodeExplorationToolsOutsideUATColumns(t *testing.T) {
 	}
 }
 
-func TestQARunPolicyLosesOnlyReadFileInVerdictColumns(t *testing.T) {
+func TestQARunPolicyKeepsItsCodeToolsInVerdictColumns(t *testing.T) {
 	for _, column := range []domain.TaskColumn{domain.TaskColumnInQA, domain.TaskColumnReadyForQA} {
 		t.Run(string(column), func(t *testing.T) {
 			policy := qaRunPolicyIn(t, column)
-			assert.NotContains(t, policy.AllowTools, "read_file")
+			assert.Contains(t, policy.AllowTools, "read_file")
 			assert.Contains(t, policy.AllowTools, "get_repo_tree")
 			assert.Contains(t, policy.AllowTools, "grep_code")
 			assert.Contains(t, policy.AllowTools, "get_task_pull_request")

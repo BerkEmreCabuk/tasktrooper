@@ -15,15 +15,12 @@ const (
 	BehaviourEnsurePROnEnter          BehaviourKey = "ensure_pr_on_enter"
 	BehaviourDetectMigrationOnEnter   BehaviourKey = "detect_migration_on_enter"
 	BehaviourStageDeployOnEnter       BehaviourKey = "stage_deploy_on_enter"
-	BehaviourHoldForHumanApproval     BehaviourKey = "hold_for_human_approval"
 	BehaviourAutoEnter                BehaviourKey = "auto_enter"
 	BehaviourAdvanceOnDiff            BehaviourKey = "advance_on_diff"
 	BehaviourAdvanceOnDocument        BehaviourKey = "advance_on_document"
 	BehaviourBuildVerify              BehaviourKey = "build_verify"
 	BehaviourCommitOnFinish           BehaviourKey = "commit_on_finish"
-	BehaviourReviewOnly               BehaviourKey = "review_only"
 	BehaviourRequirePRForReview       BehaviourKey = "require_pr_for_review"
-	BehaviourCriteriaSweep            BehaviourKey = "criteria_sweep"
 	BehaviourRequireCriteriaComplete  BehaviourKey = "require_criteria_complete"
 	BehaviourCriterionVerdict         BehaviourKey = "criterion_verdict"
 	BehaviourForwardExit              BehaviourKey = "forward_exit"
@@ -31,16 +28,12 @@ const (
 	BehaviourReviewVerdictSweep       BehaviourKey = "review_verdict_sweep"
 	BehaviourRequireExecutionEvidence BehaviourKey = "require_execution_evidence"
 	BehaviourRequireProductCheck      BehaviourKey = "require_product_check"
-	BehaviourShowAllCriteria          BehaviourKey = "show_all_criteria"
 	BehaviourReviewChainStage         BehaviourKey = "review_chain_stage"
-	BehaviourEnforceReviewChain       BehaviourKey = "enforce_review_chain"
 	BehaviourRequireReleaseDeploy     BehaviourKey = "require_release_deploy"
 	BehaviourStripWriters             BehaviourKey = "strip_writers"
 	BehaviourNoCodeReading            BehaviourKey = "no_code_reading"
-	BehaviourNoReadFile               BehaviourKey = "no_read_file"
 
-	// The three (type)-scoped behaviours live on TaskTypeDef.Behaviours.
-	BehaviourDocumentDeliverable  BehaviourKey = "document_deliverable"
+	// The two (type)-scoped behaviours live on TaskTypeDef.Behaviours.
 	BehaviourNoWorkspaceWrites    BehaviourKey = "no_workspace_writes"
 	BehaviourRequireRepoGrounding BehaviourKey = "require_repo_grounding"
 )
@@ -52,6 +45,25 @@ type BehaviourScope string
 const (
 	BehaviourScopeStage BehaviourScope = "stage"
 	BehaviourScopeType  BehaviourScope = "type"
+)
+
+// BehaviourGroup is when a stage-scoped behaviour's effect fires, for the
+// Settings UI to present as three labeled sections instead of one flat list.
+// It is a presentation grouping, not a new firing rule — every behaviour
+// already fires at its own fixed point in the engine; this only classifies
+// where that point is. A type-scoped behaviour (BehaviourScopeType) has no
+// meaningful entry/exit and is always BehaviourGroupOther.
+type BehaviourGroup string
+
+const (
+	// BehaviourGroupEntry fires on/gates a task's arrival into the stage.
+	BehaviourGroupEntry BehaviourGroup = "entry"
+	// BehaviourGroupExit is a run-finish hook or a gate checked before the
+	// move out to the next stage is honored.
+	BehaviourGroupExit BehaviourGroup = "exit"
+	// BehaviourGroupOther is a type-wide or run-shape flag not tied to a
+	// specific column transition (tool-policy stripping, run metadata).
+	BehaviourGroupOther BehaviourGroup = "other"
 )
 
 // ParamType is the shape a behaviour param's value must parse as (params are
@@ -79,59 +91,77 @@ type ParamSpec struct {
 // BehaviourSpec is one entry of BehaviourRegistry: everything validation and
 // the UI's behaviour picker need without the engine package in scope.
 type BehaviourSpec struct {
-	Scope       BehaviourScope
+	Scope BehaviourScope
+	Group BehaviourGroup
+	// Kinds are the stage kinds this behaviour is offered on and accepted
+	// for. Empty means "any kind" — used only by the handful that genuinely
+	// apply everywhere. Everything else has exactly one job and one place to
+	// do it (merge_pr_on_enter only ever means anything on a terminal stage),
+	// so listing them stops a workflow from being authored with a behaviour
+	// that could never fire.
+	Kinds       []StageKind
 	Label       string
 	Description string
 	Params      []ParamSpec
+}
+
+// AppliesToKind reports whether a behaviour may be attached to a stage of
+// this kind. A behaviour with no Kinds applies to every kind.
+func (s BehaviourSpec) AppliesToKind(kind StageKind) bool {
+	if len(s.Kinds) == 0 {
+		return true
+	}
+	for _, k := range s.Kinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // BehaviourRegistry is the single source of truth for behaviour keys, scopes
 // and params; workflow.ValidateStages and the behaviours endpoint read it.
 var BehaviourRegistry = map[BehaviourKey]BehaviourSpec{
 	BehaviourDispatchSuspended: {
-		Scope: BehaviourScopeStage, Label: "Dispatch suspended",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindTerminal}, Label: "Dispatch suspended",
 		Description: "The dispatcher never starts a run for a task sitting in this stage.",
 	},
 	BehaviourRouteToSubscribers: {
-		Scope: BehaviourScopeStage, Label: "Route to subscribers",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindQueue, StageKindReview, StageKindApproval}, Label: "Route to subscribers",
 		Description: "A task entering this stage wakes every agent subscribed to the column instead of only its assignee.",
 	},
 	BehaviourMergePROnEnter: {
-		Scope: BehaviourScopeStage, Label: "Merge PR on enter",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindTerminal}, Label: "Merge PR on enter",
 		Description: "Entering this stage wakes the merge flow for the task's pull request.",
 	},
 	BehaviourWatchDeployOnResume: {
-		Scope: BehaviourScopeStage, Label: "Watch deploy on resume",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindTerminal}, Label: "Watch deploy on resume",
 		Description: "A task resuming into this stage is watched for its production deploy.",
 	},
 	BehaviourBlockOnDependencies: {
-		Scope: BehaviourScopeStage, Label: "Block on dependencies",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindQueue, StageKindWork}, Label: "Block on dependencies",
 		Description: "The task parks here while an unfinished blocker (`blocks`) exists.",
 		Params:      []ParamSpec{{Name: "refuse_move", Type: ParamTypeBool}},
 	},
 	BehaviourWaitForCI: {
-		Scope: BehaviourScopeStage, Label: "Wait for CI",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindQueue, StageKindReview}, Label: "Wait for CI",
 		Description: "Dispatch into this stage waits for the pipeline gate to open.",
 	},
 	BehaviourEnsurePROnEnter: {
-		Scope: BehaviourScopeStage, Label: "Ensure PR on enter",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindReview, StageKindTerminal}, Label: "Ensure PR on enter",
 		Description: "Entering this stage opens the task's pull request if it does not exist yet.",
 	},
 	BehaviourDetectMigrationOnEnter: {
-		Scope: BehaviourScopeStage, Label: "Detect migration on enter",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindQueue, StageKindReview}, Label: "Detect migration on enter",
 		Description: "Entering this stage checks the branch diff for a schema migration.",
 	},
 	BehaviourStageDeployOnEnter: {
-		Scope: BehaviourScopeStage, Label: "Stage deploy on enter",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindQueue, StageKindReview}, Label: "Stage deploy on enter",
 		Description: "Entering this stage triggers a stage deploy, per the repository's test strategy.",
 		Params:      []ParamSpec{{Name: "when", Type: ParamTypeEnum, Options: []string{"qa", "per_step"}, Required: true}},
 	},
-	BehaviourHoldForHumanApproval: {
-		Scope: BehaviourScopeStage, Label: "Hold for human approval",
-		Description: "An agent's approving move out of this stage is held for a human when the repository requires human review.",
-	},
 	BehaviourAutoEnter: {
-		Scope: BehaviourScopeStage, Label: "Auto-enter",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Kinds: []StageKind{StageKindQueue, StageKindRework}, Label: "Auto-enter",
 		Description: "The dispatcher moves the task straight into the named column on assignment/wake.",
 		Params: []ParamSpec{
 			{Name: "to", Type: ParamTypeColumn, Required: true},
@@ -139,108 +169,84 @@ var BehaviourRegistry = map[BehaviourKey]BehaviourSpec{
 		},
 	},
 	BehaviourAdvanceOnDiff: {
-		Scope: BehaviourScopeStage, Label: "Advance on diff",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Kinds: []StageKind{StageKindWork, StageKindRework}, Label: "Advance on diff",
 		Description: "A run that ends with a green build and a real diff is moved to the named column automatically.",
 		Params:      []ParamSpec{{Name: "to", Type: ParamTypeColumn, Required: true}},
 	},
 	BehaviourAdvanceOnDocument: {
-		Scope: BehaviourScopeStage, Label: "Advance on document",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Kinds: []StageKind{StageKindWork, StageKindRework}, Label: "Advance on document",
 		Description: "A run that ends with a document attached is moved to the named column automatically.",
 		Params:      []ParamSpec{{Name: "to", Type: ParamTypeColumn, Required: true}},
 	},
 	BehaviourBuildVerify: {
-		Scope: BehaviourScopeStage, Label: "Build verify",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Label: "Build verify",
 		Description: "A run in this stage runs the build-gate fix round before finishing.",
 	},
 	BehaviourCommitOnFinish: {
-		Scope: BehaviourScopeStage, Label: "Commit on finish",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Label: "Commit on finish",
 		Description: "A run in this stage commits its diff on the way out.",
 	},
-	BehaviourReviewOnly: {
-		Scope: BehaviourScopeStage, Label: "Review only",
-		Description: "This stage is a review column: no diff is expected from a run here.",
-	},
 	BehaviourRequirePRForReview: {
-		Scope: BehaviourScopeStage, Label: "Require PR for review",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Kinds: []StageKind{StageKindReview}, Label: "Require PR for review",
 		Description: "A run here refuses without an open pull request to review.",
 	},
-	BehaviourCriteriaSweep: {
-		Scope: BehaviourScopeStage, Label: "Criteria sweep",
-		Description: "This stage participates in the acceptance-criteria sweep loop.",
-	},
 	BehaviourRequireCriteriaComplete: {
-		Scope: BehaviourScopeStage, Label: "Require criteria complete",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindQueue, StageKindReview, StageKindTerminal}, Label: "Require criteria complete",
 		Description: "Entering this stage is refused while an acceptance criterion is still open.",
 	},
 	BehaviourCriterionVerdict: {
-		Scope: BehaviourScopeStage, Label: "Criterion verdict",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupOther, Kinds: []StageKind{StageKindQueue, StageKindReview}, Label: "Criterion verdict",
 		Description: "A verdict recorded in this stage is attributed to the named review channel.",
 		Params:      []ParamSpec{{Name: "channel", Type: ParamTypeEnum, Options: []string{"qa", "pm"}, Required: true}},
 	},
 	BehaviourForwardExit: {
-		Scope: BehaviourScopeStage, Label: "Forward exit",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Kinds: []StageKind{StageKindReview, StageKindApproval, StageKindTerminal}, Label: "Forward exit",
 		Description: "A move out of this stage counts as a forward review exit for scoring.",
 	},
 	BehaviourRequireTestCases: {
-		Scope: BehaviourScopeStage, Label: "Require test cases",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Kinds: []StageKind{StageKindQueue, StageKindReview}, Label: "Require test cases",
 		Description: "This stage requires the task's generated test cases to be scored.",
 	},
 	BehaviourReviewVerdictSweep: {
-		Scope: BehaviourScopeStage, Label: "Review verdict sweep",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Kinds: []StageKind{StageKindQueue, StageKindReview, StageKindApproval}, Label: "Review verdict sweep",
 		Description: "A finished review round in this stage is swept to a verdict and passed on.",
 		Params:      []ParamSpec{{Name: "pass_to", Type: ParamTypeColumn, Required: true}},
 	},
 	BehaviourRequireExecutionEvidence: {
-		Scope: BehaviourScopeStage, Label: "Require execution evidence",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Kinds: []StageKind{StageKindQueue, StageKindReview}, Label: "Require execution evidence",
 		Description: "A QA round in this stage is rejected as ungrounded without evidence the product was actually run.",
 	},
 	BehaviourRequireProductCheck: {
-		Scope: BehaviourScopeStage, Label: "Require product check",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Kinds: []StageKind{StageKindReview, StageKindApproval}, Label: "Require product check",
 		Description: "A UAT round in this stage is rejected without evidence the product was checked.",
 	},
-	BehaviourShowAllCriteria: {
-		Scope: BehaviourScopeStage, Label: "Show all criteria",
-		Description: "The prompt for this stage lists every acceptance criterion, not only open ones.",
-	},
 	BehaviourReviewChainStage: {
-		Scope: BehaviourScopeStage, Label: "Review chain stage",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Kinds: []StageKind{StageKindReview, StageKindApproval}, Label: "Review chain stage",
 		Description: "This stage is a mandatory step of the type's review chain, required before done/released.",
 		Params: []ParamSpec{
 			{Name: "label", Type: ParamTypeString, Required: true},
 			{Name: "remedy", Type: ParamTypeString, Required: true},
 		},
 	},
-	BehaviourEnforceReviewChain: {
-		Scope: BehaviourScopeStage, Label: "Enforce review chain",
-		Description: "Entering this stage is refused unless the type's whole review chain has passed.",
-	},
 	BehaviourRequireReleaseDeploy: {
-		Scope: BehaviourScopeStage, Label: "Require release deploy",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindTerminal}, Label: "Require release deploy",
 		Description: "Entering this stage is refused without a recorded successful production deploy.",
 	},
 	BehaviourStripWriters: {
-		Scope: BehaviourScopeStage, Label: "Strip writers",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupOther, Kinds: []StageKind{StageKindQueue, StageKindReview, StageKindApproval, StageKindTerminal}, Label: "Strip writers",
 		Description: "Write/verdict tools are stripped from the policy in this stage, except any named in allow.",
 		Params:      []ParamSpec{{Name: "allow", Type: ParamTypeString}},
 	},
 	BehaviourNoCodeReading: {
-		Scope: BehaviourScopeStage, Label: "No code reading",
+		Scope: BehaviourScopeStage, Group: BehaviourGroupOther, Kinds: []StageKind{StageKindReview, StageKindApproval}, Label: "No code reading",
 		Description: "Code-reading tools are stripped from the policy in this stage.",
 	},
-	BehaviourNoReadFile: {
-		Scope: BehaviourScopeStage, Label: "No read file",
-		Description: "read_file is stripped from the policy in this stage.",
-	},
-	BehaviourDocumentDeliverable: {
-		Scope: BehaviourScopeType, Label: "Document deliverable",
-		Description: "This task type's deliverable is a document, not a diff.",
-	},
 	BehaviourNoWorkspaceWrites: {
-		Scope: BehaviourScopeType, Label: "No workspace writes",
+		Scope: BehaviourScopeType, Group: BehaviourGroupOther, Label: "No workspace writes",
 		Description: "Runs on this task type never get workspace write tools.",
 	},
 	BehaviourRequireRepoGrounding: {
-		Scope: BehaviourScopeType, Label: "Require repo grounding",
+		Scope: BehaviourScopeType, Group: BehaviourGroupOther, Label: "Require repo grounding",
 		Description: "A run on this task type is rejected as ungrounded without evidence the repository was actually read.",
 	},
 }

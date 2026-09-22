@@ -58,6 +58,12 @@ func ValidateStages(stages []domain.WorkflowStage, validColumns map[string]bool)
 		}
 		for _, b := range st.Behaviours {
 			problems = append(problems, validateBehaviourRef(col, b, domain.BehaviourScopeStage, validColumns)...)
+			// A behaviour attached to a kind it can never fire on is not a
+			// harmless extra tick: it reads as configured and does nothing.
+			if spec, ok := domain.BehaviourRegistry[b.Key]; ok && !spec.AppliesToKind(st.Kind) {
+				problems = append(problems, StageProblem{col, "behaviours",
+					fmt.Sprintf("behaviour %q does not apply to a %q stage", b.Key, st.Kind)})
+			}
 		}
 	}
 	return problems
