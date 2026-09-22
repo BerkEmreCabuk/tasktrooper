@@ -2227,37 +2227,34 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	}
 
 	// External agents/skills catalog: a git repo (or local dir) the app pulls
-	// definitions from. Boot sync runs before the first tick; the UI's manual
-	// button shares SyncFromCatalog and its mutex, so the three never interleave.
+	// definitions from. catalogRepo/catalogSyncStoreForHandler feed the
+	// Handler Config below — without them /v1/catalog/* always answers "not
+	// configured" even though the sync below is running fine. The boot-time
+	// sync itself is wired further down, as a boot step sequenced after
+	// embeddings_endpoint: a fresh install's first sync creates skills that
+	// need embedding, and running it any earlier fails every skill with
+	// "unsupported protocol scheme" on the not-yet-configured embedder.
+	var catalogRepo port.CatalogRepoReader
+	var catalogSyncStoreForHandler port.CatalogSyncStore
+	var catalogSyncOnce func(context.Context)
 	if strings.TrimSpace(cfg.AgentCatalog.Source) != "" && e.pgDB != nil && catalogSvc != nil {
 		catalogSyncStore := pgstore.NewCatalogSyncStore(e.pgDB)
 		reader := &catalogrepo.Reader{Source: cfg.AgentCatalog.Source, CacheDir: cfg.AgentCatalog.CacheDir}
-		go func(runCtx context.Context) {
-			syncOnce := func() {
-				syncCtx, cancel := context.WithTimeout(runCtx, 10*time.Minute)
-				defer cancel()
-				res, err := catalogSvc.SyncFromCatalog(syncCtx, reader, catalogSyncStore)
-				if err != nil {
-					log.Warn().Err(err).Msg("agent catalog sync failed")
-					return
-				}
-				log.Info().Str("ref", res.RepoRef).
-					Int("created", res.Created).Int("updated", res.Updated).
-					Int("merged", res.Merged).Int("pending", res.Pending).
-					Msg("agent catalog synced")
+		catalogSyncStoreForHandler = catalogSyncStore
+		catalogRepo = reader
+		catalogSyncOnce = func(runCtx context.Context) {
+			syncCtx, cancel := context.WithTimeout(runCtx, 10*time.Minute)
+			defer cancel()
+			res, err := catalogSvc.SyncFromCatalog(syncCtx, reader, catalogSyncStore)
+			if err != nil {
+				log.Warn().Err(err).Msg("agent catalog sync failed")
+				return
 			}
-			syncOnce()
-			ticker := time.NewTicker(cfg.AgentCatalog.Interval)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-ticker.C:
-					syncOnce()
-				case <-runCtx.Done():
-					return
-				}
-			}
-		}(ctx)
+			log.Info().Str("ref", res.RepoRef).
+				Int("created", res.Created).Int("updated", res.Updated).
+				Int("merged", res.Merged).Int("pending", res.Pending).
+				Msg("agent catalog synced")
+		}
 	}
 
 	var settingsSvc *settings.Service
@@ -2334,6 +2331,33 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			indexSvc.SetEmbeddingResolver(llmProviderSvc)
 		}
 
+	}
+
+	// The boot-time catalog sync, sequenced as a boot step so it starts only
+	// after embeddings_endpoint above has run (steps run in registration
+	// order). It launches onto its own goroutine, on the long-lived ctx
+	// rather than the step's, and the step returns immediately: a full first
+	// sync (skill embeds for every agent) easily outlasts bootSeed's shared
+	// stepTimeout, which is a budget for quick steps, not this one. The UI's
+	// manual sync button shares SyncFromCatalog and its mutex with both this
+	// and the recurring tick below, so the three never interleave.
+	if catalogSyncOnce != nil {
+		e.bootSeed.AddStep("agent_catalog_sync", func(context.Context) error {
+			go catalogSyncOnce(ctx)
+			return nil
+		})
+		go func(runCtx context.Context) {
+			ticker := time.NewTicker(cfg.AgentCatalog.Interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					catalogSyncOnce(runCtx)
+				case <-runCtx.Done():
+					return
+				}
+			}
+		}(ctx)
 	}
 
 	var sessionSvc *session.Service
@@ -2435,6 +2459,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		AttachmentSvc:     attachmentSvc,
 		MobileDeviceSvc:   e.mobileDeviceSvc,
 		CatalogSvc:        catalogSvc,
+		CatalogRepo:       catalogRepo,
+		CatalogSyncStore:  catalogSyncStoreForHandler,
 		MCPSvc:            mcpService,
 		AuditStore:        auditStore,
 		MCPManager:        e.mcpManager,
