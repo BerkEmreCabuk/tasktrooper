@@ -12,9 +12,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fixedBlockerStore overrides ListBlockingSources to return a fixed list,
-// standing in for what ListBlockingSources's done/released SQL filter would
-// return for a real blocker in a given state.
 type fixedBlockerStore struct {
 	*graphRelationStore
 	blockers []domain.BoardTask
@@ -24,11 +21,6 @@ func (f *fixedBlockerStore) ListBlockingSources(context.Context, uuid.UUID) ([]d
 	return f.blockers, nil
 }
 
-// A manual move into todo with an open blocker is queueing, not starting, and
-// is allowed: the dispatch-time park (board.WorkOrder) is what actually stops
-// an agent from picking the task up before its blockers land, parking it in
-// place with the blockers named on the card. Only in_progress — a direct
-// attempt to start the work this instant — is still refused up front.
 func TestValidateMoveAllowedAllowsTodoWithAnOpenBlocker(t *testing.T) {
 	svc := &Service{
 		relations: &fixedBlockerStore{

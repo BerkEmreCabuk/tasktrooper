@@ -14,9 +14,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// releaseFixture bundles the collaborators newReleaseTestService wires up,
-// so a test can both script a scenario (setState) and assert exactly what
-// the release actions did (asc, play, audit).
 type releaseFixture struct {
 	repoID uuid.UUID
 	repos  *fakeRepositoryResolver
@@ -26,10 +23,6 @@ type releaseFixture struct {
 	audit  *fakeOpsAuditStore
 }
 
-// setState overwrites both the iOS and Android registry rows' state — every
-// release test targets one platform or the other, never both at once, so a
-// single knob covering both keeps the fixture setup terse. A platform with
-// no registered row yet is silently skipped.
 func (f *releaseFixture) setState(state string) {
 	for _, platform := range []string{domain.MobileStorePlatformIOS, domain.MobileStorePlatformAndroid} {
 		app, err := f.apps.Get(context.Background(), f.repoID, platform)
@@ -41,12 +34,6 @@ func (f *releaseFixture) setState(state string) {
 	}
 }
 
-// newReleaseTestService wires a storeops.Service with a live iOS app and a
-// live Android app already registered for one repository named repoName,
-// working App Store Connect / Google Play credentials saved (so any method
-// that reaches the client succeeds), and the audit store wired via
-// SetAuditor. Tests that need a different starting state call
-// f.setState.
 func newReleaseTestService(t *testing.T, repoName string) (*storeops.Service, *releaseFixture) {
 	t.Helper()
 
@@ -106,8 +93,6 @@ func newReleaseTestService(t *testing.T, repoName string) (*storeops.Service, *r
 	return svc, &releaseFixture{repoID: repoID, repos: repos, apps: apps, asc: asc, play: play, audit: audit}
 }
 
-// The same server-side brake the deploy actions have. iOS submit is
-// production-class: it puts the app in front of Apple's reviewers.
 func TestSubmitIOSRequiresConfirmPhrase(t *testing.T) {
 	svc, f := newReleaseTestService(t, "tasktrooper")
 	err := svc.SubmitIOS(context.Background(), f.repoID, "wrong", "akif")
@@ -119,8 +104,6 @@ func TestSubmitIOSRequiresConfirmPhrase(t *testing.T) {
 	}
 }
 
-// Only a live app can be submitted; a half-onboarded one has no store app id
-// to submit against, and the error must say so rather than 500 from the API.
 func TestSubmitIOSRefusesAnAppThatIsNotOnboarded(t *testing.T) {
 	svc, f := newReleaseTestService(t, "r")
 	f.setState(domain.MobileStoreStateOnboarding)
@@ -130,8 +113,6 @@ func TestSubmitIOSRefusesAnAppThatIsNotOnboarded(t *testing.T) {
 	}
 }
 
-// Rollout fraction is user input reaching a production API — clamp it here,
-// not in the browser.
 func TestSetAndroidRolloutRejectsFractionOutOfRange(t *testing.T) {
 	svc, f := newReleaseTestService(t, "r")
 	for _, bad := range []float64{-0.1, 1.5} {
@@ -141,7 +122,6 @@ func TestSetAndroidRolloutRejectsFractionOutOfRange(t *testing.T) {
 	}
 }
 
-// Promoting to production is production-class; promoting to a test track is not.
 func TestPromoteAndroidRequiresConfirmOnlyForProduction(t *testing.T) {
 	svc, f := newReleaseTestService(t, "r")
 	if err := svc.PromoteAndroid(context.Background(), f.repoID, "internal", 1, "", "akif"); err != nil {
@@ -152,7 +132,6 @@ func TestPromoteAndroidRequiresConfirmOnlyForProduction(t *testing.T) {
 	}
 }
 
-// Every attempt is audited, including the refused ones.
 func TestRefusedStoreActionIsAudited(t *testing.T) {
 	svc, f := newReleaseTestService(t, "r")
 	_ = svc.HaltAndroid(context.Background(), f.repoID, "nope", "akif")
@@ -161,10 +140,6 @@ func TestRefusedStoreActionIsAudited(t *testing.T) {
 	}
 }
 
-// --- Additional coverage beyond the plan's required tests ---
-
-// A repository with no registered app for the platform 404s instead of
-// panicking or auditing a phantom attempt.
 func TestSubmitIOSPropagatesAppNotFound(t *testing.T) {
 	svc, f := newReleaseTestService(t, "r")
 	otherRepo := uuid.New()
@@ -178,8 +153,6 @@ func TestSubmitIOSPropagatesAppNotFound(t *testing.T) {
 	}
 }
 
-// The success path: a correctly confirmed submit reaches LatestVersion and
-// SubmitForReview, and the single audit row records success.
 func TestSubmitIOSSucceedsAndAudits(t *testing.T) {
 	svc, f := newReleaseTestService(t, "tasktrooper")
 	if err := svc.SubmitIOS(context.Background(), f.repoID, "tasktrooper", "akif"); err != nil {
@@ -193,8 +166,6 @@ func TestSubmitIOSSucceedsAndAudits(t *testing.T) {
 	}
 }
 
-// ReleaseIOS follows SubmitIOS's exact shape: same confirm guardrail, same
-// live-state precondition.
 func TestReleaseIOSRequiresConfirmPhrase(t *testing.T) {
 	svc, f := newReleaseTestService(t, "tasktrooper")
 	err := svc.ReleaseIOS(context.Background(), f.repoID, "wrong", "akif")
@@ -206,9 +177,6 @@ func TestReleaseIOSRequiresConfirmPhrase(t *testing.T) {
 	}
 }
 
-// Halt and resume are the two Android actions that need no confirmation on
-// resume (Halt is production-class, Resume never touches what users get
-// beyond what was already rolling out).
 func TestResumeAndroidNeedsNoConfirmation(t *testing.T) {
 	svc, f := newReleaseTestService(t, "tasktrooper")
 	if err := svc.ResumeAndroid(context.Background(), f.repoID, "akif"); err != nil {
@@ -219,9 +187,6 @@ func TestResumeAndroidNeedsNoConfirmation(t *testing.T) {
 	}
 }
 
-// A missing store credential surfaces as ErrStoreCredentialUnavailable, not
-// a bare port.ErrNotFound or a generic 500-shaped error — the HTTP layer
-// keys 424 Failed Dependency off this sentinel.
 func TestHaltAndroidWithNoCredentialReportsCredentialUnavailable(t *testing.T) {
 	svc, f := newReleaseTestService(t, "tasktrooper")
 	if err := svc.DeleteCredential(context.Background(), domain.StoreCredentialGooglePlay); err != nil {

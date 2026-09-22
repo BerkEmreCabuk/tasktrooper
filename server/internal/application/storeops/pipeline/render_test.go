@@ -13,11 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// What these tests defend is one property: the script is the procedure and the
-// workflow is a wrapper. Everything else here — the base64 decodes, the
-// no-rebuild prod channel, the bash guard — is a specific way that property
-// has already been broken once.
-
 func iosSpec() Spec {
 	return Spec{
 		Platform:   domain.MobileStorePlatformIOS,
@@ -45,9 +40,6 @@ func render(t *testing.T, spec Spec) (script, workflow Artifact) {
 	return arts[0], arts[1]
 }
 
-// codeOnly drops comment lines. The doctrine these tests defend is about
-// STEPS, and prose that names a step it is refusing to take must not read as
-// the step itself.
 func codeOnly(body string) string {
 	var kept []string
 	for _, line := range strings.Split(body, "\n") {
@@ -58,8 +50,6 @@ func codeOnly(body string) string {
 	return strings.Join(kept, "\n")
 }
 
-// funcBody returns one shell function's body, so an assertion about a channel
-// cannot be satisfied by a line that belongs to the other one.
 func funcBody(t *testing.T, script, name string) string {
 	t.Helper()
 	start := strings.Index(script, name+"() {")
@@ -70,17 +60,13 @@ func funcBody(t *testing.T, script, name string) string {
 	return rest[:end]
 }
 
-// The script comes FIRST. A caller writing the artifacts one at a time must
-// never leave a workflow on disk that dispatches a script which is not there.
 func TestRenderReturnsTheScriptBeforeTheWorkflow(t *testing.T) {
 	for _, spec := range []Spec{iosSpec(), androidSpec()} {
 		script, workflow := render(t, spec)
 
 		assert.Equal(t, "scripts/mobile-release.sh", script.Path)
 		assert.Equal(t, ".github/workflows/mobile-release.yml", workflow.Path)
-		// 0755 here rather than a chmod at the call site: both engines exec it,
-		// and a mode decided by whichever caller remembers is a mode that will
-		// eventually be forgotten.
+
 		assert.Equal(t, uint32(0o755), script.Mode)
 		assert.Equal(t, uint32(0o644), workflow.Mode)
 		assert.Contains(t, workflow.Body, script.Path,
@@ -88,9 +74,6 @@ func TestRenderReturnsTheScriptBeforeTheWorkflow(t *testing.T) {
 	}
 }
 
-// GitHub reads workflows only from the repository root, so a sub-project's
-// workflow cannot travel with its sub-project the way its script does — and
-// two apps in one monorepo would otherwise render the same file twice.
 func TestRenderScopesASubProject(t *testing.T) {
 	spec := androidSpec()
 	spec.SubProjectPath = "apps/mobile"
@@ -102,8 +85,6 @@ func TestRenderScopesASubProject(t *testing.T) {
 	assert.Contains(t, workflow.Body, "path: apps/mobile/build/mobile-release/**")
 }
 
-// The generated script has to be valid bash before anything else is worth
-// asserting about it.
 func TestGeneratedScriptParses(t *testing.T) {
 	bash, err := exec.LookPath("bash")
 	if err != nil {
@@ -121,9 +102,6 @@ func TestGeneratedScriptParses(t *testing.T) {
 	}
 }
 
-// bash, and the guard that says so. zsh cost a day here twice: `"$app:latest"`
-// is a MODIFIER under zsh, and a failing `.` sourcing does not stop a zsh
-// script under set -e.
 func TestGeneratedScriptRefusesZsh(t *testing.T) {
 	for _, spec := range []Spec{iosSpec(), androidSpec()} {
 		script, _ := render(t, spec)
@@ -133,8 +111,6 @@ func TestGeneratedScriptRefusesZsh(t *testing.T) {
 	}
 }
 
-// Every base64 secret is decoded, and decoded in the SCRIPT — the workflow
-// hands over the encoded value and nothing else.
 func TestEveryBase64SecretIsDecodedInTheScript(t *testing.T) {
 	cases := map[string]struct {
 		spec   Spec
@@ -171,10 +147,6 @@ func TestEveryBase64SecretIsDecodedInTheScript(t *testing.T) {
 	}
 }
 
-// GitHub masks the STORED secret and never a derivative, so a decoded key has
-// to be registered line by line. It is done in the script — where the decode
-// is — and guarded, because ::add-mask:: on a laptop prints the key instead of
-// hiding it.
 func TestDecodedKeysAreMaskedInTheScriptAndOnlyUnderActions(t *testing.T) {
 	for name, spec := range map[string]Spec{"ios": iosSpec(), "android": androidSpec()} {
 		t.Run(name, func(t *testing.T) {
@@ -189,8 +161,6 @@ func TestDecodedKeysAreMaskedInTheScriptAndOnlyUnderActions(t *testing.T) {
 		"the ASC key is the one the templates called out by name")
 }
 
-// prod DOES NOT REBUILD. There is one binary per release and it is the one
-// testers used; archiving again at submission time ships something nobody ran.
 func TestProdDoesNotRebuild(t *testing.T) {
 	t.Run("ios", func(t *testing.T) {
 		script, _ := render(t, iosSpec())
@@ -220,19 +190,15 @@ func TestProdDoesNotRebuild(t *testing.T) {
 	})
 }
 
-// The steps the deleted templates carried, in the file that now owns them.
 func TestScriptCarriesTheWholeProcedure(t *testing.T) {
 	t.Run("ios", func(t *testing.T) {
 		script, _ := render(t, iosSpec())
 		stage := funcBody(t, script.Body, "release_stage")
 		for _, want := range []string{
-			// Asserted through the `sec` helper rather than as `security <verb>`:
-			// every password-bearing call goes through it so the value lands on
-			// security's stdin instead of in a world-readable argv.
+
 			`sec "create-keychain`,
 			`sec "import`,
-			// Without the partition list codesign raises a GUI prompt no runner
-			// can answer and the job hangs until it times out.
+
 			`sec "set-key-partition-list`,
 			"Provisioning Profiles",
 			"CODE_SIGN_STYLE=Manual",
@@ -250,8 +216,7 @@ func TestScriptCarriesTheWholeProcedure(t *testing.T) {
 		stage := funcBody(t, script.Body, "release_stage")
 		for _, want := range []string{
 			"decode_secret ANDROID_UPLOAD_KEYSTORE_B64",
-			// The signing values reach Gradle through a 0600 gradle.properties in
-			// a Gradle home this run owns, not through -P.
+
 			`signing_properties "$keystore"`,
 			`-g "$GRADLE_RUN_HOME"`,
 			`-PversionCode="$BUILD_NUMBER"`,
@@ -262,10 +227,6 @@ func TestScriptCarriesTheWholeProcedure(t *testing.T) {
 	})
 }
 
-// The whole point of the two indirections above: a build that runs for minutes
-// must not park a signing password in argv, where anything running as the same
-// user reads it out of `ps -ax -o args`. Asserted as absence, because the fix
-// is only worth anything while nobody adds the convenient flag back.
 func TestSigningValuesNeverReachArgv(t *testing.T) {
 	t.Run("android", func(t *testing.T) {
 		script, _ := render(t, androidSpec())
@@ -290,14 +251,10 @@ func TestSigningValuesNeverReachArgv(t *testing.T) {
 	})
 }
 
-// Play refuses a brand-new app's FIRST bundle over the API. The run must then
-// leave the signed AAB behind and say so, not fail with a stack trace.
 func TestPlayFirstUploadStopsCleanlyWithTheArtifact(t *testing.T) {
 	script, workflow := render(t, androidSpec())
 	stage := funcBody(t, script.Body, "release_stage")
 
-	// The bundle is copied into $ARTIFACTS before anything is uploaded, so the
-	// by-hand path always has a file to point at.
 	copyAt := strings.Index(stage, `cp "$built" "$AAB"`)
 	uploadAt := strings.Index(stage, "fastlane run supply")
 	require.GreaterOrEqual(t, copyAt, 0)
@@ -313,9 +270,6 @@ func TestPlayFirstUploadStopsCleanlyWithTheArtifact(t *testing.T) {
 	assert.Contains(t, workflow.Body, "if-no-files-found: ignore")
 }
 
-// The doctrine, asserted: the workflow may not contain a step the script does
-// not have. Anything here that builds, signs or uploads exists only under
-// Actions, and the copy nobody watches is the one that drifts.
 func TestWorkflowIsOnlyAWrapper(t *testing.T) {
 	for name, spec := range map[string]Spec{"ios": iosSpec(), "android": androidSpec()} {
 		t.Run(name, func(t *testing.T) {
@@ -345,16 +299,12 @@ func TestWorkflowRunsOnTheRightMachineAndSerialisesPerApp(t *testing.T) {
 	assert.Contains(t, android.Body, "actions/setup-java@v4")
 
 	for _, workflow := range []Artifact{ios, android} {
-		// Keyed on the app: two apps in one monorepo release independently, and
-		// two runs against the same app must not race for one build number.
+
 		assert.Contains(t, workflow.Body, "group: mobile-${{ inputs.channel }}-com.example.myapp")
 		assert.Contains(t, workflow.Body, "cancel-in-progress: false")
 	}
 }
 
-// A Gradle module path is colon-separated, so a nested application module
-// survives to the gradlew invocation whole — :apps:android:bundleRelease is
-// the task, and truncating it to the last segment would build nothing.
 func TestRenderKeepsANestedGradleModule(t *testing.T) {
 	artifacts, err := Render(Spec{
 		Platform:   domain.MobileStorePlatformAndroid,
@@ -365,8 +315,6 @@ func TestRenderKeepsANestedGradleModule(t *testing.T) {
 	assert.Contains(t, artifacts[0].Body, "MODULE='apps:android'")
 }
 
-// Values reaching a shell word and a concurrency group are matched, not
-// escaped: an identifier that needs escaping is a mis-detected identifier.
 func TestRenderRefusesWhatItCannotSafelyInterpolate(t *testing.T) {
 	cases := map[string]Spec{
 		"no platform":      {Identifier: "com.example.app", Scheme: "App"},
@@ -398,7 +346,6 @@ func TestRenderRefusesWhatItCannotSafelyInterpolate(t *testing.T) {
 	}
 }
 
-// A display name is the one free-text field here, and it is only ever printed.
 func TestDisplayNameIsQuotedRatherThanRefused(t *testing.T) {
 	spec := iosSpec()
 	spec.AppName = "It's a Test\"App"

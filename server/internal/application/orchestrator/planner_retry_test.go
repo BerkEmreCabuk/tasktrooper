@@ -13,9 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// scriptedLLM replays one canned response per call and records the messages
-// (and the full request, for callers that need more than that) it was handed,
-// so a test can assert what the retry actually sent back.
+// Replays one canned response per call and records the messages and full request it was handed.
 type scriptedLLM struct {
 	responses []string
 	calls     [][]domain.Message
@@ -37,8 +35,7 @@ func (s *scriptedLLM) Embed(_ context.Context, _ string, _ string) ([]float32, e
 	return nil, nil
 }
 
-// singleAgentCatalog answers only the three lookups the planner performs; the
-// embedded interface leaves the rest unimplemented on purpose.
+// Answers only the three lookups the planner performs; the embedded interface leaves the rest unimplemented.
 type singleAgentCatalog struct {
 	port.CatalogStore
 	agent domain.Agent
@@ -56,10 +53,7 @@ func (c singleAgentCatalog) ListEnabledRulesByAgent(_ context.Context, _ uuid.UU
 	return nil, nil
 }
 
-// A validation failure used to leave the messages untouched, so all three
-// attempts sent the identical prompt, the model returned the identical rejected
-// plan, and a fixable plan reached the user as "planner failed after 3
-// attempts". The rejection has to go back to the model.
+// The rejection must go back to the model, or three attempts send the identical prompt.
 func TestPlannerGenerate_FeedsValidationErrorBackToTheModel(t *testing.T) {
 	agentID := uuid.New()
 	rejected := `{"ready":true,"summary":"plan","questions":[],"tasks":[
@@ -94,12 +88,7 @@ func TestPlannerGenerate_FeedsValidationErrorBackToTheModel(t *testing.T) {
 		"its own rejected plan must precede the correction")
 }
 
-// The planner used to send domain.JSONResponseFormat() — bare
-// {"type":"json_object"}, no schema — so a provider with strict structured
-// output support had nothing to constrain decoding against, and every stray
-// comma or dropped field fell through to the expensive parse-repair retry
-// loop this file otherwise exercises. The request must now carry the real
-// schema instead.
+// The request must carry the real schema, not bare {"type":"json_object"}.
 func TestPlannerGenerate_RequestCarriesTheJSONSchema(t *testing.T) {
 	agentID := uuid.New()
 	accepted := `{"ready":true,"summary":"plan","questions":[],"tasks":[
@@ -132,9 +121,7 @@ func TestPlannerGenerate_RequestCarriesTheJSONSchema(t *testing.T) {
 	assert.Contains(t, props, "questions")
 }
 
-// The planner states the disjoint-write rule as a hard, countable constraint —
-// prose about "disjoint deliverables" alone produced five board writers in one
-// wave.
+// The disjoint-write rule must be a hard, countable constraint, not prose.
 func TestBuildPlannerSystemPrompt_StatesBoardWriteConstraintAsCheckable(t *testing.T) {
 	p := orchestrator.BuildPlannerSystemPromptWithOptionsForTest(orchestrator.PlannerOptions{Lang: "tr"})
 
@@ -143,9 +130,7 @@ func TestBuildPlannerSystemPrompt_StatesBoardWriteConstraintAsCheckable(t *testi
 	assert.Contains(t, p, "count the board writers per parallel_group")
 }
 
-// The ordering has to live inside the subtask: a wave per lifecycle step plans
-// work the control plane already does, and the plan validators reject it. What
-// the description must carry instead is the order and the boundary.
+// The ordering must live inside the subtask's description; the validators reject a wave per lifecycle step.
 func TestBuildPlannerSystemPrompt_ShapesSubtaskDescriptionAsOrderedPhases(t *testing.T) {
 	p := orchestrator.BuildPlannerSystemPromptWithOptionsForTest(orchestrator.PlannerOptions{Lang: "tr"})
 
@@ -155,9 +140,7 @@ func TestBuildPlannerSystemPrompt_ShapesSubtaskDescriptionAsOrderedPhases(t *tes
 	assert.Contains(t, p, "pulling the repository, creating the branch, claiming the task, moving columns")
 }
 
-// Subtasks in one wave share the branch but not the context: the one adding a
-// button cannot see the one that deleted a section of the same page, and both
-// report success. Only a pass over the merged result catches that.
+// Split plans share a branch but not context; only a pass over the merged result catches that.
 func TestBuildPlannerSystemPrompt_RequiresVerificationSubtaskOnSplitPlans(t *testing.T) {
 	p := orchestrator.BuildPlannerSystemPromptWithOptionsForTest(orchestrator.PlannerOptions{Lang: "tr"})
 
@@ -167,8 +150,6 @@ func TestBuildPlannerSystemPrompt_RequiresVerificationSubtaskOnSplitPlans(t *tes
 	assert.Contains(t, p, "Do not give it move_board_task")
 }
 
-// The five-subtask plan was one subtask per board column (analiz, implement,
-// QA, pm_uat, approval) for a single small change.
 func TestBuildPlannerSystemPrompt_RejectsOneSubtaskPerLifecycleStage(t *testing.T) {
 	p := orchestrator.BuildPlannerSystemPromptWithOptionsForTest(orchestrator.PlannerOptions{Lang: "tr"})
 

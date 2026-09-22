@@ -1,8 +1,3 @@
-// Package prodops turns production signals — external alerts, our own health
-// probes and failed deploys — into deduplicated incidents, derives a concrete
-// remedy for each, and feeds it back to the agent that can fix it or to the
-// human who must decide. It exists so nobody has to read logs to find out what
-// broke and what to do about it.
 package prodops
 
 import (
@@ -14,16 +9,11 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// Defaults fill the fields a given alert shape does not carry.
 type Defaults struct {
 	Env    string
 	Source string
 }
 
-// Normalize collapses the alert shapes we accept — Alertmanager, Sentry, GCP
-// Cloud Monitoring and a plain generic payload — into one IncidentInput.
-// Unknown shapes fall through to the generic reader rather than being
-// rejected: a dropped alert is worse than a coarsely-titled one.
 func Normalize(raw []byte, def Defaults) (domain.IncidentInput, error) {
 	var envelope map[string]any
 	if err := json.Unmarshal(raw, &envelope); err != nil {
@@ -69,9 +59,6 @@ func Normalize(raw []byte, def Defaults) (domain.IncidentInput, error) {
 	return in, nil
 }
 
-// fromAlertmanager reads a Prometheus Alertmanager webhook. Only the first
-// alert of the group is modelled: the group is one problem, and the rest of
-// the batch stays available in the raw payload.
 func fromAlertmanager(env map[string]any, def Defaults) domain.IncidentInput {
 	in := domain.IncidentInput{Env: def.Env}
 	alerts, _ := env["alerts"].([]any)
@@ -89,8 +76,7 @@ func fromAlertmanager(env map[string]any, def Defaults) domain.IncidentInput {
 	in.Detail = firstNonEmpty(strOf(annotations, "description"), strOf(annotations, "message"))
 	in.Severity = domain.NormalizeSeverity(strOf(labels, "severity"))
 	in.Env = firstNonEmpty(strOf(labels, "env"), strOf(labels, "environment"), def.Env)
-	// A group is only resolved when every alert in it is: the first alert
-	// resolving while others still fire must not close the incident.
+
 	allResolved := true
 	for _, a := range alerts {
 		am, _ := a.(map[string]any)
@@ -100,8 +86,7 @@ func fromAlertmanager(env map[string]any, def Defaults) domain.IncidentInput {
 		}
 	}
 	in.Resolved = allResolved || strings.EqualFold(str(env, "status"), "resolved")
-	// Alertmanager's own fingerprint already dedupes per label set; reuse it so
-	// our identity matches the sender's.
+
 	in.Fingerprint = firstNonEmpty(strOf(first, "fingerprint"),
 		domain.IncidentFingerprint(alertname, strOf(labels, "service"), strOf(labels, "job"), in.Env))
 	if len(alerts) > 1 {
@@ -110,8 +95,6 @@ func fromAlertmanager(env map[string]any, def Defaults) domain.IncidentInput {
 	return in
 }
 
-// fromGoogleCloudMonitoring reads a Cloud Monitoring notification. A "closed"
-// state is a recovery, which resolves the matching incident.
 func fromGoogleCloudMonitoring(env map[string]any, def Defaults) domain.IncidentInput {
 	incident, _ := env["incident"].(map[string]any)
 	in := domain.IncidentInput{Env: def.Env}
@@ -130,8 +113,6 @@ func fromGoogleCloudMonitoring(env map[string]any, def Defaults) domain.Incident
 	return in
 }
 
-// fromSentry reads a Sentry issue alert (both the modern `data.issue` shape and
-// the legacy flat event).
 func fromSentry(env map[string]any, def Defaults) domain.IncidentInput {
 	in := domain.IncidentInput{Env: def.Env}
 	issue := map[string]any{}
@@ -157,8 +138,6 @@ func fromSentry(env map[string]any, def Defaults) domain.IncidentInput {
 	return in
 }
 
-// fromGeneric reads the documented plain shape: {title, detail, severity, env,
-// fingerprint, resolved}. It is also the fallback for unrecognised payloads.
 func fromGeneric(env map[string]any, def Defaults) domain.IncidentInput {
 	in := domain.IncidentInput{
 		Title:       firstNonEmpty(strOf(env, "title"), strOf(env, "message"), strOf(env, "summary"), strOf(env, "error")),
@@ -196,7 +175,6 @@ func strOf(m map[string]any, key string) string {
 	return ""
 }
 
-// str walks a nested map path and reads the leaf as a string.
 func str(m map[string]any, path ...string) string {
 	cur := m
 	for i, key := range path {
@@ -221,8 +199,6 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// truncateUTF8 cuts at a byte budget without splitting a multi-byte rune —
-// Postgres rejects invalid UTF-8 outright, which would drop the whole alert.
 func truncateUTF8(s string, n int) string {
 	if len(s) <= n {
 		return s

@@ -8,10 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The shipped default was 60s, which is below the cost of the loop every
-// developer agent runs — install, build, test — so the agent could never verify
-// its own work. This pins the shipped budgets rather than the code defaults:
-// the bug was in the config file, not in the fallback.
 func TestShippedTerminalBudgetsFitARealBuild(t *testing.T) {
 	cfg, err := appconfig.Load("../../../resources/config.yml")
 	require.NoError(t, err)

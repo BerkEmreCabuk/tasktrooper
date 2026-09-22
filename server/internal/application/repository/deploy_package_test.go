@@ -15,9 +15,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// fakePackageStore is an in-memory port.DeployPackageStore. Membership is kept
-// as the ids the caller supplied, so position is the slice index — exactly what
-// the real store writes.
 type fakePackageStore struct {
 	pkg     domain.DeployPackage
 	members []domain.DeployPackageTask
@@ -80,8 +77,6 @@ func (f *fakePackageStore) ListTasks(context.Context, uuid.UUID) ([]domain.Deplo
 	return out, nil
 }
 
-// fakePackageTaskStore serves several tasks by id — the release-gate fake only
-// ever holds one, and a package needs a board.
 type fakePackageTaskStore struct {
 	tasks map[uuid.UUID]domain.BoardTask
 }
@@ -110,9 +105,6 @@ func (f *fakePackageTaskStore) ListByRepository(context.Context, uuid.UUID) ([]d
 	return nil, nil
 }
 
-// ListAll answers FindTaskRepositoryID, which the relation guards use to render
-// a task as "T-12 (API migration)" in their error messages. Returning nil made
-// every such message fall back to a UUID.
 func (f *fakePackageTaskStore) ListAll(context.Context) ([]domain.BoardTask, error) {
 	out := make([]domain.BoardTask, 0, len(f.tasks))
 	for _, task := range f.tasks {
@@ -179,13 +171,10 @@ func (f *fakePackageTaskStore) BlockOnCancel(context.Context, uuid.UUID, uuid.UU
 	return nil
 }
 
-// fakeRelationStore answers deploy_depends_on lookups from a plain
-// source → targets map.
 type fakeRelationStore struct {
 	deps    map[uuid.UUID][]uuid.UUID
 	listErr error
-	// replaced records the last ReplaceForTaskOfType call so the "only one type
-	// is touched" contract can be asserted.
+
 	replaced map[uuid.UUID][]uuid.UUID
 }
 
@@ -247,9 +236,6 @@ func (f *fakeRelationStore) AddBlockers(_ context.Context, targetTaskID uuid.UUI
 	return out, nil
 }
 
-// fakePackagePipelineStore keeps per-task pipeline history and records what a
-// dispatch created — a dispatched deploy immediately becomes a pending run, the
-// way the real store behaves, so the idempotency guard is exercised for real.
 type fakePackagePipelineStore struct {
 	runs    map[uuid.UUID][]domain.TaskPipeline
 	created []domain.TaskPipeline
@@ -268,8 +254,6 @@ func (f *fakePackagePipelineStore) Update(_ context.Context, p domain.TaskPipeli
 	return p, nil
 }
 
-// ClaimTerminal mirrors the real guard: a pipeline reaches a terminal state
-// once, and a second caller is told it lost. See port.TaskPipelineStore.
 func (f *fakePackagePipelineStore) ClaimTerminal(ctx context.Context, p domain.TaskPipeline) (domain.TaskPipeline, bool, error) {
 	out, err := f.Update(ctx, p)
 	return out, err == nil, err
@@ -304,9 +288,6 @@ func (f *fakePackagePipelineStore) ListJobs(context.Context, uuid.UUID) ([]domai
 	return nil, nil
 }
 
-// packageFixture wires a service whose every release gate is satisfiable, so a
-// test that sees no dispatch is seeing the package logic refuse — not an
-// unrelated gate.
 type packageFixture struct {
 	svc       *Service
 	repoID    uuid.UUID
@@ -317,11 +298,6 @@ type packageFixture struct {
 	comments  *fakeReleaseComments
 }
 
-// newPackageFixture builds a package of len(keys) done tasks, in the given
-// order, each stamped at the commit its branch is on so releaseTargetGate
-// passes. AutoReleaseOnDone is deliberately FALSE: a batched-release repository
-// is the only kind that needs a deploy package, and the package path must work
-// there.
 func newPackageFixture(t *testing.T, keys ...string) *packageFixture {
 	t.Helper()
 	repoID := uuid.New()
@@ -366,7 +342,6 @@ func newPackageFixture(t *testing.T, keys ...string) *packageFixture {
 	}
 }
 
-// taskID looks a member up by its board key.
 func (f *packageFixture) taskID(t *testing.T, key string) uuid.UUID {
 	t.Helper()
 	for _, m := range f.packages.members {
@@ -378,27 +353,24 @@ func (f *packageFixture) taskID(t *testing.T, key string) uuid.UUID {
 	return uuid.Nil
 }
 
-// dependsOn records "later must deploy after earlier".
 func (f *packageFixture) dependsOn(t *testing.T, later, earlier string) {
 	t.Helper()
 	l, e := f.taskID(t, later), f.taskID(t, earlier)
 	f.relations.deps[l] = append(f.relations.deps[l], e)
 }
 
-// markLive puts a member in the released column, which is production evidence.
 func (f *packageFixture) markLive(t *testing.T, key string) {
 	t.Helper()
 	id := f.taskID(t, key)
 	task := f.tasks.tasks[id]
 	task.Column = domain.TaskColumnReleased
 	f.tasks.tasks[id] = task
-	// A landed deploy is no longer in flight.
+
 	f.pipelines.runs[id] = []domain.TaskPipeline{{
 		TaskID: id, Trigger: domain.PipelineTriggerProdDeploy, Status: domain.PipelineStatusSuccess,
 	}}
 }
 
-// dispatchedKeys names the tasks a dispatch created a deploy for, in order.
 func (f *packageFixture) dispatchedKeys(t *testing.T) []string {
 	t.Helper()
 	var out []string
@@ -412,13 +384,11 @@ func (f *packageFixture) dispatchedKeys(t *testing.T) []string {
 	return out
 }
 
-// A package's release order is its dependency order, and where dependencies do
-// not constrain it, the order the human assembled it in.
 func TestOrderMembersSortsByDeployDependencies(t *testing.T) {
 	cases := []struct {
 		name string
 		keys []string
-		// deps maps "later" → "earlier it must deploy after".
+
 		deps map[string]string
 		want []string
 	}{
@@ -469,9 +439,6 @@ func TestOrderMembersSortsByDeployDependencies(t *testing.T) {
 	}
 }
 
-// A cycle has no release order. Picking one arbitrarily would dispatch a task
-// whose own dependency gate is guaranteed to refuse it, so ordering must fail
-// loudly and name the tasks involved.
 func TestOrderMembersRejectsCycle(t *testing.T) {
 	f := newPackageFixture(t, "DE-1", "DE-2")
 	f.dependsOn(t, "DE-1", "DE-2")
@@ -489,8 +456,6 @@ func TestOrderMembersRejectsCycle(t *testing.T) {
 	}
 }
 
-// A dependency outside the package cannot be ordered by this package, so it
-// must not be treated as an edge — deployDependencyGate is the authority on it.
 func TestOrderMembersIgnoresDependenciesOutsideThePackage(t *testing.T) {
 	f := newPackageFixture(t, "DE-1")
 	outsider := uuid.New()
@@ -506,12 +471,9 @@ func TestOrderMembersIgnoresDependenciesOutsideThePackage(t *testing.T) {
 	}
 }
 
-// ReleasePackage starts the train: it dispatches only the members whose
-// dependencies are already satisfied and leaves the package releasing. The
-// second wave must NOT go out yet — its dependency's deploy is still running.
 func TestReleasePackageDispatchesOnlyTheFirstWave(t *testing.T) {
 	f := newPackageFixture(t, "DE-1", "DE-2")
-	f.dependsOn(t, "DE-1", "DE-2") // DE-1 ships after DE-2
+	f.dependsOn(t, "DE-1", "DE-2")
 
 	pkg, err := f.svc.ReleasePackage(context.Background(), f.repoID, f.packages.pkg.ID)
 	if err != nil {
@@ -526,8 +488,6 @@ func TestReleasePackageDispatchesOnlyTheFirstWave(t *testing.T) {
 	}
 }
 
-// The wave that could not go out on release goes out on the next read, once its
-// dependency has actually landed. This is the whole reason advancement is lazy.
 func TestAdvancePackageDispatchesTheNextWaveWhenTheDependencyLands(t *testing.T) {
 	f := newPackageFixture(t, "DE-1", "DE-2")
 	f.dependsOn(t, "DE-1", "DE-2")
@@ -550,8 +510,6 @@ func TestAdvancePackageDispatchesTheNextWaveWhenTheDependencyLands(t *testing.T)
 	}
 }
 
-// Every member live → the train is released. Nothing else writes that status:
-// it is evidence, not a claim.
 func TestAdvancePackageReleasesWhenEveryMemberIsLive(t *testing.T) {
 	f := newPackageFixture(t, "DE-1", "DE-2")
 	f.packages.pkg.Status = domain.DeployPackageStatusReleasing
@@ -575,8 +533,6 @@ func TestAdvancePackageReleasesWhenEveryMemberIsLive(t *testing.T) {
 	}
 }
 
-// Advancement is called on every read, so it must be idempotent: a member whose
-// deploy is already in flight is not dispatched a second time.
 func TestAdvancePackageDoesNotRedispatchAnInFlightMember(t *testing.T) {
 	f := newPackageFixture(t, "DE-1")
 
@@ -596,12 +552,9 @@ func TestAdvancePackageDoesNotRedispatchAnInFlightMember(t *testing.T) {
 	}
 }
 
-// A refused member fails the whole train, and the note has to name which member
-// and why — a failed package with no reason is indistinguishable from a stuck
-// one.
 func TestAdvancePackageFailsWithTheOffendingTaskNamed(t *testing.T) {
 	f := newPackageFixture(t, "DE-1")
-	// Withdraw the sign-off: releaseTargetGate now refuses this task.
+
 	id := f.taskID(t, "DE-1")
 	task := f.tasks.tasks[id]
 	task.VerifiedSHA = ""
@@ -622,7 +575,6 @@ func TestAdvancePackageFailsWithTheOffendingTaskNamed(t *testing.T) {
 	}
 }
 
-// A draft package is enriched but never advanced: nobody started it.
 func TestAdvancePackageLeavesADraftAlone(t *testing.T) {
 	f := newPackageFixture(t, "DE-1")
 
@@ -641,9 +593,6 @@ func TestAdvancePackageLeavesADraftAlone(t *testing.T) {
 	}
 }
 
-// A cycle discovered at release time fails the package before anything is
-// dispatched — half a train shipped with no way to finish it is worse than a
-// train that never left.
 func TestReleasePackageFailsOnCycleWithoutDispatching(t *testing.T) {
 	f := newPackageFixture(t, "DE-1", "DE-2")
 	f.dependsOn(t, "DE-1", "DE-2")
@@ -661,17 +610,13 @@ func TestReleasePackageFailsOnCycleWithoutDispatching(t *testing.T) {
 	}
 }
 
-// A package is the release path FOR batched-release repositories, so the flag
-// that disables per-task auto release must not disable it. The fixture's repo
-// has AutoReleaseOnDone=false throughout; this pins the behaviour explicitly.
 func TestPackageReleaseIgnoresAutoReleaseOnDone(t *testing.T) {
 	f := newPackageFixture(t, "DE-1")
 
-	// The ordinary path is still refused for this repository…
 	if _, err := f.svc.TriggerRelease(context.Background(), f.repoID, f.taskID(t, "DE-1")); !errors.Is(err, ErrReleaseDisabled) {
 		t.Fatalf("want ErrReleaseDisabled on the per-task path, got %v", err)
 	}
-	// …while the package path releases it.
+
 	pkg, err := f.svc.ReleasePackage(context.Background(), f.repoID, f.packages.pkg.ID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -684,7 +629,6 @@ func TestPackageReleaseIgnoresAutoReleaseOnDone(t *testing.T) {
 	}
 }
 
-// The dependency gate is what makes deploy_depends_on more than documentation.
 func TestDeployDependencyGateBlocksUntilTheDependencyIsLive(t *testing.T) {
 	f := newPackageFixture(t, "DE-1", "DE-2")
 	f.dependsOn(t, "DE-1", "DE-2")
@@ -704,9 +648,6 @@ func TestDeployDependencyGateBlocksUntilTheDependencyIsLive(t *testing.T) {
 	}
 }
 
-// An unreadable dependency list fails closed. "Cannot check" is the case the
-// gate exists for; treating it as "checked and fine" is how an out-of-order
-// deploy reaches production during a database hiccup.
 func TestDeployDependencyGateFailsClosedOnUnreadableRelations(t *testing.T) {
 	f := newPackageFixture(t, "DE-1")
 	f.relations.listErr = errors.New("boom: the database is unreachable")
@@ -718,8 +659,6 @@ func TestDeployDependencyGateFailsClosedOnUnreadableRelations(t *testing.T) {
 	}
 }
 
-// Editing deploy order must not touch the task's other relations — a full
-// replace would silently drop its blocks relations.
 func TestReplaceDeployDependenciesTouchesOnlyItsOwnType(t *testing.T) {
 	f := newPackageFixture(t, "DE-1", "DE-2")
 	source, target := f.taskID(t, "DE-1"), f.taskID(t, "DE-2")
@@ -737,9 +676,6 @@ func TestReplaceDeployDependenciesTouchesOnlyItsOwnType(t *testing.T) {
 	}
 }
 
-// A task that deploy-depends on itself would deadlock its own release gate
-// forever, so it is refused at the edge rather than written and discovered
-// later.
 func TestReplaceDeployDependenciesRejectsSelfDependency(t *testing.T) {
 	f := newPackageFixture(t, "DE-1")
 	id := f.taskID(t, "DE-1")
@@ -751,9 +687,6 @@ func TestReplaceDeployDependenciesRejectsSelfDependency(t *testing.T) {
 	}
 }
 
-// The pre-deploy checklist is posted from the structured fields when the deploy
-// is dispatched — that is what replaced the "write a checklist comment"
-// instruction in the tool description.
 func TestTriggerReleasePostsTheRunbookOnDispatch(t *testing.T) {
 	f := newPackageFixture(t, "DE-1")
 	id := f.taskID(t, "DE-1")
@@ -777,7 +710,6 @@ func TestTriggerReleasePostsTheRunbookOnDispatch(t *testing.T) {
 	}
 }
 
-// A task with no runbook must not produce an empty comment on every release.
 func TestTriggerReleasePostsNothingWithoutARunbook(t *testing.T) {
 	f := newPackageFixture(t, "DE-1")
 

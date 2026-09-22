@@ -13,13 +13,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// reviewGit is a port.GitClient stub for the PR gate: everything the gate does
-// not touch is inherited (and panics if it is ever called).
 type reviewGit struct {
 	port.GitClient
-	origin string
-	// prErrs is consumed one call at a time, so a test can say "the first
-	// EnsurePullRequest fails, the one after the push succeeds".
+	origin    string
 	prErrs    []error
 	prURL     string
 	pushErr   error
@@ -56,10 +52,6 @@ func TestReviewPRContext_UsesTheExistingPR(t *testing.T) {
 	assert.Zero(t, g.pushCalls, "a branch that already has a PR must not be pushed again")
 }
 
-// The developer's branch is pushed at the END of its run, so the PR attempt
-// fired by the column move can lose the race and leave no PR at all. The
-// reviewer publishes the branch and opens it rather than reviewing a change
-// that exists nowhere but the local workspace.
 func TestReviewPRContext_PushesTheBranchAndOpensThePR(t *testing.T) {
 	g := &reviewGit{
 		origin:  "https://github.com/acme/acme-web.git",
@@ -88,8 +80,6 @@ func TestReviewPRContext_NoPRIsAnErrorWhenTheRepoHasAnOrigin(t *testing.T) {
 	assert.ErrorIs(t, err, ErrReviewPRMissing)
 }
 
-// A repository with no remote cannot have a pull request, and refusing to
-// review it would strand every task in code_review. The diff is still there.
 func TestReviewPRContext_NoOriginReviewsTheDiffAlone(t *testing.T) {
 	g := &reviewGit{prErrs: []error{errors.New("no origin"), errors.New("no origin")}}
 
@@ -113,10 +103,8 @@ func TestIsReviewColumn(t *testing.T) {
 	}
 }
 
-// The reviewer is told to read the ENTIRE diff, so it must get more of it than
-// a working run that only needs a reminder of its own changes.
 func TestReviewDiffMessage_ReviewerGetsTheWholeDiff(t *testing.T) {
-	diff := strings.Repeat("+ line of code\n", 1200) // ~18 KB
+	diff := strings.Repeat("+ line of code\n", 1200)
 
 	reviewer := reviewDiffMessage(taskWF, domain.TaskColumnCodeReview, diff)
 	implementer := reviewDiffMessage(taskWF, domain.TaskColumnInProgress, diff)
@@ -128,7 +116,7 @@ func TestReviewDiffMessage_ReviewerGetsTheWholeDiff(t *testing.T) {
 }
 
 func TestReviewDiffMessage_TruncatesBeyondTheReviewLimit(t *testing.T) {
-	diff := strings.Repeat("+ line of code\n", 4000) // ~60 KB
+	diff := strings.Repeat("+ line of code\n", 4000)
 
 	got := reviewDiffMessage(taskWF, domain.TaskColumnCodeReview, diff)
 
@@ -136,9 +124,6 @@ func TestReviewDiffMessage_TruncatesBeyondTheReviewLimit(t *testing.T) {
 	assert.Less(t, len(got), reviewDiffLimit+500)
 }
 
-// The generic column instruction told the reviewer to "do the work this column
-// asks of your role", which it read as: build it, run it, test it. It spent
-// whole runs reproducing the pipeline instead of reading the diff.
 func TestColumnInstructionCodeReviewReadsTheDiffInsteadOfRunningIt(t *testing.T) {
 	got := columnInstruction(taskWF, domain.BoardTask{Column: domain.TaskColumnCodeReview})
 

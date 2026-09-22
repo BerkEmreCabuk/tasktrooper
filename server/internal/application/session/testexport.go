@@ -16,8 +16,6 @@ func ResolveChatModelForTest(reqModel, sessionModel, agentModel string) string {
 	return resolveChatModel(reqModel, sessionModel, agentModel)
 }
 
-// AttachImageAttachmentsForTest exercises the image-enrichment helper directly
-// against a fake attachment store; rows and history must be index-parallel.
 func AttachImageAttachmentsForTest(
 	ctx context.Context,
 	store AttachmentLinker,
@@ -27,11 +25,6 @@ func AttachImageAttachmentsForTest(
 	attachImageAttachments(ctx, store, rows, history)
 }
 
-// ResolveRunWorkspaceForTest exercises the workspace + context + prompt decisions
-// one turn makes, which is where a task-bound chat differs from every other chat:
-// it must land in the task's own branch checkout rather than the shared mirror
-// clone. It returns the workspace dir, the run context (carrying the branch and
-// task id) and the history the model would see.
 func ResolveRunWorkspaceForTest(
 	ctx context.Context,
 	store port.SessionStore,
@@ -50,16 +43,10 @@ func ResolveRunWorkspaceForTest(
 	return dir, runCtx, out, err
 }
 
-// NewHostExecutedServiceForTest builds the minimum Service the host-executor
-// chat path needs: a store to record the CLI session on, and the executor that
-// answers the turn. Everything else that path touches is a parameter.
 func NewHostExecutedServiceForTest(store port.SessionStore, executor port.ChatExecutor) *Service {
 	return &Service{store: store, chatExecutor: executor}
 }
 
-// ParkTurnOnQuotaForTest exercises the quota-park path directly — the store
-// write and the transcript notice it leaves behind — without paying for the
-// rest of SendMessage's setup (workspace, agent context, the run itself).
 func ParkTurnOnQuotaForTest(
 	ctx context.Context,
 	store port.SessionStore,
@@ -73,14 +60,6 @@ func ParkTurnOnQuotaForTest(
 	return svc.parkTurnOnQuota(ctx, sessionID, req, policy, block, lang)
 }
 
-// RunHostExecutedTurnForTest exercises the branch a claude_code chat takes
-// instead of the agent loop — the branch whose absence made such an agent
-// chattable only in theory.
-//
-// The arguments are spelled out rather than hidden behind a fixture because they
-// ARE the contract with the executor: which provider decided the route, which
-// workspace the CLI is started in, which policy its tools are served under, and
-// whether the session row carried a CLI session to resume.
 func (s *Service) RunHostExecutedTurnForTest(
 	ctx context.Context,
 	sess domain.Session,
@@ -104,8 +83,6 @@ func (s *Service) RunHostExecutedTurnForTest(
 	}, out)
 }
 
-// AppendAssistantErrorForTest exercises how a failed turn is written into the
-// transcript, which is where a user actually meets an error.
 func AppendAssistantErrorForTest(ctx context.Context, store port.SessionStore, sessionID uuid.UUID, err error) {
 	(&Service{store: store}).appendAssistantError(ctx, sessionID, err)
 }

@@ -14,20 +14,13 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// mcpEndpoint publishes the loopback URL a CHILD process on this host must POST
-// to in order to reach this server's MCP endpoint.
-//
-// It exists because of an ordering problem, not an abstraction one: the Claude
-// Code executor is constructed inside buildHandler, which also activates the
-// board workers, so a run can be executing before buildHandler returns — while
-// with Server.Port 0 (desktop, and every test) the port is not even chosen
-// until the listener binds. Run therefore binds FIRST and publishes the bound
-// address into this before it builds the handler, so the address is a fact
-// rather than a guess by the time anything can read it.
-//
-// The host is always 127.0.0.1, never whatever the listener bound. A cloud pod
-// listens on 0.0.0.0, which is not an address anything can connect TO, and the
-// only client this URL is ever handed to is a process on this same host.
+// mcpEndpoint publishes the loopback URL a CHILD process on this host POSTs to
+// for this server's MCP endpoint: Run binds FIRST and publishes the bound
+// address, because with Server.Port 0 the port is not even chosen until the
+// listener binds, and a run can be executing before buildHandler returns. The
+// host is always 127.0.0.1, never whatever the listener bound — a cloud pod
+// listens on 0.0.0.0, which nothing can connect to, and the only client is a
+// process on this same host.
 type mcpEndpoint struct {
 	url atomic.Pointer[string]
 }
@@ -48,19 +41,15 @@ func (e *mcpEndpoint) get() string {
 	return ""
 }
 
-// publicEndpoint is the address a session on somebody's MAC reaches this
-// endpoint at: the deployment's gateway-fronted /api/mcp.
-//
-// A plain string rather than the atomic above, because nothing about it is
-// discovered at boot — it is configuration (server.public_base_url), known
-// before anything can dispatch. An empty one is a deployment that was never
-// told its own public name, which is a real state and reads downstream as "no
-// endpoint to hand out" rather than as a URL nobody can resolve.
+// publicEndpoint is where a session on somebody's MAC reaches this endpoint:
+// the deployment's gateway-fronted /api/mcp. A plain string, because nothing
+// about it is discovered at boot — it is config (server.public_base_url), known
+// before anything dispatches. Empty means the deployment was never told its own
+// public name, which reads downstream as "no endpoint to hand out".
 type publicEndpoint string
 
 func (p publicEndpoint) get() string { return string(p) }
 
-// mcpAddress is the one thing the provider needs from either of the two above.
 type mcpAddress interface{ get() string }
 
 // claudeCodeMCP is the executor's claudecode.MCPProvider: one token per run,
@@ -68,14 +57,13 @@ type mcpAddress interface{ get() string }
 type claudeCodeMCP struct {
 	endpoint mcpAddress
 	tokens   *mcpserver.RunTokenRegistry
-	// registry answers WHICH tools this run's policy is served, so the executor
-	// can name them in the session's system prompt. Nil in the tests that only
-	// exercise minting, which then get no manifest — the same as an install
-	// whose registry has not been wired.
+	// registry decides which tools this run's policy is served, so the executor
+	// can name them in the session's system prompt. Nil in the minting-only
+	// tests, whose manifest is then empty.
 	registry port.ToolRegistry
-	// ttl is the absolute ceiling on a credential that leaves this machine: its
-	// run's own lifetime bounds it either way, but "the run ended" is a fact only
-	// this process observes. 0 means none, which is what a loopback token gets.
+	// ttl ceilings a credential that leaves this machine; "the run ended" is a
+	// fact only this process observes. 0 means none, which is what a loopback
+	// token gets.
 	ttl time.Duration
 	// now is time.Now, overridden in tests.
 	now func() time.Time
@@ -94,22 +82,13 @@ func (m *claudeCodeMCP) ForRun(ctx context.Context, run claudecode.MCPRun) (clau
 	noop := func() {}
 	url := m.endpoint.get()
 	if url == "" {
-		// Loopback: the listener has not bound yet. Only reachable if a run
-		// started before the HTTP server did, which the activation ordering
-		// prevents. Remote: server.public_base_url is not configured, so there
-		// is no address a laptop could resolve.
-		//
-		// A TASK fails here rather than degrading — when it asked to. It used
-		// to degrade unconditionally, on the reasoning that a run without the
-		// board tools still does real work on the CLI's native ones — which is
-		// true and beside the point: the work it cannot do is the workflow. It
-		// cannot move its card, tick a criterion or record a verdict, so the
-		// run ends looking successful, the criteria gate refuses the hand-off,
-		// and the board dispatches the same task again. Nothing in that loop
-		// reports a fault and nothing ends it; it just spends the
-		// subscription. One sentence on the run row is cheaper than any number
-		// of laps. See MCPRun.RequiresTools — and see RemoteExecutor.Execute
-		// for why the remote path deliberately does NOT set it.
+		// Loopback: the listener has not bound yet, which the activation
+		// ordering prevents. A task run that requires tools FAILS here rather
+		// than degrading — a run without board tools cannot move its card or
+		// tick a criterion, so it ends "successful", the criteria gate refuses,
+		// and the board re-dispatches the same task in a silent, billable loop.
+		// A chat turn (and a remote task, see RemoteExecutor.Execute) keeps the
+		// old degrade-without-tools behaviour.
 		if run.RequiresTools {
 			log.Error().Str("task_key", run.Label).
 				Msg("mcp endpoint address not published yet; refusing to start an agent cli task run that would have no tasktrooper board tools")
@@ -117,26 +96,15 @@ func (m *claudeCodeMCP) ForRun(ctx context.Context, run claudecode.MCPRun) (clau
 				"the tasktrooper tool endpoint is not serving yet, so this %s run would have no way to move its card, "+
 					"tick an acceptance criterion or record a verdict; it will be dispatched again once the server is up", run.Label)
 		}
-		// A chat turn keeps the old behaviour: fewer tools is a worse
-		// conversation, not an unfinishable one. So does a remote task, whose
-		// alternative is failing every run of every claude_code agent on one
-		// unset configuration line.
 		log.Warn().Str("session_id", run.Label).
 			Msg("no mcp endpoint address for this session; it runs on its native tools only, with no tasktrooper board tools")
 		return claudecode.MCPConfig{}, noop, nil
 	}
 
-	// ctx is the caller's run context — the board runner's runCtx, or a chat
-	// turn's: the endpoint executes this session's tool calls under it, so they
-	// are attributed exactly as the agent loop's would be. run.Policy is the
-	// same policy the loop would have enforced, and it decides which tools the
-	// session is served. A chat turn is credentialled identically to a board
-	// run, which is the point — the agent has TaskTrooper's tools in
-	// conversation for the same reason it has them on a card.
-	// SkillsOnDisk rides along for the same reason: it narrows the surface too
-	// (load_skill is withheld from a run whose skills are files in its
-	// workspace), so the endpoint has to learn it from the credential exactly as
-	// it learns the policy.
+	// ctx is the caller's run context, so the endpoint attributes this
+	// session's tool calls exactly as the agent loop would. run.Policy decides
+	// the served tools; SkillsOnDisk rides the credential (and narrows the
+	// surface — load_skill is withheld for workspace-file skills).
 	served := mcpserver.Run{
 		Ctx:          ctx,
 		Policy:       run.Policy,
@@ -148,12 +116,8 @@ func (m *claudeCodeMCP) ForRun(ctx context.Context, run claudecode.MCPRun) (clau
 	if err != nil {
 		return claudecode.MCPConfig{}, noop, err
 	}
-	// ONE Run value decides both what the endpoint will serve this token and
-	// what the session is told it holds, because ServedToolNames answers the
-	// question off the same struct tools/list will. A manifest built from a
-	// second, hand-assembled notion of the run would eventually name a tool the
-	// endpoint refuses — and the model, having been told it has it, would keep
-	// calling it.
+	// The SAME Run value serves tools/list and the session's manifest, so the
+	// model is never told it has a tool the endpoint will refuse.
 	return claudecode.MCPConfig{
 		URL:   url,
 		Token: token,
@@ -168,20 +132,11 @@ func (m *claudeCodeMCP) expiry() time.Time {
 	return m.clock().Add(m.ttl)
 }
 
-// mcpTokenGrace is how long past a session's own run timeout its credential
-// stays valid.
-//
-// It is not zero because the two clocks are not the same clock: the ceiling is
-// stamped in this process when the token is minted, and the session on the Mac
-// starts some time after that (queueing behind another of that member's runs,
-// the tunnel round trip, the CLI's own start-up) and finishes on its own
-// deadline. A ceiling equal to the run timeout would start expiring healthy
-// sessions in their last minutes — a 401 the CLI reports as
-// `requires re-authorization (token expired)` and then gives up on the server
-// for the rest of the run, which is the exact silent failure this whole
-// endpoint's logging exists to catch.
-//
-// It is short because the token's real revocation is elsewhere: the executor's
-// defer, the run context's cancellation, and a process restart all kill it
-// sooner. This is only the backstop for a copy that outlived all three.
+// mcpTokenGrace stays valid past a session's own run timeout because minting
+// and running are not the same clock: a session starts late (queueing, the
+// tunnel, CLI start-up) and an equal ceiling would 401 healthy sessions in
+// their last minutes — a silent failure this endpoint's logging exists to
+// catch. It is short because the real revocation is the run context's
+// cancellation and a process restart; this is the backstop for a copy that
+// outlived all of those.
 const mcpTokenGrace = 15 * time.Minute

@@ -106,8 +106,7 @@ func TestBuildIntakeSystemPrompt_SkipsDisabledSoloAgentSkills(t *testing.T) {
 }
 
 func TestBuildIntakeSystemPrompt_NoDanglingCatalogReference(t *testing.T) {
-	// The prompt used to tell the model to follow catalog skills and rules it
-	// was never shown. Without a catalog, it must not claim one exists.
+	// Without a catalog the prompt must not claim skills and rules exist.
 	p := orchestrator.BuildIntakeSystemPromptForTest(orchestrator.IntakeOptions{
 		Lang:          "tr",
 		SoloAgentName: "product-manager",

@@ -11,20 +11,18 @@ import (
 // HostingLinkStore persists the per-(repository, area) provider binding.
 type HostingLinkStore interface {
 	ListByRepository(ctx context.Context, repositoryID uuid.UUID) ([]domain.HostingLink, error)
-	// Get returns an error wrapping ErrNotFound when the area has no link.
 	Get(ctx context.Context, repositoryID uuid.UUID, area string) (domain.HostingLink, error)
-	// Save upserts on (repository_id, area).
 	Save(ctx context.Context, link domain.HostingLink) (domain.HostingLink, error)
 	Delete(ctx context.Context, repositoryID uuid.UUID, area string) error
 }
 
-// VercelCredentialStore keeps the Vercel access token (encrypted at rest, the
-// way the GitHub token is) and the default team it acts in.
+// VercelCredentialStore keeps the Vercel access token (encrypted at rest) and
+// the default team it acts in.
 type VercelCredentialStore interface {
 	VercelToken(ctx context.Context) (string, error)
 	SetVercelToken(ctx context.Context, token string) error
-	// DeleteVercelToken removes the token AND the default team: a scope with
-	// no credential behind it is not a setting, it is a stale hint.
+	// Removes the token AND the default team: a scope with no credential
+	// behind it is not a setting, it is a stale hint.
 	DeleteVercelToken(ctx context.Context) error
 	VercelTeam(ctx context.Context) (string, error)
 	SetVercelTeam(ctx context.Context, teamID string) error

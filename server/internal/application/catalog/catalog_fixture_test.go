@@ -8,9 +8,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// monorepoCatalog is the repo-root catalog this package's definitions moved
-// to. Reading it back through the production reader keeps the generator's
-// output and the code's expectations from drifting.
+// Repo-root catalog read through the production reader, so the generator's output and these expectations cannot drift.
 const monorepoCatalog = "../../../../catalog"
 
 func repoCatalogAgents(t *testing.T) map[string]domain.UpstreamAgent {

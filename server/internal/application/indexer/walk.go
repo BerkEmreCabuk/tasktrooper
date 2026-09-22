@@ -7,9 +7,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/mapper"
 )
 
-// indexableExtensions is the source-file allowlist. Every entry here has a
-// symbol-aware chunker in chunker.DefaultRegistry; adding an extension without
-// one still works but degrades that language to fixed-size slices.
 var indexableExtensions = map[string]struct{}{
 	".go":    {},
 	".ts":    {},

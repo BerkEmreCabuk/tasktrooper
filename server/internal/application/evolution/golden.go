@@ -13,18 +13,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// goldenRun is one pass over the agent's golden suite. Failures name the tasks
-// that missed and what they missed, which is the only part of the run the gate
-// judge can reason about.
+// One pass over the agent's golden suite; failures name the tasks that missed and what they missed — the only part of the run the gate judge can reason about.
 type goldenRun struct {
 	Rate      float64
 	Evaluated int
 	Failures  []string
-	// Unservable is set when the pass was abandoned because the agent's engine
-	// cannot answer this kind of call at all — a Claude Code agent asked for a
-	// toolless completion. It is distinct from "the suite ran and everything
-	// failed" and from "there is no suite", because it is the only one of the
-	// three that means NOTHING WAS MEASURED and the reason is a setting.
+	// Set when the pass was abandoned because the agent's engine cannot answer this kind of call at all. Distinct from "ran and everything failed" and "no suite": only it means NOTHING WAS MEASURED and the reason is a setting.
 	Unservable error
 }
 
@@ -35,10 +29,7 @@ const (
 	goldenPhaseAfter  = "after"
 )
 
-// runGoldenEval replays the agent's golden tasks against its CURRENT skills
-// and rules (a fast offline signal that the latest evolution didn't break the
-// agent). Pass = every expected substring present (case-insensitive).
-// phase tags the persisted results so a before/after pair stays readable.
+// Replays the agent's golden tasks against its CURRENT skills and rules — a fast offline signal that the latest evolution didn't break the agent. Pass = every expected substring present (case-insensitive); phase tags the persisted results so a before/after pair stays readable.
 func (s *Service) runGoldenEval(ctx context.Context, agentRec domain.Agent, reflectionID uuid.UUID, phase string) goldenRun {
 	if s.golden == nil {
 		return goldenRun{}
@@ -62,10 +53,7 @@ func (s *Service) runGoldenEval(ctx context.Context, agentRec domain.Agent, refl
 			ruleTexts = append(ruleTexts, r.Content)
 		}
 	}
-	// Golden eval is tool-less; inline full skill content instead of the lazy
-	// index so the agent's knowledge is actually exercised. Self-evolution is
-	// masked for the same reason: a create_skill invitation would promise a
-	// tool this run cannot call.
+	// Golden eval is tool-less; inline full skill content instead of the lazy index so the agent's knowledge is exercised. Self-evolution is masked for the same reason: a create_skill invitation would promise a tool this run cannot call.
 	evalAgent := agentRec
 	evalAgent.SelfEvolutionEnabled = false
 	systemPrompt := prompt.BuildSystemPrompt(evalAgent, nil, nil, ruleTexts, "")
@@ -103,12 +91,7 @@ func (s *Service) runGoldenEval(ctx context.Context, agentRec domain.Agent, refl
 			Model:        model,
 		})
 		if err != nil {
-			// A refusal this agent's engine cannot ever answer applies to every
-			// remaining task identically, so grinding through the rest of the
-			// suite would spend a round-trip each to collect the same sentence
-			// and end with Evaluated == 0 anyway. Stop, and stop LOUDLY: an
-			// empty suite is what made the gate keep change sets on
-			// "non-regression" between two rates that were both zero.
+			// The same refusal hits every remaining task, so stop — and stop loudly: an empty suite is what made the gate keep change sets on "non-regression" between two rates that were both zero.
 			if errors.Is(err, domain.ErrHostExecutedUnservable) {
 				log.Error().Err(err).Str("agent", agentRec.Name).Str("golden", task.Name).Str("phase", phase).
 					Msg("golden suite cannot run for this agent; abandoning the pass with nothing evaluated")
@@ -149,9 +132,7 @@ func (s *Service) runGoldenEval(ctx context.Context, agentRec domain.Agent, refl
 	return run
 }
 
-// unservable reports whether either pass of the suite was abandoned because the
-// agent's engine cannot serve this kind of call. Either one is enough: a gate
-// needs a before AND an after, and a missing half is not evidence.
+// Either half missing is enough: a gate needs a before AND an after, and a missing half is not evidence.
 func goldenUnservable(before, after goldenRun) error {
 	if before.Unservable != nil {
 		return before.Unservable
@@ -163,30 +144,12 @@ func goldenSummaryLine(rate float64, evaluated int) string {
 	return fmt.Sprintf("Golden eval: %.0f%% pass (%d task)", rate*100, evaluated)
 }
 
-// gateVerdict is the keep-or-revert decision on one reflection's changes.
 type gateVerdict struct {
 	Keep   bool   `json:"keep"`
 	Reason string `json:"reason"`
 }
 
-// judgeGoldenGate decides whether the changes a reflection just applied are
-// kept. The reflection wrote the changes, so it cannot be the one to grade
-// them: a second model sees only the before/after golden runs and the change
-// list, and its verdict is what stands.
-//
-// The deterministic rule below is the floor, not the ceiling: a drop is always
-// a revert regardless of what the judge says, and an unreachable judge falls
-// back to "keep only if the suite did not get worse".
-//
-// That fallback has one condition, and it is the whole reason this function was
-// revisited: "the suite did not get worse" is only a statement about anything if
-// THE SUITE RAN. Two rates of zero over zero tasks satisfy `after >= before`
-// perfectly, so a change set the system never measured was kept with the reason
-// "kept on non-regression" — a sentence that reads on the dashboard exactly like
-// evidence. The silent provider fallback is what made that state reachable: the
-// judge and the suite were both rerouted to the default HTTP provider,
-// and when that provider was a dead `gemini-2.0-flash` they both failed while
-// the gate kept saying non-regression. Now an unmeasured change set REVERTS.
+// The reflection wrote the changes, so it cannot grade them: an independent second model sees only the before/after golden runs and the change list. The deterministic floor is a drop is always a revert regardless of the judge, and an unreachable judge falls back to "keep only if the suite did not get worse" — which is only a statement if the suite ran: two zero rates satisfy after >= before, which is how an unmeasured change set was kept as "non-regression". An unmeasured change set now reverts.
 func (s *Service) judgeGoldenGate(ctx context.Context, agentRec domain.Agent, before, after goldenRun, changes []string) gateVerdict {
 	improved := after.Rate > before.Rate
 	held := after.Rate >= before.Rate
@@ -196,10 +159,7 @@ func (s *Service) judgeGoldenGate(ctx context.Context, agentRec domain.Agent, be
 			"golden pass rate dropped %.0f%% → %.0f%%", before.Rate*100, after.Rate*100)}
 	}
 
-	// Nothing was measured, and the reason is a setting rather than a bad
-	// minute. Revert: an agent that rewrote its own instructions with no
-	// evidence they help is exactly what this gate exists to stop, and keeping
-	// them would be the gate reporting a pass it never ran.
+	// Not measured, and the reason is a setting rather than a bad minute: an agent that rewrote its own instructions with no evidence they help is exactly what this gate exists to stop.
 	if unservable := goldenUnservable(before, after); unservable != nil {
 		log.Error().Err(unservable).Str("agent", agentRec.Name).
 			Msg("golden gate reverting: the suite could not run for this agent, so there is no evidence to keep the changes on")
@@ -238,11 +198,7 @@ func (s *Service) judgeGoldenGate(ctx context.Context, agentRec domain.Agent, be
 		ResponseFormat: domain.JSONSchemaResponseFormat("golden_gate_verdict", gateVerdictSchema()),
 	})
 	if err != nil {
-		// A judge that cannot run on this agent's engine will never run, so
-		// "kept on non-regression" would become the standing verdict on every
-		// future change set this agent writes about itself. Revert instead, and
-		// say which setting to change — the same treatment the suite gets above,
-		// for the same reason: no grader, no keep.
+		// An unservable judge will never run, so "kept on non-regression" would become the standing verdict on every future change set — revert instead, the same treatment the suite gets: no grader, no keep.
 		if errors.Is(err, domain.ErrHostExecutedUnservable) {
 			log.Error().Err(err).Str("agent", agentRec.Name).
 				Msg("golden gate reverting: the judge cannot run for this agent, so nothing graded these changes")
@@ -266,11 +222,7 @@ func (s *Service) judgeGoldenGate(ctx context.Context, agentRec domain.Agent, be
 	return verdict
 }
 
-// judgeRouting keeps the judge on its own model when one is configured, so the
-// grader is not literally the same weights that produced the changes. With no
-// override the judge defaults to the agent's ModelHeavy: keep-or-revert on a
-// prompt change is a hard-tier decision, and the cheap default model rubber-
-// stamping its own tier's edits is exactly the failure the gate exists for.
+// Judge stays on its own model when one is configured, so the grader is not literally the weights that produced the changes; with no override it is the agent's ModelHeavy — keep-or-revert on a prompt change is a hard-tier decision.
 func (s *Service) judgeRouting(agentRec domain.Agent) (string, domain.LLMProviderType) {
 	model, provider := agentRec.Model, agentRec.ProviderType
 	if agentRec.ModelHeavy != "" {

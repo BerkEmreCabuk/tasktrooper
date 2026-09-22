@@ -27,8 +27,6 @@ func (f fakeActive) HasLiveRunForTask(_ context.Context, id uuid.UUID, _ time.Du
 	return f[id], nil
 }
 
-// mkTaskDir creates a task workspace with a file inside it, so a partial delete
-// shows up as an existing directory rather than as success.
 func mkTaskDir(t *testing.T, root string, id uuid.UUID, age time.Duration) string {
 	t.Helper()
 	dir := filepath.Join(root, "task-"+id.String())
@@ -54,12 +52,12 @@ func TestWorkspaceReaperKeepsAndReaps(t *testing.T) {
 	root := t.TempDir()
 	grace := time.Hour
 
-	finished := uuid.New()    // released long ago → reaped
-	justDone := uuid.New()    // done, but inside the grace window → kept
-	working := uuid.New()     // in_progress → kept whatever its age
-	orphan := uuid.New()      // no row at all, old → reaped
-	freshOrphan := uuid.New() // no row, but recent → kept
-	running := uuid.New()     // released and old, but a run holds it → kept
+	finished := uuid.New()
+	justDone := uuid.New()
+	working := uuid.New()
+	orphan := uuid.New()
+	freshOrphan := uuid.New()
+	running := uuid.New()
 
 	dirs := map[uuid.UUID]string{
 		finished:    mkTaskDir(t, root, finished, 10*time.Hour),
@@ -69,7 +67,6 @@ func TestWorkspaceReaperKeepsAndReaps(t *testing.T) {
 		freshOrphan: mkTaskDir(t, root, freshOrphan, time.Minute),
 		running:     mkTaskDir(t, root, running, 10*time.Hour),
 	}
-	// Directories the reaper must never touch, whatever their age.
 	untouchable := []string{"agents", "repos", "lost+found", "task-not-a-uuid"}
 	for _, name := range untouchable {
 		if err := os.MkdirAll(filepath.Join(root, name), 0o755); err != nil {
@@ -106,9 +103,6 @@ func TestWorkspaceReaperKeepsAndReaps(t *testing.T) {
 	}
 }
 
-// A database that cannot answer makes every directory look orphaned. Reaping on
-// that reading would delete the workspace of every running task, so the pass has
-// to end instead.
 func TestWorkspaceReaperKeepsEverythingWhenTheTaskListFails(t *testing.T) {
 	root := t.TempDir()
 	dir := mkTaskDir(t, root, uuid.New(), 100*time.Hour)

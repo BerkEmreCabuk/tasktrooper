@@ -13,10 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeWakeResourceLister is board.WorkOrderResourceLister reduced to what
-// WakeDependentsOf drives: ClearWorkOrderWaiting on the tasks it decides are
-// free. ListBlockedByResource is unused on this path (only the periodic sweep
-// calls it) and returns nothing.
 type fakeWakeResourceLister struct {
 	byID    map[uuid.UUID]domain.BoardTask
 	cleared []uuid.UUID
@@ -35,9 +31,6 @@ func (f *fakeWakeResourceLister) ClearWorkOrderWaiting(_ context.Context, taskID
 	return task, true, nil
 }
 
-// fakeWakeBlockerReader answers ListBlockingSources per task, the way the
-// relation store would once one dependent's blocker has landed and another's
-// has not.
 type fakeWakeBlockerReader struct {
 	openByTask map[uuid.UUID][]domain.BoardTask
 }
@@ -46,9 +39,6 @@ func (f *fakeWakeBlockerReader) ListBlockingSources(_ context.Context, targetTas
 	return f.openByTask[targetTaskID], nil
 }
 
-// fakeWakeDependents answers ListBySource with the edges a landed blocker
-// carries as their source, mixing in a non-blocks relation to prove it is
-// filtered out.
 type fakeWakeDependents struct {
 	bySource map[uuid.UUID][]domain.TaskRelation
 }
@@ -57,10 +47,6 @@ func (f *fakeWakeDependents) ListBySource(_ context.Context, sourceTaskID uuid.U
 	return f.bySource[sourceTaskID], nil
 }
 
-// This is the event-driven half of the mechanism, exercised end to end: a
-// blocker reaching done must wake a fully-clear dependent inside the same
-// call, with a real agent run enqueued, while leaving a dependent that still
-// has an open blocker exactly where it was.
 func TestWakeDependentsOfDispatchesTheClearDependentAndLeavesTheStillBlockedOneParked(t *testing.T) {
 	blockerID := uuid.New()
 	agentID := uuid.New()
@@ -115,8 +101,6 @@ func TestWakeDependentsOfDispatchesTheClearDependentAndLeavesTheStillBlockedOneP
 	assert.Equal(t, agentID, runner.jobs[0].Run.AgentID)
 }
 
-// A best-effort no-op: nothing to wire means the dependent waits for the next
-// poll instead of the call panicking.
 func TestWakeDependentsOfIsANoOpWithoutDependentsWired(t *testing.T) {
 	boardCfg := &fakeBoardConfigStore{}
 	events := &fakeEventStore{}

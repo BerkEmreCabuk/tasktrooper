@@ -16,11 +16,6 @@ var readyPriorityRank = map[domain.TaskPriority]int{
 	domain.TaskPriorityLow:      3,
 }
 
-// ListReadyTasks is the unblocked queue: backlog/todo tasks with no unfinished
-// `blocks` blocker, sorted so the first entry is what an agent should pick up
-// next. It skips withLatestPipelineStatus (the other list methods' N+1 pipeline
-// enrichment) because a queue read has no use for it — the model is choosing
-// what to start, not reporting on what is running.
 func (s *Service) ListReadyTasks(ctx context.Context, repositoryID uuid.UUID) ([]domain.BoardTask, error) {
 	var tasks []domain.BoardTask
 	var err error
@@ -65,9 +60,6 @@ func (s *Service) ListReadyTasks(ctx context.Context, repositoryID uuid.UUID) ([
 	return ready, nil
 }
 
-// readyPriorityRankOf falls back to the lowest rank for a priority the map
-// does not recognize, rather than the zero value's rank (critical) that a bare
-// map lookup would silently hand an unset or corrupt priority.
 func readyPriorityRankOf(p domain.TaskPriority) int {
 	if rank, ok := readyPriorityRank[p]; ok {
 		return rank

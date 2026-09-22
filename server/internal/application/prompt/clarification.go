@@ -20,17 +20,7 @@ func ClarificationGuidance() string {
 	return clarificationGuidance
 }
 
-// cliClarificationGuidance is the clarification contract for a run whose tools
-// arrive over MCP — every claude_code CLI run. ask_user is not among them: it is
-// refused in adapter/mcpserver.exposed before any policy filtering, because it
-// returns a ClarificationRequest for the agent loop to park a task on and a live
-// CLI session has no such pause to offer.
-//
-// It therefore says the opposite of clarificationGuidance on the one point that
-// matters. That block tells the agent to call ask_user and to keep questions out
-// of its message body; a CLI run given it hunts for a tool it does not hold and
-// is forbidden the only channel it has — the closing message, which the runner
-// already surfaces on the card.
+// ask_user is refused over MCP before any policy filtering (it parks a task in a way a live CLI session cannot offer), so this says the opposite of clarificationGuidance: no ask_user, and the questions live in the closing message the runner already surfaces on the card.
 const cliClarificationGuidance = `## Missing information
 - Never assume missing requirements, scope, preferences, or constraints.
 - Read the repository before you call something unknown: file layout, where a section or component lives, routing and existing config are yours to find, not the human's to describe.
@@ -59,11 +49,7 @@ func FormatClarificationMessage(req domain.ClarificationRequest) string {
 	return strings.TrimSpace(sb.String())
 }
 
-// ClarificationHistoryNote replays a question the agent already asked back into
-// its own history. The stored assistant message only ever held the request's
-// context line — the questions themselves lived in a JSONB column the model
-// never saw, so on the next turn it read the user's answer without knowing what
-// it had answered.
+// The stored assistant message only held the context line; the questions lived in a JSONB column the model never saw, so the next turn read the answer without knowing what it answered.
 func ClarificationHistoryNote(req domain.ClarificationRequest) string {
 	if len(req.Questions) == 0 {
 		return ""
@@ -77,14 +63,7 @@ func ClarificationHistoryNote(req domain.ClarificationRequest) string {
 	return sb.String()
 }
 
-// FormatClarificationQuestions renders a request as one readable block: the
-// context line the agent wrote, then every question it actually asked.
-//
-// A parked task used to remember only the context ("I need a few details about
-// the store link"), which is not a question — so when the answer came back the
-// resumed run was handed a vague preamble paired with a precise reply and asked
-// the same questions over again. The question text is the part that has to
-// survive.
+// A parked task once remembered only the context line, which is not a question; the question text is the part that must survive.
 func FormatClarificationQuestions(req domain.ClarificationRequest) string {
 	var sb strings.Builder
 	if ctx := strings.TrimSpace(req.Context); ctx != "" {
@@ -111,14 +90,9 @@ func numberedQuestion(index int, q domain.ClarificationQuestion) string {
 	return line + " [options: " + strings.Join(labels, " | ") + "]"
 }
 
-// ClarificationCommentPrefix marks the task comment written when a human
-// answers an agent's question. Answers used to live only in the throwaway chat
-// session the question opened, so the task itself remembered nothing: the next
-// run — a resume, a retry, a reviewer hand-back — started blind and asked again.
-// The comment is that memory, and the prefix is how a later run finds it.
+// Answers used to live only in the throwaway chat session, so the task remembered nothing and the next run asked again; the comment is that memory and the prefix is how a later run finds it.
 const ClarificationCommentPrefix = "[clarification]"
 
-// ClarificationAnswerComment renders the answered exchange for the task record.
 func ClarificationAnswerComment(question, answer string) string {
 	var sb strings.Builder
 	sb.WriteString(ClarificationCommentPrefix)
@@ -131,29 +105,16 @@ func ClarificationAnswerComment(question, answer string) string {
 	return sb.String()
 }
 
-// IsClarificationComment reports a comment written by ClarificationAnswerComment.
 func IsClarificationComment(content string) bool {
 	return strings.HasPrefix(strings.TrimSpace(content), ClarificationCommentPrefix)
 }
 
-// maxAnsweredClarifications and maxAnsweredClarificationChars bound what one
-// run is handed, newest first.
-//
-// The bound is the point: this block goes into EVERY run of the task (see
-// board.Runner), and nothing behind it is capped — TaskCommentStore.ListByTask
-// carries no LIMIT, unlike its BoardEvent and TaskAgentRun siblings, so a
-// long-lived card would replay its entire clarification history on every
-// dispatch and charge each run for every answer it ever received. The newest
-// answers are the ones still being acted on; the rest stay on the card, where
-// list_comments can fetch them.
+// Everything behind this is uncapped (ListByTask carries no LIMIT) and goes into every run, so a long-lived card would replay its whole clarification history on each dispatch.
 const (
 	maxAnsweredClarifications     = 10
 	maxAnsweredClarificationChars = 2000
 )
 
-// AnsweredClarificationsMessage replays the questions this task already had
-// answered into a new run's context, newest last. Empty when the task has none,
-// and bounded by maxAnsweredClarifications.
 func AnsweredClarificationsMessage(comments []domain.TaskComment) string {
 	answered := make([]string, 0, len(comments))
 	for _, c := range comments {
@@ -178,8 +139,7 @@ func AnsweredClarificationsMessage(comments []domain.TaskComment) string {
 	sb.WriteString("The human has already answered the questions below. Treat these answers as decided requirements, ")
 	sb.WriteString("act on them, and never ask them again — only ask about something genuinely still unknown.\n")
 	if omitted > 0 {
-		// Said out loud, so a run that finds a gap looks it up instead of
-		// deciding the question was never answered and acting on its own guess.
+		// Said out loud, so a run that finds a gap looks it up instead of deciding the question was never answered.
 		fmt.Fprintf(&sb, "The %d most recent are shown; %d older answer(s) are on this task's comments — read them with list_comments before treating anything as unanswered.\n",
 			len(answered), omitted)
 	}
@@ -195,9 +155,6 @@ func AnsweredClarificationsMessage(comments []domain.TaskComment) string {
 	return strings.TrimSpace(sb.String())
 }
 
-// ClarificationAckMessage is what the clarification chat says back once an
-// answer has been handed to the task that was waiting on it. Written in the
-// user-facing locale, like the questions it replies to.
 func ClarificationAckMessage(lang string) string {
 	switch lang {
 	case "tr":

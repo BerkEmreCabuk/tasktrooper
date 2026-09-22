@@ -9,19 +9,13 @@ import (
 	"time"
 )
 
-// gitCmdTimeout bounds one git invocation. History reads are cheap, but a
-// pack-corrupt or network-backed repo can hang, and a profile refresh must not
-// hang with it.
+// Bounds one git invocation: history reads are cheap, but a pack-corrupt or network-backed repo can hang, and a profile refresh must not hang with it.
 const gitCmdTimeout = 15 * time.Second
 
-// churnCommits is how far back the hotspot ranking looks. Far enough to show
-// what the team actually keeps touching, short enough that a two-year-old
-// rewrite does not dominate today's map.
+// How far back the hotspot ranking looks: far enough to show what the team actually keeps touching, short enough that a two-year-old rewrite does not dominate today's map.
 const churnCommits = 300
 
-// conventionalCommitRe matches the `type(scope): subject` shape. The ratio of
-// matching subjects decides whether the profile can tell agents to write
-// commits that way — a convention is only a convention when history obeys it.
+// Matches the `type(scope): subject` shape; the ratio of matching subjects decides whether the profile can tell agents to write commits that way — a convention is only a convention when history obeys it.
 var conventionalCommitRe = regexp.MustCompile(`^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?!?: .+`)
 
 func collectGit(ctx context.Context, root string, f *Facts) {
@@ -73,8 +67,7 @@ func defaultBranch(ctx context.Context, root string) string {
 	if ref := gitLine(ctx, root, "symbolic-ref", "--short", "refs/remotes/origin/HEAD"); ref != "" {
 		return strings.TrimPrefix(ref, "origin/")
 	}
-	// No origin/HEAD (a common state in a freshly cloned working copy): fall
-	// back to whichever of the usual two actually exists, then to HEAD.
+	// No origin/HEAD (a common state in a freshly cloned working copy): fall back to whichever of the usual two actually exists, then to HEAD.
 	for _, candidate := range []string{"main", "master"} {
 		if _, err := git(ctx, root, "rev-parse", "--verify", "refs/remotes/origin/"+candidate); err == nil {
 			return candidate
@@ -100,7 +93,7 @@ func parseRemote(url string) (host, slug string) {
 		hostAndPath := strings.SplitN(parts[1], "/", 2)
 		if len(hostAndPath) == 2 {
 			h := hostAndPath[0]
-			if i := strings.IndexByte(h, '@'); i >= 0 { // strip embedded credentials
+			if i := strings.IndexByte(h, '@'); i >= 0 {
 				h = h[i+1:]
 			}
 			return h, hostAndPath[1]
@@ -109,9 +102,7 @@ func parseRemote(url string) (host, slug string) {
 	return "", ""
 }
 
-// branchConvention samples recent remote branches and reports the dominant
-// naming shape. It reports the samples too: a pattern with no examples is an
-// assertion, and agents ignore assertions they cannot check.
+// Samples recent remote branches and reports the dominant naming shape — with the samples too, because a pattern with no examples is an assertion, and agents ignore assertions they cannot check.
 func branchConvention(ctx context.Context, root, defaultBranch string) (samples []string, pattern string) {
 	out, err := git(ctx, root, "for-each-ref", "--sort=-committerdate", "--count=40", "--format=%(refname:short)", "refs/remotes/origin")
 	if err != nil {
@@ -121,8 +112,7 @@ func branchConvention(ctx context.Context, root, defaultBranch string) (samples 
 	total := 0
 	for _, line := range strings.Split(out, "\n") {
 		name := strings.TrimPrefix(strings.TrimSpace(line), "origin/")
-		// "origin" is what refs/remotes/origin/HEAD shortens to — the symbolic
-		// pointer, not a branch anyone named.
+		// "origin" is what refs/remotes/origin/HEAD shortens to — the symbolic pointer, not a branch anyone named.
 		if name == "" || name == "HEAD" || name == "origin" || name == defaultBranch {
 			continue
 		}
@@ -163,9 +153,7 @@ func branchConvention(ctx context.Context, root, defaultBranch string) (samples 
 	return samples, pattern
 }
 
-// mergeStyle distinguishes a merge-commit history from a linear one, and
-// reports whether work lands on the default branch without going through a
-// merge at all (the "we push straight to main" shape).
+// Distinguishes a merge-commit history from a linear one, and reports whether work lands on the default branch without a merge at all — the "we push straight to main" shape.
 func mergeStyle(ctx context.Context, root string) (style string, directToMain bool) {
 	total := countLines(gitOut(ctx, root, "log", "-100", "--format=%H"))
 	if total == 0 {
@@ -249,7 +237,7 @@ func nonEmptyLines(s string) []string {
 
 func countLines(s string) int { return len(nonEmptyLines(s)) }
 
-// itoa avoids dragging strconv through every call site in this file.
+// Avoids dragging strconv through every call site in this file.
 func itoa(n int) string {
 	if n == 0 {
 		return "0"

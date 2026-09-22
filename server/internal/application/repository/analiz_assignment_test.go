@@ -1,14 +1,5 @@
 package repository
 
-// CreateTask's task-type assignee resolution: a new task's assignee comes
-// from its type's assignee_role_id/assignee_mode (port.RoleResolver's
-// AssigneeForNewTask), not from a hardcoded analiz-vs-everything-else special
-// case read off settings. See workflowtest.Default for the fixture this
-// exercises: analiz is assignee_mode=override with role "analyst", which
-// resolves (in the "all default" scenario) to the agent "system-architect"
-// for every area — the direct replacement for the old
-// analiz_assignee_backend/frontend/mobile settings this test used to cover.
-
 import (
 	"testing"
 

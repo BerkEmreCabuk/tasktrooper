@@ -10,7 +10,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// seed writes a tree of files and returns its root.
 func seed(t *testing.T, files map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -26,9 +25,6 @@ func seed(t *testing.T, files map[string]string) string {
 	return root
 }
 
-// TestCommandsComeFromDeclarations pins the whole point of the package: the
-// commands reported are the ones the tree declares, with the file they were
-// read from — never a plausible default.
 func TestCommandsComeFromDeclarations(t *testing.T) {
 	root := seed(t, map[string]string{
 		"package.json":   `{"name":"web","packageManager":"pnpm@9.0.0","scripts":{"build":"vite build","test":"vitest run","dev":"vite","postinstall":"patch-package"},"dependencies":{"react":"^19.0.0","vite":"^6.0.0"}}`,
@@ -70,8 +66,6 @@ func TestCommandsComeFromDeclarations(t *testing.T) {
 	}
 }
 
-// TestDeployFromWorkflow: a workflow whose steps ship is reported with the
-// trigger that fires it, and a push trigger is marked automatic.
 func TestDeployFromWorkflow(t *testing.T) {
 	root := seed(t, map[string]string{
 		"go.mod": "module demo\n\ngo 1.26\n",
@@ -133,9 +127,6 @@ jobs:
 	}
 }
 
-// TestHostingIntegrationWithoutWorkflowIsTheDeploy: a Vercel link and no
-// deploy workflow means the provider's git integration ships the repo — the
-// fact the old free-text profile never stated.
 func TestHostingIntegrationWithoutWorkflowIsTheDeploy(t *testing.T) {
 	root := seed(t, map[string]string{
 		"vercel.json":  `{"framework":"nextjs"}`,
@@ -172,9 +163,6 @@ func TestHostingIntegrationWithoutWorkflowIsTheDeploy(t *testing.T) {
 	}
 }
 
-// TestWorkflowBeatsProviderIntegration: with both a deploy workflow and a
-// hosting link, only the workflow is reported — advising the dashboard when
-// CI is what ships would send agents to the wrong place.
 func TestWorkflowBeatsProviderIntegration(t *testing.T) {
 	root := seed(t, map[string]string{
 		"vercel.json": `{}`,
@@ -199,8 +187,6 @@ jobs:
 	}
 }
 
-// TestMonorepoKindInference: two classifiable children make a monorepo with
-// their kinds as sub-projects.
 func TestMonorepoKindInference(t *testing.T) {
 	files := map[string]string{
 		"apps/backend/go.mod":   "module demo\n\ngo 1.26\n",
@@ -223,8 +209,6 @@ func TestMonorepoKindInference(t *testing.T) {
 	}
 }
 
-// TestSingleKindInference: a mobile app with a few config files is still
-// mobile, not frontend.
 func TestSingleKindInference(t *testing.T) {
 	files := map[string]string{"tsconfig.json": "{}", "Podfile": "platform :ios\n"}
 	for i := 0; i < 25; i++ {
@@ -236,8 +220,6 @@ func TestSingleKindInference(t *testing.T) {
 	}
 }
 
-// TestDerivedSectionsCarryTheirSources: staleness depends on every derived
-// section knowing which files it was read from.
 func TestDerivedSectionsCarryTheirSources(t *testing.T) {
 	root := seed(t, map[string]string{
 		"go.mod": "module demo\n\ngo 1.26\n",
@@ -266,8 +248,6 @@ jobs:
 	}
 }
 
-// TestProposalsAreConcrete: the proposals a settings page can apply carry
-// values in the shape the settings expect.
 func TestProposalsAreConcrete(t *testing.T) {
 	root := seed(t, map[string]string{
 		"go.mod":   "module demo\n\ngo 1.26\n",
@@ -290,8 +270,6 @@ func TestProposalsAreConcrete(t *testing.T) {
 	}
 }
 
-// TestMissingWorkingCopyDegrades: a repository whose working copy is gone
-// yields warnings and no facts, never a panic and never invented content.
 func TestMissingWorkingCopyDegrades(t *testing.T) {
 	f := Collect(context.Background(), filepath.Join(t.TempDir(), "nope"))
 	if f.HasAny() {

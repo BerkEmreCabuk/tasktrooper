@@ -15,8 +15,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// parkEventStore is the board_events table, remembered. Locked because a park
-// is written from the run's own goroutine in the runner tests.
 type parkEventStore struct {
 	mu     sync.Mutex
 	events []domain.BoardEvent
@@ -49,7 +47,6 @@ func (s *parkEventStore) all() []domain.BoardEvent {
 	return append([]domain.BoardEvent(nil), s.events...)
 }
 
-// payloads decodes what was written, which is the only thing the UI ever sees.
 func (s *parkEventStore) payloads() []map[string]interface{} {
 	out := []map[string]interface{}{}
 	for _, e := range s.all() {
@@ -68,8 +65,6 @@ type spanMove struct {
 	at     time.Time
 }
 
-// parkSpanStore records only RecordMove; the rest of the ledger is not on the
-// park path and answers emptily.
 type parkSpanStore struct {
 	mu    sync.Mutex
 	moves []spanMove
@@ -126,10 +121,6 @@ func journalTask() domain.BoardTask {
 	}
 }
 
-// The park has to read on the board exactly like any other system move: same
-// from/to columns, same actor, and a reason the timeline can render. Without
-// this event the card jumped to `blocked` with nothing in its history to say
-// when or why.
 func TestParkJournalRecordsTheMoveTheDispatcherNeverWrites(t *testing.T) {
 	events, spans := &parkEventStore{}, &parkSpanStore{}
 	task := journalTask()
@@ -157,9 +148,6 @@ func TestParkJournalRecordsTheMoveTheDispatcherNeverWrites(t *testing.T) {
 	assert.Equal(t, agentID.String(), payload["assignee_agent_id"])
 }
 
-// The span ledger has to close the visit the run was in. Left open, a task that
-// waited six hours for a quota reads as six hours of in_progress work in every
-// time-in-column KPI.
 func TestParkJournalClosesTheColumnSpan(t *testing.T) {
 	events, spans := &parkEventStore{}, &parkSpanStore{}
 	task := journalTask()
@@ -175,9 +163,6 @@ func TestParkJournalClosesTheColumnSpan(t *testing.T) {
 		"the span is stamped with the event's time, so the ledger and the history agree")
 }
 
-// The store answers "" for a task that no longer exists, and a park that raced a
-// delete must still not invent a column. The task's own column is the one the
-// run was looking at, so it is the honest fallback.
 func TestParkJournalFallsBackToTheTasksOwnColumn(t *testing.T) {
 	events := &parkEventStore{}
 	task := journalTask()
@@ -189,10 +174,6 @@ func TestParkJournalFallsBackToTheTasksOwnColumn(t *testing.T) {
 	assert.Equal(t, string(domain.TaskColumnInProgress), events.payloads()[0]["from_column"])
 }
 
-// Nothing moved, so nothing is recorded: a task parked while already blocked
-// (re-parked by a second run) would otherwise litter the timeline with
-// blocked → blocked rows. repository.Service guards its own move event the same
-// way.
 func TestParkJournalIgnoresAnAlreadyBlockedTask(t *testing.T) {
 	events, spans := &parkEventStore{}, &parkSpanStore{}
 	task := journalTask()
@@ -205,9 +186,6 @@ func TestParkJournalIgnoresAnAlreadyBlockedTask(t *testing.T) {
 	assert.Empty(t, spans.recorded())
 }
 
-// The park is already durable by the time the journal runs. A history write that
-// failed must cost a timeline row and nothing else — never a panic in the run's
-// goroutine, and never an unwind of the park.
 func TestParkJournalSurvivesItsOwnFailures(t *testing.T) {
 	task := journalTask()
 	ctx := context.Background()

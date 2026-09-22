@@ -7,11 +7,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// The provider a chat turn is sent to always comes from the agent record, while
-// the model used to come from the session row — a snapshot taken when the chat
-// was opened. Changing the agent's model left that snapshot behind, so the
-// request carried the old provider's model name to the new provider and came
-// back "Invalid model".
 func TestResolveChatModel(t *testing.T) {
 	tests := []struct {
 		name       string

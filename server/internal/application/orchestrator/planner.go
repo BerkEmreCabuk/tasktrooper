@@ -17,38 +17,10 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// maxPlannerRetries bounds every stage that talks to a provider — intake,
-// planner, replanner, verifier — and it is one budget for two kinds of failure:
-// the provider refusing the call, and the model answering with something that
-// does not parse or does not validate. A stage that burns an attempt correcting
-// itself has one fewer left for a rate limit, which is deliberate: the total
-// wall clock a single run may spend on one stage is what this number protects.
-//
-// All four stages used to re-send a failed request instantly. A rate limit was
-// therefore burned through in milliseconds — three requests inside the time the
-// provider expected one — and a request the provider rejects deterministically
-// (a bad model name, a malformed body, a prompt over the context window)
-// collected the identical rejection three times before surfacing it. The
-// wait/shrink/stop policy that fixes it now lives in llmretry, shared with the
-// agent loop; llmretry.Await is the variant for callers like these four, which
-// assemble their prompt fresh from run facts and so have nothing to shrink.
+// One retry budget shared by intake, planner, replanner and verifier, for provider and parse failures alike.
 const maxPlannerRetries = 2
 
-// pipelineStepError is how a stage reports a terminal provider failure.
-//
-// It exists to keep one particular failure from reading like a flaky provider.
-// A request naming a host-executed provider (an agent on the Claude Code CLI)
-// is refused before any endpoint is touched, and it used to be silently
-// rerouted to whatever HTTP provider was configured as default — which, for
-// the install this was written for, was a dead model. Removing that reroute makes
-// the refusal reach here, and "planner failed after 3 attempts: ..." would
-// invite exactly the wrong diagnosis: the stage did not fail three times, and
-// no fourth attempt would help. llmretry.Classify already stops the retry loop
-// on it; this makes the sentence match.
-//
-// Every one of these stages is LOAD-BEARING. There is no degraded mode for an
-// intake that produced no goal or a planner that produced no tasks, so the run
-// fails and says why, rather than continuing with an empty plan.
+// Presents a host-executor refusal as a config problem, not a flaky provider.
 func pipelineStepError(step string, attempts int, err error) error {
 	if errors.Is(err, domain.ErrHostExecutedUnservable) {
 		return fmt.Errorf("%s cannot run for this agent: %w", step, err)
@@ -60,9 +32,7 @@ type PlannerOptions struct {
 	ConstrainedAgentID *uuid.UUID
 	Lang               string
 	ProviderType       domain.LLMProviderType
-	// Workspace is the rendered projects/repositories snapshot — see
-	// IntakeOptions.Workspace. The planner can also stop with questions, so it
-	// needs the same grounding.
+	// Rendered projects/repositories snapshot; the planner and intake share it.
 	Workspace string
 }
 
@@ -207,24 +177,17 @@ func (p *Planner) Generate(ctx context.Context, intake domain.GoalIntake, userMe
 
 // plannerParseOpts adapts the shared parser to the two prompts that use it.
 type plannerParseOpts struct {
-	// requireQuestions rejects output without a "questions" key. A planner must
-	// always state whether it needs answers, so a missing key means truncated
-	// or off-schema output worth retrying.
+	// requireQuestions rejects output without a "questions" key; off-schema output is worth retrying.
 	requireQuestions bool
 	// assumeReady treats output as a finished plan even without a "ready" flag.
 	assumeReady bool
 }
 
-// parsePlannerOutput parses a planning turn.
 func parsePlannerOutput(content string) (domain.PlannerOutput, error) {
 	return parsePlannerJSON(content, plannerParseOpts{requireQuestions: true})
 }
 
-// parseRepairPlanOutput parses a replanning turn. The replanner prompt defines
-// neither "ready" nor "questions" — repair plans never interrogate the user —
-// so running it through the strict planner rules rejected every single replan
-// ("planner output missing questions field", three retries, no repair tasks)
-// and silently dropped the repair step from every verified run.
+// Repair plans define neither "ready" nor "questions", so the strict planner rules must not apply.
 func parseRepairPlanOutput(content string) (domain.PlannerOutput, error) {
 	return parsePlannerJSON(content, plannerParseOpts{assumeReady: true})
 }
@@ -258,7 +221,7 @@ func parsePlannerJSON(content string, opts plannerParseOpts) (domain.PlannerOutp
 	var summaryStr string
 	if len(raw.Summary) > 0 {
 		if err := goccyjson.Unmarshal(raw.Summary, &summaryStr); err != nil {
-			// LLM returned an object instead of string — flatten to JSON text
+			// Object instead of string — flatten to JSON text.
 			summaryStr = strings.TrimSpace(string(raw.Summary))
 		}
 	}
@@ -303,9 +266,7 @@ func parsePlannerJSON(content string, opts plannerParseOpts) (domain.PlannerOutp
 	return output, nil
 }
 
-// normalizeDifficulty coerces the planner's free-form difficulty into the two
-// values the executor understands. Anything that isn't clearly "hard" defaults
-// to "easy" so an omitted/garbled value never silently upgrades the model.
+// Anything not clearly "hard" defaults to "easy" so a garbled value never upgrades the model.
 func normalizeDifficulty(v string) string {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "hard", "high", "complex", "difficult":
@@ -315,11 +276,7 @@ func normalizeDifficulty(v string) string {
 	}
 }
 
-// validatePlannerOutput checks a planning turn. priorTasks are the subtasks
-// already planned for this run — empty for the first plan, the original plan's
-// subtasks for a repair plan — so the one-creator rule is counted across the
-// whole run and not per planning turn, and so depends_on can name work the run
-// has already done.
+// Checks a planning turn; priorTasks are this run's already-planned subtasks.
 func validatePlannerOutput(output domain.PlannerOutput, agents []domain.Agent, skillOwnership map[string]map[string]bool, maxTasks int, priorTasks []domain.PlannerTask) error {
 	if output.Summary == "" {
 		return fmt.Errorf("planner output missing summary")
@@ -336,29 +293,19 @@ func validatePlannerOutput(output domain.PlannerOutput, agents []domain.Agent, s
 		agentIDs[a.ID.String()] = true
 	}
 
-	// priorIDs are the ids this run already used. They are dependency targets,
-	// never redefinable: a repair task that reuses one would collide with the
-	// stored plan_tasks row it names.
+	// Dependency targets, never redefinable: reuse would collide with the stored plan_tasks row.
 	priorIDs := make(map[string]bool, len(priorTasks))
 	for _, t := range priorTasks {
 		priorIDs[t.ID] = true
 	}
 
-	// Titles the run has already used. A repair plan that re-states a finished
-	// subtask verbatim is the duplicate the board shows twice — see
-	// validateNoRepeatedTitles.
+	// A repair plan restating a finished subtask verbatim is the duplicate the board shows twice.
 	priorTitles := make(map[string]string, len(priorTasks))
 	for _, t := range priorTasks {
 		priorTitles[normalizeTitle(t.Title)] = t.ID
 	}
 
-	// The same guard on the body, because the title one is trivially evaded and
-	// was: one plan shipped "Verify changes and satisfy acceptance criteria" and
-	// "Execute build and tests to verify changes" as separate waves carrying a
-	// character-for-character identical description. Both ran, the repair round
-	// ran it a third time, and QA posted the same "scenarios completed" comment
-	// three times for a single round of work. Two names for one instruction is
-	// one task.
+	// The same guard on the body: the title one is trivially evaded and was.
 	const duplicateDescriptionMinLen = 80
 	priorDescriptions := make(map[string]string, len(priorTasks))
 	for _, t := range priorTasks {
@@ -394,9 +341,7 @@ func validatePlannerOutput(output domain.PlannerOutput, agents []domain.Agent, s
 				"task %s repeats the title of task %s, which this run already ran (%q). A subtask that restates finished work runs it a second time and the board shows the same step twice. Repair by describing what is still MISSING, with its own distinct title, and reference the finished task in depends_on",
 				t.ID, priorID, t.Title)
 		}
-		// Long enough to be an instruction, not a stub. Two tasks that both say
-		// "run the tests" are plausibly different work described tersely; two that
-		// share a full paragraph verbatim are the same work planned twice.
+		// Long enough to be an instruction, not a stub.
 		if key := normalizeTitle(t.Description); len(key) >= duplicateDescriptionMinLen {
 			if priorID, clash := priorDescriptions[key]; clash {
 				return fmt.Errorf(
@@ -422,13 +367,7 @@ func validatePlannerOutput(output domain.PlannerOutput, agents []domain.Agent, s
 		}
 	}
 
-	// A dependency may name a task of this planning turn OR one the run already
-	// completed. Checking it against this turn alone made the replanner's own
-	// prompt unsatisfiable — it tells the model "depends_on may reference
-	// existing task ids from the prior plan" (buildReplannerSystemPrompt), and
-	// every repair plan that did so was rejected here, re-sent against the same
-	// contradiction maxPlannerRetries+1 times, and then abandoned; the run went
-	// on to report itself completed with the verifier's issue never repaired.
+	// A dependency may name this turn OR an id the run already completed; the replanner prompt relies on that.
 	for _, t := range output.Tasks {
 		for _, dep := range t.DependsOn {
 			if !seen[dep] && !priorIDs[dep] {
@@ -456,20 +395,13 @@ func validatePlannerOutput(output domain.PlannerOutput, agents []domain.Agent, s
 	return nil
 }
 
-// createBoardTaskTool is the one board write that mints a new record rather than
-// changing an existing one, so it is capped across the whole plan and not just
-// per parallel group.
+// createBoardTaskTool is capped across the whole plan, not just per parallel group.
 const createBoardTaskTool = "create_board_task"
 
-// normalizeTitle folds a subtask title to what two titles have to differ in to
-// be different work: case and spacing are not it.
 func normalizeTitle(s string) string {
 	return strings.Join(strings.Fields(strings.ToLower(strings.TrimSpace(s))), " ")
 }
 
-// bookkeepingOnlyTools are the calls that announce where work stands without
-// producing any of it. ask_user rides along because asking is not producing
-// either — the same reading the executor's hasWorkTool uses.
 var bookkeepingOnlyTools = map[string]bool{
 	"claim_board_task":     true,
 	"move_board_task":      true,
@@ -477,27 +409,7 @@ var bookkeepingOnlyTools = map[string]bool{
 	domain.AskUserToolName: true,
 }
 
-// validateNoBookkeepingOnlySubtasks rejects a plan that gives a column move a
-// subtask of its own.
-//
-// The prompt has told planners since the beginning that claiming a task and
-// moving it to in_progress belong inside the implementing subtask. The move at
-// the OTHER end was never named, and that is the one every plan grew: a final
-// "Move task to code_review" step. It costs a whole subtask — its own model
-// call, its own retries, its own card on the board — to make one tool call, and
-// it is worse than wasteful, because nothing verifies it. The executor treats a
-// bookkeeping subtask as finished when the agent stops talking, so DE-1's plan
-// showed "Move task to code_review — completed" while the task's own history
-// recorded no move at all: the call had failed, or was never made, and the
-// subtask reported success either way.
-//
-// The move is the system's job now (board.Runner.advanceToCodeReview), so a
-// subtask for it has nothing left to do but invent work — which is exactly what
-// DE-1's did, for 45 iterations.
-//
-// A single-subtask plan is left alone: "move DE-1 to done" is a legitimate
-// request whose entire deliverable IS the move, and the prior tasks count in
-// because a repair plan's one task is still the second task of the run.
+// A plan with 2+ subtasks may not give a column move a subtask of its own.
 func validateNoBookkeepingOnlySubtasks(tasks, priorTasks []domain.PlannerTask) error {
 	if len(tasks)+len(priorTasks) < 2 {
 		return nil
@@ -513,11 +425,7 @@ func validateNoBookkeepingOnlySubtasks(tasks, priorTasks []domain.PlannerTask) e
 	return nil
 }
 
-// isBookkeepingOnlySubtask reports whether a subtask's whole declaration is
-// progress announcements. A subtask that declares no tools inherits its agent's
-// toolset and is therefore never bookkeeping-only, and one that only comments
-// (a hand-off note, a stakeholder answer) is left alone — the shape being
-// rejected is a step whose point is the column change.
+// A subtask with no declared tools inherits its agent's toolset and is never bookkeeping-only.
 func isBookkeepingOnlySubtask(t domain.PlannerTask) bool {
 	if len(t.ToolNames) == 0 {
 		return false
@@ -534,33 +442,7 @@ func isBookkeepingOnlySubtask(t domain.PlannerTask) bool {
 	return movesColumn
 }
 
-// validateSingleTaskCreator rejects a run that spreads board-task creation over
-// more than one subtask. It is counted over the original plan AND every repair
-// plan appended to it, because both ways of getting a second creator were seen
-// in the same afternoon:
-//
-// validateDisjointWrites already stops two creators inside one parallel_group,
-// but chaining them with depends_on satisfied it: a plan for one request came
-// back as "determine where the link goes" → "decide how it looks" → "add it",
-// each in its own group, each opening its own board task. Three records, one
-// piece of work. Sequencing does not make a second creator correct — the
-// planning steps were never separate deliverables to begin with.
-//
-// The other route was verification. The plan opened the right task, the verifier
-// scored the run failed because the feature was not live yet, and the repair
-// plan opened a second "technical analysis" task for work the first one already
-// covered. Verification only runs once every subtask succeeded, so a repair plan
-// never needs to create a record the original plan was already responsible for.
-//
-// One subtask may still create several tasks in a single run; what it may not do
-// is share the job with a sibling that cannot see what it opened.
-//
-// policies maps agent id to that agent's tool policy, and closes the hole this
-// check used to have: a subtask with no tool_names declares nothing, so counting
-// declarations alone made it invisible while the executor still handed it the
-// agent's whole toolset. Such a subtask is counted as a creator exactly when its
-// agent is allowed to create — in the seeded roles only product-manager is, so
-// developer and QA subtasks are unaffected.
+// Counted over the original plan AND every repair plan: chained or un-owned creators both dodge it.
 func validateSingleTaskCreator(tasks []domain.PlannerTask, policies map[string]domain.ToolPolicy) error {
 	creators := make([]string, 0, 2)
 	for _, t := range tasks {
@@ -577,9 +459,7 @@ func validateSingleTaskCreator(tasks []domain.PlannerTask, policies map[string]d
 		len(creators), strings.Join(creators, ", "), createBoardTaskTool)
 }
 
-// subtaskMayCreateTasks reports whether a subtask will reach create_board_task
-// once the executor resolves its policy: declared tool_names win, and an empty
-// declaration falls back to what the assigned agent is allowed.
+// Declared tool_names win; an empty declaration falls back to what the agent is allowed.
 func subtaskMayCreateTasks(t domain.PlannerTask, policies map[string]domain.ToolPolicy) bool {
 	if len(t.ToolNames) > 0 {
 		for _, name := range t.ToolNames {
@@ -596,20 +476,10 @@ func subtaskMayCreateTasks(t domain.PlannerTask, policies map[string]domain.Tool
 	return domain.ToolAllowedByPolicy(createBoardTaskTool, policy)
 }
 
-// boardWriteTools is domain's list, shared so this check and the executor's
-// policy resolution can never disagree about what counts as a board write.
+// domain's list, shared so this check and the executor can never disagree.
 func boardWriteTool(name string) bool { return domain.IsBoardWriteTool(name) }
 
-// validateDisjointWrites rejects a plan that puts two board-writing subtasks in
-// the same parallel_group. Waves run concurrently and each subtask sees the
-// conversation as it looked before the run, so neither can observe what the
-// other just wrote: told to open the same task, both open it. Ordering has to be
-// declared with depends_on, and the planner's retry loop feeds this error back
-// so it can re-plan.
-//
-// This only sees subtasks that declare tool_names. A subtask that declares none
-// inherits its agent's whole policy and is invisible here — the tool-level
-// duplicate guard covers that remainder.
+// Two board-writing subtasks in one parallel_group run blind and would create duplicates; order with depends_on.
 func validateDisjointWrites(tasks []domain.PlannerTask) error {
 	type writer struct {
 		taskID string
@@ -640,20 +510,7 @@ func validateDisjointWrites(tasks []domain.PlannerTask) error {
 	return nil
 }
 
-// subtaskDescriptionShape puts the ordering INSIDE the subtask instead of
-// spreading it over waves.
-//
-// The pull, the branch and the hand-off move are the control plane's (the
-// workspace is cloned and checked out before any agent starts, and a finished
-// run with a diff is moved to code_review for it), so a wave per lifecycle step
-// plans work nobody has to do — and the plan validators reject exactly those
-// subtasks. What was genuinely missing is the order and the boundary within the
-// one subtask that does the work: runs implemented, declared success and never
-// executed anything, or wandered into refactors nobody asked for.
-//
-// So the phases are written as the shape of the description field. They cost no
-// extra model call, they cannot be dropped by a validator, and the executing
-// agent reads them in the order it must work them.
+// Ordering and boundary live in the description; lifecycle steps are the control plane's.
 const subtaskDescriptionShape = `Shape of a subtask description (implementation work):
 Write the description as ordered phases the agent works top to bottom, and state the boundary explicitly. Phases are prose inside ONE subtask — never separate subtasks, never separate parallel_groups:
 1. Scope — the change to make, named concretely: which files, endpoints, screens or components. If the exact location must be discovered, say which tools find it.
@@ -662,22 +519,7 @@ Write the description as ordered phases the agent works top to bottom, and state
 4. Close — tick every acceptance criterion the verified change satisfies, leave the rest open with a reason, and report what changed plus the command output that proved it.
 Do NOT plan phases for pulling the repository, creating the branch, claiming the task, moving columns or opening the pull request: the system does all of those around the run. The agent's phases start at the code and end at the evidence.`
 
-// verificationSubtaskRule adds the check that a split plan cannot perform on
-// itself.
-//
-// Subtasks in one wave share the branch but not the context: each sees the
-// workspace as it looked when the wave started, and none sees what the others
-// wrote. Two implementers on one repository is enough for the failure — the one
-// adding a button and the one editing the same page can leave the branch with
-// the button in place and a whole section gone, and both report success
-// truthfully, because each verified only its own change.
-//
-// So the last wave is a reader, not a writer: it builds and tests the merged
-// state, reads the WHOLE branch diff for damage no single implementer could
-// see, and only then ticks the criteria. The column move stays with the control
-// plane (board.Runner.advanceToCodeReview) — a subtask whose deliverable is a
-// move is the shape DE-1 failed as, reported "completed" twice with no move in
-// the task's history, and the plan validators reject it.
+// A split plan ends with one read-only subtask that verifies the merged result alone.
 const verificationSubtaskRule = `Final verification subtask (mandatory when the plan has MORE THAN ONE subtask that changes code in the same repository):
 - Add exactly one last subtask that depends_on every implementing subtask and sits alone in the last parallel_group. It changes nothing by default: it is the pass that judges the merged result.
 - Its description states, in this order: (1) build and test the repository as a whole and read the output; (2) read the complete branch diff and judge it against the original request — a subtask that ran earlier could not see what the later ones wrote, so this is the only pass that can catch one change breaking or deleting another's work; (3) check every acceptance criterion against what the build/test output and the diff actually show; (4) tick each criterion that holds with set_criterion_completed, leave the rest open, and report findings with add_task_comment.
@@ -752,11 +594,6 @@ Rules:
 			sb.WriteString("Skills:\n")
 			for _, sk := range entry.Skills {
 				if sk.Enabled {
-					// Metadata only: the planner picks skill_ids from
-					// name/description; the full skill body is loaded on-demand
-					// by the executor (GetSkill) when the task runs. Dumping every
-					// skill's full content bloated the prompt past provider token
-					// limits even for a one-line request.
 					sb.WriteString(fmt.Sprintf("- id=%s name=%s category=%s description=%s\n", sk.ID, sk.Name, sk.Category, sk.Description))
 				}
 			}

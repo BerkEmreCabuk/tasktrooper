@@ -68,8 +68,7 @@ server:
 	cfg, err := config.Load(f)
 	s.NoError(err)
 	s.Equal(30, cfg.LLM.MaxIterations)
-	// Task work gets its own, larger budget: a coding run is search + read +
-	// edit + verify, not a chat turn.
+
 	s.Equal(80, cfg.LLM.TaskMaxIterations)
 }
 
@@ -91,9 +90,6 @@ tools:
 	s.Equal(int64(1048576), cfg.Tools.Web.MaxResponseBytes)
 }
 
-// TestDefaultBrowserEnabled: an omitted tools.browser block means enabled, an
-// explicit false must still win — the loader distinguishes the two on the raw
-// keys, not the unmarshalled bool.
 func (s *ConfigLoaderSuite) TestDefaultBrowserEnabled() {
 	content := `
 llm:
@@ -127,9 +123,6 @@ tools:
 	s.False(cfg.Tools.Browser.Enabled)
 }
 
-// An absent file is the packaged desktop app: one executable, no resources
-// directory beside it. Load falls back to the copy compiled into the binary
-// rather than refusing to start.
 func (s *ConfigLoaderSuite) TestFileNotFoundFallsBackToTheEmbeddedConfig() {
 	cfg, err := config.Load("/nonexistent/path/config.yml")
 	s.Require().NoError(err)
@@ -189,9 +182,6 @@ func TestConfigLoaderSuite(t *testing.T) {
 	suite.Run(t, new(ConfigLoaderSuite))
 }
 
-// TestDefaultStoreopsPollInterval mirrors TestDefaultMaxIterations: an
-// omitted storeops.poll_interval falls back to 5 minutes rather than the
-// store monitor never sweeping.
 func (s *ConfigLoaderSuite) TestDefaultStoreopsPollInterval() {
 	cfg, err := config.Parse([]byte(`
 server:
@@ -201,8 +191,6 @@ server:
 	s.Equal(5*time.Minute, cfg.Storeops.PollInterval)
 }
 
-// TestStoreopsPollIntervalOverride confirms an explicit value in config.yml
-// wins over the default.
 func (s *ConfigLoaderSuite) TestStoreopsPollIntervalOverride() {
 	cfg, err := config.Parse([]byte(`
 server:
@@ -214,10 +202,6 @@ storeops:
 	s.Equal(10*time.Minute, cfg.Storeops.PollInterval)
 }
 
-// TestDefaultEmbeddingQueryCacheEntries mirrors TestDefaultStoreopsPollInterval:
-// an omitted embedding.query_cache_entries falls back to a bounded LRU size
-// instead of the query-vector cache defaulting to zero, which would silently
-// disable it (0 means "unset" for this field, not "off").
 func (s *ConfigLoaderSuite) TestDefaultEmbeddingQueryCacheEntries() {
 	cfg, err := config.Parse([]byte(`
 server:
@@ -227,8 +211,6 @@ server:
 	s.Equal(2048, cfg.Embedding.QueryCacheEntries)
 }
 
-// TestEmbeddingQueryCacheEntriesOverride confirms an explicit value in
-// config.yml wins over the default.
 func (s *ConfigLoaderSuite) TestEmbeddingQueryCacheEntriesOverride() {
 	cfg, err := config.Parse([]byte(`
 server:
@@ -240,9 +222,6 @@ embedding:
 	s.Equal(64, cfg.Embedding.QueryCacheEntries)
 }
 
-// TestEmbeddingQueryCacheEntriesNegativeDisables confirms a negative value is
-// left as-is by the loader instead of being defaulted like the zero value —
-// negative is the documented way to turn the cache off.
 func (s *ConfigLoaderSuite) TestEmbeddingQueryCacheEntriesNegativeDisables() {
 	cfg, err := config.Parse([]byte(`
 server:

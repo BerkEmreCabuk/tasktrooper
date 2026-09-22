@@ -9,23 +9,17 @@ import (
 )
 
 // MaxAttachmentBytes caps a single binary attachment. Attachments live as
-// BYTEA rows in Postgres rather than on disk (a task's own workspace can be
-// wiped by the reaper), so the cap protects the database, the connection and
-// the HTTP path all at once.
+// BYTEA rows rather than on disk (a task workspace can be wiped by the reaper),
+// so the cap protects the database, the connection and the HTTP path at once.
 const MaxAttachmentBytes = 10 << 20
 
-// ErrAttachmentTooLarge rejects an upload over MaxAttachmentBytes. The HTTP
-// layer maps it to 413.
+// The HTTP layer maps these to 413 and 415 respectively.
 var ErrAttachmentTooLarge = fmt.Errorf("attachment exceeds the %d MB limit", MaxAttachmentBytes>>20)
-
-// ErrAttachmentTypeNotAllowed rejects a content type outside the allowlist.
-// The HTTP layer maps it to 415.
 var ErrAttachmentTypeNotAllowed = errors.New("attachment content type is not allowed")
 
-// AllowedAttachmentTypes is the server-side allowlist for binary attachments:
-// the image formats browsers render inline plus common document formats. The
-// type is validated after server-side sniffing, never trusted from the client
-// alone.
+// Server-side allowlist: the image formats browsers render inline plus common
+// document formats. Validated after server-side sniffing, never from the
+// client alone.
 var AllowedAttachmentTypes = map[string]bool{
 	"image/png":        true,
 	"image/jpeg":       true,
@@ -71,7 +65,6 @@ type AttachmentMeta struct {
 	CreatedAt     time.Time  `json:"created_at"`
 }
 
-// Meta strips the bytes.
 func (a Attachment) Meta() AttachmentMeta {
 	return AttachmentMeta{
 		ID:            a.ID,

@@ -16,68 +16,25 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// NewCodeCoverageThreshold is the bar the report is written against: the share
-// of the lines THIS change wrote that a test executes.
-//
-// It is the number worth showing, because it is about the change under review
-// rather than the codebase around it — a repo measuring 44% overall says
-// nothing about whether the diff in front of you is tested. It no longer blocks
-// the hand-off: a run that is otherwise finished is not worth holding over a
-// percentage, and what the figure is for is telling the reader which lines to
-// look at.
-//
-// Ninety rather than a hundred because a diff always carries lines no test can
-// reasonably reach — a wiring line in main, an error branch behind a syscall
-// that cannot be provoked — and demanding all of them teaches the agent to
-// delete the branch instead of testing it.
+// 90 not 100: every diff carries lines no test can reach, and demanding them teaches the agent to delete the branch.
 const NewCodeCoverageThreshold = 90.0
 
-// newCodeMinLines is the smallest diff whose percentage means anything.
-//
-// Under it the number is noise that reads as signal: a change touching two
-// coverable lines is either 100%, 50% or 0%, so one unreachable wiring line
-// reads as half the diff untested. Such a diff gets its counts stated plainly
-// instead — the reviewer reading it can see two lines.
 const newCodeMinLines = 5
 
-// newCodeSampleLimit bounds the uncovered lines named in the report. The point
-// is to show the agent where to start, not to reproduce the diff.
 const newCodeSampleLimit = 25
 
-// gitTimeout bounds the diff calls. They are local and read-only; a git that
-// hangs this long is broken, and the gate must not inherit the hang.
 const gitTimeout = 60 * time.Second
 
-// NewCodeCoverage is the verdict on the lines a change added or modified.
 type NewCodeCoverage struct {
-	// Percent is Covered/Total as a percentage. Meaningless unless Measured.
 	Percent float64
-	// Measured separates "the diff's new lines were checked" from "they could
-	// not be", which the gate must react to in opposite ways: the first may
-	// block, the second may only report. Everything that can go wrong here —
-	// no git, no profile, a language with no per-line recipe — lands as false.
-	Measured bool
-	// Covered/Total count only COVERABLE changed lines: a line the coverage
-	// tool has an opinion about. Comments, blanks, imports and type
-	// declarations are not instrumented by any of these tools, and counting
-	// them as uncovered would fail a documentation commit.
-	Covered int
-	Total   int
-	// Detail carries the reason when Measured is false.
-	Detail string
-	// Uncovered names up to newCodeSampleLimit changed-but-unexecuted lines as
-	// "path:line", so the failure report points at work rather than a number.
+	// Measured is what lets the gate react in opposite ways; Percent is meaningless unless Measured.
+	Measured  bool
+	Covered   int
+	Total     int
+	Detail    string
 	Uncovered []string
 }
 
-// changedLines maps repo-relative path → the set of line numbers this change
-// added or modified, read from the diff against the branch point.
-//
-// -U0 is what makes the answer exact: with context lines the hunk header spans
-// unchanged code, and every neighbour of an edit would be billed to this task.
-// The base is the merge base rather than the branch tip for the same reason
-// TaskDiff picks it — a task branch that has fallen behind must not be asked to
-// cover everything the default branch gained in the meantime.
 func changedLines(ctx context.Context, dir string) (map[string]map[int]bool, error) {
 	base := mergeBase(ctx, dir)
 	if base == "" {
@@ -112,9 +69,6 @@ func runGit(ctx context.Context, dir string, args ...string) (string, error) {
 
 var hunkHeader = regexp.MustCompile(`^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@`)
 
-// parseDiffLines reads a -U0 unified diff and returns the NEW-side line numbers
-// each file gained. A hunk with a zero new-side count is a pure deletion and
-// contributes nothing: removing code is not a thing tests can cover.
 func parseDiffLines(diff string) map[string]map[int]bool {
 	files := make(map[string]map[int]bool)
 	var current string
@@ -125,7 +79,6 @@ func parseDiffLines(diff string) map[string]map[int]bool {
 		switch {
 		case strings.HasPrefix(line, "+++ "):
 			path := strings.TrimSpace(strings.TrimPrefix(line, "+++ "))
-			// /dev/null is a deleted file; b/ is git's new-side prefix.
 			if path == "/dev/null" {
 				current = ""
 				continue
@@ -165,15 +118,8 @@ func parseDiffLines(diff string) map[string]map[int]bool {
 	return files
 }
 
-// lineHits maps repo-relative path → line number → execution count, for every
-// line the coverage tool instrumented. A line absent from the map is a line the
-// tool has no opinion about, which is what keeps comments and declarations out
-// of the denominator.
 type lineHits map[string]map[int]int
 
-// record keeps the highest count seen for a line. Coverage formats emit
-// overlapping records — nested Go blocks, a template inlined twice — and the
-// line did execute the larger number of times.
 func (h lineHits) record(file string, line, count int) {
 	set := h[file]
 	if set == nil {
@@ -186,10 +132,6 @@ func (h lineHits) record(file string, line, count int) {
 	set[line] = count
 }
 
-// goProfileLines reads a Go coverage profile. Its lines are
-// "<import-path>/<file>:<startLine>.<col>,<endLine>.<col> <numStmt> <count>",
-// so the file has to be re-rooted from the module path onto the repo before it
-// can be matched against a diff path.
 func goProfileLines(dir string) (lineHits, bool) {
 	f, err := os.Open(filepath.Join(dir, "coverage.out"))
 	if err != nil {
@@ -236,7 +178,6 @@ func goProfileLines(dir string) (lineHits, bool) {
 	return hits, true
 }
 
-// parseBlockRange reads "12.34,15.2" into its first and last line.
 func parseBlockRange(span string) (int, int, bool) {
 	comma := strings.Index(span, ",")
 	if comma < 0 {
@@ -261,9 +202,6 @@ func parsePos(pos string) (int, bool) {
 	return n, err == nil
 }
 
-// goModulePath reads the module line out of go.mod so profile paths can be made
-// repo-relative. An unreadable go.mod is not fatal: paths then fail to match and
-// the result is reported unmeasured rather than wrong.
 func goModulePath(dir string) string {
 	f, err := os.Open(filepath.Join(dir, "go.mod"))
 	if err != nil {
@@ -280,9 +218,6 @@ func goModulePath(dir string) string {
 	return ""
 }
 
-// lcovLines reads coverage/lcov.info — what `flutter test --coverage` writes and
-// what vitest's lcov reporter writes — into per-line hits. SF: is the file,
-// DA:<line>,<hits> the record.
 func lcovLines(dir string) (lineHits, bool) {
 	f, err := os.Open(filepath.Join(dir, "coverage", "lcov.info"))
 	if err != nil {
@@ -299,8 +234,6 @@ func lcovLines(dir string) (lineHits, bool) {
 		switch {
 		case strings.HasPrefix(line, "SF:"):
 			path := strings.TrimPrefix(line, "SF:")
-			// lcov writers disagree about absolute vs relative; the diff only
-			// speaks repo-relative, so everything is normalised to that.
 			if filepath.IsAbs(path) {
 				if rel, err := filepath.Rel(dir, path); err == nil && !strings.HasPrefix(rel, "..") {
 					path = rel
@@ -334,12 +267,6 @@ func lcovLines(dir string) (lineHits, bool) {
 	return hits, true
 }
 
-// measureNewCode intersects the diff with the coverage profile.
-//
-// Only lines present in BOTH count. A changed line the tool never instrumented
-// is not evidence of anything — it is a comment, an import or a declaration —
-// and a changed file the profile does not mention at all is usually a config or
-// a fixture, which no suite covers and which must not fail a task.
 func measureNewCode(ctx context.Context, dir string, hits lineHits) NewCodeCoverage {
 	if len(hits) == 0 {
 		return NewCodeCoverage{Detail: "the run left no per-line coverage profile to read"}
@@ -358,9 +285,6 @@ func measureNewCode(ctx context.Context, dir string, hits lineHits) NewCodeCover
 	for path := range changed {
 		paths = append(paths, path)
 	}
-	// Sorted so the sample of uncovered lines is stable between runs: an agent
-	// re-reading the report after a fix must not see a different set of lines
-	// merely because a map iterated differently.
 	sort.Strings(paths)
 	for _, path := range paths {
 		fileHits, ok := hits[filepath.ToSlash(path)]
@@ -399,9 +323,6 @@ func measureNewCode(ctx context.Context, dir string, hits lineHits) NewCodeCover
 	}
 }
 
-// newCodeCoverageReport states what the diff's own lines measured. It is a
-// report, not a verdict: a shortfall is named — with the lines to look at, which
-// is the part worth having — and the run hands off anyway.
 func newCodeCoverageReport(ctx context.Context, dir string, hits lineHits) string {
 	res := measureNewCode(ctx, dir, hits)
 	if !res.Measured {

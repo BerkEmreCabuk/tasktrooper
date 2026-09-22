@@ -82,8 +82,6 @@ func newHarness(t *testing.T, task domain.BoardTask, target domain.DeployTarget,
 	return h
 }
 
-// ------------------------------------------------ signal kind 1: Actions run
-
 func TestStatusResolvesFromActionsDeployJob(t *testing.T) {
 	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd, HealthURL: "https://api.example.com/health"})
 	h.actions.runsForCommit = actionRuns(actionRun(55, "https://gh/run/55"))
@@ -102,9 +100,7 @@ func TestStatusResolvesFromActionsDeployJob(t *testing.T) {
 	if got.Signal != domain.DeploySignalActionsRun {
 		t.Fatalf("signal = %q, want actions_run", got.Signal)
 	}
-	// The Actions signal answered, so the commit-status surface must not have
-	// been consulted at all: a repository with a deploy job and a stale
-	// third-party status must not have that status override its own CI.
+
 	if h.actions.commitCalls != 0 {
 		t.Fatalf("commit status consulted %d times despite an Actions deploy job", h.actions.commitCalls)
 	}
@@ -114,8 +110,7 @@ func TestStatusResolvesFromActionsDeployJob(t *testing.T) {
 }
 
 func TestStatusIgnoresNonDeployJobsInTheSameRun(t *testing.T) {
-	// "Backend CI/CD" carries build, test AND deploy. A red unit test is a
-	// failed BUILD, not a failed deploy, and must not trigger a rollback.
+
 	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
 	h.actions.runsForCommit = actionRuns(actionRun(7, ""))
 	h.actions.jobsByRun[7] = jobs(
@@ -152,11 +147,8 @@ func TestStatusPendingWhileDeployJobRuns(t *testing.T) {
 	}
 }
 
-// ------------------------------- signal kind 2: commit status (Vercel-style)
-
 func TestStatusResolvesFromCommitStatusWhenNoActionsDeployJob(t *testing.T) {
-	// acme-web: no deploy workflow anywhere. The Actions runs that exist are
-	// lint/typecheck, and vercel[bot] writes the commit status.
+
 	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
 	h.actions.runsForCommit = actionRuns(actionRun(12, ""))
 	h.actions.jobsByRun[12] = jobs(job(4, "lint", "completed", "success"))
@@ -225,8 +217,6 @@ func TestStatusWithoutMergeCommitIsUnknown(t *testing.T) {
 	}
 }
 
-// ------------------------------------------- failure → log fetch → summary
-
 func TestFailedDeployNamesTheJobAndItsLogIsSummarized(t *testing.T) {
 	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
 	h.actions.runsForCommit = actionRuns(actionRun(21, "https://gh/run/21"))
@@ -256,8 +246,7 @@ func TestFailedDeployNamesTheJobAndItsLogIsSummarized(t *testing.T) {
 	if len(res.Content) > 2400 {
 		t.Fatalf("summary is %d chars, well past the 2000 cap", len(res.Content))
 	}
-	// The point of summarizing rather than tailing: the error line survives even
-	// though 200 lines of cleanup were printed after it.
+
 	if !strings.Contains(res.Content, "migration 0021 failed") {
 		t.Fatalf("the error line was lost in truncation:\n%s", res.Content)
 	}
@@ -272,8 +261,6 @@ func TestSummarizeLogKeepsShortLogsWhole(t *testing.T) {
 		t.Fatalf("out = %q", out)
 	}
 }
-
-// ------------------------------------------------- health-window attribution
 
 func TestAttributeReleaseNamesTheTaskThatDeployedTheLiveCommit(t *testing.T) {
 	task := releasedTask()
@@ -314,8 +301,7 @@ func TestAttributeReleaseDeclinesOutsideTheHealthWindow(t *testing.T) {
 }
 
 func TestAttributeReleaseIgnoresAFailedDeploy(t *testing.T) {
-	// A failed deploy left production on the PREVIOUS commit. Blaming the task
-	// whose deploy never landed would roll back a release that is not there.
+
 	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
 	completed := fixed.Add(-1 * time.Minute)
 	h.runs.byEnv[domain.DeployEnvProd] = []domain.DeploymentRun{{
@@ -329,7 +315,7 @@ func TestAttributeReleaseIgnoresAFailedDeploy(t *testing.T) {
 }
 
 func TestAttributeReleaseDeclinesWhenNoTaskClaimsTheCommit(t *testing.T) {
-	// A human merged this one. Nothing to blame and nothing to wake.
+
 	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd})
 	completed := fixed.Add(-1 * time.Minute)
 	h.runs.byEnv[domain.DeployEnvProd] = []domain.DeploymentRun{{
@@ -341,8 +327,6 @@ func TestAttributeReleaseDeclinesWhenNoTaskClaimsTheCommit(t *testing.T) {
 		t.Fatal("a commit no task claims must not be attributed")
 	}
 }
-
-// ---------------------------------------------------------------- rollback
 
 func failedDeployHarness(t *testing.T, target domain.DeployTarget) *harness {
 	t.Helper()
@@ -415,7 +399,7 @@ func TestRollbackWorkflowMechanismDispatchesTheTag(t *testing.T) {
 
 func TestRollbackRevertMechanismWhenNoDeployWorkflow(t *testing.T) {
 	h := failedDeployHarness(t, domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: true})
-	// deployops refuses: nothing to dispatch. That is the push-to-deploy repo.
+
 	h.rollback.err = errNoWorkflow
 	h.git.hasGit = true
 	h.git.revertSHA = "9999999999999999999999999999999999999999"
@@ -454,13 +438,9 @@ func TestRollbackReportsManualStepsItCannotPerform(t *testing.T) {
 	}
 }
 
-// ------------------------------------------- agent-actor authorization path
-
 func TestRollbackRefusesWhenAnotherReleaseIsLive(t *testing.T) {
 	h := failedDeployHarness(t, domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: true})
-	// Somebody else released after this task. Rolling back now would undo THEIR
-	// change — this is the check that stands in for the human's typed
-	// confirmation.
+
 	h.runs.byEnv[domain.DeployEnvProd] = []domain.DeploymentRun{{HeadSHA: "1234512345123451234512345123451234512345"}}
 
 	_, err := h.svc.Rollback(context.Background(), rollbackReq())
@@ -491,8 +471,7 @@ func TestRollbackCarriesTheAgentAuthorizationIntoDeployops(t *testing.T) {
 	if auth.Trigger != deploywatch.RollbackTriggerDeployFailed || auth.AgentName != "qa-agent" {
 		t.Fatalf("auth loses the audit fields: %+v", auth)
 	}
-	// The human's Confirm field must stay empty on this path: the agent does not
-	// get to type the repository's name.
+
 	if h.rollback.inputs[0].Confirm != "" {
 		t.Fatalf("an agent rollback must not supply a confirmation phrase, got %q", h.rollback.inputs[0].Confirm)
 	}
@@ -502,8 +481,7 @@ func TestRollbackCarriesTheAgentAuthorizationIntoDeployops(t *testing.T) {
 }
 
 func TestRollbackRefusesWithoutARealTrigger(t *testing.T) {
-	// The deploy succeeded. A model that reaches for the rollback tool anyway
-	// gets a refusal, not a reverted release.
+
 	h := newHarness(t, releasedTask(), domain.DeployTarget{Env: domain.DeployEnvProd, AutoRollback: true})
 	h.actions.runsForCommit = actionRuns(actionRun(41, ""))
 	h.actions.jobsByRun[41] = jobs(job(5, "deploy", "completed", "success"))

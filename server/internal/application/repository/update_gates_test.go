@@ -25,8 +25,6 @@ func TestUpdateSetsTheMobilePlatformOnAMobileRepo(t *testing.T) {
 	require.Equal(t, []string{domain.MobilePlatformAndroid}, repos.mobilePlatformWrites)
 }
 
-// The kind in the same PATCH is what the platform is judged against, so
-// "make this mobile and it is an iOS app" is one request, not two.
 func TestUpdateAcceptsAPlatformAlongsideTheKindThatJustifiesIt(t *testing.T) {
 	svc, repos := newUpdateTestService(domain.Repository{ID: uuid.New(), Kind: domain.RepoKindBackend})
 	kind := domain.RepoKindMobile
@@ -57,7 +55,6 @@ func TestUpdateRejectsAnUnknownPlatform(t *testing.T) {
 	require.Empty(t, repos.mobilePlatformWrites)
 }
 
-// Clearing is always allowed: "" is the unset value, whatever the kind.
 func TestUpdateClearsThePlatformOnAnyKind(t *testing.T) {
 	svc, repos := newUpdateTestService(domain.Repository{
 		ID: uuid.New(), Kind: domain.RepoKindBackend, MobilePlatform: domain.MobilePlatformIOS,
@@ -130,9 +127,6 @@ func TestUpdateRejectsAnUnknownReleaseEngine(t *testing.T) {
 	require.Empty(t, repos.releaseEngineWrites)
 }
 
-// "" is a legal statement here, unlike mobile_platform's unset value: it means
-// the column's default. The column itself must never hold a blank, because
-// ValidReleaseEngine("") is false and every reader downstream treats it as a bug.
 func TestUpdateWritesAutoForAnEmptyReleaseEngine(t *testing.T) {
 	svc, repos := newUpdateTestService(domain.Repository{
 		ID: uuid.New(), Kind: domain.RepoKindMobile, ReleaseEngine: domain.ReleaseEngineLocal,

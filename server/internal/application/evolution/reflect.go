@@ -14,8 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// skillSnapshot / ruleSnapshot are the compact before/after payloads stored on
-// evolution events (embeddings intentionally excluded).
+// Compact before/after payloads stored on evolution events (embeddings intentionally excluded).
 type skillSnapshot struct {
 	ID          uuid.UUID  `json:"id"`
 	Name        string     `json:"name"`
@@ -74,9 +73,7 @@ func (s *Service) processReflection(ctx context.Context, reflection domain.Agent
 		SkillBudget: s.cfg.MaxSkillsPerAgent, RuleBudget: s.cfg.MaxRulesPerAgent,
 	}
 
-	// The gate needs a baseline measured against the pre-change catalog, so it
-	// runs before anything is applied — but only when the reflection actually
-	// proposes catalog changes, otherwise it is a suite run for nothing.
+	// It needs a baseline measured against the pre-change catalog, so it runs before anything is applied — but only when the reflection actually proposes catalog changes, otherwise it is a suite run for nothing.
 	gate := s.cfg.GoldenGate && agentRec.SelfEvolutionEnabled && proposesCatalogChange(output)
 	var beforeRun goldenRun
 	if gate {
@@ -146,9 +143,7 @@ func (s *Service) processReflection(ctx context.Context, reflection domain.Agent
 	log.Info().Str("agent", agentRec.Name).Str("trigger", reflection.Trigger).Int("changes", len(applyLog)).Msg("reflection completed")
 }
 
-// countMemories is the catalog-count half of ReflectionDecision's before/after
-// bookkeeping; the query mirrors gatherEvidence's own listing (every scope, one
-// agent) but with a high limit since this is a count, not evidence to show.
+// Mirrors gatherEvidence's own listing (every scope, one agent) but with a high limit since this is a count, not evidence to show.
 func (s *Service) countMemories(ctx context.Context, agentID uuid.UUID) int {
 	if s.memories == nil {
 		return 0
@@ -203,10 +198,7 @@ func (s *Service) runLLM(ctx context.Context, agentRec domain.Agent, evidence st
 		{Role: domain.RoleUser, Content: evidence},
 	}
 
-	// Model routing: reflection rewrites the agent's own instructions, which is
-	// the hardest kind of work the agent owns — so it runs on the agent's
-	// ModelHeavy when one is set, exactly like a "hard" orchestrator subtask.
-	// evolution.model / evolution.provider_type stay the operator override.
+	// Reflection rewrites the agent's own instructions, the hardest work it owns, so it runs on the agent's ModelHeavy like a "hard" orchestrator subtask; evolution.model/provider_type stay the operator override.
 	model := agentRec.Model
 	if agentRec.ModelHeavy != "" {
 		model = agentRec.ModelHeavy
@@ -222,12 +214,7 @@ func (s *Service) runLLM(ctx context.Context, agentRec domain.Agent, evidence st
 	callOnce := func(msgs []domain.Message) (string, error) {
 		if s.cfg.AllowWebResearch && s.agentLoop != nil {
 			policy := domain.ToolPolicy{AllowTools: []string{"web_search", "fetch_url"}}
-			// s.agentLoop is the router, so an agent on a host-executed provider
-			// reflects on its own performance through that host's CLI.
-			// WithScratchWorkspace because this is the one agentic path with no
-			// repository at all: it is a background cron reading the agent's own
-			// history and the web, so a fresh empty directory is the honest place
-			// to run it — there is no code for it to be scoped to.
+			// s.agentLoop is the router, so an agent on a host-executed provider reflects on its own performance through that host's CLI. WithScratchWorkspace: this is the one agentic path with no repository at all — a background cron, so a fresh empty directory is the honest place to run it.
 			resp, err := s.agentLoop.Run(ctx, msgs, model, provider, policy,
 				agent.WithSessionLimits(agentRec.MaxTurns, agentRec.Effort),
 				agent.WithCLILabel("reflect:"+agentRec.Name, "agent self-reflection"),
@@ -286,16 +273,11 @@ func (s *Service) applyOutput(
 	if score, err := s.perf.GetScore(ctx, agentRec.ID); err == nil {
 		scoreAt = score.Score
 	}
-	// Everything the reflection writes into the catalog is attributed to this
-	// reflection in the version history, so a human reading a skill's history
-	// can tell a self-evolution rewrite from their own edit.
+	// Everything the reflection writes into the catalog is attributed to it in version history, so a human reading a skill's history can tell a self-evolution rewrite from their own edit.
 	ctx = catalog.WithVersionSource(ctx, catalog.VersionSource{
 		Source: domain.CatalogVersionSourceEvolution, ReflectionID: &reflection.ID,
 	})
-	// recordEvent returns the persisted event (and any store error) so callers
-	// can attach the event's id to the ReflectionChangeOutcome they record for
-	// the same change — the two records need to point at each other so the
-	// golden gate can later mark an outcome rolled_back by matching event ids.
+	// Returns the persisted event so callers attach its id to the outcome they record for the same change — the two records must point at each other for the golden gate to later mark outcomes rolled_back by matching event ids.
 	recordEvent := func(e domain.AgentEvolutionEvent) (domain.AgentEvolutionEvent, error) {
 		e.ReflectionID = &reflection.ID
 		e.AgentID = agentRec.ID
@@ -366,11 +348,7 @@ func (s *Service) applyOutput(
 				})
 				continue
 			}
-			// The evidence this reads is a pile of run transcripts, so the
-			// easiest thing for it to produce is a summary of one of them.
-			// Same bar as save_memory: a note tied to one card is a run log,
-			// and the card already holds it. Skipped rather than failed —
-			// the rest of the reflection is still worth applying.
+			// Same bar as save_memory: a note tied to one card is a run log and the card already holds it. Skipped rather than failed — the rest of the reflection is still worth applying.
 			if reason := domain.MemoryRunLogReason(mc.Content); reason != "" {
 				log.Info().Str("agent", agentRec.Name).Str("reason", reason).
 					Str("content", truncate(mc.Content, 80)).Msg("reflection memory skipped: run log, not a durable lesson")
@@ -380,10 +358,7 @@ func (s *Service) applyOutput(
 				})
 				continue
 			}
-			// Reflection reasons over runs from every repository at once, so it
-			// has no single project to bind a lesson to: what it saves is
-			// global. Repository-specific lessons come from save_memory during
-			// the run itself, where the repository is known.
+			// Reflection reasons over runs from every repository at once, so what it saves is global; repo-specific lessons come from save_memory during the run, where the repository is known.
 			mem, err := s.memories.Save(ctx, agentRec.ID, nil, mc.Content, mc.Category, domain.MemorySourceReflection)
 			if err != nil {
 				log.Warn().Err(err).Msg("reflection memory save failed")
@@ -462,8 +437,7 @@ func (s *Service) applySkillChanges(
 ) []string {
 	var applied []string
 	count := 0
-	// budget is the standing catalog size, tracked across this batch so a
-	// reflection cannot slip three creates past a cap it was already at.
+	// Budget is the standing catalog size, tracked across this batch so a reflection cannot slip three creates past a cap it was already at.
 	budget := len(skillByID)
 	byName := map[string]domain.Skill{}
 	for _, sk := range skillByID {
@@ -477,9 +451,7 @@ func (s *Service) applySkillChanges(
 			})
 			continue
 		}
-		// A create that names an existing skill is the model trying to replace
-		// it; treat it as the update it meant, instead of adding a second
-		// skill with the same name whose content contradicts the first.
+		// A create that names an existing skill is the model trying to replace it; treat it as the update it meant, instead of adding a second same-named skill whose content contradicts the first.
 		if ch.Action == "create" {
 			if existing, ok := byName[strings.ToLower(strings.TrimSpace(ch.Name))]; ok {
 				ch.Action = "update"
@@ -751,7 +723,6 @@ func (s *Service) applyRuleChanges(
 	return applied
 }
 
-// applyReverts restores the before-state of a previous evolution event.
 func (s *Service) applyReverts(
 	ctx context.Context,
 	agentRec domain.Agent,

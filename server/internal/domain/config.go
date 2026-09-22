@@ -27,137 +27,91 @@ type Config struct {
 	Opencode      OpencodeConfig      `koanf:"opencode"`
 }
 
-// CursorAgentConfig drives the local Cursor CLI executor: the path a board run
-// on the cursor_agent provider is handed to instead of the in-process agent
-// loop (internal/adapter/cli/cursor).
-//
-// There is no Enabled flag, for the same reason AntigravityConfig has none:
-// the switch is whether the binary exists on this host.
+// CursorAgentConfig drives the local Cursor CLI executor
+// (internal/adapter/cli/cursor). No Enabled flag: the switch is whether the
+// binary exists on this host.
 type CursorAgentConfig struct {
-	// Binary is the CLI to run, resolved on PATH. Empty means "cursor-agent".
-	// Normally set from CURSOR_AGENT_BIN.
+	// Binary is the CLI to run, resolved on PATH; empty means "cursor-agent",
+	// normally set from CURSOR_AGENT_BIN.
 	Binary string `koanf:"binary"`
-	// RunTimeout bounds ONE session end to end. 0 means the executor's default
+	// RunTimeout bounds one session end to end; 0 means the executor default
 	// (1h).
 	RunTimeout time.Duration `koanf:"run_timeout"`
 }
 
-// OpencodeConfig drives the local OpenCode CLI executor: the path a board run
-// on the opencode provider is handed to instead of the in-process agent loop
-// (internal/adapter/cli/opencode).
-//
-// There is no Enabled flag, for the same reason AntigravityConfig has none:
-// the switch is whether the binary exists on this host.
+// OpencodeConfig drives the local OpenCode CLI executor
+// (internal/adapter/cli/opencode). No Enabled flag: the switch is whether the
+// binary exists on this host.
 type OpencodeConfig struct {
-	// Binary is the CLI to run, resolved on PATH. Empty means "opencode".
-	// Normally set from OPENCODE_BIN.
+	// Binary is the CLI to run, resolved on PATH; empty means "opencode",
+	// normally set from OPENCODE_BIN.
 	Binary string `koanf:"binary"`
-	// RunTimeout bounds ONE session end to end. 0 means the executor's default
+	// RunTimeout bounds one session end to end; 0 means the executor default
 	// (1h).
 	RunTimeout time.Duration `koanf:"run_timeout"`
 }
 
-// AntigravityConfig drives the local Antigravity (AGY) CLI executor: the path a
-// board run on the antigravity provider is handed to instead of the in-process
-// agent loop (internal/adapter/cli/antigravity).
-//
-// There is no Enabled flag, for the same reason ClaudeCodeConfig has none: the
-// switch is whether the binary exists on this host. An installation without the
-// CLI registers no executor at all, and an antigravity agent's run then fails
-// with one clear sentence naming the missing binary.
+// AntigravityConfig drives the local Antigravity (AGY) CLI executor
+// (internal/adapter/cli/antigravity). No Enabled flag: the switch is whether
+// the binary exists on this host.
 type AntigravityConfig struct {
-	// Binary is the CLI to run, resolved on PATH. Empty means "agy".
-	// Normally set from ANTIGRAVITY_BIN.
+	// Binary is the CLI to run, resolved on PATH; empty means "agy", normally
+	// set from ANTIGRAVITY_BIN.
 	Binary string `koanf:"binary"`
-	// MaxTurns bounds one CLI session. 0 means the executor's default (100).
+	// MaxTurns bounds one CLI session; 0 means the executor default (100).
 	MaxTurns int `koanf:"max_turns"`
-	// RunTimeout bounds ONE session end to end. 0 means the executor's default
+	// RunTimeout bounds one session end to end; 0 means the executor default
 	// (1h).
 	RunTimeout time.Duration `koanf:"run_timeout"`
 }
 
-// ClaudeCodeConfig drives the local Claude Code CLI executor: the path a board
-// run on the claude_code provider is handed to instead of the in-process agent
-// loop (internal/adapter/cli/claudecode).
-//
-// There is no Enabled flag, for the same reason MobileConfig has none: the
-// switch is whether the binary exists on this host. An installation without the
-// CLI registers no executor at all, and a claude_code agent's run then fails
-// with one clear sentence naming the missing binary — which is more useful than
-// a flag an operator can set to true on a machine where it cannot work.
+// ClaudeCodeConfig drives the local Claude Code CLI executor
+// (internal/adapter/cli/claudecode). No Enabled flag: the switch is whether
+// the binary exists on this host.
 type ClaudeCodeConfig struct {
-	// Binary is the CLI to run, resolved on PATH. Empty means "claude".
-	// Normally set from CLAUDE_CODE_BIN, which is NOT a secret and therefore
-	// not touched by the process-secret scrub (platform/runtime/envscrub.go):
-	// it names a program, and the child process needs PATH to find it anyway.
+	// Binary is the CLI to run, resolved on PATH; empty means "claude", set
+	// from CLAUDE_CODE_BIN.
 	Binary string `koanf:"binary"`
-	// MaxTurns bounds one CLI session, the way llm.task_max_iterations bounds a
-	// loop run. 0 means the executor's default (100).
+	// MaxTurns bounds one CLI session; 0 means the executor default (100).
 	MaxTurns int `koanf:"max_turns"`
-	// RunTimeout bounds ONE session end to end. It is the only thing that ever
-	// gives up on a wedged CLI: a subprocess has no equivalent of a provider's
-	// HTTP timeout, and the run's heartbeat keeps the row fresh, so the
-	// stale-run reconciler never sees it either. 0 means the executor's default
-	// (1h).
+	// RunTimeout bounds one session end to end — the only safeguard on a
+	// wedged subprocess, whose heartbeat keeps the stale-run reconciler away.
+	// 0 means the executor default (1h).
 	RunTimeout time.Duration `koanf:"run_timeout"`
-	// SettingSources says which of the CLI's settings files a session loads: a
-	// comma-separated subset of user, project, local. Empty means the executor's
-	// default, "project,local" — the OPERATOR's own ~/.claude settings are left
-	// out, because a local runner is somebody's working machine and their hooks,
-	// plugins and permission rules would otherwise land inside every board run.
-	// Set "user,project,local" to restore the CLI's own default; the one install
-	// that needs to is the one whose Claude auth lives in a user-level
-	// apiKeyHelper (a normal subscription login is unaffected).
+	// SettingSources is a subset of user, project, local; empty means
+	// "project,local" — the operator's own ~/.claude settings are excluded.
 	SettingSources string `koanf:"setting_sources"`
-	// MaxConcurrentSessions bounds how many CLI sessions run at once. 0 means
-	// the executor's default (3); negative means unlimited.
-	//
-	// The subscription's usage limit is shared by every session on this
-	// account, so N sessions running in parallel that all hit it mid-work all
-	// park at the same time, and a burst on resume re-hits it immediately. The
-	// cap keeps the burn sequential enough that the sessions that started
-	// actually finish instead of all being cut off together.
+	// MaxConcurrentSessions bounds parallel CLI sessions; 0 means default (3),
+	// negative unlimited. The cap keeps the shared subscription limit from
+	// cutting every session off at once.
 	MaxConcurrentSessions int `koanf:"max_concurrent_sessions"`
 }
 
 // ProdOpsConfig drives production monitoring: the health probe that watches
-// every deploy target's health URL and turns a dead environment into an
-// incident without waiting for an external alerting stack.
+// deploy targets and turns a dead environment into an incident.
 type ProdOpsConfig struct {
 	MonitorEnabled bool          `koanf:"monitor_enabled"`
 	ProbeInterval  time.Duration `koanf:"probe_interval"`
 }
 
-// StoreopsConfig drives the mobile store monitor: the sweep that re-verifies
-// onboarding checklists, polls store review status, and renews signing
-// assets ahead of expiry.
+// StoreopsConfig drives the mobile store monitor.
 type StoreopsConfig struct {
 	PollInterval time.Duration `koanf:"poll_interval"`
 }
 
-// DeployOpsConfig drives the deploy monitor: the sweep that mirrors GitHub
-// Actions deploy runs locally, attributes console-triggered runs, and turns
-// a failed deploy into an incident. One API call per repository ×
-// environment per sweep, which is why the default interval is slower than
-// the health probe's.
+// DeployOpsConfig drives the deploy monitor: it mirrors GitHub Actions runs
+// locally and turns a failed deploy into an incident.
 type DeployOpsConfig struct {
 	MonitorEnabled bool          `koanf:"monitor_enabled"`
 	PollInterval   time.Duration `koanf:"poll_interval"`
-	// HealthWindow is how long after a successful deploy an incident on that
-	// environment is attributed to the task that just released — the
-	// post-release watch the QA agent is told to keep, and the window inside
-	// which auto_rollback fires. 0 means the package default (15m).
-	//
-	// Short on purpose. It is keyed on a specific commit and it authorises a
-	// ROLLBACK of a specific card, so it has to be short enough that a
-	// coincidence does not get somebody's release reverted. The generic
-	// 45-minute correlation in prodops/remedy.go is unrelated and unchanged —
-	// that one only ever writes advisory words.
+	// HealthWindow is how long after a successful deploy an incident is
+	// attributed to the task that just released (the post-release watch and
+	// auto_rollback window); 0 means the package default (15m). Short on
+	// purpose: it authorises a rollback of a specific card.
 	HealthWindow time.Duration `koanf:"health_window"`
 }
 
-// EvolutionConfig drives agent self-evolution: periodic reflections, KPI
-// evaluation, and evolution-impact tracking.
+// EvolutionConfig drives agent self-evolution.
 type EvolutionConfig struct {
 	Enabled            bool          `koanf:"enabled"`
 	AllowWebResearch   bool          `koanf:"allow_web_research"`
@@ -170,16 +124,12 @@ type EvolutionConfig struct {
 	MinEventsForImpact int           `koanf:"min_events_for_impact"`
 	MaxSkillChanges    int           `koanf:"max_skill_changes"`
 	MaxRuleChanges     int           `koanf:"max_rule_changes"`
-	// MaxSkillsPerAgent / MaxRulesPerAgent are the standing budget, not the
-	// per-reflection one: once an agent is at budget, a reflection can only
-	// update, merge or delete — a create is rejected. Left unbounded, a weekly
-	// reflection grows the catalog forever and the agent's own instructions
-	// start contradicting each other.
+	// MaxSkillsPerAgent / MaxRulesPerAgent are the standing budget; at budget a
+	// reflection can only update, merge or delete, never create.
 	MaxSkillsPerAgent int `koanf:"max_skills_per_agent"`
 	MaxRulesPerAgent  int `koanf:"max_rules_per_agent"`
-	// GoldenGate runs the golden suite before AND after the changes and
-	// reverts them when the after-run is worse. Costs one extra suite run per
-	// reflection that actually changed something.
+	// GoldenGate runs the golden suite before AND after changes and reverts
+	// when the after-run is worse.
 	GoldenGate        bool   `koanf:"golden_gate"`
 	JudgeModel        string `koanf:"judge_model"`
 	JudgeProviderType string `koanf:"judge_provider_type"`
@@ -189,16 +139,15 @@ type EvolutionConfig struct {
 }
 
 // AgentCatalogConfig drives the external agents/skills catalog: a git clone
-// (or a local directory) the app watches and pulls agent definitions from, so
-// a new agent or a skill edit ships without a desktop release. Disabled by
-// an empty Source.
+// (or a local directory) the app watches and pulls agent definitions from.
+// Disabled by an empty Source.
 type AgentCatalogConfig struct {
 	Source string `koanf:"source"`
-	// CacheDir is where a git Source is cloned into. A Source that is a
-	// directory is used in place, CacheDir ignored.
+	// CacheDir is where a git Source is cloned; a directory Source is used in
+	// place.
 	CacheDir string `koanf:"cache_dir"`
-	// Interval between background syncs after the boot-time one. 0 = the
-	// 15m default.
+	// Interval between background syncs after the boot-time one; 0 = the 15m
+	// default.
 	Interval time.Duration `koanf:"interval"`
 }
 
@@ -209,22 +158,13 @@ type BoardConfig struct {
 	RequireCriteriaComplete bool              `koanf:"require_criteria_complete"`
 	TaskTypeModels          map[string]string `koanf:"task_type_models"`
 	// ReconcileStaleAfter/ReconcileInterval drive the reconciler that recovers
-	// task_agent_runs orphaned by a process restart or a dropped in-memory
-	// job (dispatch is otherwise purely event-driven, so nothing else ever
-	// revisits an idle task). Kept generous by default: a run has no
-	// per-iteration timeout, so a legitimately slow multi-turn agent run must
-	// not be mistaken for a lost one.
+	// task_agent_runs orphaned by a restart/dropped job (dispatch is otherwise
+	// purely event-driven). Generous: a run has no per-iteration timeout.
 	ReconcileStaleAfter time.Duration `koanf:"reconcile_stale_after"`
 	ReconcileInterval   time.Duration `koanf:"reconcile_interval"`
-	// PipelineGateTimeout is the longest a task may wait in code_review for a
-	// build/test result before its reviewer is dispatched anyway, and
-	// PipelineGateInterval is how often unfinished pipelines are re-asked.
-	//
-	// Both exist because the gate's only key used to be an event nobody
-	// guarantees: PipelineRunner.finalize, in the process that started the
-	// pipeline. A pod restart, a dropped delivery or a CI account with no
-	// minutes left left the card in code_review with a spinner and no agent,
-	// forever. See board.PipelineGateWindow for why the default is what it is.
+	// PipelineGateTimeout/Interval exist because the gate's only key used to
+	// be the pipeline-finalize event nobody guarantees (restart, dropped
+	// delivery, CI out of minutes), which left cards in code_review forever.
 	PipelineGateTimeout  time.Duration `koanf:"pipeline_gate_timeout"`
 	PipelineGateInterval time.Duration `koanf:"pipeline_gate_interval"`
 }
@@ -233,21 +173,15 @@ type LLMConfig struct {
 	BaseURL string `koanf:"base_url"`
 	Model   string `koanf:"model"`
 	APIKey  string `koanf:"api_key"`
-	// MaxIterations bounds a chat turn: a question plus a few lookups.
+	// MaxIterations bounds a chat turn.
 	MaxIterations int `koanf:"max_iterations"`
-	// TaskMaxIterations bounds a board task or orchestration subtask, which is
-	// search + read + edit + verify and needs several times the turns of a
-	// chat. Sharing MaxIterations killed real coding runs mid-edit.
+	// TaskMaxIterations bounds a board task/orchestration subtask, which needs
+	// several times a chat's turns; sharing MaxIterations killed real runs
+	// mid-edit.
 	TaskMaxIterations int `koanf:"task_max_iterations"`
-	// RunMaxTotalTokens is a mid-run circuit breaker: the agent loop sums every
-	// response's PromptTokens+CompletionTokens across one run (chat or task)
-	// and ends it — through the same wrap-up path an exhausted iteration
-	// budget takes — once the total crosses this many tokens. It exists
-	// alongside, not instead of, MaxIterations/TaskMaxIterations: a run can
-	// blow through a token budget in far fewer turns than its iteration cap
-	// allows (a huge context, a summarizer that failed to shrink it), and
-	// billing.Service.Allow only gates BEFORE a run starts, never during one —
-	// see its own comment for why. 0 disables it.
+	// RunMaxTotalTokens is a mid-run circuit breaker on total prompt+completion
+	// tokens, taking the same wrap-up path as an exhausted iteration budget;
+	// billing only gates before a run starts. 0 disables it.
 	RunMaxTotalTokens int           `koanf:"run_max_total_tokens"`
 	Timeout           time.Duration `koanf:"timeout"`
 }
@@ -256,9 +190,8 @@ type ServerConfig struct {
 	Port    int            `koanf:"port"`
 	APIKey  string         `koanf:"api_key"`
 	APIKeys []APIKeyConfig `koanf:"api_keys"`
-	// PublicBaseURL is the externally reachable origin of this instance
-	// (e.g. "https://bridge.example.com"). GitHub push webhooks are pointed at
-	// it; empty disables webhook setup.
+	// PublicBaseURL is the externally reachable origin, where GitHub push
+	// webhooks are pointed; empty disables webhook setup.
 	PublicBaseURL string `koanf:"public_base_url"`
 }
 
@@ -301,47 +234,32 @@ type IndexerConfig struct {
 	ChunkMaxLines   int      `koanf:"chunk_max_lines"`
 	AllowedRoots    []string `koanf:"allowed_roots"`
 	QueryRewrite    bool     `koanf:"query_rewrite"`
-	// Concurrency is how many files are chunked, embedded and stored at the
-	// same time. Indexing is one HTTP round trip per chunk and the process
-	// spends nearly all of its wall clock waiting for the embedding endpoint,
-	// so a single worker leaves both sides idle. Raising it multiplies the
-	// request rate too — the embedding rate limiter is what keeps that from
-	// turning into 429s. 0 falls back to defaultIndexConcurrency.
+	// Concurrency is how many files are chunked/embedded/stored at once;
+	// indexing mostly waits on the embedding endpoint. 0 = default.
 	Concurrency int `koanf:"concurrency"`
-	// EmbedConcurrency bounds embedding calls across every index job at once,
-	// so indexing two repositories does not multiply the load on a local
-	// embedding model. 0 falls back to the indexer's default (2).
+	// EmbedConcurrency bounds embedding calls across every index job; 0 = the
+	// indexer's default (2).
 	EmbedConcurrency int `koanf:"embed_concurrency"`
 }
 
-// EmbeddingConfig paces embedding requests. Indexing a repository fires one
-// embedding call per chunk back to back, which hosted endpoints answer with
-// 429 — and a single 429 used to fail the whole index at ~9%. RequestsPerMinute
-// spaces the calls out, the retry settings absorb the 429s that still happen,
-// and a Retry-After from the provider also delays every following call so one
-// rejection does not turn into a burst of them.
+// EmbeddingConfig paces embedding requests (one per chunk back to back used to
+// 429-fail whole indexes at ~9%).
 type EmbeddingConfig struct {
 	// RequestsPerMinute caps embedding calls; 0 leaves them unthrottled.
 	RequestsPerMinute int `koanf:"requests_per_minute"`
-	// MaxRetries is how many times a rate-limited call is retried. 0 means unset
-	// (the loader's default applies); a negative value turns retrying off.
+	// MaxRetries is how many times a rate-limited call is retried; 0 = the
+	// loader default, negative turns retrying off.
 	MaxRetries int `koanf:"max_retries"`
-	// RetryBackoff is the first wait after a 429; it doubles per attempt and is
-	// used only when the provider sends no Retry-After.
+	// RetryBackoff is the first wait after a 429, doubling per attempt, used
+	// only when the provider sends no Retry-After.
 	RetryBackoff time.Duration `koanf:"retry_backoff"`
 	// MaxRetryWait caps a single wait, including a provider's Retry-After.
 	MaxRetryWait time.Duration `koanf:"max_retry_wait"`
-	// RequestTimeout budgets one embedding call. The indexer derives its
-	// per-chunk deadline from this plus the retry waits.
+	// RequestTimeout budgets one embedding call; the indexer's per-chunk
+	// deadline derives from it plus the retry waits.
 	RequestTimeout time.Duration `koanf:"request_timeout"`
-	// QueryCacheEntries bounds the in-memory LRU that caches query embedding
-	// vectors keyed by (provider, model, exact text), so an identical query
-	// (a rewritten codebase_search query, the planner's skill search, memory
-	// recall) is served without a re-embed. Index-time chunk embedding shares
-	// the same cache, but indexer/incremental.go's SHA-256 content dedup means
-	// a chunk is only ever re-embedded when its content changed, so it does
-	// not repeatedly thrash the LRU. 0 means unset (the loader's default
-	// applies); a negative value disables the cache.
+	// QueryCacheEntries bounds the LRU caching query embedding vectors keyed by
+	// (provider, model, exact text); 0 = unset, negative disables.
 	QueryCacheEntries int `koanf:"query_cache_entries"`
 }
 
@@ -360,9 +278,8 @@ type TerminalConfig struct {
 	Enabled    bool          `koanf:"enabled"`
 	WorkingDir string        `koanf:"working_dir"`
 	Timeout    time.Duration `koanf:"timeout"`
-	// MaxTimeout caps what a single run_terminal call may ask for with
-	// timeout_seconds. Timeout is the default for an unspecified call; this is
-	// the ceiling for a slow one (dependency install, cold build, full suite).
+	// MaxTimeout is the ceiling for a slow call (dependency install, cold
+	// build); Timeout is the default for an unspecified one.
 	MaxTimeout time.Duration         `koanf:"max_timeout"`
 	Sandbox    TerminalSandboxConfig `koanf:"sandbox"`
 }
@@ -388,34 +305,23 @@ type BrowserConfig struct {
 }
 
 // MobileConfig attaches a real Android device, reached through an Appium
-// server, to the mobile_* tools.
-//
-// There is no Enabled flag on purpose. The browser is a binary in the image and
-// can be assumed present; a phone is a physical object an operator plugged in,
-// so "configured" is the only honest switch — an installation with no hub URL
-// and no device has nothing to enable, and registering the tools anyway would
-// give agents a tool set whose every call fails.
+// server, to the mobile_* tools. No Enabled flag: a hub URL is the only honest
+// switch — an installation with no hub and no device has nothing to enable.
 type MobileConfig struct {
-	// HubURL is the Appium server base, e.g. http://appium.tasktrooper:4723.
+	// HubURL is the Appium server base.
 	HubURL string `koanf:"hub_url"`
-	// DeviceUDID pins which phone. Appium would otherwise take whatever adb
-	// lists first, which on a host with an emulator attached is not the device
-	// QA was told it is testing.
+	// DeviceUDID pins which phone; Appium would otherwise take whatever adb
+	// lists first.
 	DeviceUDID string `koanf:"device_udid"`
-	// PlatformVersion is optional, and only makes the capability set explicit.
+	// PlatformVersion optionally makes the capability set explicit.
 	PlatformVersion string `koanf:"platform_version"`
-	// DevicePIN unlocks the lock screen at the start of every session. It is a
-	// credential: it comes from the environment, is never logged, and is never
-	// exposed to an agent as a tool argument.
+	// DevicePIN unlocks the lock screen each session; a credential, from the
+	// environment, never logged, never a tool argument.
 	DevicePIN string `koanf:"device_pin"`
-	// AuthToken is sent to the hub as a bearer token. The tunnel in front of a
-	// home-hosted Appium is the real access control; this is the hop inside it.
+	// AuthToken is sent to the hub as a bearer token.
 	AuthToken string `koanf:"auth_token"`
-	// BridgeURL is the adb sidecar next to Appium (cmd/device-agent). It is
-	// what lets the settings UI pair and connect a phone; without it the
-	// device still works, but attaching one is again a shell on the Appium
-	// host. Cluster-side wiring, so it stays in config rather than in the
-	// registration an operator edits.
+	// BridgeURL is the adb sidecar (cmd/device-agent) that lets the settings
+	// UI pair and connect a phone.
 	BridgeURL   string `koanf:"bridge_url"`
 	BridgeToken string `koanf:"bridge_token"`
 }

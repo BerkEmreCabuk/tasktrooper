@@ -15,8 +15,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// fakeCredentialStore stores whatever bytes it is handed untouched (no
-// encryption of its own), so a test can prove the SERVICE is what encrypts.
 type fakeCredentialStore struct {
 	row     port.GCloudCredentialRow
 	present bool
@@ -47,8 +45,6 @@ func (f *fakeCredentialStore) Delete(_ context.Context) error {
 	return nil
 }
 
-// fakeBindingStore is an in-memory port.GCloudResourceStore keyed the way the
-// postgres unique constraint is.
 type fakeBindingStore struct {
 	rows map[string]domain.GCloudResourceBinding
 }
@@ -95,7 +91,6 @@ func (f *fakeBindingStore) Delete(_ context.Context, repositoryID uuid.UUID, pat
 	return nil
 }
 
-// fakeClient is a scriptable port.GCloudClient.
 type fakeClient struct {
 	identity  domain.GCloudIdentity
 	validErr  error
@@ -162,8 +157,6 @@ func newService(t *testing.T, creds *fakeCredentialStore, bindings *fakeBindingS
 	})
 }
 
-// TestSaveCredentialEncryptsThePayload is the storage invariant: the key file
-// must never sit in the database in the clear.
 func TestSaveCredentialEncryptsThePayload(t *testing.T) {
 	creds := &fakeCredentialStore{}
 	client := &fakeClient{identity: domain.GCloudIdentity{ProjectID: "demo-project", ClientEmail: "sa@demo.iam.gserviceaccount.com"}}
@@ -178,16 +171,12 @@ func TestSaveCredentialEncryptsThePayload(t *testing.T) {
 	if strings.Contains(string(creds.row.Data), "private_key") || strings.Contains(string(creds.row.Data), "pretend") {
 		t.Fatalf("the stored payload is not encrypted: %q", creds.row.Data)
 	}
-	// The two identifiers ARE stored in the clear, on purpose: the console
-	// names the connection without a decrypt.
+
 	if creds.row.ProjectID != "demo-project" || creds.row.ClientEmail != "sa@demo.iam.gserviceaccount.com" {
 		t.Fatalf("identity columns = %q / %q", creds.row.ProjectID, creds.row.ClientEmail)
 	}
 }
 
-// TestSaveCredentialRefusesToStoreAnUnvalidatedCredential is storeops' rule
-// applied here: nothing reaches the vault that has not been confirmed to
-// authenticate.
 func TestSaveCredentialRefusesToStoreAnUnvalidatedCredential(t *testing.T) {
 	creds := &fakeCredentialStore{}
 	client := &fakeClient{validErr: errors.New("invalid_grant")}
@@ -202,8 +191,6 @@ func TestSaveCredentialRefusesToStoreAnUnvalidatedCredential(t *testing.T) {
 	}
 }
 
-// TestSaveCredentialReportsAPersistFailureAsInfra keeps the 400/500 split
-// honest: a database failure is not the caller's bad input.
 func TestSaveCredentialReportsAPersistFailureAsInfra(t *testing.T) {
 	creds := &fakeCredentialStore{setErr: errors.New("connection refused")}
 	svc := newService(t, creds, newFakeBindingStore(), &fakeClient{})
@@ -217,8 +204,6 @@ func TestSaveCredentialReportsAPersistFailureAsInfra(t *testing.T) {
 	}
 }
 
-// TestCredentialNeverReturnsThePayload is the disclosure invariant: the view
-// carries identifiers and a timestamp, and there is no route back to the key.
 func TestCredentialNeverReturnsThePayload(t *testing.T) {
 	creds := &fakeCredentialStore{}
 	client := &fakeClient{identity: domain.GCloudIdentity{ProjectID: "demo-project", ClientEmail: "sa@demo.iam.gserviceaccount.com"}}
@@ -250,8 +235,6 @@ func TestCredentialReportsDisconnectedWithoutAnError(t *testing.T) {
 	}
 }
 
-// TestResourcesReportsNotConnectedSeparately is the sentinel the edge branches
-// on to answer not_connected rather than listing_unsupported.
 func TestResourcesReportsNotConnectedSeparately(t *testing.T) {
 	svc := newService(t, &fakeCredentialStore{}, newFakeBindingStore(), &fakeClient{})
 	_, err := svc.Resources(context.Background())
@@ -260,8 +243,6 @@ func TestResourcesReportsNotConnectedSeparately(t *testing.T) {
 	}
 }
 
-// connectedService saves a credential and hands back the service, so the
-// listing tests start from a connected vault.
 func connectedService(t *testing.T, client *fakeClient, bindings *fakeBindingStore) *gcloudops.Service {
 	t.Helper()
 	creds := &fakeCredentialStore{}
@@ -272,9 +253,6 @@ func connectedService(t *testing.T, client *fakeClient, bindings *fakeBindingSto
 	return svc
 }
 
-// TestResourcesKeepsOneFamilyWhenTheOtherIsRefused is the reason the verdict
-// is per-family: a service account with roles/run.viewer and nothing else
-// still produces a usable Cloud Run picker.
 func TestResourcesKeepsOneFamilyWhenTheOtherIsRefused(t *testing.T) {
 	client := &fakeClient{
 		runList: domain.GCloudResourceList{Resources: []domain.GCloudResourceRef{
@@ -299,8 +277,6 @@ func TestResourcesKeepsOneFamilyWhenTheOtherIsRefused(t *testing.T) {
 	}
 }
 
-// TestResourcesNeverTurnsARefusalIntoAnError is the "no 500" rule: both
-// families refused is still a successful, connected answer.
 func TestResourcesNeverTurnsARefusalIntoAnError(t *testing.T) {
 	client := &fakeClient{runErr: port.ErrGCloudListingUnavailable, gkeErr: port.ErrGCloudListingUnavailable}
 	svc := connectedService(t, client, newFakeBindingStore())
@@ -317,8 +293,6 @@ func TestResourcesNeverTurnsARefusalIntoAnError(t *testing.T) {
 	}
 }
 
-// TestResourcesPropagatesARealFailure keeps the other side of that line: a
-// broken credential or a network failure is a genuine error.
 func TestResourcesPropagatesARealFailure(t *testing.T) {
 	client := &fakeClient{runErr: errors.New("connection reset")}
 	svc := connectedService(t, client, newFakeBindingStore())
@@ -344,8 +318,6 @@ func TestResourcesCarriesUnreachableLocations(t *testing.T) {
 	}
 }
 
-// TestBindResourceConfirmsTheResourceExists mirrors storeops' rule: a binding
-// nothing can resolve is a binding every later read fails on.
 func TestBindResourceConfirmsTheResourceExists(t *testing.T) {
 	client := &fakeClient{getErr: port.ErrNotFound}
 	bindings := newFakeBindingStore()
@@ -364,8 +336,6 @@ func TestBindResourceConfirmsTheResourceExists(t *testing.T) {
 	}
 }
 
-// TestBindResourceRefusesWhenItCannotVerify: a 403 means the credential
-// cannot read the resource, so the binding cannot be claimed as confirmed.
 func TestBindResourceRefusesWhenItCannotVerify(t *testing.T) {
 	client := &fakeClient{getErr: port.ErrGCloudListingUnavailable}
 	bindings := newFakeBindingStore()
@@ -383,8 +353,6 @@ func TestBindResourceRefusesWhenItCannotVerify(t *testing.T) {
 	}
 }
 
-// TestBindResourceStoresGooglesAnswerNotTheRequest: the picker's copy can be
-// stale, and the location decides which resource a later read reaches.
 func TestBindResourceStoresGooglesAnswerNotTheRequest(t *testing.T) {
 	client := &fakeClient{runDetail: domain.CloudRunServiceDetail{
 		Ref: domain.GCloudResourceRef{
@@ -441,8 +409,6 @@ func TestBindResourceRejectsAMismatchedType(t *testing.T) {
 	}
 }
 
-// TestBindResourceRejectsAnUnknownSubProject exercises the optional repository
-// resolver: a path the repository does not declare is the caller's mistake.
 func TestBindResourceRejectsAnUnknownSubProject(t *testing.T) {
 	repoID := uuid.New()
 	svc := gcloudops.NewService(gcloudops.Deps{
@@ -467,9 +433,6 @@ type fakeRepos struct{ repo domain.Repository }
 
 func (f fakeRepos) Get(context.Context, uuid.UUID) (domain.Repository, error) { return f.repo, nil }
 
-// TestResourceReturnsTheBindingEvenWhenDisconnected: the binding is a fact
-// about the repository, and losing it because a key was deleted would lose
-// real state.
 func TestResourceReturnsTheBindingEvenWhenDisconnected(t *testing.T) {
 	bindings := newFakeBindingStore()
 	repoID := uuid.New()
@@ -536,8 +499,6 @@ func TestResourceReportsAnAbsentBindingAsNotFound(t *testing.T) {
 	}
 }
 
-// TestDeleteCredentialKeepsTheBindings: a rotated key must not force someone
-// to re-pick every service.
 func TestDeleteCredentialKeepsTheBindings(t *testing.T) {
 	bindings := newFakeBindingStore()
 	repoID := uuid.New()

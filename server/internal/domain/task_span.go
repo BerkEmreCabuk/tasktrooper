@@ -6,10 +6,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// TaskColumnSpan is one uninterrupted stay of a task in one board column.
-// A task that bounces back through need_revision produces a second span for
-// the same column with a higher VisitNo rather than overwriting the first, so
-// the history of a rework loop stays readable.
+// TaskColumnSpan is one uninterrupted stay of a task in one board column. A
+// task that bounces back through need_revision produces a second span for the
+// same column with a higher VisitNo rather than overwriting the first, so the
+// history of a rework loop stays readable.
 type TaskColumnSpan struct {
 	ID              uuid.UUID  `json:"id"`
 	TaskID          uuid.UUID  `json:"task_id"`
@@ -29,11 +29,9 @@ const (
 )
 
 // SpanCountsForSpeed reports whether time spent in a column may be charged to
-// an agent's speed KPI.
-//
-// Excluded: blocked (waiting on a human answer), human_uat and analiz_review
-// (human approval gates with no agent subscriber), backlog/todo (nobody's
-// work), need_revision (a queue, not work), and the terminal columns.
+// an agent's speed KPI. Excluded: blocked (waiting on a human), human_uat and
+// analiz_review (human gates), backlog/todo (nobody's work), need_revision (a
+// queue, not work), and the terminal columns.
 func SpanCountsForSpeed(col TaskColumn) bool {
 	switch col {
 	case TaskColumnInProgress, TaskColumnCodeReview, TaskColumnReadyForQA,

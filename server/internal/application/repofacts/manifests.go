@@ -9,13 +9,10 @@ import (
 	"strings"
 )
 
-// maxManifestBytes caps a manifest read. Manifests are small; anything larger
-// is a generated blob and parsing it buys nothing.
+// Caps a manifest read: manifests are small; anything larger is a generated blob and parsing it buys nothing.
 const maxManifestBytes = 512 * 1024
 
-// frameworkDeps are the npm dependencies worth naming in a profile — the ones
-// that decide how the code is written. Everything else is noise at this
-// altitude.
+// The npm dependencies worth naming in a profile — the ones that decide how the code is written; everything else is noise at this altitude.
 var frameworkDeps = map[string]bool{
 	"react": true, "next": true, "vue": true, "nuxt": true, "svelte": true,
 	"@sveltejs/kit": true, "@angular/core": true, "solid-js": true, "astro": true,

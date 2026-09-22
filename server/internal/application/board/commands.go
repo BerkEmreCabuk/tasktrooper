@@ -84,36 +84,21 @@ func hasNodeModules(dir string) bool {
 
 func ResolveVerifyStages(dir string, repo domain.Repository) []Stage {
 	if cmd := splitCommand(repo.VerifyCommand); len(cmd) > 0 {
-		// A declared command gets the dependency installs a detected one gets.
-		// Without them `make lint` ran in a fresh task checkout with no
-		// node_modules anywhere, `npx tsc` fetched an unrelated registry package
-		// called tsc whose only output is an error, and the gate reported that
-		// as the agent's build failure.
 		return append(nodeSetupStages(dir), Stage{Name: "verify", Command: cmd})
 	}
 	return detectBuild(dir)
 }
 
-// nodeSetupMaxDepth bounds how far below the workspace root a package with its
-// own lockfile is looked for, and nodeSetupMaxStages how many installs one
-// verification may start.
 const (
 	nodeSetupMaxDepth  = 3
 	nodeSetupMaxStages = 6
 )
 
-// skipSetupDirs are never searched for packages: dependency trees and build
-// output hold package files that are not the project's own.
 var skipSetupDirs = map[string]bool{
 	"node_modules": true, "vendor": true, "dist": true, "build": true,
 	"out": true, "coverage": true, "target": true,
 }
 
-// nodeSetupStages returns an `npm ci` setup stage for every package in the
-// workspace that has a package-lock.json but no node_modules yet: the root and
-// nested ones such as desktop/ and desktop/ui/ in a monorepo. A package without
-// a lockfile is left alone, because installing it would resolve versions the
-// repository never pinned.
 func nodeSetupStages(dir string) []Stage {
 	var rels []string
 	var walk func(abs, rel string, depth int)
@@ -133,7 +118,6 @@ func nodeSetupStages(dir string) []Stage {
 		}
 		for _, e := range entries {
 			name := e.Name()
-			// IsDir is false for a symlink, which also keeps a link cycle out.
 			if !e.IsDir() || strings.HasPrefix(name, ".") || skipSetupDirs[name] {
 				continue
 			}

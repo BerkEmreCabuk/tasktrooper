@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// fakeSeeds stands in for install_state: once the board is seeded it stays
-// seeded. calls counts how often the store was asked at all.
 type fakeSeeds struct {
 	mu      sync.Mutex
 	already bool
@@ -39,7 +37,6 @@ func (m *fakeSeeds) counts() (seeded, calls int) {
 	return m.seeded, m.calls
 }
 
-// stepRecorder counts step runs and signals each one.
 type stepRecorder struct {
 	mu    sync.Mutex
 	runs  int
@@ -82,8 +79,6 @@ func newService() (*Service, *fakeSeeds) {
 	return NewService(seeds), seeds
 }
 
-// Every request calls Ensure, so the steps must run once per process however
-// often it is called, and a seeded board must not cost a query per request.
 func TestStepsRunOncePerProcess(t *testing.T) {
 	svc, seeds := newService()
 	rec := newStepRecorder()
@@ -105,8 +100,6 @@ func TestStepsRunOncePerProcess(t *testing.T) {
 	}
 }
 
-// A seed that failed at boot is not cached: the next Ensure (the first request)
-// retries it, and the steps wait for a board that exists.
 func TestAFailedSeedIsRetried(t *testing.T) {
 	svc, seeds := newService()
 	rec := newStepRecorder()
@@ -134,8 +127,6 @@ func TestAFailedSeedIsRetried(t *testing.T) {
 	}
 }
 
-// The steps outlive the context that launched them: the request that happened
-// to be first is answered long before a dozen seed writes finish.
 func TestStepsOutliveTheCallersContext(t *testing.T) {
 	svc, _ := newService()
 	release := make(chan struct{})
@@ -163,9 +154,6 @@ func TestStepsOutliveTheCallersContext(t *testing.T) {
 	}
 }
 
-// A failing step is logged and skipped, never fatal: an install whose mcp
-// catalog did not seed still has a working board, and the caller must not fail
-// because of a seed nobody asked for.
 func TestAFailingStepDoesNotFailEnsure(t *testing.T) {
 	svc, _ := newService()
 	bad := newStepRecorder()
@@ -181,15 +169,12 @@ func TestAFailingStepDoesNotFailEnsure(t *testing.T) {
 	good.waitFor(t, 1)
 }
 
-// The board seed is the durable, once-ever half; the steps are the
-// once-per-process half. An install seeded by an earlier build still gets the
-// steps, which is how new seed data reaches it.
 func TestStepsRunForAnAlreadySeededInstall(t *testing.T) {
 	svc, seeds := newService()
 	rec := newStepRecorder()
 	svc.AddStep("probe", rec.run)
 
-	seeds.already = true // install_state says the board already exists
+	seeds.already = true
 
 	if err := svc.Ensure(context.Background()); err != nil {
 		t.Fatalf("Ensure: %v", err)

@@ -15,8 +15,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// quotaParkStore records what parkTurnOnQuota does to the store: the park
-// itself, and the transcript notice it leaves behind.
 type quotaParkStore struct {
 	port.SessionStore
 	parkErr error
@@ -71,9 +69,6 @@ func TestParkTurnOnQuotaParksAndLeavesAQueuedNotice(t *testing.T) {
 		"a queued turn must not read as a rate-limit failure to a client keying styling off the prefix")
 	assert.NotContains(t, store.appendedContent, domain.RateLimitNoticePrefix)
 
-	// The returned error is itself the queued sentence, so a caller that
-	// returns it straight through (SendMessage, SendMessageStream) hands its
-	// own caller the right wording without re-deriving it.
 	assert.Contains(t, err.Error(), "will send automatically")
 }
 

@@ -165,7 +165,6 @@ func TestCancelReportsFalseForRunsItDoesNotHold(t *testing.T) {
 	runID := uuid.New()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// Register and release, exactly as a run that has just finished does.
 	r.registerCancel(runID, cancel)()
 
 	if r.Cancel(runID) {

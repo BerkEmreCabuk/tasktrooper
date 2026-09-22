@@ -6,21 +6,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// AssigneeMode is how a task type's assignee_role_id is applied when a task of
-// that type is created.
 type AssigneeMode string
 
 const (
-	// AssigneeModeNone never assigns from the role: the requested assignee (or
-	// none) stands, exactly as task/bug/technical behave today.
-	AssigneeModeNone AssigneeMode = "none"
-	// AssigneeModeDefault fills the assignee from the role only when nothing
-	// was requested.
-	AssigneeModeDefault AssigneeMode = "default"
-	// AssigneeModeOverride always assigns from the role, the way an analiz
-	// task's assignee is resolved today (resolveAnalizAssignee): the role's
-	// agent for the task's area wins even over a requested assignee, falling
-	// back to the requested one when the role has nobody for that area.
+	AssigneeModeNone     AssigneeMode = "none"
+	AssigneeModeDefault  AssigneeMode = "default"
 	AssigneeModeOverride AssigneeMode = "override"
 )
 
@@ -33,9 +23,6 @@ func ValidAssigneeMode(m AssigneeMode) bool {
 	}
 }
 
-// StageKind classifies what a column is FOR, independent of which type it
-// belongs to — the engine reads Kind where it used to compare a column
-// literal (e.g. "is this a review column").
 type StageKind string
 
 const (
@@ -59,8 +46,6 @@ func ValidStageKind(k StageKind) bool {
 	}
 }
 
-// ParticipantMode is whether a role does the work in a stage or signs off on
-// it.
 type ParticipantMode string
 
 const (
@@ -77,19 +62,11 @@ func ValidParticipantMode(m ParticipantMode) bool {
 	}
 }
 
-// BehaviourRef is one behaviour attached to a stage or a task type, with the
-// params the behaviour declares it needs (see BehaviourRegistry). Params are
-// always strings on the wire — a column slug, an enum option, "true"/"false"
-// for a bool param — because they round-trip through jsonb and an HTTP form
-// the same way regardless of the param's logical type.
 type BehaviourRef struct {
 	Key    BehaviourKey
 	Params map[string]string
 }
 
-// TaskTypeDef is a task type as data: what used to be one of the four
-// TaskType* constants is now a row a human can add, rename (label/prefix) and
-// attach type-scoped behaviours to.
 type TaskTypeDef struct {
 	Key            TaskType
 	Label          string
@@ -101,9 +78,7 @@ type TaskTypeDef struct {
 	AssigneeMode   AssigneeMode
 	Behaviours     []BehaviourRef
 	BuiltIn        bool
-	// TaskCount is populated on reads that need it (list/get), never written —
-	// it is what a delete/prefix-change refusal is judged against.
-	TaskCount int
+	TaskCount      int
 }
 
 func (t TaskTypeDef) Has(key BehaviourKey) bool {
@@ -115,10 +90,6 @@ func (t TaskTypeDef) Has(key BehaviourKey) bool {
 	return false
 }
 
-// StageParticipant names one role's part in a stage: at most one worker role
-// and one approver role per stage (enforced by workflow.ValidateStages), so a
-// stage's roster is never ambiguous about who does the work versus who signs
-// off.
 type StageParticipant struct {
 	RoleID       uuid.UUID
 	Mode         ParticipantMode
@@ -126,9 +97,6 @@ type StageParticipant struct {
 	Position     int
 }
 
-// WorkflowStage is one column's behaviour for one task type. A column with no
-// stage row for a type carries no behaviours and routes to the task's
-// assignee — today's fallback for a custom column nothing else claims.
 type WorkflowStage struct {
 	ID           uuid.UUID
 	TaskType     TaskType
@@ -161,16 +129,11 @@ func (s WorkflowStage) Param(key BehaviourKey, name string) (string, bool) {
 	return "", false
 }
 
-// Workflow is one task type's full set of stages — the shape every gate,
-// dispatch decision and prompt used to read off hardcoded column/type
-// literals now asks of instead.
 type Workflow struct {
 	Type   TaskTypeDef
 	Stages []WorkflowStage
 }
 
-// Stage returns the stage for a column, and false when the column has no row
-// for this type (the "custom column, no behaviours" case).
 func (w Workflow) Stage(col TaskColumn) (WorkflowStage, bool) {
 	for _, s := range w.Stages {
 		if s.Column == col {
@@ -180,18 +143,11 @@ func (w Workflow) Stage(col TaskColumn) (WorkflowStage, bool) {
 	return WorkflowStage{}, false
 }
 
-// Has reports whether the stage at col carries the named behaviour. A column
-// with no stage row never has any behaviour — the same "unclaimed column"
-// fallback Stage documents.
 func (w Workflow) Has(col TaskColumn, key BehaviourKey) bool {
 	stage, ok := w.Stage(col)
 	return ok && stage.Has(key)
 }
 
-// Param reads one param of a stage behaviour. The bool is false when the
-// column has no stage, the stage lacks the behaviour, or the behaviour has no
-// such param — three different absences a caller usually treats the same way
-// (fall back to a default), which is why they collapse into one bool here.
 func (w Workflow) Param(col TaskColumn, key BehaviourKey, name string) (string, bool) {
 	stage, ok := w.Stage(col)
 	if !ok {
@@ -200,8 +156,6 @@ func (w Workflow) Param(col TaskColumn, key BehaviourKey, name string) (string, 
 	return stage.Param(key, name)
 }
 
-// TypeHas reports whether the task type itself (not a stage) carries the
-// named behaviour — the (type)-scoped rows of BehaviourRegistry.
 func (w Workflow) TypeHas(key BehaviourKey) bool {
 	return w.Type.Has(key)
 }
@@ -215,9 +169,6 @@ func (w Workflow) KindOf(col TaskColumn) StageKind {
 	return stage.Kind
 }
 
-// sortedOnPath returns the on_path stages ordered by Position — the spine of
-// the type's lifecycle, off-path drag targets (need_revision, blocked, a
-// custom column) excluded.
 func (w Workflow) sortedOnPath() []WorkflowStage {
 	out := make([]WorkflowStage, 0, len(w.Stages))
 	for _, s := range w.Stages {
@@ -229,9 +180,6 @@ func (w Workflow) sortedOnPath() []WorkflowStage {
 	return out
 }
 
-// NextOnPath is the next stage after col on the on-path spine — what
-// auto_enter/advance_on_diff/advance_on_document used to name as a literal
-// column. False when col is not on the spine, or is its last stage.
 func (w Workflow) NextOnPath(col TaskColumn) (TaskColumn, bool) {
 	path := w.sortedOnPath()
 	for i, s := range path {
@@ -242,10 +190,6 @@ func (w Workflow) NextOnPath(col TaskColumn) (TaskColumn, bool) {
 	return "", false
 }
 
-// WorkColumn is the first on-path stage of kind "work" — the column an
-// implementer actually writes code (or, for analiz, documents) in. It is what
-// verify.go's build-gate fix round used to ask for as domain.TaskColumnInProgress
-// literally.
 func (w Workflow) WorkColumn() (TaskColumn, bool) {
 	for _, s := range w.sortedOnPath() {
 		if s.Kind == StageKindWork {
@@ -255,10 +199,6 @@ func (w Workflow) WorkColumn() (TaskColumn, bool) {
 	return "", false
 }
 
-// ReviewChain is the ordered list of stages this type's review_chain_stage
-// behaviour marks mandatory — what a hardcoded per-type ReviewChainForType
-// slice used to return before Release B. Ordered by the stage's on-path
-// position so a block message lists them in lifecycle order.
 func (w Workflow) ReviewChain() []ReviewStage {
 	path := w.sortedOnPath()
 	order := make(map[TaskColumn]int, len(path))

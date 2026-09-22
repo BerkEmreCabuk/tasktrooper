@@ -6,9 +6,7 @@ import (
 	"strings"
 )
 
-// marker is one "this file existing means this service is wired" rule. The
-// table is deliberately file-based: a config file committed to the repo is a
-// fact, whereas a service name mentioned in a README is a rumour.
+// One "this file existing means this service is wired" rule. The table is deliberately file-based: a config file committed to the repo is a fact, whereas a service name mentioned in a README is a rumour.
 type marker struct {
 	file     string // exact basename, matched anywhere in the tree
 	name     string
@@ -54,8 +52,7 @@ var fileMarkers = []marker{
 	{file: "Appfile", name: "Fastlane", category: "mobile"},
 }
 
-// depMarkers map a dependency already parsed out of a manifest to a service.
-// They cover the integrations that ship as a library rather than a config file.
+// Map a dependency already parsed out of a manifest to a service — the integrations that ship as a library rather than a config file.
 var depMarkers = map[string]marker{
 	"stripe":                {name: "Stripe", category: "payments"},
 	"firebase":              {name: "Firebase", category: "auth"},
@@ -79,8 +76,7 @@ func collectPlatforms(root string, t *treeScan, f *Facts) {
 
 	for _, m := range fileMarkers {
 		for _, rel := range t.find(m.file) {
-			// supabase/config.toml is the only config.toml worth claiming —
-			// the name is too common to trust on its own.
+			// supabase/config.toml is the only config.toml worth claiming — the name is too common to trust on its own.
 			if m.file == "config.toml" && !strings.Contains(rel, "supabase") {
 				continue
 			}
@@ -92,16 +88,14 @@ func collectPlatforms(root string, t *treeScan, f *Facts) {
 		}
 	}
 
-	// A .vercel/project.json is written by `vercel link`; it proves the repo is
-	// attached to a Vercel project even when vercel.json was never created.
+	// A .vercel/project.json is written by `vercel link`; it proves the repo is attached to a Vercel project even when vercel.json was never created.
 	for _, rel := range t.find("project.json") {
 		if strings.Contains(rel, ".vercel/") {
 			add(Integration{Name: "Vercel", Category: "hosting", Detail: "linked Vercel project", Evidence: rel})
 		}
 	}
 
-	// Kubernetes: recognise it from a manifest that actually declares a
-	// workload, not from a directory called "k8s".
+	// Kubernetes: recognise it from a manifest that actually declares a workload, not from a directory called "k8s".
 	for _, rel := range t.files {
 		if depth(rel) > 5 {
 			continue
@@ -144,7 +138,7 @@ func collectPlatforms(root string, t *treeScan, f *Facts) {
 	})
 }
 
-// testConfigs maps a test-runner config basename to the framework it proves.
+// Maps a test-runner config basename to the framework it proves.
 var testConfigs = []struct {
 	prefix    string
 	framework string
@@ -193,9 +187,7 @@ func collectTestAreas(_ string, t *treeScan, f *Facts) {
 	}
 }
 
-// goTestArea reports the module-ish area of a Go test rather than its exact
-// package directory: `go test ./...` is run from the module root, so naming
-// the leaf package would tell an agent to cd somewhere pointless.
+// Reports the module-ish area of a Go test rather than its exact package directory: `go test ./...` is run from the module root, so naming the leaf package would tell an agent to cd somewhere pointless.
 func goTestArea(rel string) string {
 	parts := strings.Split(rel, "/")
 	if len(parts) > 2 && parts[0] == "apps" {

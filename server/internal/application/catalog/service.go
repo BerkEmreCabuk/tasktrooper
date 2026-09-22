@@ -19,42 +19,20 @@ type Service struct {
 	boardConfig    port.BoardConfigStore
 	versions       port.CatalogVersionStore
 	roleAdmin      RoleAdmin
-	// providers lets the runtime reconciler fall back to the install's active
-	// HTTP provider; nil means CLI-only.
+	// nil means CLI-only.
 	providers LLMProviders
-	// skillBudget is the per-agent skill ceiling the catalog sync shares with
-	// evolution's max_skills_per_agent; set by runtime wiring (SetSkillBudget).
+	// Shared ceiling with evolution's max_skills_per_agent; set by runtime wiring.
 	skillBudget int
-	// hostExecutor answers "can a run on this provider actually be executed
-	// here". Nil means no runner is attached, which is the correct answer on
-	// every host that has no agent CLI installed — including the cloud pod.
+	// Nil means no runner is attached — correct on every host without an agent CLI installed.
 	hostExecutor HostExecutorProbe
 }
 
-// HostExecutorProbe reports whether this host has a runner attached for a
-// provider that is a local process rather than an HTTP endpoint.
 type HostExecutorProbe func(domain.LLMProviderType) bool
 
-// ErrNoHostRunner marks the save-time refusal as the caller's to fix rather
-// than a server fault, so the transport can answer 400 with the sentence
-// instead of 500 with it.
 var ErrNoHostRunner = errors.New("no host runner for this provider")
 
-// ErrInvalidInput marks a refusal caused by the REQUEST BODY rather than by
-// anything on this server: a missing name, a skill with no content, an effort
-// level that is not one of the five, a negative turn cap.
-//
-// It exists because every one of them left through the generic error path as a
-// 500 — `PUT /admin/agents/:id` with no name answered `500 "name is required"`
-// — which tells a client and a monitor that the server broke and the same body
-// is worth sending again. Nothing here is retriable and nothing here is ours to
-// fix; the only thing that resolves it is a different request.
 var ErrInvalidInput = errors.New("invalid input")
 
-// invalidInputError carries the sentence WITHOUT the sentinel's own text in
-// front of it. These messages are already the whole explanation and are
-// rendered verbatim in the UI, so the usual `fmt.Errorf("%w: …")` wrap would
-// only make a reader step past a label to reach the sentence.
 type invalidInputError struct{ msg string }
 
 func (e invalidInputError) Error() string        { return e.msg }
@@ -64,10 +42,7 @@ func invalidInput(format string, a ...any) error {
 	return invalidInputError{msg: fmt.Sprintf(format, a...)}
 }
 
-// SeedingInProgress is a constant false now that agents arrive through the
-// external catalog sync rather than a boot-time template upsert. It survives so
-// the /admin/agents handler's existing "seeding" response field stays a stable
-// contract for the UI's poll.
+// Constant false now that agents arrive through the external catalog sync; kept for the UI's stable "seeding" poll contract.
 func (s *Service) SeedingInProgress() bool {
 	return false
 }
@@ -88,43 +63,21 @@ func (s *Service) SetBoardConfigStore(store port.BoardConfigStore) {
 	s.boardConfig = store
 }
 
-// RoleAdmin is the narrow slice of application/workflow.Service the catalog
-// needs to fill a template's suggested role vacancies (see
-// applySuggestedRoles): read the current role roster and write an
-// assignment back through the checked/reload path, without an import cycle
-// onto application/workflow.
 type RoleAdmin interface {
 	ListRoles(ctx context.Context) ([]domain.AgentRole, error)
 	SetRoleAssignments(ctx context.Context, roleID uuid.UUID, assignments []domain.RoleAssignment) error
 }
 
-// SetRoleAdmin wires the role roster CreateAgentFromTemplate fills a
-// template's suggested role vacancies against. Nil (the pre-wiring default)
-// skips that step, matching every other late-wired collaborator here.
 func (s *Service) SetRoleAdmin(r RoleAdmin) {
 	s.roleAdmin = r
 }
 
-// SetHostExecutorProbe wires the check that decides whether an agent may be
-// saved onto a host-executed provider. Set after construction, because whether
-// a runner exists is discovered at boot by probing the host rather than read
-// from configuration.
+// Runner existence is discovered at boot by probing the host, not read from configuration.
 func (s *Service) SetHostExecutorProbe(p HostExecutorProbe) {
 	s.hostExecutor = p
 }
 
-// checkHostExecutor refuses to persist an agent whose engine does not exist
-// here.
-//
-// The provider is only half of a working configuration: the other half is a
-// runner process on the machine this server runs on, and nothing about the
-// agent record says whether one is attached. Saved without it, the same
-// misconfiguration surfaced as about ten different runtime failures — a board
-// run that fails with a sentence about a missing binary, a chat turn that
-// refuses, a verify-fix round that silently never happens, a golden suite that
-// evaluates zero tasks — each one describing its own symptom and none of them
-// pointing at the choice that caused it. Refusing the save is one sentence, at
-// the moment the choice is made, addressed to the person making it.
+// Refuses to persist an agent whose engine does not exist here; uncaught, the same misconfiguration surfaced as many unrelated runtime failures.
 func (s *Service) checkHostExecutor(providerType domain.LLMProviderType) error {
 	if !domain.RequiresHostExecutor(providerType) {
 		return nil
@@ -141,25 +94,7 @@ func (s *Service) checkHostExecutor(providerType domain.LLMProviderType) error {
 		ErrNoHostRunner, label)
 }
 
-// checkProviderAvailable refuses to persist an agent onto a provider that is
-// declared but has no executor behind it.
-//
-// This is the guard the "coming soon" badge in the UI is a courtesy for, and it
-// is on the server because the badge cannot be. A client that predates the
-// availability flag renders the provider like any other; the mobile app and the
-// API are reachable without any client at all. Any one of those could save an
-// agent on cursor_agent, and the agent would look completely healthy — a row in
-// the catalog, a provider the board accepts — right up to the point where a
-// task assigned to it finds no executor and the run fails somewhere far from
-// this choice. The refusal belongs where the choice is made.
-//
-// It runs BEFORE checkHostExecutor because the two failures are different and
-// only one of them is fixable: "no runner attached" is answered by attaching a
-// runner, and telling somebody to go do that for a provider whose executor was
-// never written would send them off to fix the wrong thing.
-//
-// A provider ref that is not a declared type — the empty string, or an
-// endpoint uuid — is not this guard's business and passes through.
+// Refuses a provider declared but with no executor; runs before checkHostExecutor because "no runner attached" is fixable and "no executor was written" is not.
 func (s *Service) checkProviderAvailable(providerType domain.LLMProviderType) error {
 	if providerType == "" || !domain.ValidLLMProviderType(string(providerType)) {
 		return nil
@@ -262,8 +197,7 @@ func (s *Service) DeleteSkillForAgent(ctx context.Context, agentID, skillID uuid
 	if err := s.store.DeleteSkill(ctx, skillID); err != nil {
 		return err
 	}
-	// The deleted content is the last thing written to history: without it the
-	// skill could never be brought back.
+	// The deleted content is the last write to history so the skill can be restored.
 	s.recordSkillVersion(ctx, domain.CatalogVersionActionDelete, existing)
 	return nil
 }
@@ -276,13 +210,7 @@ func (s *Service) SearchSkills(ctx context.Context, query string, topK int) ([]d
 	return s.store.SearchSkills(ctx, emb, topK, nil)
 }
 
-// resolveTechStack refuses a skill filed under a stack that is not this
-// agent's. The foreign key cannot catch it: any real stack id is valid to
-// Postgres regardless of which agent it belongs to, so the reference is valid
-// to Postgres and wrong to everybody else — the skill would show up under an
-// agent that has no such stack to render it.
-// The nil uuid is read as "general", so a client that sends an empty id gets
-// the same answer as one that sends none.
+// Any real stack id is valid to Postgres regardless of which agent owns it, so the reference passes the FK and fails everyone else.
 func (s *Service) resolveTechStack(ctx context.Context, agentID uuid.UUID, stackID *uuid.UUID) (*uuid.UUID, error) {
 	if stackID == nil || *stackID == uuid.Nil {
 		return nil, nil
@@ -347,9 +275,7 @@ func (s *Service) UpdateTechStackForAgent(ctx context.Context, agentID, stackID 
 	return s.store.UpdateTechStack(ctx, existing)
 }
 
-// DeleteTechStackForAgent leaves the stack's skills in place: the foreign key
-// nulls their tech_stack_id, which files them back as general skills. Deleting
-// a way of organising skills is not deleting the skills.
+// The FK nulls skills' tech_stack_id, filing them back as general skills.
 func (s *Service) DeleteTechStackForAgent(ctx context.Context, agentID, stackID uuid.UUID) error {
 	if _, err := s.GetTechStackForAgent(ctx, agentID, stackID); err != nil {
 		return err
@@ -380,8 +306,6 @@ func (s *Service) CreateAgent(ctx context.Context, req domain.CreateAgentRequest
 		Name: req.Name, Description: req.Description, SubagentType: req.SubagentType,
 		SystemPrompt: req.SystemPrompt, ProviderType: req.ProviderType, Model: req.Model, ModelHeavy: req.ModelHeavy, MaxTurns: req.MaxTurns, Effort: req.Effort, ToolPolicy: req.ToolPolicy, Enabled: req.Enabled,
 		SelfEvolutionEnabled: req.SelfEvolutionEnabled,
-		// A new agent is born connected to the catalog (toggles on); turning
-		// either off is a settings-time decision on an existing agent.
 		AutoPullAgentUpdates: true,
 		KeepSkillsUpdated:    true,
 	})
@@ -438,13 +362,7 @@ func (s *Service) UpdateAgent(ctx context.Context, id uuid.UUID, req domain.Upda
 	})
 }
 
-// dropStaleModels clears model names that belong to the provider the agent is
-// being moved off. A model name only means something to the provider it was
-// picked from, but the agent record keeps one provider and two free-form model
-// names, so a provider switch that carried the old names over produced an agent
-// whose provider was one vendor and whose (heavy) model was another's — every
-// run on it died with the provider's "invalid model" 400. A name the caller
-// actually changed is left alone: that one was picked for the new provider.
+// A model name only means something to its own provider, so a provider switch clears carried-over names; a name the caller actually changed is left alone.
 func dropStaleModels(existing domain.Agent, req domain.UpdateAgentRequest) domain.UpdateAgentRequest {
 	if existing.ProviderType == "" || req.ProviderType == "" || existing.ProviderType == req.ProviderType {
 		return req

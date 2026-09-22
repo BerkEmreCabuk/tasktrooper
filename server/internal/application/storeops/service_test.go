@@ -16,10 +16,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/secrets"
 )
 
-// ServiceSuite exercises the credential vault and the app-registry read path.
-// It sets MCP_SECRETS_KEY itself and restores whatever was there before —
-// same save/restore discipline as secrets.CipherSuite — so it never leaks
-// state into other packages' tests.
 type ServiceSuite struct {
 	suite.Suite
 
@@ -89,9 +85,6 @@ func (s *ServiceSuite) playCredential() map[string]string {
 	}
 }
 
-// SaveCredential must validate against the store console before persisting
-// anything: an invalid credential is rejected and nothing is written, even
-// encrypted.
 func (s *ServiceSuite) TestSaveCredentialRejectsInvalidCredentialAndPersistsNothing() {
 	s.asc.ValidateAuthErr = errors.New("401 unauthorized")
 
@@ -112,8 +105,6 @@ func (s *ServiceSuite) TestSaveCredentialRejectsInvalidGooglePlayCredentialAndPe
 	s.Equal(0, s.creds.count(), "an invalid credential must not be stored")
 }
 
-// The persisted payload must be encrypted: the stored bytes are not the
-// plaintext JSON, and decrypting them round-trips back to the original map.
 func (s *ServiceSuite) TestSaveCredentialEncryptsThePersistedPayload() {
 	data := s.ascCredential()
 
@@ -136,7 +127,6 @@ func (s *ServiceSuite) TestSaveCredentialEncryptsThePersistedPayload() {
 	s.Equal(data, roundTripped, "decrypting the stored payload must round-trip to the original map")
 }
 
-// An unknown provider is rejected before any client is built or persisted.
 func (s *ServiceSuite) TestSaveCredentialRejectsUnknownProvider() {
 	err := s.svc.SaveCredential(context.Background(), "unknown_console", map[string]string{"x": "y"})
 
@@ -146,8 +136,6 @@ func (s *ServiceSuite) TestSaveCredentialRejectsUnknownProvider() {
 	s.Equal(0, s.play.ValidateAuthCalls)
 }
 
-// Credentials() is the safe listing: it never carries a payload, only
-// whether a provider is configured and when it was last written.
 func (s *ServiceSuite) TestCredentialsNeverReturnsPayloads() {
 	s.Require().NoError(s.svc.SaveCredential(context.Background(), domain.StoreCredentialASC, s.ascCredential()))
 
@@ -160,10 +148,6 @@ func (s *ServiceSuite) TestCredentialsNeverReturnsPayloads() {
 	s.False(views[0].UpdatedAt.IsZero())
 }
 
-// Credentials() must list every KNOWN provider, not only the ones with a
-// stored row — otherwise a declared-but-unsaved provider is indistinguishable
-// from an unknown one, and the web UI (Task 13) can never show the "not yet
-// configured" state.
 func (s *ServiceSuite) TestCredentialsListsKnownProvidersEvenWhenUnconfigured() {
 	views, err := s.svc.Credentials(context.Background())
 
@@ -178,8 +162,6 @@ func (s *ServiceSuite) TestCredentialsListsKnownProvidersEvenWhenUnconfigured() 
 	s.ElementsMatch([]string{domain.StoreCredentialASC, domain.StoreCredentialGooglePlay}, providers)
 }
 
-// Saving one provider flips only that provider's view to configured; the
-// other known provider stays unconfigured.
 func (s *ServiceSuite) TestCredentialsFlipsOnlyTheSavedProvider() {
 	s.Require().NoError(s.svc.SaveCredential(context.Background(), domain.StoreCredentialASC, s.ascCredential()))
 
@@ -215,9 +197,6 @@ func (s *ServiceSuite) TestCredentialsListsBothConfiguredProviders() {
 	s.ElementsMatch([]string{domain.StoreCredentialASC, domain.StoreCredentialGooglePlay}, providers)
 }
 
-// DeleteCredential removes the stored credential entirely — the provider
-// falls back to the unconfigured view, not off the list (ruling 1: the list
-// is always every known provider).
 func (s *ServiceSuite) TestDeleteCredentialRemovesIt() {
 	s.Require().NoError(s.svc.SaveCredential(context.Background(), domain.StoreCredentialGooglePlay, s.playCredential()))
 	s.Require().Equal(1, s.creds.count())
@@ -234,8 +213,6 @@ func (s *ServiceSuite) TestDeleteCredentialRemovesIt() {
 	}
 }
 
-// AppsByRepository returns exactly the registry rows for that repository,
-// leaving other repositories' rows out.
 func (s *ServiceSuite) TestAppsByRepositoryReturnsTheRegistryRows() {
 	ctx := context.Background()
 	repoID := uuid.New()
@@ -282,13 +259,6 @@ func (s *ServiceSuite) TestAppsByRepositoryEmptyWhenNoneRegistered() {
 	s.Empty(got)
 }
 
-// TestSaveCredentialWithNilCipherReturnsErrorInsteadOfPanicking covers the
-// runtime's own graceful-degrade default: when MCP_SECRETS_KEY/SERVER_API_KEY
-// is absent, runtime.go still builds storeOpsSvc with a nil cipher rather
-// than refusing to boot. secrets.Cipher.Encrypt/Decrypt dereference their
-// receiver unconditionally, so a nil *Cipher used to panic every hit of
-// SaveCredential (PUT /v1/store/credentials/:provider) instead of failing
-// the one request cleanly.
 func TestSaveCredentialWithNilCipherReturnsErrorInsteadOfPanicking(t *testing.T) {
 	creds := newFakeCredentialStore()
 	asc := &fakeASC{}
@@ -310,16 +280,9 @@ func TestSaveCredentialWithNilCipherReturnsErrorInsteadOfPanicking(t *testing.T)
 	}
 }
 
-// TestVerifyOnboardingWithNilCipherReturnsErrorInsteadOfPanicking covers the
-// decrypt side: credential() (reached via asc()/play()) also dereferenced a
-// nil cipher unconditionally. Exercised through VerifyOnboarding — the same
-// entry point storeops.Monitor.Sweep calls on every onboarding row, so a nil
-// cipher used to crash the monitor's sweep goroutine, not just one HTTP
-// request.
 func TestVerifyOnboardingWithNilCipherReturnsErrorInsteadOfPanicking(t *testing.T) {
 	creds := newFakeCredentialStore()
-	// Seed a raw row directly, bypassing SaveCredential (which itself now
-	// requires a cipher) so the decrypt path is reached in isolation.
+
 	if err := creds.Set(context.Background(), domain.StoreCredentialASC, []byte("irrelevant-bytes")); err != nil {
 		t.Fatal(err)
 	}
@@ -347,9 +310,6 @@ func TestVerifyOnboardingWithNilCipherReturnsErrorInsteadOfPanicking(t *testing.
 	}
 }
 
-// TestDeleteCredentialRejectsUnknownProvider covers the same input
-// validation SaveCredential already had: DELETE /v1/store/credentials/junk
-// must not report 204 as if a real provider's credential was removed.
 func TestDeleteCredentialRejectsUnknownProvider(t *testing.T) {
 	svc := storeops.NewService(storeops.Deps{Credentials: newFakeCredentialStore()})
 

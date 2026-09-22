@@ -89,8 +89,6 @@ func (s *NormalizeSuite) TestGenericPayloadAndDefaults() {
 	s.NotEmpty(in.Fingerprint, "a payload without a fingerprint still needs a dedupe identity")
 }
 
-// An unrecognised shape must still produce an ingestable incident: dropping an
-// alert because we do not know its vendor is the worst possible outcome.
 func (s *NormalizeSuite) TestUnknownShapeStillIngests() {
 	raw := []byte(`{"weird":{"nested":true}}`)
 
@@ -107,8 +105,6 @@ func (s *NormalizeSuite) TestInvalidJSONRejected() {
 	s.Error(err)
 }
 
-// The same alert must fold onto the same fingerprint, and a different alert
-// must not — this is what keeps one outage from opening a hundred tasks.
 func (s *NormalizeSuite) TestFingerprintStability() {
 	a := domain.IncidentFingerprint("HighErrorRate", "api", "prod")
 	b := domain.IncidentFingerprint("highErrorRate", "api", "prod")

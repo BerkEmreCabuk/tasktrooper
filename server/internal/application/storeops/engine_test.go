@@ -15,8 +15,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// engineFixture bundles what an engine test scripts (the two probes) and what
-// it asserts against (the parker, the starter's record, the audit log).
 type engineFixture struct {
 	repoID uuid.UUID
 	taskID uuid.UUID
@@ -26,21 +24,16 @@ type engineFixture struct {
 	parker *fakeReleaseParker
 	tasks  *fakeTaskCreator
 
-	// actionsErr / localHost script the probes; actionsCalls and localCalls
-	// count them so a test can prove auto asked Actions first and stopped
-	// asking once it had an answer.
 	actionsErr   error
 	localHost    storeops.LocalRunnerHost
 	localErr     error
 	actionsCalls int
 	localCalls   int
-	// probedWorkflow is the workflow file name the Actions probe was asked
-	// about, which is the whole question on a monorepo.
+
 	probedWorkflow string
 
-	// started records every release the starter was asked to launch.
 	started []startedRelease
-	// startErr scripts a starter failure.
+
 	startErr error
 }
 
@@ -49,23 +42,14 @@ type startedRelease struct {
 	Artifacts []pipeline.Artifact
 }
 
-// testWorkflowFile is what pipeline.Render names the workflow for a
-// repository-root app — the exact file StartBuild asks the probe about.
 const testWorkflowFile = "mobile-release.yml"
 
-// newEngineTestService wires a service with one repository that has an iOS and
-// an Android app linked and live, an onboarding task on file (so a park has
-// something to park), and both probes answering "available" until a test says
-// otherwise.
 func newEngineTestService(t *testing.T) (*storeops.Service, *engineFixture) {
 	t.Helper()
 
 	repoID, taskID := uuid.New(), uuid.New()
 	repos := newFakeRepositoryResolver()
-	// The build targets stand in for what import detection read off the working
-	// copy. Without them every StartBuild here would be refused, which is the
-	// point of the fixture carrying them: a repository that states nothing
-	// cannot be released.
+
 	repos.set(domain.Repository{
 		ID: repoID, Name: "trooper", Kind: domain.RepoKindMobile,
 		DetectedBuildTargets: domain.BuildTargets{XcodeScheme: "Trooper", GradleModule: "app"},
@@ -140,10 +124,6 @@ func (f *engineFixture) withEngine(engine string) domain.Repository {
 	return repo
 }
 
-// Auto's whole order in one test: Actions when it can run, the local runner
-// when it cannot, and a hard stop when neither can. The third case is the one
-// that matters — there is no third engine, so anything other than
-// ErrNoReleaseEngine here would be a silent downgrade.
 func TestResolveEngineAutoPrefersActionsThenLocalThenBlocks(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	ctx := context.Background()
@@ -168,9 +148,6 @@ func TestResolveEngineAutoPrefersActionsThenLocalThenBlocks(t *testing.T) {
 	}
 }
 
-// The billing refusal this whole classification exists for: an org whose
-// Actions are blocked for non-payment is a permanent state auto answers by
-// falling back, and it must be told apart from GitHub simply being down.
 func TestResolveEngineTellsABillingRefusalFromAnOutage(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	ctx := context.Background()
@@ -190,8 +167,6 @@ func TestResolveEngineTellsABillingRefusalFromAnOutage(t *testing.T) {
 		}
 	}
 
-	// A plain server error is NOT "Actions cannot run" — falling back on it
-	// would hide an outage behind a laptop that may be shut.
 	f.actionsErr = errors.New("github api: 500 Internal Server Error")
 	if _, err := svc.ResolveEngine(ctx, f.repo(), domain.MobileStorePlatformAndroid, testWorkflowFile); err == nil ||
 		errors.Is(err, domain.ErrNoReleaseEngine) || strings.Contains(err.Error(), "local") {
@@ -199,31 +174,23 @@ func TestResolveEngineTellsABillingRefusalFromAnOutage(t *testing.T) {
 	}
 }
 
-// An iOS archive needs Xcode, which needs macOS. A paired Linux runner is no
-// runner at all for iOS — and with Actions out, that is a blocked release, not
-// an Android-style "any host will do".
 func TestResolveEngineRefusesANonMacHostForIOS(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	ctx := context.Background()
-	// A billing refusal, not a missing workflow: only the first is an
-	// objection this release cannot answer for itself (see the workflow test
-	// below), so it is the one that makes "no engine" mean no engine.
+
 	f.actionsErr = storeops.ErrActionsBillingBlocked
 	f.localHost = storeops.LocalRunnerHost{Paired: true, MacOS: false}
 
 	if _, err := svc.ResolveEngine(ctx, f.repo(), domain.MobileStorePlatformIOS, testWorkflowFile); !errors.Is(err, domain.ErrNoReleaseEngine) {
 		t.Fatalf("err = %v, want ErrNoReleaseEngine for iOS on a non-Mac host", err)
 	}
-	// The same host builds Android perfectly well.
+
 	engine, err := svc.ResolveEngine(ctx, f.repo(), domain.MobileStorePlatformAndroid, testWorkflowFile)
 	if err != nil || engine != domain.ReleaseEngineLocal {
 		t.Fatalf("engine = %q, err = %v; want local for android", engine, err)
 	}
 }
 
-// A pin is a statement about where releases may run. Satisfying it with the
-// other machine would ship from somewhere nobody approved, so an unavailable
-// pinned engine is refused rather than swapped.
 func TestResolveEngineNeverSubstitutesAPinnedEngine(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	ctx := context.Background()
@@ -250,9 +217,6 @@ func TestResolveEngineRejectsAnUnknownEngine(t *testing.T) {
 	}
 }
 
-// With no engine to run on, the release does not fail quietly into a log line:
-// the card is parked on human_decision, which has no sweeper on purpose —
-// paying the bill or opening a Mac is a person's job.
 func TestStartBuildParksTheTaskWhenNoEngineCanRun(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	f.actionsErr = storeops.ErrActionsBillingBlocked
@@ -278,9 +242,6 @@ func TestStartBuildParksTheTaskWhenNoEngineCanRun(t *testing.T) {
 	}
 }
 
-// The body's engine overrides the repository's setting for one run, and the
-// starter is handed the engine that was actually resolved — never the string
-// the caller sent.
 func TestStartBuildHonoursTheRequestedEngine(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	f.actionsErr = errors.New("github api: 402 Payment Required")
@@ -295,8 +256,7 @@ func TestStartBuildHonoursTheRequestedEngine(t *testing.T) {
 	if f.actionsCalls != 0 {
 		t.Fatal("Actions was probed for a run pinned to the local runner")
 	}
-	// The generated files are what the engine runs: the release script and the
-	// workflow that calls it, in that order.
+
 	if len(start.Artifacts) != 2 || !strings.HasSuffix(start.Artifacts[0], "mobile-release.sh") {
 		t.Fatalf("artifacts = %v, want the script first", start.Artifacts)
 	}
@@ -309,8 +269,6 @@ func TestStartBuildRejectsAnUnknownEngine(t *testing.T) {
 	}
 }
 
-// Nothing can be built for a repository whose store app was never linked —
-// there is no identifier to sign, upload or name a concurrency group with.
 func TestStartBuildRefusesAnUnlinkedApp(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	app, err := f.apps.Get(context.Background(), f.repoID, domain.MobileStorePlatformAndroid)
@@ -326,9 +284,6 @@ func TestStartBuildRefusesAnUnlinkedApp(t *testing.T) {
 	}
 }
 
-// The generated script builds what the WORKING COPY named, not what a
-// convention would have: the Gradle module here is the detected one, and the
-// release script says so.
 func TestStartBuildShipsTheDetectedBuildTargets(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	repo := f.repo()
@@ -347,9 +302,6 @@ func TestStartBuildShipsTheDetectedBuildTargets(t *testing.T) {
 	}
 }
 
-// A mobile sub-project's targets are its own and are never inherited from the
-// repository row: a monorepo's app has its own Gradle build, and bundling the
-// repository-level module inside it would ship a different binary.
 func TestStartBuildTakesTheSubProjectsOwnBuildTargets(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	repo := f.repo()
@@ -371,9 +323,6 @@ func TestStartBuildTakesTheSubProjectsOwnBuildTargets(t *testing.T) {
 	}
 }
 
-// A working copy that never stated what to build does not get a release built
-// against a convention. The refusal names what to go and do, because the fix
-// is a commit in the user's own repository.
 func TestStartBuildRefusesWhenNoBuildTargetWasDetected(t *testing.T) {
 	for _, tc := range []struct {
 		platform string
@@ -407,8 +356,6 @@ func TestStartBuildRefusesWhenNoBuildTargetWasDetected(t *testing.T) {
 	}
 }
 
-// A repository with no registry row 404s rather than being reported as a bad
-// request — the same split every other storeops route makes.
 func TestStartBuildOnAnUnknownRepositoryIsNotFound(t *testing.T) {
 	svc, _ := newEngineTestService(t)
 	if _, err := svc.StartBuild(context.Background(), uuid.New(), domain.MobileStorePlatformAndroid, "", "akif"); !errors.Is(err, port.ErrNotFound) {
@@ -416,9 +363,6 @@ func TestStartBuildOnAnUnknownRepositoryIsNotFound(t *testing.T) {
 	}
 }
 
-// unlinkOnboardingTask drops the app's onboarding task, which is the state
-// every app bound through the store picker is in: only Onboard ever writes
-// that field.
 func (f *engineFixture) unlinkOnboardingTask(t *testing.T, platform string) {
 	t.Helper()
 	app, err := f.apps.Get(context.Background(), f.repoID, platform)
@@ -431,11 +375,6 @@ func (f *engineFixture) unlinkOnboardingTask(t *testing.T, platform string) {
 	}
 }
 
-// The probe is asked for the ONE file the dispatch will name. A monorepo
-// renders mobile-release-<sub-project>.yml, and a repository that still
-// carries a plain mobile-release.yml from an earlier life must not be read as
-// already having this app's workflow — that answer sends the release to a
-// dispatch GitHub replies 404 to.
 func TestStartBuildProbesTheExactWorkflowItWillDispatch(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	repo := f.repo()
@@ -456,9 +395,6 @@ func TestStartBuildProbesTheExactWorkflowItWillDispatch(t *testing.T) {
 	}
 }
 
-// The starter is handed the file BODIES and their modes, not just paths: it is
-// the thing that has to write them, and the release script has to land
-// executable because a machine execs it directly.
 func TestStartBuildHandsTheStarterTheFilesToDeliver(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	if _, err := svc.StartBuild(context.Background(), f.repoID, domain.MobileStorePlatformAndroid, "", "akif"); err != nil {
@@ -476,10 +412,6 @@ func TestStartBuildHandsTheStarterTheFilesToDeliver(t *testing.T) {
 	}
 }
 
-// A repository that has never released has no mobile-release workflow, and
-// that is not a reason to block: the starter writes that exact file before it
-// dispatches. Blocking here is what made a clean mobile repo unreleasable —
-// the file the system needs could never arrive by the system's own hand.
 func TestResolveEngineTakesActionsWhenTheOnlyGapIsTheWorkflowItWrites(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	ctx := context.Background()
@@ -491,16 +423,12 @@ func TestResolveEngineTakesActionsWhenTheOnlyGapIsTheWorkflowItWrites(t *testing
 		t.Fatalf("engine = %q, err = %v; want github_actions", engine, err)
 	}
 
-	// A paired machine that can build TODAY still wins: it has nothing to
-	// write first.
 	f.localHost = storeops.LocalRunnerHost{Paired: true, MacOS: true}
 	engine, err = svc.ResolveEngine(ctx, f.repo(), domain.MobileStorePlatformAndroid, testWorkflowFile)
 	if err != nil || engine != domain.ReleaseEngineLocal {
 		t.Fatalf("engine = %q, err = %v; want local", engine, err)
 	}
 
-	// A billing refusal is the objection this release CANNOT answer for
-	// itself, and it still blocks.
 	f.actionsErr = storeops.ErrActionsBillingBlocked
 	f.localHost = storeops.LocalRunnerHost{}
 	if _, err := svc.ResolveEngine(ctx, f.repo(), domain.MobileStorePlatformAndroid, testWorkflowFile); !errors.Is(err, domain.ErrNoReleaseEngine) {
@@ -508,10 +436,6 @@ func TestResolveEngineTakesActionsWhenTheOnlyGapIsTheWorkflowItWrites(t *testing
 	}
 }
 
-// The engine the probes picked can turn out to be one this deployment cannot
-// drive — a paired Mac with no local runner wired is the live case. To the
-// person who pressed the button that is the same wall as having no engine, so
-// it parks the card instead of returning a 500 nobody can act on.
 func TestStartBuildParksWhenTheStarterCannotDriveTheResolvedEngine(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	f.actionsErr = storeops.ErrActionsBillingBlocked
@@ -526,10 +450,6 @@ func TestStartBuildParksWhenTheStarterCannotDriveTheResolvedEngine(t *testing.T)
 	}
 }
 
-// An app bound through the picker has no onboarding task. Parking used to be
-// silently skipped for it, so the whole picker population got a 409 and a log
-// line with nothing on the board — which is the one place
-// domain.ResourceHumanDecision says a person is supposed to find this.
 func TestStartBuildOpensACardToParkWhenTheAppHasNoTask(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	f.unlinkOnboardingTask(t, domain.MobileStorePlatformAndroid)
@@ -546,8 +466,6 @@ func TestStartBuildOpensACardToParkWhenTheAppHasNoTask(t *testing.T) {
 		t.Fatalf("card title = %q, want it to name the block", title)
 	}
 
-	// The card is remembered on the row, so pressing the button again parks
-	// the same one instead of littering the board.
 	app, err := f.apps.Get(context.Background(), f.repoID, domain.MobileStorePlatformAndroid)
 	if err != nil {
 		t.Fatal(err)
@@ -566,9 +484,6 @@ func TestStartBuildOpensACardToParkWhenTheAppHasNoTask(t *testing.T) {
 	}
 }
 
-// A park that did not happen must not be reported as one: the handler answers
-// 409 saying the card was parked, and this error text is the only place the
-// operator could learn otherwise.
 func TestStartBuildSaysSoWhenTheParkItselfFails(t *testing.T) {
 	svc, f := newEngineTestService(t)
 	f.actionsErr = storeops.ErrActionsBillingBlocked

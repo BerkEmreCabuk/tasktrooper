@@ -38,17 +38,17 @@ const (
 type MemoryRepoScope string
 
 const (
-	// MemoryRepoScopeVisible is what an agent sees while working inside a
-	// repository: global memories plus that repository's own. With no
-	// repository in play it degrades to global-only, so lessons from an
-	// unrelated repo never leak into a run.
+	// MemoryRepoScopeVisible (default) is what an agent sees inside a
+	// repository: global memories plus that repository's own; with no repo in
+	// play it degrades to global-only, so lessons from an unrelated repo never
+	// leak into a run.
 	MemoryRepoScopeVisible MemoryRepoScope = ""
 	// MemoryRepoScopeProject returns only memories bound to the repository.
 	MemoryRepoScopeProject MemoryRepoScope = "project"
 	// MemoryRepoScopeGlobal returns only repository-independent memories.
 	MemoryRepoScopeGlobal MemoryRepoScope = "global"
-	// MemoryRepoScopeAny ignores the repository dimension entirely. Used by
-	// management views that list everything an agent knows.
+	// MemoryRepoScopeAny ignores the repository dimension; for management views
+	// that list everything an agent knows.
 	MemoryRepoScopeAny MemoryRepoScope = "any"
 )
 

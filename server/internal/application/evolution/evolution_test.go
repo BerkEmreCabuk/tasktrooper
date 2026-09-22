@@ -44,12 +44,7 @@ func TestParseReflectionOutput(t *testing.T) {
 	}
 }
 
-// TestParseReflectionOutput_CLIShapes locks the fix for the real bug: the
-// Claude Code CLI path has no JSON schema attached at all (runLLM's
-// AllowWebResearch branch), so the model invents its own key names. These two
-// shapes are abridged from actual raw_output rows that completed with an empty
-// summary and zero agent_evolution_events before this fix — both must now
-// parse into a populated domain.ReflectionOutput with reason preserved.
+// Locks the fix for the real bug: the CLI path has no JSON schema at all (runLLM's AllowWebResearch branch), so the model invents its own key names. Both shapes are abridged from actual raw_output rows that completed with an empty summary and zero events before this fix; both must parse with reason preserved.
 func TestParseReflectionOutput_CLIShapes(t *testing.T) {
 	summaryShape := "## Analysis\n**Baseline vs. current:** Composite KPI rose from 64.28 → 72.2 across the window.\n\n" +
 		"```json\n" +
@@ -101,9 +96,7 @@ func TestParseReflectionOutput_CLIShapes(t *testing.T) {
 	}
 }
 
-// TestParseReflectionOutput_PrefersLastFencedBlock guards the "last fenced
-// block wins" rule: a model that shows an example JSON shape before its real
-// answer must not have the example mistaken for the decision.
+// Guards the "last fenced block wins" rule: a model that shows an example JSON shape before its real answer must not have the example mistaken for the decision.
 func TestParseReflectionOutput_PrefersLastFencedBlock(t *testing.T) {
 	raw := "Example shape:\n```json\n{\"self_assessment\":\"example, ignore me\"}\n```\n\n" +
 		"My actual answer:\n```json\n{\"self_assessment\":\"real answer\",\"skills\":[],\"rules\":[],\"memories\":[],\"reverts\":[]}\n```"
@@ -162,11 +155,7 @@ func contains(s, sub string) bool {
 	return strings.Contains(s, sub)
 }
 
-// --- fakes for applyOutput / ListReflections coverage -----------------------
-
-// fakeEvolutionStore is a minimal in-memory port.AgentEvolutionStore: enough
-// of CreateEvent/GetEvent to exercise applyOutput's outcome bookkeeping, and
-// enough of ListReflections to exercise legacy-decision derivation.
+// Minimal in-memory store: enough of CreateEvent/GetEvent to exercise applyOutput's outcome bookkeeping, and enough of ListReflections to exercise legacy-decision derivation.
 type fakeEvolutionStore struct {
 	events      []domain.AgentEvolutionEvent
 	reflections []domain.AgentReflection
@@ -182,10 +171,7 @@ func (f *fakeEvolutionStore) GetReflection(context.Context, uuid.UUID) (domain.A
 	return domain.AgentReflection{}, nil
 }
 func (f *fakeEvolutionStore) ListReflections(context.Context, uuid.UUID, int) ([]domain.AgentReflection, error) {
-	// Copied, not aliased: a real store scans fresh rows on every call, so
-	// mutating the caller's result (deriveLegacyDecisions does exactly that)
-	// must never reach back into what this fake holds — the same guarantee
-	// TestListReflections_DerivesLegacyDecision checks against store.reflections.
+	// Copied, not aliased: a real store scans fresh rows on every call, so mutating the caller's result (deriveLegacyDecisions does) must never reach back into what this fake holds.
 	out := make([]domain.AgentReflection, len(f.reflections))
 	copy(out, f.reflections)
 	return out, nil
@@ -235,12 +221,7 @@ func (fakePerfStore) HasEventForTask(context.Context, uuid.UUID, string) (bool, 
 	return false, nil
 }
 
-// TestApplyOutput_CLIShapedOutputAppliesAndRecordsOutcome is the fix's outcome
-// end-to-end: a normalized, schema-shaped ReflectionOutput (what
-// parseReflectionOutput now hands back for a CLI-path raw output) must reach
-// the catalog manager, create an evolution event, and record an outcome that
-// carries the reason and points at that event — the record the old code
-// silently dropped.
+// The fix end-to-end: a normalized, schema-shaped output (what parseReflectionOutput now hands back for a CLI-path raw output) must reach the catalog manager, create an evolution event, and record an outcome that carries the reason and points at that event — the record the old code silently dropped.
 func TestApplyOutput_CLIShapedOutputAppliesAndRecordsOutcome(t *testing.T) {
 	mgr := &fakeManager{}
 	store := &fakeEvolutionStore{}
@@ -283,10 +264,7 @@ func TestApplyOutput_CLIShapedOutputAppliesAndRecordsOutcome(t *testing.T) {
 	}
 }
 
-// TestApplyOutput_SkippedWhenSelfEvolutionDisabled covers the other outcome
-// path item 5 asks for: the whole-batch skip when SelfEvolutionEnabled=false
-// must still produce a "skipped" outcome for every proposed skill/rule change,
-// not just silently drop them from the record.
+// The whole-batch skip when SelfEvolutionEnabled=false must still produce a "skipped" outcome for every proposed skill/rule change, not silently drop them from the record.
 func TestApplyOutput_SkippedWhenSelfEvolutionDisabled(t *testing.T) {
 	mgr := &fakeManager{}
 	store := &fakeEvolutionStore{}
@@ -313,11 +291,7 @@ func TestApplyOutput_SkippedWhenSelfEvolutionDisabled(t *testing.T) {
 	}
 }
 
-// TestListReflections_DerivesLegacyDecision is item 6: a completed reflection
-// stored before Decision existed (Decision == nil, RawOutput populated) must
-// get one synthesized on read, tagged Legacy, with its Summary backfilled and
-// its Baseline pulled from the next older completed reflection that has a
-// PerformanceSnapshot — all without writing anything back to the store.
+// A completed reflection stored before Decision existed (Decision == nil, RawOutput populated) must get one synthesized on read, tagged Legacy, with Summary backfilled and Baseline pulled from the next older completed reflection with a PerformanceSnapshot — all without writing anything back to the store.
 func TestListReflections_DerivesLegacyDecision(t *testing.T) {
 	agentID := uuid.New()
 	rawOutput := `{"self_assessment":"legacy assessment","skills":[{"action":"delete","skill_id":"s1","name":"old","reason":"stale"}],"rules":[],"memories":[],"reverts":[]}`
@@ -354,8 +328,7 @@ func TestListReflections_DerivesLegacyDecision(t *testing.T) {
 	if newer.Decision.Baseline == nil || newer.Decision.Baseline.Score != 50 {
 		t.Fatalf("baseline should be backfilled from the older completed reflection with a snapshot: %+v", newer.Decision.Baseline)
 	}
-	// Nothing is written back to the store — deriveLegacyDecisions only ever
-	// mutates the slice ListReflections is about to return.
+	// Nothing is written back to the store — deriveLegacyDecisions only mutates the slice ListReflections is about to return.
 	if store.reflections[0].Decision != nil {
 		t.Error("the derived decision must not be persisted back to the store")
 	}

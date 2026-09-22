@@ -9,8 +9,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// refusingLoop is the HTTP loop, which must never be reached for an agent whose
-// engine is a local process.
+// The HTTP loop, which must never be reached for an agent whose engine is a local process.
 type refusingLoop struct{ t *testing.T }
 
 func (l refusingLoop) Run(context.Context, []domain.Message, string, domain.LLMProviderType, domain.ToolPolicy, ...agent.RunOption) (domain.AgentResponse, error) {
@@ -53,12 +52,7 @@ func (c *reflectCLI) snapshot() (int, domain.TaskExecution) {
 	return c.calls, c.last
 }
 
-// With web research on, reflection is an agentic run — so it goes to the CLI for
-// an agent whose engine is one.
-//
-// This is the one agentic path with no repository at all: it reads the agent's
-// own history and the web. The router gives it a fresh empty scratch directory
-// rather than refusing it or letting the session loose in the server's own tree.
+// With web research on, reflection is an agentic run — so it goes to the CLI for an agent whose engine is one. It is the one agentic path with no repository at all (it reads the agent's own history and the web), so the router gives it a fresh empty scratch directory rather than refusing it or letting the session loose in the server's own tree.
 func TestReflectionWebResearchRunsOnTheHostExecutor(t *testing.T) {
 	cli := &reflectCLI{answer: `{"self_assessment":"ok","skills":[],"rules":[],"memories":[],"reverts":[]}`}
 	router := agent.NewRouter(refusingLoop{t: t})
@@ -99,19 +93,7 @@ func TestReflectionWebResearchRunsOnTheHostExecutor(t *testing.T) {
 	}
 }
 
-// Without web research, reflection is a JSON-schema call the CLI cannot produce
-// at all — so it stays on the HTTP client. The loop is not involved either way.
-//
-// What the client then DOES with a claude_code request is its own decision, made
-// in one place, and it changed: it used to reroute the call to the
-// active default provider with the model blanked, and now it refuses it with a
-// message naming the step, the engine and the fix. This test deliberately does
-// not encode either behaviour — it asserts only that the request leaves here
-// intact, with the agent's own provider and its schema attached, so the client
-// has everything it needs to make that call. See
-// llm.TestMultiClientRefusesUtilityCallsOnHostExecutedProviders for the refusal
-// itself, and evolution.TestGoldenGateRevertsWhenTheJudgeCannotRun for what this
-// package does with it.
+// Without web research, reflection is a JSON-schema call the CLI cannot produce at all — so it stays on the HTTP client. What the client then does with a claude_code request is its own decision (it used to reroute to the active default with the model blanked, now it refuses naming the step, engine and fix); this test deliberately encodes neither, asserting only that the request leaves intact with the agent's own provider and schema attached. The refusal itself lives in llm.TestMultiClientRefusesUtilityCallsOnHostExecutedProviders, what this package does with it in TestGoldenGateRevertsWhenTheJudgeCannotRun.
 func TestReflectionWithoutWebResearchStaysOnTheLLMClient(t *testing.T) {
 	router := agent.NewRouter(refusingLoop{t: t})
 	router.SetTaskExecutor(&reflectCLI{})
@@ -131,8 +113,7 @@ func TestReflectionWithoutWebResearchStaysOnTheLLMClient(t *testing.T) {
 	if len(llm.requests) != 1 {
 		t.Fatalf("llm calls = %d, want 1", len(llm.requests))
 	}
-	// The provider still travels; blanking the model and picking the default
-	// provider is the client's decision, made once, in one place.
+	// The provider still travels; blanking the model and picking the default provider is the client's decision, made once, in one place.
 	if llm.requests[0].ProviderType != domain.LLMProviderClaudeCode {
 		t.Fatalf("provider = %q, want the agent's own; the redirect belongs to the llm client",
 			llm.requests[0].ProviderType)
@@ -142,9 +123,7 @@ func TestReflectionWithoutWebResearchStaysOnTheLLMClient(t *testing.T) {
 	}
 }
 
-// promotionModel must not pick up whichever agent happened to sort first: the
-// classification is the evolution engine's own work, and the zero values mean
-// "the default provider, on that provider's own model".
+// promotionModel must not pick up whichever agent happened to sort first: the classification is the evolution engine's own work, and the zero values mean "the default provider, on that provider's own model".
 func TestPromotionModelUsesTheTenantDefault(t *testing.T) {
 	s := &Service{}
 	model, provider := s.promotionModel()

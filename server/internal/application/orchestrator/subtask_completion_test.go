@@ -13,9 +13,7 @@ import (
 var implementationTools = []string{"claim_board_task", "move_board_task", "run_terminal", "grep_code"}
 
 func TestStartedNotFinished_ClaimAndMoveOnlyIsNotDone(t *testing.T) {
-	// The card that read "completed" while its own result said "I claimed the
-	// task and moved it to in_progress. Now I will start by reviewing the
-	// project structure."
+	// The card read completed while the result admitted it never started the work.
 	reason := orchestrator.StartedNotFinishedReasonForTest(
 		map[string]int{"claim_board_task": 1, "move_board_task": 1},
 		implementationTools,
@@ -35,8 +33,7 @@ func TestStartedNotFinished_RealWorkPasses(t *testing.T) {
 }
 
 func TestStartedNotFinished_MoveOnlySubtaskIsComplete(t *testing.T) {
-	// "Move DE-1 onto the board" — the move IS the deliverable, so a run whose
-	// whole ledger is that move finished its job.
+	// The move IS the deliverable; a run whose whole ledger is that move finished its job.
 	reason := orchestrator.StartedNotFinishedReasonForTest(
 		map[string]int{"move_board_task": 1},
 		[]string{"move_board_task", "ask_user"},
@@ -46,16 +43,14 @@ func TestStartedNotFinished_MoveOnlySubtaskIsComplete(t *testing.T) {
 }
 
 func TestStartedNotFinished_NoToolCallsPasses(t *testing.T) {
-	// A subtask that answers from context calls nothing. Failing those would
-	// break every conversational plan.
+	// A subtask that answers from context calls nothing; failing it would break every conversational plan.
 	reason := orchestrator.StartedNotFinishedReasonForTest(nil, implementationTools)
 
 	assert.Empty(t, reason)
 }
 
 func TestUsageDelta_IsolatesOneSubtaskFromASharedTracker(t *testing.T) {
-	// Board runs share one tracker across every orchestrator subtask, so the
-	// per-subtask check has to read a difference, not a total.
+	// Board runs share one tracker across subtasks; the per-subtask check reads a difference, not a total.
 	_, usage := registry.ContextWithToolUsage(t.Context())
 	usage.Record("grep_code")
 	before := usage.Snapshot()

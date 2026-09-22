@@ -5,8 +5,6 @@ import (
 	"strings"
 )
 
-// parseSeedDoc reads the `---` frontmatter block and body used by catalog
-// files and by the merge flow's model responses.
 func parseSeedDoc(raw string) (map[string]string, string, error) {
 	content := strings.TrimPrefix(raw, "\ufeff")
 	lines := strings.Split(content, "\n")

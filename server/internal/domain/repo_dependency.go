@@ -42,8 +42,8 @@ func ValidDatabaseEngine(e string) bool {
 }
 
 // RepoDependency is one edge FROM RepositoryID TO a sub-project, another
-// repository, or a manually-recorded database. Mirrors HostingLink's shape —
-// one row per binding, TargetKind decides which fields apply.
+// repository, or a manually-recorded database; TargetKind decides which fields
+// apply.
 type RepoDependency struct {
 	ID                   uuid.UUID  `json:"id"`
 	RepositoryID         uuid.UUID  `json:"repository_id"`
@@ -58,8 +58,7 @@ type RepoDependency struct {
 	DatabaseName         string     `json:"database_name,omitempty"`
 	DatabaseUsername     string     `json:"database_username,omitempty"`
 	// DatabaseSecret is masked (secrets.MaskedValue()) whenever a secret is
-	// stored, "" when none was ever set. The real value never round-trips —
-	// same rule as internal/application/mcp/resolve.go's secret fields.
+	// stored, "" when none was ever set. The real value never round-trips.
 	DatabaseSecret string    `json:"database_secret,omitempty"`
 	Note           string    `json:"note,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
@@ -85,11 +84,10 @@ type SaveRepoDependencyRequest struct {
 }
 
 // ValidateRepoDependencyRequest checks the field-level rules that do not
-// require reading another repository row: target_kind is one of the known
-// values, a repo/sub_repo target carries a target_repository_id, a repo
-// target is not a self-reference, and a database target's own fields are
-// well-formed. The "same project" and "sub-project path exists" checks read
-// other repositories and live in the application service instead.
+// require reading another repository row: known target_kind, a repo/sub_repo
+// target carries a target_repository_id, no self-reference, and a database
+// target's own fields are well-formed. The "same project" and "sub-project path
+// exists" checks live in the application service instead.
 func ValidateRepoDependencyRequest(req SaveRepoDependencyRequest, sourceRepositoryID uuid.UUID) error {
 	switch req.TargetKind {
 	case DependencyTargetSubRepo:

@@ -14,8 +14,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 )
 
-// fakeJobStore records what Create was asked to store; nothing else here needs
-// a real store.
 type fakeJobStore struct {
 	created     int
 	callbackURL string
@@ -46,13 +44,6 @@ func loopbackPolicy() urlguard.Policy {
 	return p
 }
 
-// ─── F7: callback_url is an attacker-chosen destination ───────────────────────
-
-// TestCreateRefusesInternalCallbackURLs is the finding at the front door:
-// callback_url came off the request body and went straight to an outbound POST
-// with no scheme check at all, and loopback — the interesting case, because it
-// reaches this pod's own unauthenticated endpoints — is exactly what the cluster
-// NetworkPolicy cannot see.
 func TestCreateRefusesInternalCallbackURLs(t *testing.T) {
 	for _, callback := range []string{
 		"http://127.0.0.1:8080/admin/api-keys",
@@ -99,9 +90,6 @@ func TestCreateAcceptsPublicAndEmptyCallbackURLs(t *testing.T) {
 	}
 }
 
-// TestFireCallbackRefusesInternalDestinations covers the rows a write-time check
-// cannot: anything already stored, and anything whose name has changed answer
-// since. The destination is resolved and checked again where the POST is made.
 func TestFireCallbackRefusesInternalDestinations(t *testing.T) {
 	hit := make(chan struct{}, 1)
 	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -110,7 +98,7 @@ func TestFireCallbackRefusesInternalDestinations(t *testing.T) {
 	}))
 	defer internal.Close()
 
-	svc := newTestService(&fakeJobStore{}) // production default: loopback off
+	svc := newTestService(&fakeJobStore{})
 	svc.fireCallback(context.Background(), internal.URL+"/admin", uuid.New(), domain.JobStatusCompleted, []byte(`{"a":1}`), "")
 
 	select {
@@ -120,9 +108,6 @@ func TestFireCallbackRefusesInternalDestinations(t *testing.T) {
 	}
 }
 
-// TestFireCallbackDoesNotFollowRedirects: a callback is a delivery, and the body
-// carries the job result. Following a 302 would post the model's output wherever
-// the callback host points next.
 func TestFireCallbackDoesNotFollowRedirects(t *testing.T) {
 	elsewhere := make(chan struct{}, 1)
 	second := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -147,7 +132,6 @@ func TestFireCallbackDoesNotFollowRedirects(t *testing.T) {
 	}
 }
 
-// A legitimate callback still gets its POST, with the body intact.
 func TestFireCallbackStillDelivers(t *testing.T) {
 	got := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

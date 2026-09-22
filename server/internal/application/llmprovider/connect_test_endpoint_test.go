@@ -1,14 +1,5 @@
 package llmprovider_test
 
-// "Test connection" has to test the connection the operator actually has.
-//
-// It resolved its base URL as request-or-definition-default and never looked at
-// the stored row, so a provider connected on http://127.0.0.1:11234/v1 was
-// probed at http://127.0.0.1:1234/v1 — the "Custom (OpenAI-compatible)"
-// default — and the connection refused there was reported as the user's. A
-// green or red answer about an address nobody configured is worse than no
-// answer, because somebody will act on it.
-
 import (
 	"context"
 	"net/http"
@@ -29,8 +20,6 @@ func newProviderStore() *mockStore {
 	}
 }
 
-// modelsServer stands in for an OpenAI-compatible endpoint and records the
-// paths it was asked for.
 func modelsServer(t *testing.T, paths *[]string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -60,8 +49,6 @@ func TestTestUsesTheStoredBaseURLNotTheDefinitionDefault(t *testing.T) {
 	require.Equal(t, []string{"/v1/models"}, paths)
 }
 
-// An explicit base_url is still what is tested — that is the "try this before I
-// save it" case the form's button exists for.
 func TestTestPrefersAnExplicitBaseURLOverTheStoredOne(t *testing.T) {
 	var storedPaths, requestedPaths []string
 	stored := modelsServer(t, &storedPaths)
@@ -99,8 +86,6 @@ func TestConnectStoresTheDefaultModelItWasGiven(t *testing.T) {
 		"the model the caller sent was stored, not silently dropped")
 }
 
-// The connect FORM does not ask for a model, so an omitted one must keep what
-// is already configured rather than blank it.
 func TestConnectKeepsTheStoredDefaultModelWhenNoneIsSent(t *testing.T) {
 	var paths []string
 	srv := modelsServer(t, &paths)

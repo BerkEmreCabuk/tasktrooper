@@ -19,12 +19,9 @@ type AgentTemplate struct {
 	Skills       []TemplateSkill                 `json:"skills"`
 	Rules        []CreateOrchestratorRuleRequest `json:"rules"`
 	KPIs         []CreateKPIRequest              `json:"kpis"`
-	// Roles/Subscriptions are what CreateAgentFromTemplate fills for the new
-	// agent, but only into a genuinely open seat — see
-	// catalog.Service.applySuggestedRoles/applySuggestedSubscriptions. Naming
-	// a role key here is data, not routing: the engine never reads a
-	// template, and a key that does not (or no longer) exist is simply
-	// skipped.
+	// Filled by CreateAgentFromTemplate only into a genuinely open seat;
+	// naming a role key is data, not routing — the engine never reads a
+	// template, and a missing key is simply skipped.
 	Roles                []TemplateRoleSuggestion `json:"roles"`
 	Subscriptions        []TaskColumn             `json:"subscriptions"`
 	SelfEvolutionEnabled bool                     `json:"self_evolution_enabled"`
@@ -33,19 +30,18 @@ type AgentTemplate struct {
 	UpdatedAt            time.Time                `json:"updated_at"`
 }
 
-// TemplateRoleSuggestion is one role a template proposes its agent for when
-// created from it — Key names a roles.key row (e.g. "developer", "qa"), and
-// nil Areas means the same "any area" a RoleAssignment with nil Areas does.
+// TemplateRoleSuggestion is one role a template proposes its agent for. Key
+// names a roles.key row; nil Areas means the same "any area" a RoleAssignment
+// with nil Areas does.
 type TemplateRoleSuggestion struct {
 	Key   string   `json:"key"`
 	Areas []string `json:"areas,omitempty"`
 }
 
 // TemplateSkill is a skill as a template carries it. It names its tech stack
-// instead of pointing at one: a stack id belongs to the agent the template was
-// saved from, and the agent being created from it owns different rows. An empty
-// TechStack is a general skill, which is also what an old template — stored
-// before stacks existed — decodes to.
+// rather than pointing at one: a stack id belongs to the agent the template
+// was saved from, and a new agent owns different rows. An empty TechStack is a
+// general skill — what an old template predating stacks decodes to.
 type TemplateSkill struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
@@ -69,8 +65,6 @@ func (s TemplateSkill) CreateRequest() CreateSkillRequest {
 	}
 }
 
-// TemplateSkillsFrom lifts plain create requests into template skills, for the
-// built-in role definitions that carry no stacks.
 func TemplateSkillsFrom(reqs []CreateSkillRequest) []TemplateSkill {
 	out := make([]TemplateSkill, 0, len(reqs))
 	for _, r := range reqs {

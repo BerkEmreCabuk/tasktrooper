@@ -9,13 +9,13 @@ import (
 
 // Hosting links answer "where does this part of the repository actually live"
 // with the provider's own identity — a Vercel project id, its team, its root
-// directory, the address production answers on — as opposed to a deploy
-// target, which answers "which workflow ships env X". The two are keyed
-// differently on purpose: a target is per environment, a link is per AREA, so
-// a monorepo can say its frontend is on Vercel while its backend is elsewhere.
+// directory, the address production answers on — as opposed to a deploy target,
+// which answers "which workflow ships env X". The two are keyed differently on
+// purpose: a target is per environment, a link is per AREA, so a monorepo can
+// say its frontend is on Vercel while its backend is elsewhere.
 
-// HostingAreaRoot is the area of a single-kind repository: the whole tree.
-// A monorepo uses its sub-repo kinds (RepoKindFrontend, RepoKindBackend…) as
+// HostingAreaRoot is the area of a single-kind repository: the whole tree. A
+// monorepo uses its sub-repo kinds (RepoKindFrontend, RepoKindBackend…) as
 // areas instead.
 const HostingAreaRoot = ""
 
@@ -64,8 +64,8 @@ type HostingLink struct {
 	// ExternalID / ExternalName identify the provider-side project.
 	ExternalID   string `json:"external_id,omitempty"`
 	ExternalName string `json:"external_name,omitempty"`
-	// ScopeID / ScopeSlug are the provider's tenant above the project (a
-	// Vercel team; "" is the personal account).
+	// ScopeID / ScopeSlug are the provider's tenant above the project (a Vercel
+	// team; "" is the personal account).
 	ScopeID   string `json:"scope_id,omitempty"`
 	ScopeSlug string `json:"scope_slug,omitempty"`
 	// RootDirectory is the sub-folder the provider builds from, when the
@@ -92,17 +92,17 @@ type SaveHostingLinkRequest struct {
 	// ScopeID is the provider tenant the project lives under (Vercel team id;
 	// "" = personal account). Omitted, the connection's default team is used.
 	ScopeID *string `json:"scope_id,omitempty"`
-	// Source defaults to HostingSourceUser; the UI passes "detected" when it
-	// is confirming what detection proposed.
+	// Source defaults to HostingSourceUser; the UI passes "detected" when it is
+	// confirming what detection proposed.
 	Source string `json:"source,omitempty"`
 	// Evidence is free text: the reason the operator (or the detector) picked
 	// this project.
 	Evidence string `json:"evidence,omitempty"`
 }
 
-// Vercel objects, as the rest of the system needs them. They are domain
-// types, not adapter ones, so the application layer can reason about a
-// project without importing the HTTP client.
+// Vercel objects, as the rest of the system needs them — domain types, not
+// adapter ones, so the application layer can reason about a project without
+// importing the HTTP client.
 
 // VercelUser is the account a token belongs to.
 type VercelUser struct {
@@ -175,8 +175,8 @@ const (
 	HostingMatchName        = "name"         // project name equals the repo/area name
 )
 
-// HostingHint is a marker the tree itself carries about where an area ships
-// (a vercel.json, a fly.toml, a deploy workflow). It is evidence, not a link.
+// HostingHint is a marker the tree itself carries about where an area ships (a
+// vercel.json, a fly.toml, a deploy workflow). It is evidence, not a link.
 type HostingHint struct {
 	Provider string `json:"provider"`
 	Name     string `json:"name"`
@@ -195,8 +195,8 @@ type HostingCandidate struct {
 // tree says, which provider projects match, and whether that is decisive.
 type HostingAreaDetection struct {
 	Area string `json:"area"`
-	// Kind is the area's repo kind (backend/frontend); Directory the folder
-	// the area lives in on a monorepo ("" at the root).
+	// Kind is the area's repo kind (backend/frontend); Directory the folder the
+	// area lives in on a monorepo ("" at the root).
 	Kind       string             `json:"kind"`
 	Directory  string             `json:"directory,omitempty"`
 	Existing   *HostingLink       `json:"existing,omitempty"`

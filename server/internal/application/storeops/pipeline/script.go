@@ -6,25 +6,14 @@ import (
 	"unicode/utf8"
 )
 
-// The generated shell is assembled by substitution rather than text/template
-// for two reasons that are both about reading it: shell is dense with `%`
-// (printf, ${x%suffix}) so fmt verbs would have to be escaped throughout, and
-// the workflow beside it is dense with `{{` (GitHub expressions) so Go's own
-// delimiters would have to be redefined. `@NAME@` appears in neither language.
 func expand(body string, pairs ...string) string {
 	return strings.NewReplacer(pairs...).Replace(body)
 }
 
-// shellQuote wraps a value for a single-quoted shell word. Values reaching the
-// generated script come from a store console, so the quoting is real rather
-// than decorative even though normalize() has already narrowed the character
-// set of everything but the display name.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// displayText strips what would end a comment line or a shell word early. The
-// app name is the one free-text field here and it is only ever printed.
 func displayText(s string) string {
 	clean := strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f {
@@ -32,17 +21,13 @@ func displayText(s string) string {
 		}
 		return r
 	}, s)
-	// Runes, not bytes: a byte cut lands mid-sequence on any non-ASCII name and
-	// leaves an invalid UTF-8 tail in a comment line and in APP_NAME.
+
 	if utf8.RuneCountInString(clean) > 120 {
 		clean = string([]rune(clean)[:120])
 	}
 	return clean
 }
 
-// preamble is everything both platforms and both channels share: the bash
-// guard, the arg grammar, the secret decoding and the masking. It ends with
-// the helpers defined and nothing done.
 const preamble = `#!/usr/bin/env bash
 # mobile-release.sh — @APPNAME@ (@PLATFORM@) → @STORE@
 #
@@ -701,8 +686,6 @@ func androidScript(s Spec) string {
 	)
 }
 
-// artifactsGlob is what the workflow hands upload-artifact. It is derived from
-// the script's own $ARTIFACTS rather than written twice.
 func (s Spec) artifactsGlob() string {
 	return path.Join(s.SubProjectPath, "build", "mobile-release") + "/**"
 }

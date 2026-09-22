@@ -1,7 +1,3 @@
-// Package repodocs lets a repository (or one monorepo sub-project) name which
-// file documents its coding standards, test standards, architecture and local
-// run instructions, and opens the board task that authors whichever of those
-// four is missing.
 package repodocs
 
 import (
@@ -17,25 +13,15 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// TaskCreator opens the board task that authors a missing doc, and reads it
-// back. It is the board's CreateTask/GetTask narrowed to what this package
-// needs.
 type TaskCreator interface {
 	CreateTask(ctx context.Context, repositoryID uuid.UUID, req domain.CreateBoardTaskRequest) (domain.BoardTask, error)
 	GetTask(ctx context.Context, repositoryID, taskID uuid.UUID) (domain.BoardTask, error)
 }
 
-// TaskPRMerger merges the bundle task's pull request. It is
-// board.TaskPRService.MergeTaskPullRequest narrowed to one method, so this
-// package depends on the use case rather than on the board service.
 type TaskPRMerger interface {
 	MergeTaskPullRequest(ctx context.Context, repositoryID, taskID uuid.UUID) (domain.TaskPRMergeResult, error)
 }
 
-// RepositoryStore is the slice of the repository store this package needs:
-// reading the repo to resolve its kind and sub-projects, writing back the doc
-// path a generation task was just asked to produce, and remembering which task
-// the outstanding doc bundle is in.
 type RepositoryStore interface {
 	Get(ctx context.Context, id uuid.UUID) (domain.Repository, error)
 	Update(ctx context.Context, id uuid.UUID, req domain.UpdateRepositoryRequest) (domain.Repository, error)
@@ -46,7 +32,7 @@ type Service struct {
 	repos  RepositoryStore
 	tasks  TaskCreator
 	merger TaskPRMerger
-	// workflows/roles: see board.Dispatcher's own fields of the same name.
+
 	workflows port.WorkflowReader
 	roles     port.RoleResolver
 }
@@ -58,22 +44,10 @@ func NewService(repos RepositoryStore) *Service {
 	return &Service{repos: repos}
 }
 
-// SetTaskCreator enables CreateDocTask; without it the service still exists
-// but every call refuses.
 func (s *Service) SetTaskCreator(tasks TaskCreator) { s.tasks = tasks }
 
-// SetTaskPRMerger enables MergeDocsTask. Left unset on a deployment with no
-// GitHub access, where the merge could only ever refuse.
 func (s *Service) SetTaskPRMerger(m TaskPRMerger) { s.merger = m }
 
-// CreateDocTask opens the board task that writes the missing doc — and, for
-// local_run, a run script alongside it — at path, or at the kind's
-// conventional .ai/ location when path is blank. The chosen path is recorded
-// on the repository (or sub-project) immediately: the same convention
-// InitialSetupDialog already uses for deploy addresses (see
-// deploy.Service.CreateSetupTask) — a human decided where this lives before
-// an agent ever wrote a word there, and the field should say so from the
-// moment the task exists, not only once the PR lands.
 func (s *Service) CreateDocTask(ctx context.Context, repositoryID uuid.UUID, subProjectPath, kind, path string) (domain.BoardTask, error) {
 	if s.tasks == nil {
 		return domain.BoardTask{}, fmt.Errorf("board is not available")
@@ -109,19 +83,12 @@ func (s *Service) CreateDocTask(ctx context.Context, repositoryID uuid.UUID, sub
 	})
 }
 
-// DocItem is one requested reference doc: which kind, whose sub-project (""
-// for the repository itself), and where it should land ("" for the kind's
-// conventional path).
 type DocItem struct {
 	Kind           string `json:"kind"`
 	SubProjectPath string `json:"sub_project_path,omitempty"`
 	Path           string `json:"path,omitempty"`
 }
 
-// resolvedDoc is a DocItem with everything settled: the path as it is
-// persisted (relative to whatever the doc is scoped to), the path as the agent
-// must write it (relative to the repository root), and the kind whose role
-// owns the work.
 type resolvedDoc struct {
 	kind           string
 	subProjectPath string
@@ -130,10 +97,6 @@ type resolvedDoc struct {
 	kindLabel      string
 }
 
-// resolveDoc validates one requested doc against the repository and fills in
-// the defaults. It is the single definition CreateDocTask and
-// CreateDocsBundleTask share, so a doc's path can never depend on which
-// endpoint asked for it.
 func resolveDoc(repo domain.Repository, item DocItem) (resolvedDoc, error) {
 	kind := strings.TrimSpace(item.Kind)
 	if !domain.ValidRepoDocKind(kind) {
@@ -159,9 +122,6 @@ func resolveDoc(repo domain.Repository, item DocItem) (resolvedDoc, error) {
 	return out, nil
 }
 
-// docInstructions is what the agent is told to put in one doc. local_run is
-// the odd one out and deliberately so: it asks for a script, not prose,
-// because what someone on a fresh machine needs is something they can run.
 func docInstructions(doc resolvedDoc) string {
 	switch doc.kind {
 	case domain.RepoDocCodingStandards:
@@ -187,15 +147,6 @@ func docInstructions(doc resolvedDoc) string {
 	return ""
 }
 
-// CreateDocsBundleTask asks for several reference docs at once, in ONE board
-// task, so all of them land in one branch and therefore one pull request.
-//
-// The alternative — one task per doc, which CreateDocTask still serves — puts
-// four pull requests on a repository for what a human thinks of as a single
-// piece of setup, each with its own review, its own CI run and its own merge.
-// Every requested path is recorded on the repository (or sub-project) up front
-// for the same reason CreateDocTask records its one: a human decided where
-// these live before an agent wrote a word there.
 func (s *Service) CreateDocsBundleTask(ctx context.Context, repositoryID uuid.UUID, items []DocItem) (domain.BoardTask, error) {
 	if s.tasks == nil {
 		return domain.BoardTask{}, fmt.Errorf("board is not available")
@@ -221,13 +172,9 @@ func (s *Service) CreateDocsBundleTask(ctx context.Context, repositoryID uuid.UU
 		seen[key] = true
 		docs = append(docs, doc)
 	}
-	// Persisted before the task exists: a task that opens against paths the
-	// repository does not yet claim would have the agent and the settings
-	// screen disagreeing about where a doc lives for as long as the task runs.
+
 	for _, doc := range docs {
-		// Re-read each time: setDocPath writes the whole sub-project list, so
-		// two docs on two sub-projects would otherwise each overwrite the
-		// other's row from the same stale snapshot.
+
 		current, err := s.repos.Get(ctx, repositoryID)
 		if err != nil {
 			return domain.BoardTask{}, err
@@ -254,8 +201,6 @@ func (s *Service) CreateDocsBundleTask(ctx context.Context, repositoryID uuid.UU
 	return task, nil
 }
 
-// bundleDescription enumerates every requested doc with its exact target path
-// and says, in as many words, that all of them belong to one branch.
 func bundleDescription(repo domain.Repository, docs []resolvedDoc) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Author the reference docs listed below for this %s repository, ALL of them in a single branch so exactly one pull request contains every file.\n\n", repo.Kind)
@@ -295,9 +240,6 @@ func docScopeLabel(doc resolvedDoc) string {
 	return doc.subProjectPath + " (" + doc.kindLabel + ")"
 }
 
-// DocsTaskStatus is what the docs screen shows for the outstanding bundle: the
-// task, where it has got to, and the pull request it is being reviewed in. All
-// fields empty means no bundle is outstanding.
 type DocsTaskStatus struct {
 	TaskID   string `json:"task_id"`
 	TaskKey  string `json:"task_key,omitempty"`
@@ -308,10 +250,6 @@ type DocsTaskStatus struct {
 	Merged   bool   `json:"merged"`
 }
 
-// DocsTask reports the repository's outstanding doc-bundle task. A recorded id
-// that no longer resolves to a task (it was deleted from the board) reads as
-// "none outstanding" rather than as an error: the card is gone, and the screen
-// asking should offer to open a new bundle.
 func (s *Service) DocsTask(ctx context.Context, repositoryID uuid.UUID) (DocsTaskStatus, error) {
 	repo, err := s.repos.Get(ctx, repositoryID)
 	if err != nil {
@@ -348,15 +286,6 @@ func (s *Service) docsTask(ctx context.Context, repo domain.Repository) (domain.
 	return task, true, nil
 }
 
-// MergeDocsTask merges the doc bundle's pull request into the default branch
-// and forgets the task.
-//
-// It is the same merge every other task gets — board.TaskPRService applies its
-// whole ladder of refusals, including the board's own pipeline verdict, which
-// already tolerates a repository with no CI mapped at all (only a FAILED
-// pipeline blocks; "no pipeline" and "skipped" do not). A docs-only PR on a
-// repo without CI therefore merges, and nothing here has to weaken a gate to
-// let it.
 func (s *Service) MergeDocsTask(ctx context.Context, repositoryID uuid.UUID) (domain.TaskPRMergeResult, error) {
 	if s.merger == nil {
 		return domain.TaskPRMergeResult{}, fmt.Errorf("this deployment has no GitHub pull-request access wired up")
@@ -377,30 +306,19 @@ func (s *Service) MergeDocsTask(ctx context.Context, repositoryID uuid.UUID) (do
 		if !errors.Is(err, domain.ErrMergeAlreadyMerged) {
 			return domain.TaskPRMergeResult{}, err
 		}
-		// The gate refuses a second merge attempt on purpose — merging is
-		// irreversible and must never be retried — but from this screen's
-		// point of view the PR is exactly as landed as one this call merged
-		// itself: whoever merged it (an earlier call here, the QA agent's own
-		// merge_task_pull_request, or a person on GitHub) already did the
-		// work. Reporting that as a failure is what sent the user back to a
-		// "save" button for a PR that no longer exists.
+
 		result, err = s.alreadyMergedResult(ctx, repositoryID, task)
 		if err != nil {
 			return domain.TaskPRMergeResult{}, err
 		}
 	}
-	// Cleared whenever the PR is settled, merged now or merged earlier: a
-	// failure to forget the task is worth reporting, but it must not read as
-	// a failed merge — the docs are on the default branch either way.
+
 	if clearErr := s.repos.SetDocsTaskID(ctx, repositoryID, ""); clearErr != nil {
 		result.Message = strings.TrimSpace(result.Message + " WARNING: the docs task could not be cleared from the repository (" + clearErr.Error() + ").")
 	}
 	return result, nil
 }
 
-// alreadyMergedResult re-reads the task after a refused "already merged"
-// attempt, since the gate may have just recorded the commit GitHub reports
-// rather than the stale snapshot this call started with.
 func (s *Service) alreadyMergedResult(ctx context.Context, repositoryID uuid.UUID, task domain.BoardTask) (domain.TaskPRMergeResult, error) {
 	current, err := s.tasks.GetTask(ctx, repositoryID, task.ID)
 	if err != nil {
@@ -419,8 +337,6 @@ func (s *Service) alreadyMergedResult(ctx context.Context, repositoryID uuid.UUI
 	}, nil
 }
 
-// setDocPath records where a doc kind lives, scoped to the repository itself
-// ("") or to one of its sub-projects.
 func (s *Service) setDocPath(ctx context.Context, repo domain.Repository, subProjectPath, kind, path string) error {
 	if subProjectPath == "" {
 		docs := repo.Docs
@@ -458,8 +374,6 @@ func setDocKind(docs *domain.RepositoryDocs, kind, path string) {
 	}
 }
 
-// systemTaskAssignee resolves who a system-opened doc-authoring task goes to:
-// the developer role's agent for kind/subProjects' area.
 func (s *Service) systemTaskAssignee(ctx context.Context, kind string, subProjects []domain.RepoSubProject) *uuid.UUID {
 	return s.systemTaskAssigneeForArea(ctx, domain.RepoArea(kind, subProjects))
 }
@@ -475,12 +389,6 @@ func (s *Service) systemTaskAssigneeForArea(ctx context.Context, area string) *u
 	return id
 }
 
-// bundleArea picks who authors a docs bundle: the developer role's area
-// owning most of the docs in it. A sub-project doc counts as that
-// sub-project's kind and a monorepo-level doc counts as every sub-project, so
-// a bundle of mostly-backend docs resolves to the backend area. Doc work used
-// to go to the system architect for any monorepo, and the architect refuses
-// to author files into a branch.
 func bundleArea(repo domain.Repository, docs []resolvedDoc) string {
 	owners := make([]domain.RepoSubProject, 0, len(docs))
 	for _, doc := range docs {

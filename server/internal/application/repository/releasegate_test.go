@@ -13,15 +13,11 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeReleaseGit is a port.GitClient whose only interesting answers are the
-// two the release-identity checks ask for: "is there a working copy" and "what
-// commit is the task branch on". Everything else is inert.
 type fakeReleaseGit struct {
 	hasGit  bool
 	headSHA string
 	infoErr error
-	// presence overrides what Presence answers. Zero value = derived from
-	// hasGit, so every test that only cares about the gate stays as it was.
+
 	presence *domain.GitPresence
 }
 
@@ -70,34 +66,23 @@ func (f *fakeReleaseGit) ChangedFilesSince(context.Context, string, string) ([]s
 	return nil, nil
 }
 
-// fakeReleaseRepoStore serves one repository row; Get is what most tests
-// exercise, plus UpdateRootPath for the working-copy restore.
 type fakeReleaseRepoStore struct {
 	repo domain.Repository
-	// rootPathWrites records every root_path the service saved, in order, so a
-	// restore test can assert the row was re-pointed (and that a refused
-	// restore wrote nothing).
+
 	rootPathWrites []string
 	rootPathErr    error
-	// subProjectWrites records every sub-project list the service saved, in
-	// order, so an Open() test can assert detection was persisted (or wasn't,
-	// when the caller supplied an explicit kind).
+
 	subProjectWrites [][]domain.RepoSubProject
-	// getByRootPathErr, set, makes GetByRootPath report "not found" so Open()
-	// takes its new-registration branch instead of its re-open branch. Unset
-	// (nil), it keeps the original zero-value/no-error behaviour every other
-	// test here relies on.
+
 	getByRootPathErr error
-	// mobilePlatformWrites records every mobile_platform the service saved, so
-	// an Open() test can assert the platform detection was persisted.
+
 	mobilePlatformWrites []string
-	// appIdentityWrites records every detected app identity the service saved,
-	// the Open() twin of mobilePlatformWrites.
+
 	appIdentityWrites []domain.AppIdentity
 	buildTargetWrites []domain.BuildTargets
-	// releaseEngineWrites records every release_engine the service saved.
+
 	releaseEngineWrites []string
-	// docsTaskWrites records every docs_task_id written, "" included.
+
 	docsTaskWrites []string
 }
 
@@ -219,8 +204,6 @@ func (f *fakeReleaseRepoStore) ListProjectIDsByRepositories(context.Context, []u
 	return nil, nil
 }
 
-// fakeReleaseTaskStore serves one task row; Update echoes what it is given so
-// the stamp written by a column move can be asserted.
 type fakeReleaseTaskStore struct {
 	task    domain.BoardTask
 	updated domain.BoardTask
@@ -305,8 +288,6 @@ func (f *fakeReleaseTaskStore) BlockOnCancel(context.Context, uuid.UUID, uuid.UU
 	return nil
 }
 
-// fakeReleasePipelineStore counts the pipeline rows a dispatch creates — the
-// evidence that TriggerRelease got past every gate.
 type fakeReleasePipelineStore struct {
 	created []domain.TaskPipeline
 }
@@ -320,8 +301,6 @@ func (f *fakeReleasePipelineStore) Update(_ context.Context, p domain.TaskPipeli
 	return p, nil
 }
 
-// ClaimTerminal mirrors the real guard: a pipeline reaches a terminal state
-// once, and a second caller is told it lost. See port.TaskPipelineStore.
 func (f *fakeReleasePipelineStore) ClaimTerminal(ctx context.Context, p domain.TaskPipeline) (domain.TaskPipeline, bool, error) {
 	out, err := f.Update(ctx, p)
 	return out, err == nil, err
@@ -357,8 +336,6 @@ func (f *fakeReleasePipelineStore) ListJobs(context.Context, uuid.UUID) ([]domai
 	return nil, nil
 }
 
-// fakeReleaseComments captures the system comments a block posts, so "the
-// refusal is visible on the board" is asserted rather than assumed.
 type fakeReleaseComments struct {
 	comments []domain.TaskComment
 }
@@ -376,10 +353,6 @@ const (
 	movedCommit    = "2222222222222222222222222222222222222222"
 )
 
-// TriggerRelease must dispatch only when the branch still carries the commit
-// the task was signed off at. Every other outcome — moved branch, no stamp, no
-// workspace, git failure — blocks: an unprovable release target is exactly the
-// case this gate exists for.
 func TestTriggerReleaseChecksReleaseTargetBeforeDispatch(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -493,8 +466,6 @@ func TestTriggerReleaseChecksReleaseTargetBeforeDispatch(t *testing.T) {
 	}
 }
 
-// The blocked-release error is what the operator and the release agent read:
-// it has to name both commits, not just say "mismatch".
 func TestReleaseTargetGateErrorNamesBothCommits(t *testing.T) {
 	repoID, taskID := uuid.New(), uuid.New()
 	svc := &Service{
@@ -513,14 +484,12 @@ func TestReleaseTargetGateErrorNamesBothCommits(t *testing.T) {
 	}
 }
 
-// The stamp is what makes the gate a real check, so the moves that write it
-// (and the moves that withdraw it) are pinned down here.
 func TestVerifiedSHAForMove(t *testing.T) {
 	cases := []struct {
 		name    string
 		prev    domain.TaskColumn
 		next    domain.TaskColumn
-		stamped string // stamp already on the task
+		stamped string
 		hasGit  bool
 		headSHA string
 		want    string
@@ -593,9 +562,6 @@ func TestVerifiedSHAForMove(t *testing.T) {
 	}
 }
 
-// Nothing about this gate may depend on git being wired: a control plane
-// without a git client cannot identify any commit, so it must refuse the
-// release rather than treat "cannot check" as "checked and fine".
 func TestReleaseTargetGateWithoutGitFailsClosed(t *testing.T) {
 	svc := &Service{}
 	err := svc.releaseTargetGate(context.Background(), uuid.New(),
@@ -604,8 +570,6 @@ func TestReleaseTargetGateWithoutGitFailsClosed(t *testing.T) {
 		t.Fatalf("want ErrReleaseTargetUnverified, got %v", err)
 	}
 }
-
-// --- port.BoardTaskStore / port.GitClient additions (migration 105) ---
 
 func (f *fakeReleaseTaskStore) FindTaskByMergeCommit(context.Context, uuid.UUID, string) (domain.BoardTask, error) {
 	return domain.BoardTask{}, errors.New("not found")
@@ -622,16 +586,6 @@ func (f *fakeReleaseTaskStore) TakeBlockedResourceTask(context.Context, string, 
 func (f *fakeReleaseGit) RevertCommitOnDefaultBranch(context.Context, string, string, string) (string, error) {
 	return "", nil
 }
-
-// ---------------------------------------------------------------------------
-// The done-column assertion.
-//
-// trigger_release's tool description has always said "for a task that is in the
-// done column", and its task_id parameter has always said "must be in the done
-// column". Nothing checked it. An agent could release a card sitting in
-// in_progress or need_revision, and the gate that eventually caught it was the
-// release-target gate complaining about a missing verified commit — which is
-// true, but describes a symptom rather than the mistake.
 
 func TestTriggerReleaseRefusesOutsideDone(t *testing.T) {
 	blocked := []domain.TaskColumn{
@@ -651,8 +605,7 @@ func TestTriggerReleaseRefusesOutsideDone(t *testing.T) {
 				repos: &fakeReleaseRepoStore{repo: domain.Repository{ID: repoID, AutoReleaseOnDone: true}},
 				tasks: &fakeReleaseTaskStore{task: domain.BoardTask{
 					ID: taskID, RepositoryID: repoID, Column: col,
-					// Deliberately stamped and consistent: without the column
-					// gate this task would sail through every other check.
+
 					VerifiedSHA: verifiedCommit,
 				}},
 				git:           &fakeReleaseGit{hasGit: true, headSHA: verifiedCommit},
@@ -668,8 +621,7 @@ func TestTriggerReleaseRefusesOutsideDone(t *testing.T) {
 			if len(pipelineStore.created) != 0 {
 				t.Fatalf("a task in %s must not dispatch a deploy, got %d pipelines", col, len(pipelineStore.created))
 			}
-			// The block has to be visible on the board, not only in a failed
-			// API call — same contract as the migration and identity gates.
+
 			if len(comments.comments) != 1 {
 				t.Fatalf("want exactly one system comment explaining the block, got %d", len(comments.comments))
 			}
@@ -680,9 +632,6 @@ func TestTriggerReleaseRefusesOutsideDone(t *testing.T) {
 	}
 }
 
-// done releases, and so does released — a re-release of an already-released
-// task is legitimate (a deploy package replaying its members, a re-run after an
-// infrastructure failure) and the card has moved on by then.
 func TestTriggerReleaseAllowsDoneAndReleased(t *testing.T) {
 	for _, col := range []domain.TaskColumn{domain.TaskColumnDone, domain.TaskColumnReleased} {
 		t.Run(string(col), func(t *testing.T) {

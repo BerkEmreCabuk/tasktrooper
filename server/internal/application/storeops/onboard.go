@@ -13,26 +13,16 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// Checklist item keys. Fixed contract: Task 9's Monitor keys off these
-// exact strings, so they never get renamed without updating that consumer.
 const (
 	checklistIOSAppRecord    = "ios_app_record"
 	checklistPlayAppRecord   = "play_app_record"
 	checklistPlayFirstUpload = "play_first_upload"
 )
 
-// playFirstUploadTitle is the manual step title for play_first_upload — it
-// does not depend on the package identifier, unlike the other checklist
-// items.
 const playFirstUploadTitle = "Download the signed AAB artifact from the mobile-stage-google-play workflow run (dispatch it with upload=false) and upload it to the Internal testing track"
 
-// checklistTaskDoneNote is appended to every onboarding task's description:
-// the assignee never has to tick a box, verification is automatic.
 const checklistTaskDoneNote = "the system verifies each step automatically — no need to tick anything"
 
-// Onboard is called when a store deploy target is saved. It runs every
-// automatable first-publish step, opens the guided checklist task for the
-// rest, and returns the (possibly already test_ready) app row.
 func (s *Service) Onboard(ctx context.Context, repositoryID uuid.UUID, provider, identifier, appName string) (domain.MobileStoreApp, error) {
 	platform := domain.StoreProviderPlatform(provider)
 	if platform == "" {
@@ -42,7 +32,7 @@ func (s *Service) Onboard(ctx context.Context, repositoryID uuid.UUID, provider,
 	app, err := s.apps.Get(ctx, repositoryID, platform)
 	switch {
 	case err == nil:
-		// Existing row: refresh it below rather than starting over.
+
 	case errors.Is(err, port.ErrNotFound):
 		app = domain.MobileStoreApp{
 			RepositoryID: repositoryID,
@@ -83,11 +73,6 @@ func (s *Service) Onboard(ctx context.Context, repositoryID uuid.UUID, provider,
 		verified = v
 	}
 
-	// A checklist not yet established (brand new row, or a row that never
-	// needed one) is built fresh, dropping whatever the store already
-	// confirms — those never become a manual step. An existing checklist is
-	// only ever refreshed in place: items already offered to a human stay
-	// offered until verified, never silently added to or removed.
 	if len(app.Checklist) == 0 && app.OnboardingTaskID == nil {
 		app.Checklist = buildChecklist(platform, identifier, verified)
 	} else {
@@ -103,12 +88,7 @@ func (s *Service) Onboard(ctx context.Context, repositoryID uuid.UUID, provider,
 			app.State = domain.MobileStoreStateTestReady
 		}
 	} else {
-		// The checklist is open again — typically because the target was
-		// re-saved against a different identifier, so the freshly built list
-		// is unverified. A row left sitting at test_ready here would let
-		// mobileStoreGate green-light stage deploys against an app record
-		// nobody has confirmed exists. Take the lifecycle's one backward edge
-		// (test_ready -> onboarding) instead; it exists for exactly this.
+
 		if app.CanTransition(domain.MobileStoreStateOnboarding) {
 			app.State = domain.MobileStoreStateOnboarding
 		}
@@ -134,17 +114,6 @@ func (s *Service) Onboard(ctx context.Context, repositoryID uuid.UUID, provider,
 	return stored, nil
 }
 
-// EnsureIdentifierAllowed vets an identifier BEFORE a store deploy target
-// carrying it is persisted. It is the pre-save half of the rule Onboard
-// enforces on the registry row, and it exists because deploy.SaveTarget
-// saves the target first and treats onboarding as a best-effort follow-up:
-// a refusal discovered only inside Onboard would be logged and swallowed,
-// leaving the deploy target pointing at the new identifier while the store
-// row stayed `live` under the old one — a divergence worse than the
-// overwrite it was meant to prevent.
-//
-// A repository with no registry row for the provider's platform has nothing
-// to protect and is allowed.
 func (s *Service) EnsureIdentifierAllowed(ctx context.Context, repositoryID uuid.UUID, provider, identifier string) error {
 	platform := domain.StoreProviderPlatform(provider)
 	if platform == "" {
@@ -155,19 +124,12 @@ func (s *Service) EnsureIdentifierAllowed(ctx context.Context, repositoryID uuid
 		if errors.Is(err, port.ErrNotFound) {
 			return nil
 		}
-		// Fail closed: this is a gate, and "the lookup broke" is not
-		// "nothing to protect".
+
 		return fmt.Errorf("storeops: loading store app: %w", err)
 	}
 	return checkIdentifierChange(app, platform, identifier)
 }
 
-// checkIdentifierChange refuses to re-point a published app at a different
-// bundle ID / package name. That is not an edit, it is a different app: the
-// lifecycle has no backward edge out of live, so overwriting the identifier
-// would leave the row claiming `live` — and mobileStoreGate green-lighting
-// production releases — for something that was never registered, let alone
-// published. The operator has to delete the target instead.
 func checkIdentifierChange(app domain.MobileStoreApp, platform, identifier string) error {
 	if app.State != domain.MobileStoreStateLive || app.Identifier == "" || app.Identifier == identifier {
 		return nil
@@ -177,14 +139,8 @@ func checkIdentifierChange(app domain.MobileStoreApp, platform, identifier strin
 		platform, app.Identifier, identifier, ErrIdentifierLocked)
 }
 
-// VerifyOnboarding re-checks every open checklist item against the store
-// API, marks verified ones done (with a system comment on the checklist
-// task), and advances state to test_ready when the list is complete.
 func (s *Service) VerifyOnboarding(ctx context.Context, repositoryID uuid.UUID, platform string) (domain.MobileStoreApp, error) {
-	// Validate before the load. The platform is caller-supplied (it comes
-	// straight off a URL segment), and s.apps.Get would otherwise fail first
-	// with an unhelpful "not found" for a typo — the caller's own mistake
-	// reported as if the repository had no store app.
+
 	if !validPlatform(platform) {
 		return domain.MobileStoreApp{}, fmt.Errorf("storeops: verifying onboarding: unsupported platform %q: %w", platform, ErrInvalidPlatform)
 	}
@@ -239,10 +195,6 @@ func (s *Service) VerifyOnboarding(ctx context.Context, repositoryID uuid.UUID, 
 	return stored, errors.Join(commentErrs...)
 }
 
-// provisionIOS runs every automatable iOS first-publish step: registering
-// the bundle ID with Apple, minting or renewing the distribution signing
-// assets, and pushing every resulting secret to the repository's GitHub
-// Actions vault.
 func (s *Service) provisionIOS(ctx context.Context, repositoryID uuid.UUID, identifier, appName string) error {
 	client, err := s.asc(ctx)
 	if err != nil {
@@ -262,9 +214,6 @@ func (s *Service) provisionIOS(ctx context.Context, repositoryID uuid.UUID, iden
 	return s.pushSecrets(ctx, repositoryID, values)
 }
 
-// provisionAndroid runs every automatable Android first-publish step:
-// confirming the Google Play credential still works, minting or renewing
-// the upload keystore, and pushing every resulting secret.
 func (s *Service) provisionAndroid(ctx context.Context, repositoryID uuid.UUID, identifier string) error {
 	client, err := s.play(ctx)
 	if err != nil {
@@ -280,9 +229,6 @@ func (s *Service) provisionAndroid(ctx context.Context, repositoryID uuid.UUID, 
 	return s.pushSecrets(ctx, repositoryID, values)
 }
 
-// resolveAppName is the app name EnsureBundleID registers under: the
-// caller-supplied appName, or the repository's own name when none was
-// given.
 func (s *Service) resolveAppName(ctx context.Context, repositoryID uuid.UUID, appName string) (string, error) {
 	if appName != "" {
 		return appName, nil
@@ -297,9 +243,6 @@ func (s *Service) resolveAppName(ctx context.Context, repositoryID uuid.UUID, ap
 	return repo.Name, nil
 }
 
-// verifyIOS checks the iOS checklist items against App Store Connect. It
-// returns which keys are currently satisfied and the store's app ID when
-// the app record exists (empty otherwise).
 func (s *Service) verifyIOS(ctx context.Context, identifier string) (map[string]bool, string, error) {
 	client, err := s.asc(ctx)
 	if err != nil {
@@ -312,13 +255,6 @@ func (s *Service) verifyIOS(ctx context.Context, identifier string) (map[string]
 	return map[string]bool{checklistIOSAppRecord: found}, appID, nil
 }
 
-// verifyAndroid checks the Android checklist items against Google Play: the
-// app record and whether the internal testing track already has a release.
-// The track can only be queried once the app record itself exists — the
-// real Play Developer API errors with "app not found" for
-// TrackInfo(unregistered package) (see googleplay.Client.TrackInfo), so
-// that call is skipped entirely until AppExists reports true, and
-// play_first_upload is simply reported not-yet-verified until then.
 func (s *Service) verifyAndroid(ctx context.Context, identifier string) (map[string]bool, error) {
 	client, err := s.play(ctx)
 	if err != nil {
@@ -343,9 +279,6 @@ func (s *Service) verifyAndroid(ctx context.Context, identifier string) (map[str
 	return verified, nil
 }
 
-// buildChecklist is the fresh checklist for a platform: one entry per
-// manual step, skipping ("dropping") whatever the store already confirms —
-// an already-satisfied step never becomes a task item in the first place.
 func buildChecklist(platform, identifier string, verified map[string]bool) []domain.ChecklistItem {
 	var candidates []domain.ChecklistItem
 	switch platform {
@@ -369,10 +302,6 @@ func buildChecklist(platform, identifier string, verified map[string]bool) []dom
 	return items
 }
 
-// applyVerification marks any open checklist item the store now confirms as
-// done, stamping VerifiedAt. It mutates checklist in place and returns the
-// items that flipped from not-done to done on this call — the ones that
-// deserve a fresh comment, never a re-announcement of old news.
 func applyVerification(checklist []domain.ChecklistItem, verified map[string]bool, now time.Time) []domain.ChecklistItem {
 	var newlyDone []domain.ChecklistItem
 	for i := range checklist {
@@ -387,9 +316,6 @@ func applyVerification(checklist []domain.ChecklistItem, verified map[string]boo
 	return newlyDone
 }
 
-// checklistTaskDescription renders the onboarding task body: the numbered
-// manual steps plus the standing note that the system, not the assignee,
-// closes each item out.
 func checklistTaskDescription(items []domain.ChecklistItem) string {
 	var b strings.Builder
 	for i, item := range items {

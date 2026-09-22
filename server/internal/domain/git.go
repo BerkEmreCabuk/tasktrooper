@@ -11,25 +11,20 @@ type GitStatus struct {
 	Warning     string `json:"warning,omitempty"`
 }
 
-// GitPresenceState is what is actually at a repository's root path.
-//
-// It exists because "is there a git repository here" and "is the code here at
-// all" are different questions, and answering both with one bool conflated
-// them: a root path that does not exist on this host was reported as "not a
-// git repository yet", which sends the user off to run `git init` on a folder
-// that is not there. That is not a hypothetical — the database can be restored
-// from a backup, or the workspace directory wiped and re-created, and the
-// recorded root_path stops resolving either way.
+// GitPresenceState is what is actually at a repository's root path. It exists
+// because "is there a git repository here" and "is the code here at all" are
+// different questions — a root path that does not exist on this host was
+// reported as "not a git repository yet", sending the user off to run `git
+// init` on a folder that is not there (the database can be restored from a
+// backup, or the workspace wiped, and root_path stops resolving either way).
 type GitPresenceState string
 
 const (
-	// GitPresenceRepository: the path holds a working copy. Note that this
-	// covers both an ordinary clone (.git is a directory) and a worktree or
-	// submodule checkout (.git is a FILE holding a `gitdir:` pointer) — git
-	// works in all of them, so all of them are repositories here.
+	// GitPresenceRepository: the path holds a working copy (ordinary clone,
+	// worktree or submodule checkout — .git may be a file holding a `gitdir:`).
 	GitPresenceRepository GitPresenceState = "repository"
-	// GitPresenceNoRepository: the folder is there and readable, but has no
-	// .git at all. This is the only state `git init` is the answer to.
+	// GitPresenceNoRepository: the folder is there but has no .git at all —
+	// the only state `git init` is the answer to.
 	GitPresenceNoRepository GitPresenceState = "no_repository"
 	// GitPresencePathMissing: nothing exists at the recorded path.
 	GitPresencePathMissing GitPresenceState = "path_missing"
@@ -42,10 +37,9 @@ const (
 // something true to the user rather than only enough to gate a git command.
 type GitPresence struct {
 	State GitPresenceState
-	// Reason is the operating system's own words for GitPresenceUnreadable
-	// ("permission denied", "input/output error") and is empty in every other
-	// state. The path deliberately does not appear in it: every surface that
-	// shows this warning already shows root_path beside it.
+	// Reason is the OS's own words for GitPresenceUnreadable; empty otherwise.
+	// The path deliberately does not appear in it: every surface that shows the
+	// warning already shows root_path beside it.
 	Reason string
 }
 
@@ -54,25 +48,16 @@ type GitPresence struct {
 func (p GitPresence) IsRepository() bool { return p.State == GitPresenceRepository }
 
 // CanRestoreWorkingCopy answers "may this repository's code be fetched onto
-// this machine right now", and when it may not, why not.
+// this machine right now", and when it may not, why not:
+//   - working copy present → nothing to restore, and cloning over it would
+//     destroy whatever is uncommitted;
+//   - folder present, not a repository → NOT ours to remove; say what is in the
+//     way, never clear it;
+//   - path unreadable → the answer is unknown, and acting on an unknown is how a
+//     permissions glitch turns into a re-clone;
+//   - nothing at the path → this is the case the button exists for.
 //
-// It reads the four-state GitPresence rather than re-deriving anything from the
-// filesystem, because the distinctions the restore offer needs are exactly the
-// ones GitPresence already draws:
-//
-//   - a working copy is present → there is nothing to restore, and cloning over
-//     it would destroy whatever is uncommitted in it;
-//   - something is at the path but is not a repository → NOT ours to remove.
-//     A user who put files there did so on purpose; the honest answer is to say
-//     what is in the way, never to clear it;
-//   - the path could not be read → the answer is unknown, and acting on an
-//     unknown is how a permissions glitch turns into a re-clone;
-//   - nothing is at the path → this is the case the button exists for, and the
-//     only remaining question is whether we know where the code lives.
-//
-// The refusal sentence lives here, next to the states it describes, for the
-// same reason GitPresence.Warning does: prose and condition change together.
-// English, like the rest of the repository surface.
+// The refusal sentence lives here so prose and condition change together.
 func CanRestoreWorkingCopy(presence GitPresence, remoteURL string) (bool, string) {
 	switch presence.State {
 	case GitPresenceRepository:
@@ -119,15 +104,12 @@ type RepositoryRestore struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 }
 
-// Warning is the sentence a user sees, "" when the path is a working copy.
-//
-// The copy lives here, next to the states it describes, for the same reason
+// Warning is the sentence a user sees, "" when the path is a working copy. The
+// copy lives here, next to the states it describes, for the same reason
 // QuotaBlock.UserMessage does: the sentence and the condition it explains have
 // to change together, and neither the adapter that stats the disk nor the HTTP
-// layer that serialises the answer is the right place to keep prose.
-//
-// English, like the rest of the repository surface — see the note on
-// Repository.GitWarning.
+// layer that serialises the answer is the right place to keep prose. English,
+// like the rest of the repository surface.
 func (p GitPresence) Warning() string {
 	switch p.State {
 	case GitPresenceRepository:

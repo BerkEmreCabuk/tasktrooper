@@ -195,8 +195,6 @@ func (s *BudgetSuite) TestCountToolTokensCountsARealDefinitionSet() {
 	s.Greater(CountToolTokens(tools), 0)
 }
 
-// A bigger definition must cost more tokens: the count has to track the
-// actual JSON size, not just the number of definitions.
 func (s *BudgetSuite) TestCountToolTokensGrowsWithDefinitionSize() {
 	small := []domain.ToolDefinition{{Type: "function", Function: domain.FunctionDefinition{Name: "a", Description: "x"}}}
 	big := []domain.ToolDefinition{{Type: "function", Function: domain.FunctionDefinition{Name: "a", Description: repeat("x", 4000)}}}

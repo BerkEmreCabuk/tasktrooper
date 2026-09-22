@@ -8,10 +8,10 @@ import (
 )
 
 // A schema change is the one class of change that cannot be judged from the
-// diff alone: it either applies to a live database or it does not. So the
-// board detects it from the changed file paths — never from the agent saying
-// so — and refuses to promote such a task to production until a stage deploy
-// actually ran the migration.
+// diff alone: it either applies to a live database or it does not. So the board
+// detects it from the changed file paths — never from the agent saying so — and
+// refuses to promote such a task to production until a stage deploy actually
+// ran the migration.
 
 // flywayVersioned matches Flyway/Liquibase style versioned scripts (V1__x.sql,
 // V2_1__x.sql, U3__x.sql, R__view.sql).
@@ -25,7 +25,7 @@ var migrationDirs = []string{
 }
 
 // DetectMigrationChange returns the changed files that are database schema
-// changes. Empty result means the task touches no schema.
+// changes; empty result means the task touches no schema.
 func DetectMigrationChange(paths []string) []string {
 	var hits []string
 	for _, p := range paths {
@@ -45,8 +45,8 @@ func isMigrationPath(p string) bool {
 	lower := strings.ToLower(p)
 	base := path.Base(lower)
 
-	// Vendored or generated trees are not the project's own schema. Compare
-	// whole path segments — "somevendor/" must not match, root-level
+	// Vendored or generated trees are not the project's own schema; compare
+	// whole path segments so "somevendor/" must not match but root-level
 	// "testdata/…" must.
 	for _, skip := range []string{"node_modules", "vendor", "testdata", "site-packages"} {
 		if strings.Contains("/"+lower+"/", "/"+skip+"/") {
@@ -99,9 +99,9 @@ const (
 	// TestStrategyStage (default) deploys to staging when a task reaches
 	// ready_for_qa, so QA tests a real environment.
 	TestStrategyStage = "stage"
-	// TestStrategyPerStep deploys to staging at each reviewed step
-	// (code_review and ready_for_qa), for repos where every stage of the work
-	// has to be exercised on a live environment.
+	// TestStrategyPerStep deploys to staging at each reviewed step (code_review
+	// and ready_for_qa), for repos where every stage of the work has to be
+	// exercised on a live environment.
 	TestStrategyPerStep = "per_step"
 )
 

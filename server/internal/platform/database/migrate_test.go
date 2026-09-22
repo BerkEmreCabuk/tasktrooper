@@ -1,8 +1,5 @@
-// This file is an internal test (package database, not database_test) because
-// the guarantees worth testing here — that the advisory lock is taken on the
-// pinned connection and released on every path, that 55P03 is retried, that the
-// per-migration timeouts are set before the body runs — all live on unexported
-// seams. embedded_test.go stays external and covers the real-database path.
+// An internal test (package database): the guarantees worth testing all live on
+// unexported seams; embedded_test.go covers the real-database path externally.
 package database
 
 import (
@@ -28,8 +25,7 @@ type MigrateSuite struct {
 }
 
 func (s *MigrateSuite) SetupTest() {
-	// Collapse the backoff ladder; the retry tests assert on attempt counts,
-	// not on wall-clock behaviour.
+	// Collapse the backoff ladder; retry tests assert attempt counts only.
 	s.restoreDelay = retryBaseDelay
 	retryBaseDelay = time.Millisecond
 }
@@ -38,23 +34,16 @@ func (s *MigrateSuite) TearDownTest() {
 	retryBaseDelay = s.restoreDelay
 }
 
-// ---------------------------------------------------------------------------
-// fake connection
-// ---------------------------------------------------------------------------
-
-// fakeConn stands in for *pgxpool.Conn. It records every statement the runner
-// issues, in order, and lets a test inject a failure for a chosen statement —
-// which is the only way to exercise lock contention (55P03) deterministically.
+// fakeConn records every statement in order and can inject a failure for a
+// chosen one — the only deterministic way to exercise lock contention (55P03).
 type fakeConn struct {
-	applied []string // versions loadApplied should report
+	applied []string
 
-	// failExec returns a non-nil error to fail the nth (1-based) Exec whose SQL
-	// contains match. It sees every statement, on the connection and in
-	// transactions alike.
+	// failExec fails the nth (1-based) Exec whose SQL contains match.
 	failExec func(sql string, nth int) error
 
-	stmts []string       // every statement issued, in order
-	calls map[string]int // per-SQL call counter feeding failExec
+	stmts []string
+	calls map[string]int
 }
 
 func newFakeConn(applied ...string) *fakeConn {
@@ -86,7 +75,6 @@ func (f *fakeConn) Begin(_ context.Context) (pgx.Tx, error) {
 	return &fakeTx{conn: f}, nil
 }
 
-// count returns how many recorded statements contain substr.
 func (f *fakeConn) count(substr string) int {
 	n := 0
 	for _, s := range f.stmts {
@@ -97,8 +85,6 @@ func (f *fakeConn) count(substr string) int {
 	return n
 }
 
-// indexOf returns the position of the first recorded statement containing
-// substr, or -1.
 func (f *fakeConn) indexOf(substr string) int {
 	for i, s := range f.stmts {
 		if strings.Contains(s, substr) {
@@ -172,8 +158,6 @@ func (r *fakeRows) Conn() *pgx.Conn                              { return nil }
 func lockErr() error  { return &pgconn.PgError{Code: pgLockNotAvailable, Message: "lock timeout"} }
 func otherErr() error { return &pgconn.PgError{Code: "42P01", Message: "undefined table"} }
 
-// allVersions returns every embedded migration version, so a run has nothing
-// pending and the test can focus on the lock protocol.
 func (s *MigrateSuite) allVersions() []string {
 	names, err := ListMigrationFiles(migrations.Up)
 	s.Require().NoError(err)
@@ -183,10 +167,6 @@ func (s *MigrateSuite) allVersions() []string {
 	}
 	return out
 }
-
-// ---------------------------------------------------------------------------
-// advisory lock
-// ---------------------------------------------------------------------------
 
 func (s *MigrateSuite) TestAdvisoryLockTakenAndReleased() {
 	conn := newFakeConn(s.allVersions()...)
@@ -203,7 +183,6 @@ func (s *MigrateSuite) TestAdvisoryLockTakenAndReleased() {
 
 func (s *MigrateSuite) TestAdvisoryLockReleasedOnError() {
 	conn := newFakeConn()
-	// Fail the very first thing done under the lock.
 	conn.failExec = func(sql string, _ int) error {
 		if strings.Contains(sql, "CREATE TABLE IF NOT EXISTS schema_migrations") {
 			return otherErr()
@@ -238,7 +217,6 @@ func (s *MigrateSuite) TestAdvisoryLockNotReleasedWhenNeverAcquired() {
 func (s *MigrateSuite) TestAdvisoryLockWaitsOutPeerPod() {
 	conn := newFakeConn(s.allVersions()...)
 	conn.failExec = func(sql string, nth int) error {
-		// Two lock_timeouts, as if another pod were mid-run, then success.
 		if strings.Contains(sql, "pg_advisory_lock") && nth <= 2 {
 			return lockErr()
 		}
@@ -279,10 +257,6 @@ func (s *MigrateSuite) TestUnlockFailureDiscardsConnection() {
 	s.True(discarded, "a connection whose lock state is unknown must not go back into the pool")
 }
 
-// ---------------------------------------------------------------------------
-// timeouts and 55P03 retry
-// ---------------------------------------------------------------------------
-
 func (s *MigrateSuite) TestTimeoutsSetLocallyBeforeMigrationBody() {
 	conn := newFakeConn(s.pendingOnly("001_sessions")...)
 
@@ -296,8 +270,7 @@ func (s *MigrateSuite) TestTimeoutsSetLocallyBeforeMigrationBody() {
 	s.Require().NotEqual(-1, bodyIdx)
 	s.Less(lockIdx, bodyIdx, "lock_timeout is useless if it is set after the body took its locks")
 	s.Less(stmtIdx, bodyIdx)
-	// is_local=true is SET LOCAL: the pinned connection must not carry a
-	// timeout into the next migration or back into the pool.
+	// SET LOCAL, so no timeout leaks into the next migration or the pool.
 	s.Contains(conn.stmts[lockIdx], ", true)")
 	s.Contains(conn.stmts[stmtIdx], ", true)")
 }
@@ -370,12 +343,7 @@ func (s *MigrateSuite) TestIsLockNotAvailableUnwraps() {
 	s.False(isLockNotAvailable(errors.New("plain")))
 }
 
-// ---------------------------------------------------------------------------
-// ordering / idempotency
-// ---------------------------------------------------------------------------
-
-// pendingOnly returns every version except the named ones, i.e. the "already
-// applied" set that leaves exactly those pending.
+// pendingOnly returns the "already applied" set, leaving exactly these pending.
 func (s *MigrateSuite) pendingOnly(pending ...string) []string {
 	skip := map[string]bool{}
 	for _, p := range pending {
@@ -397,7 +365,6 @@ func (s *MigrateSuite) TestAppliesOnlyPendingInAscendingOrder() {
 	s.Require().NoError(runMigrationsOn(context.Background(), conn, nil))
 
 	s.Equal(2, conn.count("INSERT INTO schema_migrations"), "applied versions are not re-applied")
-	// The first pending migration must be attempted before the last one.
 	s.Less(conn.indexOf("CREATE TABLE IF NOT EXISTS sessions"),
 		conn.indexOf("idx_sessions_agent_updated"),
 		"migrations must run in ascending version order")
@@ -417,7 +384,6 @@ func (s *MigrateSuite) TestEmbeddedMigrationsAreSorted() {
 	s.Require().NoError(err)
 	s.NotEmpty(names)
 	s.Equal("001_sessions.up.sql", names[0])
-	// Assert ascending order generically so adding a migration never breaks this.
 	s.True(sort.StringsAreSorted(names), "embedded migrations must be lexically sorted")
 }
 
@@ -425,15 +391,10 @@ func (s *MigrateSuite) TestMigrationVersion() {
 	s.Equal("001_sessions", MigrationVersion("001_sessions.up.sql"))
 }
 
-// ---------------------------------------------------------------------------
-// the corrective index migration
-// ---------------------------------------------------------------------------
-
 func (s *MigrateSuite) TestCorrectiveIndexMigrationIsTransactionSafe() {
 	body, err := fs.ReadFile(migrations.Up, "079_corrective_indexes.up.sql")
 	s.Require().NoError(err)
 
-	// Comments discuss CONCURRENTLY at length; only executable SQL matters here.
 	var executable []string
 	for _, line := range strings.Split(string(body), "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -447,8 +408,8 @@ func (s *MigrateSuite) TestCorrectiveIndexMigrationIsTransactionSafe() {
 	}
 	sql := strings.Join(executable, "\n")
 
-	// The runner wraps every migration in a transaction, which forbids
-	// CONCURRENTLY. If someone adds it later this test says why it cannot work.
+	// The runner wraps every migration in a transaction; CONCURRENTLY cannot
+	// run inside one.
 	s.NotContains(sql, "CONCURRENTLY",
 		"CREATE INDEX CONCURRENTLY cannot run inside the runner's transaction")
 
@@ -461,10 +422,6 @@ func (s *MigrateSuite) TestCorrectiveIndexMigrationIsTransactionSafe() {
 	}
 	s.Equal(9, strings.Count(sql, "CREATE INDEX IF NOT EXISTS"), "all nine audit findings covered")
 }
-
-// ---------------------------------------------------------------------------
-// DSN parsing
-// ---------------------------------------------------------------------------
 
 func (s *MigrateSuite) TestDatabaseName() {
 	cases := []struct {

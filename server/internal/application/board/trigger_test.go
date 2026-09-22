@@ -9,11 +9,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// The trigger message used to recite the whole todo -> in_progress ->
-// code_review lifecycle regardless of where the task actually was. A task
-// already sitting in in_progress was still told to "claim it, move it to
-// in_progress", the planner read that as the first deliverable, and the plan
-// opened with a step to move the task into the column it was already in.
 func TestTriggerMessageDoesNotAskForAMoveIntoTheCurrentColumn(t *testing.T) {
 	job := RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnInProgress}}
 
@@ -37,8 +32,6 @@ func TestTriggerMessageKeepsTheClaimAndMoveForATodoTask(t *testing.T) {
 	}
 }
 
-// Whatever the column, the agent must be told that the claim/move is not a
-// planning step — that is what stopped a whole subtask being spent on it.
 func TestTriggerMessageRulesOutBookkeepingAsAStep(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnTodo, domain.TaskColumnInProgress,
@@ -51,9 +44,6 @@ func TestTriggerMessageRulesOutBookkeepingAsAStep(t *testing.T) {
 	}
 }
 
-// Nobody writes "and it should compile" on a card, so a run could satisfy every
-// listed criterion and still leave the branch red or a new function untested.
-// The standing three are stated even when the card lists nothing.
 func TestTriggerMessageStatesStandingCriteriaForImplementers(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
@@ -72,8 +62,6 @@ func TestTriggerMessageStatesStandingCriteriaForImplementers(t *testing.T) {
 	}
 }
 
-// An analysis produces documents: it has no build to keep green, and telling it
-// to write unit tests is telling it to do the implementer's job.
 func TestTriggerMessageOmitsStandingCriteriaForAnaliz(t *testing.T) {
 	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{
 		Title: "t", Column: domain.TaskColumnInProgress, TaskType: "analiz",
@@ -83,10 +71,6 @@ func TestTriggerMessageOmitsStandingCriteriaForAnaliz(t *testing.T) {
 	}
 }
 
-// A run finished the work, the hand-off to code_review was refused with "4
-// acceptance criteria incomplete", and the agent had never seen those criteria:
-// the task snapshot carries title, description and column only. Listing the open
-// ones with their ids is what makes set_criterion_completed callable.
 func TestTriggerMessageListsOpenCriteriaForImplementers(t *testing.T) {
 	open := []domain.AcceptanceCriterion{
 		{ID: uuid.New(), Text: "Android button links to the Play Store listing"},
@@ -107,8 +91,6 @@ func TestTriggerMessageListsOpenCriteriaForImplementers(t *testing.T) {
 	}
 }
 
-// QA and PM record their own verdict with review_criterion; the tick is the
-// developer's claim and is not theirs to make.
 func TestTriggerMessageDoesNotTellReviewersToTickCriteria(t *testing.T) {
 	open := []domain.AcceptanceCriterion{{ID: uuid.New(), Text: "criterion"}}
 	for _, col := range []domain.TaskColumn{
@@ -132,12 +114,6 @@ func TestTriggerMessageOmitsTheCriteriaBlockWhenNoneAreOpen(t *testing.T) {
 	}
 }
 
-// The architect was dispatched on an ANALIZ task and implemented it: it edited
-// three files and deleted a fourth, because the snapshot carried no task_type
-// and the column-only instruction told every run in `todo`/`in_progress` to
-// implement the work and promised a hand-off to code_review that an analiz task
-// never gets. The type has to be in the snapshot, and it has to change the
-// instruction.
 func TestTriggerMessageCarriesTheTaskType(t *testing.T) {
 	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{
 		Title: "t", Column: domain.TaskColumnTodo, TaskType: "analiz",
@@ -171,8 +147,6 @@ func TestAnalizInstructionDoesNotAskForCodeOrACodeReviewHandoff(t *testing.T) {
 	}
 }
 
-// analiz_review and done are human moves; the run dispatched after them has a
-// different job in each, and neither is implementation.
 func TestAnalizInstructionSplitsTheHumanGateFromTheApproval(t *testing.T) {
 	waiting := columnInstruction(analizWF, domain.BoardTask{Column: domain.TaskColumnAnalizReview, TaskType: "analiz"})
 	if !strings.Contains(waiting, "Take no action") {
@@ -184,8 +158,6 @@ func TestAnalizInstructionSplitsTheHumanGateFromTheApproval(t *testing.T) {
 	}
 }
 
-// The type branch must not leak into implementation work: a task/bug keeps the
-// implementer instruction exactly as it was.
 func TestImplementationTasksKeepTheColumnInstruction(t *testing.T) {
 	for _, typ := range []domain.TaskType{"task", "bug", ""} {
 		instruction := columnInstruction(taskWF, domain.BoardTask{Column: domain.TaskColumnInProgress, TaskType: typ})
@@ -195,8 +167,6 @@ func TestImplementationTasksKeepTheColumnInstruction(t *testing.T) {
 	}
 }
 
-// The implementer instruction must name the gate, not just the hand-off: a run
-// that reads "the system moves it for you" and stops has left the task parked.
 func TestImplementerInstructionNamesTheCriteriaGate(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,

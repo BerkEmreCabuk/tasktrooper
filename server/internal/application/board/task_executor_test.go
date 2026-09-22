@@ -17,10 +17,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// agentCatalog hands the run one agent and no skills or rules. Only the three
-// calls execute() makes before it picks an executor are meaningful; the rest of
-// port.CatalogStore is embedded so this stays a fake of the seam, not of the
-// interface.
 type agentCatalog struct {
 	port.CatalogStore
 	agent domain.Agent
@@ -36,9 +32,6 @@ func (c *agentCatalog) ListEnabledRulesByAgent(context.Context, uuid.UUID) ([]do
 	return nil, nil
 }
 
-// oneRepoResolver points every run at one directory. No git client is wired in
-// the tests below, so this IS the run's working directory — which is what the
-// executor is asserted to be started in.
 type oneRepoResolver struct{ root string }
 
 func (r oneRepoResolver) ResolveRootPath(context.Context, uuid.UUID) (string, error) {
@@ -52,8 +45,6 @@ func (r oneRepoResolver) ResolveRepository(context.Context, uuid.UUID) (domain.R
 }
 func (r oneRepoResolver) ProfileForRun(context.Context, uuid.UUID, string) string { return "" }
 
-// recordingRunStore keeps the last row written, which is where a parked or
-// failed run leaves its verdict.
 type recordingRunStore struct {
 	countingRunStore
 	mu   sync.Mutex
@@ -78,8 +69,6 @@ func (s *recordingRunStore) row() domain.TaskAgentRun {
 	return s.last
 }
 
-// fakeExecutor stands in for the Claude Code CLI: it records what it was asked
-// to run and answers with whatever the test put there.
 type fakeExecutor struct {
 	supports domain.LLMProviderType
 	resp     domain.AgentResponse
@@ -88,9 +77,7 @@ type fakeExecutor struct {
 	mu      sync.Mutex
 	calls   int
 	lastReq domain.TaskExecution
-	// reqs keeps every request in order, for a test that needs to compare a
-	// follow-up call against the main one (lastReq only keeps the latest).
-	reqs []domain.TaskExecution
+	reqs    []domain.TaskExecution
 }
 
 func (f *fakeExecutor) Supports(provider domain.LLMProviderType) bool {
@@ -126,8 +113,6 @@ func (f *fakeExecutor) requests() []domain.TaskExecution {
 	return out
 }
 
-// blockRecorder captures the park. previous is what the store hands back as the
-// column the task was parked out of, which the runner turns into from_column.
 type blockRecorder struct {
 	mu       sync.Mutex
 	resource string
@@ -179,8 +164,6 @@ func claudeCodeAgent() domain.Agent {
 	return domain.Agent{ID: uuid.New(), Name: "backend-developer", ProviderType: domain.LLMProviderClaudeCode, Model: "opus"}
 }
 
-// The whole point of the seam: a claude_code agent's task goes to the executor,
-// in the run's own workspace, with the history the runner assembled.
 func TestClaudeCodeAgentIsRunByTheExecutor(t *testing.T) {
 	runs := &recordingRunStore{}
 	ex := &fakeExecutor{
@@ -206,10 +189,6 @@ func TestClaudeCodeAgentIsRunByTheExecutor(t *testing.T) {
 	assert.Equal(t, "Done: added the seam.", row.Summary)
 }
 
-// criteriaSweepRunner wires a Runner whose initial execution AND its
-// criteria-sweep rounds both go through the same fake executor — the sweep
-// dials r.agentLoop.RunTask, a different seam from the initial r.taskExecutor
-// call, and both have to be wired or the sweep panics on a nil agentLoop.
 func criteriaSweepRunner(t *testing.T, runs *recordingRunStore, ex port.TaskExecutor, updater TaskUpdater) (*Runner, RunJob) {
 	t.Helper()
 	agentRec := claudeCodeAgent()
@@ -231,10 +210,6 @@ func criteriaSweepRunner(t *testing.T, runs *recordingRunStore, ex port.TaskExec
 	return r, job
 }
 
-// A run that exhausted the criteria sweep with a criterion still open must not
-// be recorded as a clean finish: T-6 sat quietly in in_progress because the old
-// behaviour marked it Completed, and nothing ever revisited it again. Failed is
-// what puts the task back on the reconciler's retry_failed_run path.
 func TestRunExhaustingTheCriteriaSweepIsRecordedAsFailed(t *testing.T) {
 	runs := &recordingRunStore{}
 	ex := &fakeExecutor{
@@ -254,8 +229,6 @@ func TestRunExhaustingTheCriteriaSweepIsRecordedAsFailed(t *testing.T) {
 	assert.Contains(t, row.Summary, "still open")
 }
 
-// The counterpart: a run that settles every criterion, by ticking or
-// cancelling, keeps the exact behaviour it had before — Completed.
 func TestRunSettlingEveryCriterionStaysCompleted(t *testing.T) {
 	runs := &recordingRunStore{}
 	ex := &fakeExecutor{
@@ -273,9 +246,6 @@ func TestRunSettlingEveryCriterionStaysCompleted(t *testing.T) {
 	assert.Equal(t, domain.TaskAgentRunStatusCompleted, row.Status, "no regression: a settled sweep still completes")
 }
 
-// Without the binary there is no executor, and the run must fail with a
-// sentence a human can act on — not fall through to an agent loop that would
-// try to open an HTTP connection to a provider that has no endpoint.
 func TestClaudeCodeAgentWithoutAnExecutorFailsClearly(t *testing.T) {
 	runs := &recordingRunStore{}
 	r, job := executorRunner(t, claudeCodeAgent(), runs, nil)
@@ -292,8 +262,6 @@ func TestClaudeCodeAgentWithoutAnExecutorFailsClearly(t *testing.T) {
 	assert.Contains(t, row.Summary, "CLAUDE_CODE_BIN", "and it has to name the way out")
 }
 
-// A registered executor that does not support this provider is the same
-// situation as none at all: the run must not be handed to it.
 func TestClaudeCodeAgentWithAnUnsupportedExecutorFailsClearly(t *testing.T) {
 	runs := &recordingRunStore{}
 	ex := &fakeExecutor{supports: "some-other-cli"}
@@ -306,16 +274,11 @@ func TestClaudeCodeAgentWithAnUnsupportedExecutorFailsClearly(t *testing.T) {
 	assert.Zero(t, ex.callCount(), "an executor that says it does not support the provider must not be called")
 }
 
-// Every other provider keeps the path it had. The loop is a concrete type that
-// cannot be faked here, so the assertion is the one that matters for this
-// change: the executor is not consulted, and the run does not take the
-// host-executor branch.
 func TestOtherProvidersNeverReachTheExecutor(t *testing.T) {
 	for _, provider := range []domain.LLMProviderType{
 		domain.LLMProviderAnthropic,
 		domain.LLMProviderOpenAI,
 		domain.LLMProviderLocal,
-		// A named endpoint's uuid is also a legal provider value on an agent.
 		domain.LLMProviderType("6f1a1f9e-0f1e-4a4a-9d9a-000000000001"),
 	} {
 		t.Run(string(provider), func(t *testing.T) {
@@ -325,11 +288,6 @@ func TestOtherProvidersNeverReachTheExecutor(t *testing.T) {
 			ex := &fakeExecutor{supports: domain.LLMProviderClaudeCode}
 			r, job := executorRunner(t, agent, runs, ex)
 
-			// The loop is nil in this runner, so taking the loop path panics the
-			// worker goroutine — which is exactly what the recovering worker is
-			// for in production and is not what this test measures. Running
-			// execute directly, the assertion is on the executor never being
-			// consulted; the panic is recovered here.
 			func() {
 				defer func() { _ = recover() }()
 				_ = r.execute(context.Background(), context.Background(), func() {}, job)
@@ -340,9 +298,6 @@ func TestOtherProvidersNeverReachTheExecutor(t *testing.T) {
 	}
 }
 
-// A usage limit is a park, not a failure. The run row keeps everything the
-// resume needs (the reset time and the CLI session), the card moves to blocked
-// on the quota, and the task keeps all three of its consecutive-failure lives.
 func TestQuotaBlockParksTheTaskInsteadOfFailingIt(t *testing.T) {
 	resumeAt := time.Now().Add(2 * time.Hour).Round(time.Second)
 	runs := &recordingRunStore{}
@@ -373,10 +328,6 @@ func TestQuotaBlockParksTheTaskInsteadOfFailingIt(t *testing.T) {
 	assert.True(t, domain.ValidResource(resource), "a resource no sweeper looks for would park the task forever")
 }
 
-// The park is a MOVE, and the board only knows about moves it was told about.
-// Without this event the card appeared in `blocked` with its history ending at
-// "started work" hours earlier, and the span ledger counted the whole wait as
-// time spent in the working column.
 func TestQuotaParkIsRecordedOnTheBoard(t *testing.T) {
 	events, spans := &parkEventStore{}, &parkSpanStore{}
 	runs := &recordingRunStore{}
@@ -385,8 +336,6 @@ func TestQuotaParkIsRecordedOnTheBoard(t *testing.T) {
 		err:      &domain.QuotaBlock{ResumeAt: time.Now().Add(time.Hour), CLISessionID: "sess-park"},
 	}
 	r, job := executorRunner(t, claudeCodeAgent(), runs, ex)
-	// The store reports where the card was parked OUT of; the runner must use
-	// that and not the column it happens to hold in memory.
 	r.SetTaskBlocker(&blockRecorder{previous: domain.TaskColumnNeedRevision})
 	r.SetParkJournal(NewParkJournal(events, spans))
 
@@ -405,8 +354,6 @@ func TestQuotaParkIsRecordedOnTheBoard(t *testing.T) {
 	assert.Equal(t, string(domain.TaskColumnBlocked), moves[0].column)
 }
 
-// The device/deploy/work-order park had the same hole and closes the same way,
-// with the resource-block reason rather than the quota's.
 func TestResourceParkIsRecordedOnTheBoard(t *testing.T) {
 	events, spans := &parkEventStore{}, &parkSpanStore{}
 	runs := &recordingRunStore{}
@@ -434,8 +381,6 @@ func TestResourceParkIsRecordedOnTheBoard(t *testing.T) {
 	require.Len(t, spans.recorded(), 1)
 }
 
-// A failed park is not a park, so it must leave no history claiming otherwise —
-// and it must still not fail the run (the row keeps the resume state).
 func TestAFailedParkRecordsNoMove(t *testing.T) {
 	events, spans := &parkEventStore{}, &parkSpanStore{}
 	runs := &recordingRunStore{}
@@ -453,9 +398,6 @@ func TestAFailedParkRecordsNoMove(t *testing.T) {
 	assert.Equal(t, "sess-x", runs.row().CLISessionID, "the durable half still lands")
 }
 
-// The resume is a NEW run row, so the CLI session has to be found on the task's
-// history. The run immediately before this one wins; the current run (which has
-// not written its own yet) is skipped.
 func TestResumeSessionComesFromTheTasksPreviousRuns(t *testing.T) {
 	agent := claudeCodeAgent()
 	currentID := uuid.New()
@@ -490,9 +432,6 @@ func TestLatestCLISessionOnlyContinuesAParkedRun(t *testing.T) {
 		{ID: uuid.New(), AgentID: agent, CLISessionID: "sess-parked", QuotaResumeAt: &parked},
 	}, current, agent))
 
-	// The decisive case: the previous run FINISHED and the card came back (a
-	// revision). Continuing that session would tell it to carry on with work it
-	// already delivered instead of acting on the reviewer's comments.
 	assert.Equal(t, "", latestCLISession([]domain.TaskAgentRun{
 		{ID: current, AgentID: agent},
 		{ID: uuid.New(), AgentID: agent, Status: domain.TaskAgentRunStatusCompleted},
@@ -500,9 +439,6 @@ func TestLatestCLISessionOnlyContinuesAParkedRun(t *testing.T) {
 	}, current, agent), "only the run immediately before this one may be continued")
 }
 
-// A column can dispatch one task to several agents at once. Handing them all the
-// same CLI session id would start two `claude --resume <same id>` processes in
-// one workspace, each editing files the other cannot see.
 func TestLatestCLISessionIsNotSharedBetweenAgents(t *testing.T) {
 	current := uuid.New()
 	mine, theirs := uuid.New(), uuid.New()
@@ -520,10 +456,6 @@ func TestLatestCLISessionIsNotSharedBetweenAgents(t *testing.T) {
 		"another agent's park is not this agent's session to resume, even when an older one of its own exists")
 }
 
-// Parking costs the task nothing, so a park that keeps repeating has nothing to
-// stop it: the sweeper resumes, the same thing parks it again, forever. Past the
-// cap the run fails like any other, which counts against the task and puts a
-// human in front of it.
 func TestRepeatedQuotaParksEventuallyFailTheRun(t *testing.T) {
 	agent := claudeCodeAgent()
 	currentID := uuid.New()
@@ -555,8 +487,6 @@ func TestRepeatedQuotaParksEventuallyFailTheRun(t *testing.T) {
 	assert.Empty(t, resource, "the card must not be parked again once the cap has tripped")
 }
 
-// One park short of the cap still parks: the brake must not fire on a task that
-// is genuinely waiting out a long outage.
 func TestQuotaParksBelowTheCapStillPark(t *testing.T) {
 	agent := claudeCodeAgent()
 	currentID := uuid.New()
@@ -584,8 +514,6 @@ func TestQuotaParksBelowTheCapStillPark(t *testing.T) {
 	assert.NotEqual(t, domain.TaskAgentRunStatusFailed, runs.row().Status)
 }
 
-// A run that COMPLETED between two parks breaks the streak: the task recovered,
-// so its earlier parks say nothing about the one happening now.
 func TestQuotaParkStreakStopsAtTheFirstNonPark(t *testing.T) {
 	current := uuid.New()
 	parked := time.Now().Add(-time.Hour)
@@ -600,9 +528,6 @@ func TestQuotaParkStreakStopsAtTheFirstNonPark(t *testing.T) {
 	}, current), "only the unbroken run of parks counts")
 }
 
-// A failure to park the card still has to leave the durable half behind: the
-// row carries the reset time, so the state is not lost even when the board
-// write fails.
 func TestQuotaParkKeepsTheRunRowEvenIfTheCardCannotBeParked(t *testing.T) {
 	runs := &recordingRunStore{}
 	ex := &fakeExecutor{

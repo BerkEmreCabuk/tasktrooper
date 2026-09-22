@@ -1,20 +1,6 @@
 package evolution
 
-// reflectionOutputSchema is the reflection stage's structured-output contract
-// — see reflectionSystemPrompt's JSON template and parseReflectionOutput /
-// domain.ReflectionOutput. Passed via domain.JSONSchemaResponseFormat, it lets
-// a provider that supports constrained decoding guarantee the shape instead
-// of relying on the model reading the prose rule, which is what the retry in
-// runLLM (one extra turn telling the model its JSON did not parse) exists to
-// recover from on providers that don't.
-//
-// Every object requires all of its properties and sets
-// "additionalProperties": false — not because parseReflectionOutput checks
-// for them (it does a single json.Unmarshal into domain.ReflectionOutput with
-// no presence checks at all), but because OpenAI's strict json_schema mode
-// rejects a schema with an optional property or unlisted keys. A provider
-// always filling in "skills": [] when nothing changed costs nothing: it is
-// exactly what an agent with self-evolution disabled already returns today.
+// The strict shape exists for OpenAI's strict json_schema mode, which rejects a schema with an optional property or unlisted keys — parseReflectionOutput itself has no presence checks. Every object is all-required with additionalProperties:false; a provider always filling in "skills": [] costs nothing.
 func reflectionOutputSchema() map[string]interface{} {
 	skillChange := map[string]interface{}{
 		"type":                 "object",

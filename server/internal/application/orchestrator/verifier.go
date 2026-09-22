@@ -78,14 +78,7 @@ func (v *Verifier) Evaluate(ctx context.Context, intake domain.GoalIntake, userM
 	return domain.VerificationResult{}, pipelineStepError("verification", maxPlannerRetries+1, lastErr)
 }
 
-// buildVerifierSystemPrompt states what "achieved" means in a system that ships
-// through a board.
-//
-// Judged as plain outcome verification, a correct delegation always fails: the
-// run's only visible product is a backlog task, so the verifier scored "the
-// Android button is not on the site yet" as four material gaps, and the repair
-// loop it triggered opened a second board task for work the first one already
-// covered. The deliverable of a chat run is the record, not the shipped feature.
+// A chat run's only visible product is a record, so "achieved" means the record exists, not the feature shipping.
 func buildVerifierSystemPrompt() string {
 	return `You verify whether orchestration task results satisfy the stated goal.
 

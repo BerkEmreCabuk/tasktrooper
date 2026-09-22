@@ -103,7 +103,7 @@ func TestSuggest_PreprodDeployExcludedFromProd(t *testing.T) {
 	if preprod.Auto != "deploy-preprod.yml" {
 		t.Errorf("preprod auto = %q, want deploy-preprod.yml", preprod.Auto)
 	}
-	// "prod" ⊂ "preprod", so the preprod workflow must NOT bleed into the prod slot.
+
 	prod := find(got, "", domain.PipelineCategoryProdDeploy)
 	if prod.Auto != "deploy-production.yml" {
 		t.Errorf("prod auto = %q, want deploy-production.yml (preprod excluded)", prod.Auto)
@@ -127,7 +127,7 @@ func TestSuggest_MonorepoPerSubKind(t *testing.T) {
 		{Path: "apps/backend", Kind: domain.RepoKindBackend},
 		{Path: "apps/frontend", Kind: domain.RepoKindFrontend},
 	}, jobs)
-	// backend test should match backend-test (keyword "test")
+
 	bt := find(got, domain.RepoKindBackend, domain.PipelineCategoryTest)
 	ft := find(got, domain.RepoKindFrontend, domain.PipelineCategoryTest)
 	if bt.SubRepoKind != domain.RepoKindBackend {
@@ -138,9 +138,6 @@ func TestSuggest_MonorepoPerSubKind(t *testing.T) {
 	}
 }
 
-// The settings UI computes suggestions over every sub-repo kind (not just the
-// saved ones) so a freshly ticked sub-project shows its candidate jobs before
-// the selection is persisted. Guards the GetPipelineConfig call site.
 func TestSuggest_MonorepoAllKindsForUnsavedSelection(t *testing.T) {
 	jobs := []JobRef{
 		{Key: "worker-test", Name: "worker-test", WorkflowFile: "worker.yml"},
@@ -159,17 +156,13 @@ func TestSuggest_MonorepoAllKindsForUnsavedSelection(t *testing.T) {
 	}
 }
 
-// The split CI layout this codebase actually ships: four jobs in ci.yml plus an
-// auto-pr.yml that reuses them. Every category must land on exactly one target
-// with no manual pick left over.
 func TestSuggest_SplitPipelineWithAutoPR(t *testing.T) {
 	jobs := []JobRef{
 		{Key: "validate", Name: "validate", WorkflowFile: "ci.yml"},
 		{Key: "build", Name: "build", WorkflowFile: "ci.yml"},
 		{Key: "test", Name: "test", WorkflowFile: "ci.yml"},
 		{Key: "mutation-test", Name: "mutation-test", WorkflowFile: "ci.yml"},
-		// Composite names: what GitHub reports for jobs reached through
-		// `uses: ./.github/workflows/ci.yml`. Same jobs, second listing.
+
 		{Key: "ci", Name: "ci / validate", WorkflowFile: "auto-pr.yml"},
 		{Key: "ci", Name: "ci / build", WorkflowFile: "auto-pr.yml"},
 		{Key: "ci", Name: "ci / test", WorkflowFile: "auto-pr.yml"},
@@ -197,8 +190,6 @@ func TestSuggest_SplitPipelineWithAutoPR(t *testing.T) {
 	}
 }
 
-// "mutation test" contains "test": without the exclude, the unit-test slot
-// matches the mutation job too and both categories go ambiguous.
 func TestSuggest_MutationJobDoesNotClaimTheTestSlot(t *testing.T) {
 	jobs := []JobRef{
 		{Key: "test", Name: "test", WorkflowFile: "ci.yml"},

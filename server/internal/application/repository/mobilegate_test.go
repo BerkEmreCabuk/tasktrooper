@@ -13,10 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// fakeDeployTargetStore is a minimal port.DeployTargetStore for
-// mobileStoreGate tests: only Get (keyed by env) is exercised. getErr scripts
-// a real infra failure distinct from "no row for this env", mirroring
-// fakeMobileStoreAppStore's getErr below.
 type fakeDeployTargetStore struct {
 	targets map[string]domain.DeployTarget
 	getErr  error
@@ -45,8 +41,6 @@ func (f *fakeDeployTargetStore) Delete(ctx context.Context, repositoryID uuid.UU
 	return nil
 }
 
-// fakeMobileStoreAppStore is a minimal port.MobileStoreAppStore for
-// mobileStoreGate tests: only Get (keyed by platform) is exercised.
 type fakeMobileStoreAppStore struct {
 	apps   map[string]domain.MobileStoreApp
 	getErr error
@@ -154,8 +148,6 @@ func TestMobileStoreGate(t *testing.T) {
 	}
 }
 
-// A store target with no app row at all must never panic — it is treated as
-// the env's "not ready" sentinel, same as an app that has never onboarded.
 func TestMobileStoreGateNoAppRowTreatedAsNotReady(t *testing.T) {
 	repoID := uuid.New()
 	ctx := context.Background()
@@ -184,9 +176,6 @@ func TestMobileStoreGateNoAppRowTreatedAsNotReady(t *testing.T) {
 	}
 }
 
-// SetMobileStoreApps was never called (store is nil): a store target still
-// cannot be verified, so it must gate the same as a missing row — never
-// nil-deref.
 func TestMobileStoreGateNoStoreWiredTreatsAsNotReady(t *testing.T) {
 	repoID := uuid.New()
 	ctx := context.Background()
@@ -201,8 +190,6 @@ func TestMobileStoreGateNoStoreWiredTreatsAsNotReady(t *testing.T) {
 	}
 }
 
-// A store lookup error that is not "not found" (e.g. the DB is down) is a
-// real failure and must propagate, not be swallowed into a sentinel.
 func TestMobileStoreGatePropagatesUnexpectedStoreError(t *testing.T) {
 	repoID := uuid.New()
 	ctx := context.Background()
@@ -219,10 +206,6 @@ func TestMobileStoreGatePropagatesUnexpectedStoreError(t *testing.T) {
 	}
 }
 
-// A deploy-target lookup error that is not "not found" (e.g. the DB is down)
-// is a real infra failure and must propagate, not be swallowed into "no
-// target configured, nothing to gate" — a transient DB failure must never
-// silently disable the mobile-store gate and let an unverified app ship.
 func TestMobileStoreGatePropagatesUnexpectedDeployTargetError(t *testing.T) {
 	repoID := uuid.New()
 	ctx := context.Background()
@@ -237,8 +220,6 @@ func TestMobileStoreGatePropagatesUnexpectedDeployTargetError(t *testing.T) {
 	}
 }
 
-// Non-store deploy paths (no target row at all for the env, e.g. a repo that
-// never called SetDeployTargets) must never be blocked by this gate.
 func TestMobileStoreGateNoDeployTargetsWiredNeverBlocks(t *testing.T) {
 	repoID := uuid.New()
 	ctx := context.Background()

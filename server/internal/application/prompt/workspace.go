@@ -8,14 +8,9 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// workspaceRepoDescriptionMax keeps a chatty repository description from
-// crowding out the rest of the intake/planner prompt.
 const workspaceRepoDescriptionMax = 120
 
-// workspaceFactsRule heads every snapshot. The toolless pipeline stages (intake,
-// planner) see only the raw message, so they used to ask the stakeholder for
-// state the platform already stores — "does the team have access to the
-// repository?". The snapshot answers that; this rule makes re-asking forbidden.
+// The toolless intake/planner stages used to ask for state the platform already stores; the snapshot answers it and this rule makes re-asking forbidden.
 const workspaceFactsRule = `## Workspace state (system facts — never ask the stakeholder about these)
 The snapshot below is ground truth. It already answers the following, so asking them is forbidden:
 - Whether the team has access to a repository, codebase, or its credentials — every listed repository is checked out and fully accessible to the agent team.
@@ -23,9 +18,7 @@ The snapshot below is ground truth. It already answers the following, so asking 
 - Repo URLs, git hosting, CMS logins, deploy credentials, or a "contact for the dev team" — the agent team IS the dev team and the platform holds the access.
 If the request names a product with no repository in the snapshot, plan the work to create and register that repository. Do not ask the stakeholder to supply access details.`
 
-// WorkspaceFactsBlock renders the projects and repositories the system knows
-// about as a prompt section. Empty input still renders — "none registered" is a
-// fact worth stating, and it keeps the never-ask rule attached.
+// Empty input still renders: "none registered" is a fact worth stating and keeps the never-ask rule attached.
 func WorkspaceFactsBlock(projects []domain.InitiativeProject, repos []domain.Repository) string {
 	var sb strings.Builder
 	sb.WriteString(workspaceFactsRule)

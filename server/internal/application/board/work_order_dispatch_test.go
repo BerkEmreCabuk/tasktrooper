@@ -1,13 +1,5 @@
 package board_test
 
-// The dispatcher end of the work order.
-//
-// This is the half that was missing entirely. `blocks` was checked by
-// repository.Service.validateMoveAllowed, which refuses a MOVE — so a task
-// CREATED straight into todo with an open blocker, a reconciler sweep of a task
-// that never started, or a sweeper handing one back all reached the dispatcher
-// and started a run on work that was explicitly ordered to wait.
-
 import (
 	"context"
 	"testing"
@@ -41,8 +33,6 @@ func (d *dispatchParker) MarkWorkOrderWaiting(_ context.Context, _, taskID uuid.
 	return nil
 }
 
-// A task created straight into `todo` with an open blocker never goes through a
-// move, so the move guard cannot see it. It has to be caught here.
 func (s *DispatcherSuite) TestBlockedTaskIsParkedInsteadOfStarted() {
 	parker := &dispatchParker{}
 	s.disp.SetWorkOrder(board.NewWorkOrder(&dispatchBlockerReader{
@@ -89,9 +79,6 @@ func (s *DispatcherSuite) TestUnblockedTaskIsDispatchedNormally() {
 	s.Empty(parker.parked)
 }
 
-// Fail closed. A run started on an unreadable order writes a change into a
-// codebase whose prerequisite may not exist; a dispatch skipped on one is
-// picked up by the reconciler on the next sweep.
 func (s *DispatcherSuite) TestUnreadableWorkOrderStopsTheDispatch() {
 	parker := &dispatchParker{}
 	s.disp.SetWorkOrder(board.NewWorkOrder(&dispatchBlockerReader{err: assertErr}, parker))
@@ -110,12 +97,6 @@ func (s *DispatcherSuite) TestUnreadableWorkOrderStopsTheDispatch() {
 	s.Empty(parker.parked, "an unreadable order is not a known block — parking it would state something nobody checked")
 }
 
-// reentrantCommenter reproduces the production wiring the recursion bug lived
-// in: Service.AddComment persists the comment then calls s.emit, which calls
-// Dispatcher.Dispatch synchronously for the same task — before the first
-// Dispatch call that triggered the comment has even returned. It also mirrors
-// Service.AddComment re-fetching the task from the store, so the re-entrant
-// call sees BlockedResource as it now stands after Park's write.
 type reentrantCommenter struct {
 	disp     *board.Dispatcher
 	task     domain.BoardTask
@@ -138,10 +119,6 @@ func (r *reentrantCommenter) AddComment(ctx context.Context, repositoryID, taskI
 	return domain.TaskComment{}, nil
 }
 
-// The scenario the code review caught: a park's own comment re-enters
-// Dispatch for the same task while the column is still todo/in_progress, so
-// the gate is true again and would park a second time — commenting again —
-// without the already-parked guard in WorkOrder.Park.
 func (s *DispatcherSuite) TestParkCommentReenteringDispatchDoesNotRecurse() {
 	parker := &dispatchParker{}
 	taskID := uuid.New()
@@ -170,7 +147,6 @@ func (s *DispatcherSuite) TestParkCommentReenteringDispatchDoesNotRecurse() {
 	s.Equal([]uuid.UUID{taskID}, parker.parked, "parked exactly once")
 }
 
-// A build with no relation store dispatches exactly as it did before.
 func (s *DispatcherSuite) TestDispatchWithoutAWorkOrderGateIsUnchanged() {
 	repositoryID := uuid.New()
 	err := s.disp.Dispatch(context.Background(), board.DispatchInput{
@@ -190,9 +166,6 @@ type errTest string
 
 func (e errTest) Error() string { return string(e) }
 
-// Guards the direction the whole feature reads in: `blocked_by` on the tool
-// means "this task waits for those", and it is stored as blocks rows whose
-// SOURCE is the blocker. Getting this backwards would invert every stored row.
 func TestBlocksRelationDirectionIsSourceFirst(t *testing.T) {
 	blocker := uuid.New()
 	blocked := uuid.New()

@@ -1,16 +1,5 @@
 package board
 
-// The work-order park and its release.
-//
-// `blocks` has been in the schema since migration 022 and, until now, the only
-// thing that read it refused a MOVE. These tests pin the two halves that make it
-// real:
-//
-//  1. a task whose blocker is unfinished is PARKED — visibly, with a reason —
-//     instead of being started or silently skipped;
-//  2. the park ends on its own, because a sweeper asks the relation graph rather
-//     than because somebody remembers to drag the card.
-
 import (
 	"context"
 	"errors"
@@ -24,9 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// workOrderGateWorkflow is the "task" type's workflow from the same default
-// fixture the migration seeds — block_on_dependencies lives on todo/
-// in_progress there, which is the boundary these tests pin.
 func workOrderGateWorkflow() domain.Workflow {
 	return workflowtest.Default().Workflows["task"]
 }
@@ -94,12 +80,6 @@ func openBlocker() domain.BoardTask {
 	}
 }
 
-// -------------------------------------------------------------------- the park
-
-// The park has to SAY what it is waiting for. A card sitting in blocked with no
-// reason is indistinguishable from one a human parked, and the whole reason this
-// is a park rather than a silent skip is that "nobody picked this up" was
-// unreadable off the board.
 func TestWorkOrderParkNamesEveryBlockerOnTheCard(t *testing.T) {
 	task := workOrderTask(domain.TaskColumnTodo)
 	blocker := openBlocker()
@@ -118,13 +98,6 @@ func TestWorkOrderParkNamesEveryBlockerOnTheCard(t *testing.T) {
 	assert.Contains(t, comments.contents[0], "T-1 (API migration)")
 }
 
-// The park comment re-enters Dispatch for the same task.commented event
-// (Service.AddComment calls s.emit synchronously), and since the column
-// never moves out of {todo, in_progress} the gate is true again on that
-// re-entrant call. Without this guard, Park would fire again from inside its
-// own comment and recurse until the stack overflows. A task whose
-// BlockedResource is already work_order is a re-entrant call, not a fresh
-// park, so it must be a no-op.
 func TestWorkOrderParkOnAnAlreadyParkedTaskIsANoOp(t *testing.T) {
 	task := workOrderTask(domain.TaskColumnTodo)
 	task.BlockedResource = domain.ResourceWorkOrder
@@ -139,7 +112,6 @@ func TestWorkOrderParkOnAnAlreadyParkedTaskIsANoOp(t *testing.T) {
 	assert.Empty(t, comments.contents, "already parked — no re-entrant comment, that is the recursion trigger")
 }
 
-// A missing comment store costs the card a line of history and nothing else.
 func TestWorkOrderParkWorksWithoutACommenter(t *testing.T) {
 	task := workOrderTask(domain.TaskColumnTodo)
 	parker := &stubResourceParker{}
@@ -149,11 +121,6 @@ func TestWorkOrderParkWorksWithoutACommenter(t *testing.T) {
 	assert.Len(t, parker.parks, 1)
 }
 
-// ------------------------------------------------------------------- the gate
-
-// Only the columns where work STARTS. A blocks relation says who writes code
-// first; parking a task that already reached code_review would strand a
-// finished change behind a dependency the change no longer has.
 func TestWorkOrderGateAppliesOnlyWhereWorkStarts(t *testing.T) {
 	cases := []struct {
 		column domain.TaskColumn
@@ -175,9 +142,6 @@ func TestWorkOrderGateAppliesOnlyWhereWorkStarts(t *testing.T) {
 	}
 }
 
-// The sweeper's own hand-back must reach an agent. Re-asking the question the
-// sweep just answered would, at best, confirm it and, at worst, re-park the task
-// on a read that raced the blocker's own update.
 func TestWorkOrderGateSkipsTheSweepersResume(t *testing.T) {
 	wf := workOrderGateWorkflow()
 	input := DispatchInput{
@@ -188,13 +152,9 @@ func TestWorkOrderGateSkipsTheSweepersResume(t *testing.T) {
 	}
 	assert.False(t, workOrderGateApplies(wf, true, input))
 
-	// Another park's resume is not this one's: a task handed back by the device
-	// sweeper is still subject to its work order.
 	input.Payload[domain.EventPayloadResumedResource] = domain.ResourceMobileDevice
 	assert.True(t, workOrderGateApplies(wf, true, input))
 }
-
-// ----------------------------------------------------------------- the sweeper
 
 type stubWorkOrderParkStore struct {
 	parked     []domain.BoardTask
@@ -238,8 +198,6 @@ func TestWorkOrderSweepLeavesATaskParkedWhileItsBlockerIsOpen(t *testing.T) {
 	assert.Empty(t, store.takenIDs, "the blocker has not landed, so the task stays parked")
 }
 
-// The release. ListBlockingSources filters out blockers that reached done or
-// released, so an empty answer IS "everything it was waiting for is finished".
 func TestWorkOrderSweepReleasesTheTaskWhenItsBlockerLands(t *testing.T) {
 	task := workOrderTask(domain.TaskColumnBlocked)
 	store := &stubWorkOrderParkStore{parked: []domain.BoardTask{task}}
@@ -251,15 +209,10 @@ func TestWorkOrderSweepReleasesTheTaskWhenItsBlockerLands(t *testing.T) {
 	assert.Equal(t, task.ID, store.takenIDs[0])
 }
 
-// A cancelled blocker is a DELETED task, and deleting one cascades its
-// task_relations rows away (migration 022). The dependent must not be left
-// waiting for a task that no longer exists — which falls out of the same query,
-// with nothing extra to remember.
 func TestWorkOrderSweepReleasesTheTaskWhenItsBlockerIsDeleted(t *testing.T) {
 	waiting := workOrderTask(domain.TaskColumnBlocked)
 	stillBlocked := workOrderTask(domain.TaskColumnBlocked)
 	blockers := &stubBlockerReader{byTask: map[uuid.UUID][]domain.BoardTask{
-		// waiting's edge is gone with the deleted blocker; the other one's is not.
 		stillBlocked.ID: {openBlocker()},
 	}}
 	store := &stubWorkOrderParkStore{parked: []domain.BoardTask{waiting, stillBlocked}}
@@ -271,7 +224,6 @@ func TestWorkOrderSweepReleasesTheTaskWhenItsBlockerIsDeleted(t *testing.T) {
 	assert.Equal(t, waiting.ID, store.takenIDs[0])
 }
 
-// Per-task, not a queue: the second parked task's blocker may land first.
 func TestWorkOrderSweepClaimsOnlyTheTasksThatAreFree(t *testing.T) {
 	first := workOrderTask(domain.TaskColumnBlocked)
 	second := workOrderTask(domain.TaskColumnBlocked)
@@ -286,8 +238,6 @@ func TestWorkOrderSweepClaimsOnlyTheTasksThatAreFree(t *testing.T) {
 		"the later task whose blocker finished must be resumed, not the older one still waiting")
 }
 
-// An unreadable graph leaves the task parked: resuming on an error spends an
-// agent run to be told what the sweep could not find out.
 func TestWorkOrderSweepLeavesTaskParkedWhenTheGraphCannotBeRead(t *testing.T) {
 	task := workOrderTask(domain.TaskColumnBlocked)
 	store := &stubWorkOrderParkStore{parked: []domain.BoardTask{task}}
@@ -298,7 +248,6 @@ func TestWorkOrderSweepLeavesTaskParkedWhenTheGraphCannotBeRead(t *testing.T) {
 	assert.Empty(t, store.takenIDs)
 }
 
-// Another pod, or a human dragging the card out of blocked, may claim it first.
 func TestWorkOrderSweepToleratesLosingTheClaim(t *testing.T) {
 	task := workOrderTask(domain.TaskColumnBlocked)
 	store := &stubWorkOrderParkStore{
@@ -307,11 +256,9 @@ func TestWorkOrderSweepToleratesLosingTheClaim(t *testing.T) {
 	}
 	s := NewWorkOrderSweeper(store, &stubBlockerReader{}, &Dispatcher{})
 
-	s.sweep(context.Background()) // must not panic or dispatch
+	s.sweep(context.Background())
 }
 
-// A silent resume is why the stakeholder thought the mechanism did not exist
-// at all: nothing but a server log recorded it. The card must show it.
 func TestWorkOrderSweepPostsACommentOnASuccessfulResume(t *testing.T) {
 	task := workOrderTask(domain.TaskColumnBlocked)
 	store := &stubWorkOrderParkStore{parked: []domain.BoardTask{task}}
@@ -332,8 +279,6 @@ func (failingWorkOrderCommenter) AddComment(context.Context, uuid.UUID, uuid.UUI
 	return domain.TaskComment{}, errors.New("comment store unavailable")
 }
 
-// The resume itself must not be undone by a comment failure — the task is
-// unparked and dispatched either way; only the card's visibility is degraded.
 func TestWorkOrderSweepResumeSurvivesACommentFailure(t *testing.T) {
 	task := workOrderTask(domain.TaskColumnBlocked)
 	store := &stubWorkOrderParkStore{parked: []domain.BoardTask{task}}

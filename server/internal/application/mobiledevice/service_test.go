@@ -70,8 +70,6 @@ func envDevice() domain.MobileDevice {
 	}
 }
 
-// bridgeSaying stands in for the device-agent sidecar, which is the only party
-// that knows which loopback port a phone was mapped onto.
 func bridgeSaying(t *testing.T, localAddr string) *deviceagent.Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -89,9 +87,6 @@ func bridgeSaying(t *testing.T, localAddr string) *deviceagent.Client {
 	return deviceagent.New(srv.URL, "")
 }
 
-// The UDID is allocated by the bridge, one loopback port per phone. A server
-// that guessed it would be right about the first device and would point every
-// later one at a phone somebody else is driving.
 func TestAddTakesTheUDIDFromTheBridge(t *testing.T) {
 	store := &fakeStore{}
 	svc := NewService(store, bridgeSaying(t, "127.0.0.1:5556"), envDevice())
@@ -117,9 +112,6 @@ func TestAddTakesTheUDIDFromTheBridge(t *testing.T) {
 	}
 }
 
-// Several phones, several rows, several local ports. The failure this guards
-// against is the one that looks like success: two registrations collapsing onto
-// one device.
 func TestAddSecondDeviceKeepsTheFirst(t *testing.T) {
 	store := &fakeStore{}
 	ctx := context.Background()
@@ -140,8 +132,6 @@ func TestAddSecondDeviceKeepsTheFirst(t *testing.T) {
 	}
 }
 
-// A reboot is the common case and must be one edit: the same phone, a new port,
-// nothing else touched.
 func TestUpdateAcceptsANewPortForTheSamePhone(t *testing.T) {
 	store := &fakeStore{}
 	svc := NewService(store, bridgeSaying(t, "127.0.0.1:5555"), envDevice())
@@ -160,8 +150,6 @@ func TestUpdateAcceptsANewPortForTheSamePhone(t *testing.T) {
 	}
 }
 
-// iOS is refused with the reason, not as an unknown value: the operator is being
-// told about the cluster, not about their typing.
 func TestAddRefusesIOS(t *testing.T) {
 	svc := NewService(&fakeStore{}, nil, envDevice())
 	_, err := svc.Add(context.Background(), domain.SaveMobileDeviceRequest{
@@ -172,8 +160,6 @@ func TestAddRefusesIOS(t *testing.T) {
 	}
 }
 
-// The env-configured device is a supported install, not dead code: it is what
-// drives an installation nobody has registered anything on.
 func TestEffectiveFallsBackToTheEnvironment(t *testing.T) {
 	svc := NewService(&fakeStore{}, nil, envDevice())
 	devices, source, err := svc.Effective(context.Background())
@@ -188,10 +174,6 @@ func TestEffectiveFallsBackToTheEnvironment(t *testing.T) {
 	}
 }
 
-// Once anything is registered the environment stops contributing. A union would
-// list one phone twice — the env device and the registration normally describe
-// the same 127.0.0.1:5555 — and two runs would each take what they believed was
-// a free device.
 func TestRegistrationsReplaceTheEnvironment(t *testing.T) {
 	store := &fakeStore{}
 	svc := NewService(store, bridgeSaying(t, "127.0.0.1:5556"), envDevice())
@@ -207,8 +189,7 @@ func TestRegistrationsReplaceTheEnvironment(t *testing.T) {
 	if source != "settings" || len(devices) != 1 || devices[0].Name != "Pixel" {
 		t.Fatalf("effective returned %v from %q, want only the registration", devices, source)
 	}
-	// …and removing it hands the installation back to the environment rather
-	// than leaving it with no phone at all.
+
 	if _, err := svc.Remove(ctx, devices[0].ID); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
@@ -221,9 +202,6 @@ func TestRegistrationsReplaceTheEnvironment(t *testing.T) {
 	}
 }
 
-// The env device has no row, so nothing about it can be edited from a browser.
-// Saying so is the point: silently discarding the edit would leave an operator
-// convinced they changed something.
 func TestEnvDeviceCannotBeEdited(t *testing.T) {
 	svc := NewService(&fakeStore{}, nil, envDevice())
 	if _, err := svc.Update(context.Background(), uuid.Nil, domain.SaveMobileDeviceRequest{DeviceAddr: "1.2.3.4:5"}); err == nil {

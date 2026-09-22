@@ -3,9 +3,8 @@ package domain
 import "strings"
 
 // RunGateRejectionPrefixes are the sentence-openers board.Runner writes to a
-// failed run's Summary when a grounding gate rejects it for skipping the
-// required verification (reading the repo, running or checking the product)
-// rather than for an infra failure. They must be kept in sync with the
+// failed run's Summary when a grounding gate rejects it for skipping required
+// verification rather than for an infra failure. Must stay in sync with the
 // reasons runner.go actually writes.
 var RunGateRejectionPrefixes = []string{
 	"Analysis rejected:",

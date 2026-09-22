@@ -10,8 +10,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// The report this gate exists for: a PM run in pm_uat that approves every
-// criterion from board-read tools alone, never touching the running product.
 func TestUngroundedPMUATRejectsAReviewWithNoExecution(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnPMUAT}
 
@@ -29,7 +27,6 @@ func TestUngroundedPMUATAcceptsAnExecutedRound(t *testing.T) {
 	}
 }
 
-// Everything that is not a pm_uat run passes untouched.
 func TestUngroundedPMUATIgnoresNonPMUATColumns(t *testing.T) {
 	for _, column := range []domain.TaskColumn{
 		domain.TaskColumnInProgress,
@@ -45,7 +42,6 @@ func TestUngroundedPMUATIgnoresNonPMUATColumns(t *testing.T) {
 	}
 }
 
-// Asking IS the answer, same rule as isUngroundedQA.
 func TestUngroundedPMUATExemptsAQuestion(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnPMUAT}
 	resp := domain.AgentResponse{Clarification: &domain.ClarificationRequest{Context: "which stage url?"}}
@@ -53,7 +49,6 @@ func TestUngroundedPMUATExemptsAQuestion(t *testing.T) {
 	assert.False(t, isUngroundedPMUAT(taskWF, task, resp, qaUsage("review_criterion")))
 }
 
-// An unmeasured run has no ledger to judge.
 func TestUngroundedPMUATIsNilSafe(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnPMUAT}
 
@@ -120,10 +115,6 @@ func TestPMApprovedUncoveredCriterionIsNilSafe(t *testing.T) {
 	assert.False(t, pmApprovedUncoveredCriterion(taskWF, task, criteria, nil, nil, pmUATRunStartedAt))
 }
 
-// The revision report's exact scenario: a criterion was PM-approved, correctly
-// and with evidence, in an earlier run — that approval must not retrigger the
-// gate for a later run that approves a different, already-covered criterion
-// and never touches the stale one at all.
 func TestPMApprovedUncoveredCriterionIgnoresApprovalsFromEarlierRuns(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), Column: domain.TaskColumnPMUAT}
 	staleCriterionID := uuid.New()

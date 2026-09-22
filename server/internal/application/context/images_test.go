@@ -24,19 +24,16 @@ func TestImageBudgetSuite(t *testing.T) {
 
 func (s *ImageBudgetSuite) TestImageTokensFromPNGHeader() {
 	img := pngImage(s.T(), 1200, 800, color.RGBA{R: 10, G: 20, B: 30, A: 255})
-	// 1200*800 = 960000 pixels / 750 = 1280 tokens.
 	s.Equal(1280, imageTokens(img))
 }
 
 func (s *ImageBudgetSuite) TestImageTokensFromJPEGHeader() {
 	img := jpegImage(s.T(), 640, 480, color.RGBA{R: 200, G: 100, B: 50, A: 255})
-	// 640*480 = 307200 pixels / 750 = 409.6 -> 410 tokens.
 	s.Equal(410, imageTokens(img))
 }
 
 func (s *ImageBudgetSuite) TestImageTokensClampedForHugeImage() {
 	img := pngImage(s.T(), 2000, 1500, color.RGBA{R: 1, G: 2, B: 3, A: 255})
-	// 3 megapixels would be 4000 tokens; providers downscale first.
 	s.Equal(maxImageTokens, imageTokens(img))
 }
 
@@ -50,8 +47,6 @@ func (s *ImageBudgetSuite) TestImageTokensFallsBackToByteSizeWhenHeaderUnreadabl
 	png := garbageImage("image/png", 100_000)
 	unknown := garbageImage("image/webp", 100_000)
 
-	// 100000 bytes / 110 = 909.09 -> 910; the PNG ratio is coarser because
-	// lossless bytes carry fewer pixels.
 	s.Equal(910, imageTokens(jpg))
 	s.Equal(334, imageTokens(png))
 	s.Greater(imageTokens(unknown), imageTokens(jpg))
@@ -85,9 +80,7 @@ func (s *ImageBudgetSuite) TestCountTokensAddsImageCostToText() {
 
 	s.Equal(1, CountTokens(textOnly))
 	s.Equal(1+1280, CountTokens(withImage))
-	// A picture with no words still costs.
 	s.Equal(1280, CountTokens([]domain.Message{{Role: domain.RoleUser, Images: []domain.ToolResultImage{img}}}))
-	// Empty image slices change nothing about the text accounting.
 	s.Equal(1, CountTokens([]domain.Message{{Role: domain.RoleUser, Content: "abcd", Images: []domain.ToolResultImage{}}}))
 }
 
@@ -103,11 +96,8 @@ func (s *ImageBudgetSuite) TestApplyDropsImagesWhenNothingElseCanGo() {
 
 	s.Require().Len(result, 2)
 	s.LessOrEqual(CountTokens(result), b.TokenLimit())
-	// The words survive; only the pictures were shed.
 	s.Equal("look at these six screens", result[1].Content)
 	s.Equal(domain.RoleSystem, result[0].Role)
-	// Six 1280-token images against a 1400 limit leaves room for exactly one,
-	// and the one kept is the newest.
 	s.Require().Len(result[1].Images, 1)
 	s.Equal(images[5], result[1].Images[0])
 }
@@ -201,8 +191,7 @@ func uniformImage(width, height int, fill color.RGBA) image.Image {
 	return img
 }
 
-// garbageImage is base64 that no decoder can parse: it exercises the byte-size
-// fallback with a media type the estimator can still trust.
+// garbageImage is base64 no decoder can parse: it exercises the byte-size fallback with a media type the estimator trusts.
 func garbageImage(mediaType string, rawBytes int) domain.ToolResultImage {
 	raw := bytes.Repeat([]byte{0xAB, 0x03, 0xFE}, rawBytes/3+1)[:rawBytes]
 	return domain.ToolResultImage{MediaType: mediaType, Data: base64.StdEncoding.EncodeToString(raw)}

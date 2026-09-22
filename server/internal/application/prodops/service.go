@@ -16,33 +16,23 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// TaskBoard is the slice of the board this package needs: open the remediation
-// task, and comment on it as the incident evolves.
 type TaskBoard interface {
 	CreateTask(ctx context.Context, repositoryID uuid.UUID, req domain.CreateBoardTaskRequest) (domain.BoardTask, error)
 	AddComment(ctx context.Context, repositoryID, taskID uuid.UUID, req domain.CreateTaskCommentRequest) (domain.TaskComment, error)
 }
 
-// RepositoryResolver reads the repo an incident belongs to (for its kind and
-// its incident policy).
 type RepositoryResolver interface {
 	Get(ctx context.Context, id uuid.UUID) (domain.Repository, error)
 }
 
-// DeployHistory returns the repository's recent deploy pipelines, newest first.
-// It is what lets the engine blame a release for an incident.
 type DeployHistory interface {
 	RecentDeploys(ctx context.Context, repositoryID uuid.UUID, limit int) ([]domain.TaskPipeline, error)
 }
 
-// Notifier pushes an alert to the user's devices.
-// ctx is carried for its values: the send is backgrounded and still reads the
-// device list through the store.
 type Notifier interface {
 	Alert(ctx context.Context, title, body string)
 }
 
-// Deps wires the collaborators of the production operations service.
 type Deps struct {
 	Incidents port.IncidentStore
 	Targets   port.DeployTargetStore
@@ -60,21 +50,12 @@ type Service struct {
 	deploys   DeployHistory
 	notifier  Notifier
 
-	// attributor / rollbacks are the release-loop half: which task's commit
-	// production is running, and what to do about it when that commit is what
-	// broke. Both late-set (SetReleaseAttributor / SetReleaseRollbackDispatcher)
-	// because application/deploywatch and application/board are wired after this
-	// service and would otherwise be an import cycle. Nil leaves the incident
-	// path exactly as it was.
 	attributor ReleaseAttributor
 	rollbacks  ReleaseRollbackDispatcher
 
-	// Re-notify throttle for long-running critical incidents: the probe
-	// re-ingests every sweep, and a page per sweep is an alert storm.
 	notifyMu   sync.Mutex
 	lastNotify map[uuid.UUID]time.Time
 
-	// workflows/roles: see board.Dispatcher's own fields of the same name.
 	workflows port.WorkflowReader
 	roles     port.RoleResolver
 }
@@ -82,9 +63,6 @@ type Service struct {
 func (s *Service) SetWorkflows(w port.WorkflowReader)  { s.workflows = w }
 func (s *Service) SetRoleResolver(r port.RoleResolver) { s.roles = r }
 
-// defectTaskType is the type a remediation task opens as: "" (CreateTask's
-// own default-type fallback) only when no reader is wired, which production
-// always wires — see runtime.go's prodOpsSvc.SetWorkflows.
 func (s *Service) defectTaskType(ctx context.Context) domain.TaskType {
 	if s.workflows == nil {
 		return ""
@@ -108,14 +86,8 @@ func NewService(deps Deps) *Service {
 	}
 }
 
-// taskSeverityFloor is the severity from which an incident is worth opening a
-// board task for. Below it the incident is recorded and visible, but nobody is
-// interrupted.
 const taskSeverityFloor = domain.IncidentSeverityHigh
 
-// Ingest is the single entry point for every production signal. It dedupes,
-// derives a remedy, opens (or updates) the remediation task and notifies —
-// in that order, so an alert storm produces one incident and one task.
 func (s *Service) Ingest(ctx context.Context, in domain.IncidentInput) (domain.Incident, error) {
 	if in.RepositoryID == uuid.Nil {
 		return domain.Incident{}, errors.New("incident needs a repository")
@@ -148,17 +120,14 @@ func (s *Service) Ingest(ctx context.Context, in domain.IncidentInput) (domain.I
 		s.event(ctx, incident.ID, domain.IncidentEventDetected,
 			fmt.Sprintf("%s incident detected via %s (%s)", incident.Env, incident.Source, incident.Severity))
 	} else if incident.Occurrences <= 5 || incident.Occurrences%25 == 0 {
-		// The probe re-ingests every sweep of an ongoing outage; recording
-		// each recurrence as its own event row grows the timeline unboundedly.
+
 		s.event(ctx, incident.ID, domain.IncidentEventRecurred,
 			fmt.Sprintf("recurred (%d occurrences)", incident.Occurrences))
 	}
 
 	policy := s.policy(ctx, incident.RepositoryID)
 	remedy := s.buildRemedy(ctx, incident)
-	// The first-pass remedy is triage, not truth. Once someone has written a
-	// proposal, a recurrence of the same fingerprint must not overwrite it with
-	// rules-engine boilerplate.
+
 	if created || machineMayOverwriteRemedy(incident) {
 		if updated, err := s.incidents.UpdateRemedy(ctx, incident.ID, remedy.Text(), remedy.Kind,
 			domain.RemedyAuthorAutoTriage, remedy.Confidence); err != nil {
@@ -172,12 +141,6 @@ func (s *Service) Ingest(ctx context.Context, in domain.IncidentInput) (domain.I
 		}
 	}
 
-	// Attribution runs BEFORE the remediation task is opened, deliberately.
-	// A generic "production is down" diagnosis task and a specific "DE-12's
-	// release broke production, roll it back" are not the same piece of work,
-	// and opening the first one and then discovering the second leaves two
-	// cards for one outage. It is also the point where auto_rollback stops
-	// being decorative.
 	incident = s.attributeAndMaybeRollBack(ctx, incident)
 
 	if policy != domain.IncidentPolicyOff && incident.TaskID == nil &&
@@ -195,12 +158,6 @@ func (s *Service) Ingest(ctx context.Context, in domain.IncidentInput) (domain.I
 	return incident, nil
 }
 
-// machineMayOverwriteRemedy answers whether the automatic first pass is allowed
-// to replace the proposal already on the incident. It keys off the recorded
-// author: anything a human or an agent wrote is off limits no matter where the
-// status was moved afterwards. Incidents from before remedy_author existed
-// carry no author at all, so for those — and for incidents nobody has written
-// to yet — it falls back to the status proxy this guard used to be.
 func machineMayOverwriteRemedy(incident domain.Incident) bool {
 	switch incident.RemedyAuthor {
 	case domain.RemedyAuthorAutoTriage:
@@ -212,7 +169,6 @@ func machineMayOverwriteRemedy(incident domain.Incident) bool {
 	}
 }
 
-// renotifyCooldown spaces the repeat pages of one ongoing critical incident.
 const renotifyCooldown = 30 * time.Minute
 
 func (s *Service) shouldRenotify(incidentID uuid.UUID) bool {
@@ -235,9 +191,6 @@ func (s *Service) shouldRenotify(incidentID uuid.UUID) bool {
 	return true
 }
 
-// recover closes the live incident a recovery signal refers to. An unknown
-// fingerprint is not an error: alerting systems routinely send a resolve for
-// something we never opened.
 func (s *Service) recover(ctx context.Context, in domain.IncidentInput) (domain.Incident, error) {
 	live, err := s.incidents.FindLive(ctx, in.RepositoryID, in.Env, in.Fingerprint)
 	if err != nil {
@@ -265,9 +218,6 @@ func (s *Service) recover(ctx context.Context, in domain.IncidentInput) (domain.
 	return resolved, nil
 }
 
-// IngestDeployFailure turns a failed stage/preprod/prod deploy into an
-// incident. A deploy that fails halfway is a production event even when no
-// external alert fires.
 func (s *Service) IngestDeployFailure(ctx context.Context, repositoryID uuid.UUID, env, taskKey, detail string) (domain.Incident, error) {
 	severity := domain.IncidentSeverityHigh
 	if env == domain.DeployEnvProd {
@@ -285,20 +235,10 @@ func (s *Service) IngestDeployFailure(ctx context.Context, repositoryID uuid.UUI
 	})
 }
 
-// buildRemedy assembles the engine's context (deploy history, prior
-// occurrences, the environment's deploy target) and runs the rules.
 func (s *Service) buildRemedy(ctx context.Context, incident domain.Incident) domain.Remedy {
 	rc := RemedyContext{Incident: incident}
 	if s.targets != nil {
-		// Deliberately left as "err == nil, else skip" rather than switched to
-		// errors.Is(err, port.ErrNotFound): unlike mobileStoreGate this is
-		// best-effort context enrichment for a remedy suggestion, not a
-		// deploy/release gate, and buildRemedy has no error return to
-		// propagate a real infra failure through anyway — the only
-		// observable effect of any Get failure, not-found or otherwise, is a
-		// remedy proposal missing its rollback hint. See Task 12 review round
-		// 2 fix report for the mobileStoreGate case where the distinction
-		// does matter.
+
 		if target, err := s.targets.Get(ctx, incident.RepositoryID, "", incident.Env); err == nil {
 			rc.Target = target
 			if tpl, ok := deploy.Template(firstNonEmpty(target.TemplateID, target.Provider)); ok {
@@ -326,10 +266,6 @@ func (s *Service) buildRemedy(ctx context.Context, incident domain.Incident) dom
 	return Suggest(rc)
 }
 
-// openRemediationTask puts the incident on the board. Under the suggest policy
-// the task is explicitly forbidden from changing code: it must stop at a
-// written proposal, and a human decides. Under auto_fix it carries the fix
-// through the normal columns, which still gate it with tests and review.
 func (s *Service) openRemediationTask(ctx context.Context, incident domain.Incident, remedy domain.Remedy, policy domain.IncidentPolicy) (domain.Incident, error) {
 	if s.tasks == nil {
 		return incident, errors.New("board is not available")
@@ -380,9 +316,6 @@ func (s *Service) openRemediationTask(ctx context.Context, incident domain.Incid
 	return updated, nil
 }
 
-// ProposeRemedy records the diagnosis an agent (or a human) reached. It is the
-// hand-off point: the incident now carries a concrete fix, and the human is
-// told about it.
 func (s *Service) ProposeRemedy(ctx context.Context, incidentID uuid.UUID, remedy domain.Remedy, author string) (domain.Incident, error) {
 	if remedy.Kind == "" {
 		remedy.Kind = domain.RemedyKindUnknown
@@ -390,10 +323,7 @@ func (s *Service) ProposeRemedy(ctx context.Context, incidentID uuid.UUID, remed
 	if strings.TrimSpace(remedy.Summary) == "" {
 		return domain.Incident{}, errors.New("remedy needs a summary")
 	}
-	// An unnamed caller is still not the rules engine: this entry point is only
-	// reached from the tool and the API, so record it as a human write rather
-	// than leaving the author blank (blank reads as "unknown" and would let the
-	// next recurrence overwrite the proposal).
+
 	if strings.TrimSpace(author) == "" {
 		author = domain.RemedyAuthorHuman
 	}
@@ -415,10 +345,6 @@ func (s *Service) ProposeRemedy(ctx context.Context, incidentID uuid.UUID, remed
 	return incident, nil
 }
 
-// Triage re-runs the rules engine for an incident on demand (after a deploy,
-// or when new occurrences changed the picture). Unlike the ingest path this is
-// an explicit request to re-derive, so it overwrites whatever is there — but
-// the result is still machine-authored, and is recorded as such.
 func (s *Service) Triage(ctx context.Context, incidentID uuid.UUID) (domain.Incident, error) {
 	incident, err := s.incidents.Get(ctx, incidentID)
 	if err != nil {
@@ -460,15 +386,10 @@ func (s *Service) Get(ctx context.Context, incidentID uuid.UUID) (domain.Inciden
 	return s.incidents.Get(ctx, incidentID)
 }
 
-// ByTask resolves the incident a remediation task belongs to, so an agent
-// working the task can read its incident without being told the id.
 func (s *Service) ByTask(ctx context.Context, taskID uuid.UUID) (domain.Incident, error) {
 	return s.incidents.ByTask(ctx, taskID)
 }
 
-// notify interrupts the human for incidents worth interrupting for, with the
-// proposed action in the body — the point is that the notification itself
-// answers "what do I do now".
 func (s *Service) notify(ctx context.Context, incident domain.Incident, remedy domain.Remedy) {
 	if s.notifier == nil || incident.Severity.Rank() < taskSeverityFloor.Rank() {
 		return
@@ -489,8 +410,6 @@ func (s *Service) policy(ctx context.Context, repositoryID uuid.UUID) domain.Inc
 	return repo.IncidentPolicy
 }
 
-// systemTaskAssignee picks the developer role's agent for the repo's area —
-// who owns incidents for that repo kind.
 func (s *Service) systemTaskAssignee(ctx context.Context, repositoryID uuid.UUID) *uuid.UUID {
 	if s.roles == nil || s.repos == nil {
 		return nil
@@ -513,7 +432,6 @@ func (s *Service) event(ctx context.Context, incidentID uuid.UUID, kind, message
 	}
 }
 
-// deployEnvOfTrigger maps a deploy pipeline trigger back to its environment.
 func deployEnvOfTrigger(trigger domain.PipelineTrigger) string {
 	switch trigger {
 	case domain.PipelineTriggerStageDeploy:

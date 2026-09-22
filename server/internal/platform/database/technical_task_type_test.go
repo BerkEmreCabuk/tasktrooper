@@ -17,15 +17,11 @@ import (
 
 const lastMigrationBeforeTechnicalTaskType = "139_task_criterion_check_verified_sha"
 
-// TechnicalTaskTypeSuite covers migration 140: it must widen the task_type
-// CHECK constraint, and — only for an install that already runs a restricted
-// board_column_transitions graph — add the ready_for_qa/in_qa -> human_uat
-// edges a technical task needs to skip pm_uat.
+// TechnicalTaskTypeSuite covers migration 140: widen the task_type CHECK and,
+// for restricted column graphs, add ready_for_qa/in_qa -> human_uat edges.
 //
-// StartEmbedded migrates its default database on boot (see embedded.go), so a
-// test standing a database at an older schema needs its OWN, freshly
-// CREATE DATABASE'd database on that same cluster — connecting to the default
-// DSN would already be at HEAD and no migration would have anything to apply.
+// StartEmbedded migrates its default database at boot, so an older schema is
+// stood up on an own, freshly created database on the same cluster.
 type TechnicalTaskTypeSuite struct {
 	suite.Suite
 	ctx    context.Context
@@ -65,8 +61,6 @@ func (s *TechnicalTaskTypeSuite) TearDownSuite() {
 	}
 }
 
-// freshDatabase creates a new, unmigrated database on the shared cluster and
-// returns a pool connected to it, plus a cleanup that drops it.
 func (s *TechnicalTaskTypeSuite) freshDatabase() *pgxpool.Pool {
 	name := fmt.Sprintf("technical_task_type_%d", s.seq.Add(1))
 	_, err := s.boot.Exec(s.ctx, `CREATE DATABASE `+name)
@@ -129,11 +123,9 @@ func (s *TechnicalTaskTypeSuite) TestRestrictedInstallGainsHumanUATEdges() {
 	s.True(stillLegal, "the migration must be additive, not replace the operator's existing graph")
 }
 
-// TestTaskTypeCheckConstraintAcceptsTechnical predates migration 143, which
-// replaces the CHECK this test named with a FK to task_types (a custom type
-// is now legal the moment a row exists for it, with no further migration —
-// see 143_roles_task_types_workflows.up.sql). The assertion now checks the
-// FK exists and that 'technical' is a real task_types row instead.
+// The CHECK this test originally named became a FK to task_types in migration
+// 143; it now asserts that FK exists and that "technical" is a real task_types
+// row instead.
 func (s *TechnicalTaskTypeSuite) TestTaskTypeCheckConstraintAcceptsTechnical() {
 	pool := s.freshDatabase()
 

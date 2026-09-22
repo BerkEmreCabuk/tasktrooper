@@ -11,9 +11,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// SetTestCaseStore wires the task's test-round list. Nil leaves the board
-// exactly as it was before it existed: criteria, and no record of what was
-// actually exercised to satisfy them.
 func (s *Service) SetTestCaseStore(store port.TaskTestCaseStore) {
 	s.testCases = store
 }
@@ -32,9 +29,6 @@ func (s *Service) ListTestCases(ctx context.Context, taskID uuid.UUID) ([]domain
 	return items, nil
 }
 
-// RecordTestCases is the agent path: write the derived cases, then come back
-// and write their results. Matching is by title, so the same call shape serves
-// both moments.
 func (s *Service) RecordTestCases(ctx context.Context, taskID uuid.UUID, items []domain.TaskTestCaseInput) ([]domain.TaskTestCase, error) {
 	if s.testCases == nil {
 		return nil, fmt.Errorf("test cases not enabled")
@@ -49,8 +43,6 @@ func (s *Service) RecordTestCases(ctx context.Context, taskID uuid.UUID, items [
 	return s.testCases.UpsertForTask(ctx, taskID, normalized)
 }
 
-// ReplaceTestCases is the human path: the drawer sends the list it shows, and
-// what it does not send is deleted.
 func (s *Service) ReplaceTestCases(ctx context.Context, repositoryID, taskID uuid.UUID, items []domain.TaskTestCaseInput) ([]domain.TaskTestCase, error) {
 	if _, err := s.tasks.Get(ctx, repositoryID, taskID); err != nil {
 		return nil, err
@@ -82,9 +74,7 @@ func (s *Service) UpdateTestCase(ctx context.Context, repositoryID, taskID, test
 	if existing.TaskID != taskID {
 		return domain.TaskTestCase{}, fmt.Errorf("test case %s does not belong to task %s", testCaseID, taskID)
 	}
-	// A partial update carries only what changed, so the merge happens before
-	// validation: "failed" with no `actual` in the payload is legal when the
-	// stored row already has one.
+
 	normalized, err := mergeTestCase(existing, item).Normalize()
 	if err != nil {
 		return domain.TaskTestCase{}, err
@@ -92,8 +82,6 @@ func (s *Service) UpdateTestCase(ctx context.Context, repositoryID, taskID, test
 	return s.testCases.Update(ctx, testCaseID, normalized)
 }
 
-// SetTestCaseResult is the agent's single-case update: one executed case, its
-// verdict and the evidence behind it.
 func (s *Service) SetTestCaseResult(ctx context.Context, testCaseID uuid.UUID, item domain.TaskTestCaseInput) (domain.TaskTestCase, error) {
 	if s.testCases == nil {
 		return domain.TaskTestCase{}, fmt.Errorf("test cases not enabled")
@@ -134,9 +122,7 @@ func normalizeTestCases(items []domain.TaskTestCaseInput) ([]domain.TaskTestCase
 		if err != nil {
 			return nil, err
 		}
-		// The store matches by title, so two cases with the same title in ONE
-		// batch would silently collapse into the last one. Refusing here says
-		// so instead of losing a case.
+
 		key := strings.ToLower(normalized.Title)
 		if _, dup := seen[key]; dup {
 			return nil, fmt.Errorf("two test cases share the title %q; titles identify a case, so give them distinct ones", normalized.Title)
@@ -150,9 +136,6 @@ func normalizeTestCases(items []domain.TaskTestCaseInput) ([]domain.TaskTestCase
 	return out, nil
 }
 
-// validateCriterionLinks refuses a case pointed at a criterion of another task.
-// The link is what lets the drawer group cases under the criterion they prove,
-// and a cross-task id there would attribute one task's evidence to another.
 func (s *Service) validateCriterionLinks(ctx context.Context, taskID uuid.UUID, items []domain.TaskTestCaseInput) error {
 	if s.criteria == nil {
 		return nil
@@ -228,20 +211,6 @@ func mergeTestCase(existing domain.TaskTestCase, in domain.TaskTestCaseInput) do
 	return out
 }
 
-// testCaseGate holds a QA phase open until its round is on the card.
-//
-// It is the enforcement half of "record the cases you ran": QA's verdict used
-// to be a set of criterion checks, and the list of what was actually exercised
-// lived only in the run transcript — so a round that tried three obvious things
-// and a round that worked through boundaries, auth and regression left the same
-// trace. The gate refuses a forward exit from the QA columns when the task has
-// no test cases at all, and when some case is still `planned`: a case that was
-// written down and never executed is the one thing a passing round must not
-// carry.
-//
-// A `failed` case is deliberately not refused here. Failing is a legitimate
-// outcome and its exit is need_revision, which is not a forward move; blocking
-// on it would strand the round that found the bug.
 func (s *Service) testCaseGate(ctx context.Context, taskID uuid.UUID, taskType domain.TaskType, prev, target domain.TaskColumn) error {
 	if !s.requireCriteria || s.testCases == nil {
 		return nil

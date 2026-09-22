@@ -10,8 +10,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/embedmap"
 )
 
-// fixedVectors builds a reproducible dataset without math/rand: the same call
-// always yields the same numbers, in this process and any other.
 func fixedVectors(rows, cols int) [][]float32 {
 	out := make([][]float32, rows)
 	for i := range out {
@@ -40,10 +38,6 @@ func axisSpread(coords [][]float64, axis int) float64 {
 	return max - min
 }
 
-// The input is L2-normalized before anything else, so a dataset that merely
-// scales along x (1,0), (2,0), (3,0) collapses onto one point. The honest
-// "spread along the x axis" dataset is therefore a short arc of the unit
-// circle: unit norm already, varying almost entirely in x.
 func TestPCAFirstComponentIsTheXAxis(t *testing.T) {
 	angles := []float64{-0.2, -0.1, 0, 0.1, 0.2}
 	vectors := make([][]float32, len(angles))
@@ -58,19 +52,15 @@ func TestPCAFirstComponentIsTheXAxis(t *testing.T) {
 	for i := range res.Coords {
 		require.Len(t, res.Coords[i], 2)
 	}
-	// The first axis tracks x, in order, centred on zero.
+
 	for i := 1; i < len(res.Coords); i++ {
 		require.Greater(t, res.Coords[i][0], res.Coords[i-1][0])
 	}
 	require.InDelta(t, 0, res.Coords[len(res.Coords)/2][0], 1e-6)
-	// The second axis carries the arc's leftover curvature only — an order of
-	// magnitude less than the first.
+
 	require.Less(t, axisSpread(res.Coords, 1), 0.1*axisSpread(res.Coords, 0))
 }
 
-// A rank-1 dataset in three dimensions: the first component recovers the axis
-// exactly, the second has no variance left and must project everything to 0
-// rather than to noise.
 func TestPCARankExhaustedComponentIsZero(t *testing.T) {
 	res := embedmap.PCA([][]float32{{1, 0, 0}, {-1, 0, 0}}, 2)
 
@@ -93,9 +83,6 @@ func TestPCAIsDeterministic(t *testing.T) {
 	require.Equal(t, first.Coords, second.Coords, "same input must project to byte-identical coordinates")
 }
 
-// The projection is split across cores. Nothing about the numbers it produces
-// may depend on how many there are — otherwise a cached client-side embedding
-// would stop matching the server after a pod moved to a different machine.
 func TestPCAIsIndependentOfParallelism(t *testing.T) {
 	vectors := fixedVectors(600, 96)
 	restore := runtime.GOMAXPROCS(1)
@@ -108,8 +95,6 @@ func TestPCAIsIndependentOfParallelism(t *testing.T) {
 	require.Equal(t, single.Coords, parallel.Coords)
 }
 
-// The PCA must not consume its input: the caller still needs the raw embeddings
-// to line points up with their metadata.
 func TestPCADoesNotMutateInput(t *testing.T) {
 	vectors := fixedVectors(8, 5)
 	before := make([][]float32, len(vectors))

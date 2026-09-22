@@ -10,7 +10,6 @@ import (
 )
 
 func TestValidateDisjointWrites_RejectsTwoWritersInOneGroup(t *testing.T) {
-	// The shape that produced two board tasks for one request.
 	err := validateDisjointWrites([]domain.PlannerTask{
 		{ID: "t1", ToolNames: []string{"create_board_task"}, ParallelGroup: 0},
 		{ID: "t2", ToolNames: []string{"create_board_task", "move_board_task"}, ParallelGroup: 0},
@@ -41,7 +40,6 @@ func TestValidateDisjointWrites_AllowsParallelReaders(t *testing.T) {
 }
 
 func TestValidateDisjointWrites_CountsEachSubtaskOnce(t *testing.T) {
-	// A single subtask holding several write tools is not a conflict.
 	err := validateDisjointWrites([]domain.PlannerTask{
 		{ID: "t1", ToolNames: []string{"create_board_task", "move_board_task", "update_board_task"}, ParallelGroup: 0},
 	})
@@ -50,10 +48,7 @@ func TestValidateDisjointWrites_CountsEachSubtaskOnce(t *testing.T) {
 }
 
 func TestValidateDisjointWrites_UndeclaredToolsAreInvisible(t *testing.T) {
-	// Documents this check's limit: a subtask that declares no tool_names
-	// inherits its agent's whole policy, and the per-group check reads
-	// declarations only. validateSingleTaskCreator resolves the agent policy
-	// instead, which is what covers the undeclared case.
+	// The per-group check reads declarations only; validateSingleTaskCreator resolves the agent policy.
 	err := validateDisjointWrites([]domain.PlannerTask{
 		{ID: "t1", ParallelGroup: 0},
 		{ID: "t2", ParallelGroup: 0},
@@ -63,9 +58,7 @@ func TestValidateDisjointWrites_UndeclaredToolsAreInvisible(t *testing.T) {
 }
 
 func TestValidateSingleTaskCreator_UndeclaredToolsResolveAgainstAgentPolicy(t *testing.T) {
-	// The hole the per-group check leaves open: two subtasks that declare
-	// nothing, assigned to an agent that may open board tasks. Neither is
-	// visible as a writer, and both open one.
+	// The hole per-group leaves open: undeclared writers assigned to an agent that may open board tasks.
 	pm := uuid.New().String()
 	policies := map[string]domain.ToolPolicy{
 		pm: {AllowTools: []string{"create_board_task", "move_board_task", "list_board_tasks"}},
@@ -82,8 +75,7 @@ func TestValidateSingleTaskCreator_UndeclaredToolsResolveAgainstAgentPolicy(t *t
 }
 
 func TestValidateSingleTaskCreator_UndeclaredIsFineForAgentsThatCannotCreate(t *testing.T) {
-	// Only product-manager is seeded with create_board_task, so developer and QA
-	// subtasks must not be dragged into this rule just for omitting tool_names.
+	// Only product-manager is seeded with create_board_task; others must not trip this rule for omitting tool_names.
 	dev := uuid.New().String()
 	policies := map[string]domain.ToolPolicy{
 		dev: {AllowTools: []string{"claim_board_task", "move_board_task", "run_terminal", "grep_code"}},
@@ -105,9 +97,7 @@ func TestBuildPlannerSystemPrompt_StatesTheDisjointRule(t *testing.T) {
 }
 
 func TestValidateSingleTaskCreator_RejectsCreatorsChainedAcrossGroups(t *testing.T) {
-	// The plan that produced DE-1/DE-2/DE-3 for one request: a "decide where it
-	// goes" step, a "decide how it looks" step and the real work, each in its own
-	// group so validateDisjointWrites had no objection, each opening a task.
+	// Three creators, one per group, each opening a task: only the run-wide rule catches this.
 	tasks := []domain.PlannerTask{
 		{ID: "t1", ToolNames: []string{"create_board_task"}, ParallelGroup: 0},
 		{ID: "t2", ToolNames: []string{"create_board_task"}, ParallelGroup: 1, DependsOn: []string{"t1"}},
@@ -133,9 +123,7 @@ func TestValidateSingleTaskCreator_AllowsOneCreatorBesideMovers(t *testing.T) {
 }
 
 func TestValidatePlannerOutput_CountsCreatorsAcrossRepairPlans(t *testing.T) {
-	// The other route to a duplicate: the plan opened the right task, the
-	// verifier scored the run failed because the feature was not live yet, and
-	// the repair plan opened a second "technical analysis" task for it.
+	// The repair plan opens a second task for work the verifier scored failed.
 	agentID := uuid.New()
 	prior := []domain.PlannerTask{
 		{ID: "t1", Title: "Open the task", Description: "d", AgentID: agentID.String(), ToolNames: []string{"create_board_task"}},

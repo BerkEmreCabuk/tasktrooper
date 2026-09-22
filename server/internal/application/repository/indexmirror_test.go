@@ -23,10 +23,6 @@ func newMirrorService(t *testing.T, repo domain.Repository, git *fakeRestoreGit)
 	}
 }
 
-// The case the whole guard exists for: this replica never served the import (or
-// was restarted), so the checkout an index pass is about to walk is simply not
-// there. Walking it would succeed, find no files, and complete — so the clone
-// has to come back first.
 func TestIndexMirrorIsRestoredWhenMissing(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "app")
 	repo := domain.Repository{ID: uuid.New(), Name: "app", RootPath: root, RemoteURL: "https://github.com/acme/app.git"}
@@ -47,9 +43,6 @@ func TestIndexMirrorIsRestoredWhenMissing(t *testing.T) {
 	}
 }
 
-// A mirror that is already there is left alone. It is refreshed by
-// SyncDefaultBranch, not re-cloned: re-cloning a present checkout on every pass
-// would turn each push into a full fetch of the repository.
 func TestIndexMirrorPresentIsLeftAlone(t *testing.T) {
 	root := t.TempDir()
 	repo := domain.Repository{ID: uuid.New(), Name: "app", RootPath: root, RemoteURL: "https://github.com/acme/app.git"}
@@ -64,9 +57,6 @@ func TestIndexMirrorPresentIsLeftAlone(t *testing.T) {
 	}
 }
 
-// Nothing on record to restore from. The pass must stop with a sentence naming
-// that, because the alternative — indexing an empty directory and reporting
-// success — is the failure this whole path exists to prevent.
 func TestIndexMirrorWithoutRemoteFailsLoudly(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "app")
 	repo := domain.Repository{ID: uuid.New(), Name: "app", RootPath: root}
@@ -85,9 +75,6 @@ func TestIndexMirrorWithoutRemoteFailsLoudly(t *testing.T) {
 	}
 }
 
-// A folder that exists but is not a repository is somebody else's. It is not
-// emptied, not deleted and not indexed: whatever is in it, an index built from
-// it would describe something other than this repository.
 func TestIndexMirrorRefusesANonRepositoryFolder(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "notes.txt"), []byte("mine"), 0o600); err != nil {
@@ -112,7 +99,6 @@ func TestIndexMirrorRefusesANonRepositoryFolder(t *testing.T) {
 	}
 }
 
-// A clone that fails is a failed pass, not a pass over whatever is on disk.
 func TestIndexMirrorCloneFailureFailsThePass(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "app")
 	repo := domain.Repository{ID: uuid.New(), Name: "app", RootPath: root, RemoteURL: "https://github.com/acme/app.git"}

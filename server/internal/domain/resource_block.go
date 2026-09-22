@@ -2,7 +2,7 @@ package domain
 
 type ResourceBlock struct {
 	Resource string `json:"resource"`
-	Detail string `json:"detail,omitempty"`
+	Detail   string `json:"detail,omitempty"`
 }
 
 const ResourceMobileDevice = "mobile_device"

@@ -26,9 +26,7 @@ func (s *PromptsSuite) TestPrependWorkspacePrompt_TurkishLocale() {
 	s.Equal(prompt.LanguageInstruction("tr"), result[2].Content)
 	s.Equal(domain.RoleSystem, result[3].Role)
 	s.Equal(prompt.ToolSelectionGuidance(), result[3].Content)
-	// An agentless workspace chat never passes through BuildSystemPrompt, so the
-	// no-repeat contract has to be attached here as well — this is the path that
-	// runs raw shell commands.
+
 	s.Equal(domain.RoleSystem, result[4].Role)
 	s.Equal(prompt.RepeatCallGuidance(), result[4].Content)
 	s.Equal("merhaba", result[5].Content)

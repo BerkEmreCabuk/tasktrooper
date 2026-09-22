@@ -21,9 +21,6 @@ type LLMProviderStore interface {
 	SetEmbeddingModel(ctx context.Context, model string) error
 }
 
-// LLMEndpointStore persists named, multi-instance OpenAI-compatible endpoints.
-// The endpoint ID (uuid) is the provider ref used everywhere a native provider
-// type would be.
 type LLMEndpointStore interface {
 	List(ctx context.Context) ([]domain.LLMEndpoint, error)
 	Get(ctx context.Context, id string) (domain.LLMEndpoint, error)

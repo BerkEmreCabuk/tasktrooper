@@ -17,9 +17,7 @@ func implementTask(agentID uuid.UUID, id, title string) domain.PlannerTask {
 	}
 }
 
-// DE-1's plan ended with a step whose entire content was one move_board_task
-// call. It cost a model call, its own retries and its own card, nothing verified
-// it, and the board recorded no move — twice, because the repair plan copied it.
+// A move-only subtask costs a model call and its own card; nothing verified the board recorded the move.
 func TestValidatePlannerOutput_RejectsAMoveOnlySubtask(t *testing.T) {
 	agentID := uuid.New()
 	agents := []domain.Agent{{ID: agentID, Name: "frontend-developer", Enabled: true}}
@@ -41,8 +39,7 @@ func TestValidatePlannerOutput_RejectsAMoveOnlySubtask(t *testing.T) {
 	assert.Contains(t, err.Error(), "board bookkeeping")
 }
 
-// The single-subtask case is a real request ("move DE-1 to done"), and the ban
-// must not swallow it.
+// The single-subtask case is a real "move DE-1 to done" request; the ban must not swallow it.
 func TestValidatePlannerOutput_AllowsABookkeepingOnlyPlanOfOneTask(t *testing.T) {
 	agentID := uuid.New()
 	agents := []domain.Agent{{ID: agentID, Name: "product-manager", Enabled: true}}
@@ -59,8 +56,7 @@ func TestValidatePlannerOutput_AllowsABookkeepingOnlyPlanOfOneTask(t *testing.T)
 	assert.NoError(t, err, "a plan whose whole deliverable is the move is legitimate")
 }
 
-// A comment is not a column change: hand-off notes and stakeholder answers stay
-// plannable.
+// A comment is not a column change: hand-off notes and stakeholder answers stay plannable.
 func TestValidatePlannerOutput_AllowsACommentOnlySubtask(t *testing.T) {
 	agentID := uuid.New()
 	agents := []domain.Agent{{ID: agentID, Name: "product-manager", Enabled: true}}
@@ -81,9 +77,7 @@ func TestValidatePlannerOutput_AllowsACommentOnlySubtask(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-// The repair plan that produced DE-1's duplicate cards: same titles as the
-// subtasks that had already run, so the board showed each step twice — one copy
-// completed, one still working.
+// Same titles as subtasks that already ran produced duplicate cards, one per board column.
 func TestValidateRepairPlan_RejectsATitleTheRunAlreadyRan(t *testing.T) {
 	agentID := uuid.New()
 	agents := []domain.Agent{{ID: agentID, Name: "frontend-developer", Enabled: true}}
@@ -101,7 +95,6 @@ func TestValidateRepairPlan_RejectsATitleTheRunAlreadyRan(t *testing.T) {
 	assert.Contains(t, err.Error(), "repeats the title")
 }
 
-// Repair with its own scope is exactly what the replanner is for.
 func TestValidateRepairPlan_AcceptsADistinctRepairTitle(t *testing.T) {
 	agentID := uuid.New()
 	agents := []domain.Agent{{ID: agentID, Name: "frontend-developer", Enabled: true}}

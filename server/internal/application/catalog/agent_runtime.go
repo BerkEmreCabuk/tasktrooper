@@ -7,17 +7,13 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// LLMProviders is the slice of the provider store the reconciler reads: which
-// provider is active, and whether it is configured.
+// The provider store slice the reconciler reads: which provider is active and whether it is configured.
 type LLMProviders interface {
 	GetActiveProvider(ctx context.Context) (domain.LLMProviderType, error)
 	Get(ctx context.Context, providerType domain.LLMProviderType) (domain.LLMProviderConfig, error)
 }
 
-// cliPreference orders the agent CLIs when several are connected. Any CLI beats
-// an HTTP fallback; among CLIs, declaration order breaks a tie, so the first
-// host-executed provider in the registry is the default. A new CLI joins the
-// race by being declared — nothing here has to name it.
+// Declaration order breaks ties among connected CLIs; a new CLI joins by being declared.
 var cliPreference = func() []domain.LLMProviderType {
 	var out []domain.LLMProviderType
 	for _, def := range domain.AllLLMProviderDefinitions() {
@@ -28,17 +24,7 @@ var cliPreference = func() []domain.LLMProviderType {
 	return out
 }()
 
-// ReconcileAgentRuntimes points agents at a provider that can run them after the
-// set of available providers changes, and returns how many it moved.
-//
-// The target is the best connected CLI, or — when no CLI is connected — the
-// install's active HTTP provider if it is configured. An agent on a CLI that is
-// not connected moves to the target, and a catalog agent with no provider
-// adopts it. Agents on a configured HTTP provider, and custom agents left on
-// the default provider, are someone's choice and stay put. With nothing usable
-// available nothing moves: an agent still on a disconnected CLI fails with
-// "connect it", which says what to do, where the default provider would fail
-// with something vaguer.
+// Target is the best connected CLI, else the install's configured active HTTP provider; agents on disconnected CLIs move, custom agents on their default stay put, and nothing moves when nothing usable exists.
 func (s *Service) ReconcileAgentRuntimes(ctx context.Context, connected []domain.LLMProviderType) (int, error) {
 	target := preferredCLI(connected)
 	if target == "" {
@@ -85,10 +71,7 @@ func preferredCLI(connected []domain.LLMProviderType) domain.LLMProviderType {
 	return ""
 }
 
-// activeHTTPProvider is the install's active provider when it is an HTTP one
-// that has actually been configured, so moves onto it cannot land an agent on a
-// default endpoint nobody set up. A host-executed active provider is handled by
-// the CLI branch instead.
+// Only a configured HTTP provider counts; moves onto an unconfigured default endpoint would strand the agent.
 func (s *Service) activeHTTPProvider(ctx context.Context) domain.LLMProviderType {
 	if s.providers == nil {
 		return ""
@@ -104,8 +87,6 @@ func (s *Service) activeHTTPProvider(ctx context.Context) domain.LLMProviderType
 	return active
 }
 
-// SetLLMProviders lets the reconciler fall back to the install's active HTTP
-// provider. Optional: without it, only connected CLIs are considered.
 func (s *Service) SetLLMProviders(store LLMProviders) {
 	s.providers = store
 }

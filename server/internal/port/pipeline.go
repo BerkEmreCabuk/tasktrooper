@@ -13,43 +13,24 @@ type TaskPipelineStore interface {
 	Get(ctx context.Context, id uuid.UUID) (domain.TaskPipeline, error)
 	ListByTask(ctx context.Context, taskID uuid.UUID) ([]domain.TaskPipeline, error)
 	LatestByTask(ctx context.Context, taskID uuid.UUID) (domain.TaskPipeline, error)
-	// LatestStatusByTasks bulk-resolves the most recent pipeline status (and
-	// gate reason) per task in a single query — avoids N+1 queries when
-	// enriching task lists.
+	// Bulk-resolves the most recent pipeline status per task in one query —
+	// avoids N+1 when enriching task lists.
 	LatestStatusByTasks(ctx context.Context, taskIDs []uuid.UUID) (map[uuid.UUID]domain.TaskPipelineDigest, error)
-	// SupersedePending marks pending pipelines of the task as failed with note='superseded'.
 	SupersedePending(ctx context.Context, taskID uuid.UUID) error
-	// FailStaleRunning marks pending/running pipelines created before cutoff
-	// (filters on created_at, not started_at) as failed with note='interrupted'.
-	//
-	// cutoff is load-bearing and must never be 0 on a shared deployment. It was
-	// called with 0 from PipelineRunner.Start, meaning "fail every unfinished
-	// pipeline" — correct when a restart meant the only process had died,
-	// catastrophic when one replica restarting kills every pipeline the other
-	// replicas are actively polling.
+	// cutoff filters on created_at, not started_at, and must never be 0 on a
+	// shared deployment: 0 means "fail every unfinished pipeline", killing the
+	// pipelines other replicas are actively polling when one restart fails.
 	FailStaleRunning(ctx context.Context, cutoffMinutes int) error
-	// ClaimTerminal writes a pipeline's terminal status ONLY if it is still
-	// unfinished, and reports whether this caller was the one that wrote it.
-	//
-	// It is what makes finalize safe to reach twice. The in-process poll and
-	// the gate sweeper can both decide the same pipeline is done — on one
-	// replica the sweeper skipped anything in PipelineRunner.inflight, but that
-	// map only ever held THIS process's pipelines, so on a second replica it
-	// held nothing and the sweeper finalized a pipeline the first replica was
-	// mid-poll on: two QA dispatches, two column moves, two comments, for one
-	// commit. The status transition is the claim; only the winner may fire the
-	// side effects.
+	// Writes the terminal status ONLY if the pipeline is still unfinished; the
+	// status transition is the claim, and only the winner may fire side
+	// effects — what keeps finalize safe to reach twice.
 	ClaimTerminal(ctx context.Context, p domain.TaskPipeline) (domain.TaskPipeline, bool, error)
-	// ListUnfinished returns pipelines still pending/running, oldest first.
-	// This is what the reconciling sweep walks: a pipeline nobody is driving
-	// (its process died, its delivery was dropped) looks exactly like one that
-	// is simply still going, and the only way to tell them apart is to ask
-	// GitHub — which is what the sweeper does with each of these.
+	// A pipeline nobody is driving looks exactly like one still going; the
+	// only way to tell them apart is to ask GitHub, which the sweeper does.
 	ListUnfinished(ctx context.Context, limit int) ([]domain.TaskPipeline, error)
-	// ListUnfinishedByHeadSHA returns the repository's unfinished pipelines for
-	// one commit. A workflow_run webhook delivery carries a head SHA and
-	// nothing else that identifies a task, so this is the whole join from
-	// "GitHub finished a run" to "which card was waiting for it".
+	// A workflow_run webhook carries a head SHA and nothing else identifying a
+	// task, so this is the whole join from "GitHub finished a run" to "which
+	// card was waiting for it".
 	ListUnfinishedByHeadSHA(ctx context.Context, repositoryID uuid.UUID, headSHA string) ([]domain.TaskPipeline, error)
 	CreateJob(ctx context.Context, j domain.TaskPipelineJob) (domain.TaskPipelineJob, error)
 	UpdateJob(ctx context.Context, j domain.TaskPipelineJob) (domain.TaskPipelineJob, error)

@@ -21,8 +21,7 @@ func ValidatePlannerOutputForTest(output domain.PlannerOutput, agents []domain.A
 	return validatePlannerOutput(output, agents, skillOwnership, maxTasks, nil)
 }
 
-// ValidateRepairPlanForTest checks a repair plan the way the replanner does:
-// against the subtasks the original plan already contributed to the run.
+// Checks a repair plan the way the replanner does, against the run's existing subtasks.
 func ValidateRepairPlanForTest(output domain.PlannerOutput, agents []domain.Agent, skillOwnership map[string]map[string]bool, maxTasks int, priorTasks []domain.PlannerTask) error {
 	return validatePlannerOutput(output, agents, skillOwnership, maxTasks, priorTasks)
 }
@@ -57,7 +56,7 @@ func BuildTaskMessagesForTest(
 	return e.buildTaskMessages(context.Background(), uuid.Nil, history, tc, skills, stacks, agentRec, priorResults, mu, priorAttempt{Number: attempt, Err: lastErr}, subtaskWorkspace, lang)
 }
 
-// EnabledAgentSkillsForTest resolves a subtask's skill index the way runTask does.
+// Resolves a subtask's skill index the way runTask does.
 func EnabledAgentSkillsForTest(ctx context.Context, catalog port.CatalogStore, agentID uuid.UUID) ([]domain.Skill, error) {
 	e := &Executor{catalog: catalog}
 	return e.enabledAgentSkills(ctx, agentID)
@@ -95,8 +94,7 @@ func TruncateDependencyOutputForTest(content string, maxChars int) string {
 	return truncateDependencyOutput(content, maxChars)
 }
 
-// MarkTaskBlockedForTest records a subtask that stopped on a clarification the
-// way runTask does when the agent asks the stakeholder a question.
+// Records a subtask that stopped on a clarification the way runTask does.
 func MarkTaskBlockedForTest(ctx context.Context, catalog port.CatalogStore, planTask domain.PlanTask, req domain.ClarificationRequest, partial string) {
 	e := &Executor{catalog: catalog}
 	e.markTaskBlocked(ctx, planTask, req, partial)

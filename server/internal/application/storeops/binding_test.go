@@ -12,11 +12,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// A Play credential that cannot enumerate is an ANSWER, not a failure — the
-// Play Developer API has no listing endpoint at all. The sentinel has to
-// survive the service's own wrapping, because that is what lets the HTTP layer
-// answer 200 with listing_available:false instead of sending the operator to
-// retry something that will never start working.
 func TestListStoreAppsKeepsTheUnavailableAnswerMatchable(t *testing.T) {
 	svc, f := newReleaseTestService(t, "trooper")
 	f.play.ListAppsErr = port.ErrAppListingUnavailable
@@ -45,9 +40,6 @@ func TestListStoreAppsSortsTheListing(t *testing.T) {
 	}
 }
 
-// The binding is confirmed against the store before it is written: a row
-// pointing at an app the console cannot resolve is a row every later upload
-// fails on, and the refusal is the caller's own mistake rather than a 500.
 func TestLinkStoreAppRefusesAnAppTheStoreDoesNotHave(t *testing.T) {
 	svc, f := newReleaseTestService(t, "trooper")
 	f.setState(domain.MobileStoreStateOnboarding)
@@ -60,9 +52,6 @@ func TestLinkStoreAppRefusesAnAppTheStoreDoesNotHave(t *testing.T) {
 	}
 }
 
-// Linking states identity, nothing else. A link that moved the row forward
-// would let mobileStoreGate green-light a deploy against an app whose
-// onboarding nobody verified.
 func TestLinkStoreAppLeavesTheLifecycleAlone(t *testing.T) {
 	svc, f := newReleaseTestService(t, "trooper")
 	ctx := context.Background()
@@ -78,16 +67,12 @@ func TestLinkStoreAppLeavesTheLifecycleAlone(t *testing.T) {
 	if app.State != domain.MobileStoreStateOnboarding {
 		t.Fatalf("state = %q, want onboarding untouched", app.State)
 	}
-	// ASC's own answer wins: the resource id is what every later call is
-	// addressed with, and a stale one from a cached listing addresses the
-	// wrong app.
+
 	if app.StoreAppID != "asc-confirmed" || app.AppName != "Trooper" {
 		t.Fatalf("app = %+v, want the console's own app id and name", app)
 	}
 }
 
-// A live app cannot be re-pointed at a different identifier — the same rule
-// Onboard enforces, reached through the picker this time.
 func TestLinkStoreAppRefusesRepointingALiveApp(t *testing.T) {
 	svc, f := newReleaseTestService(t, "trooper")
 	f.play.AppExistsResult = true
@@ -107,8 +92,6 @@ func TestLinkStoreAppRejectsAnUnknownPlatform(t *testing.T) {
 	}
 }
 
-// Tracks reads live and leaves the cache behind, so the panel can render the
-// channels without waiting for a store round-trip next time.
 func TestTracksCachesWhatTheStoreReported(t *testing.T) {
 	svc, f := newReleaseTestService(t, "trooper")
 	ctx := context.Background()
@@ -132,9 +115,6 @@ func TestTracksCachesWhatTheStoreReported(t *testing.T) {
 	}
 }
 
-// Promotion is strictly one step forward. Jumping internal -> production would
-// skip the stage the middle channel exists to hold: Beta App Review on iOS,
-// the testing track on Play.
 func TestPromoteChannelRefusesASkippedChannel(t *testing.T) {
 	svc, f := newReleaseTestService(t, "trooper")
 	ctx := context.Background()
@@ -149,8 +129,6 @@ func TestPromoteChannelRefusesASkippedChannel(t *testing.T) {
 	}
 }
 
-// Backwards is not a promotion either, and neither is a channel that is not
-// one of the three.
 func TestPromoteChannelRefusesBackwardsAndUnknownChannels(t *testing.T) {
 	svc, f := newReleaseTestService(t, "trooper")
 	ctx := context.Background()
@@ -168,8 +146,6 @@ func TestPromoteChannelRefusesBackwardsAndUnknownChannels(t *testing.T) {
 	}
 }
 
-// Production is production-class: the same confirm brake the deploy and
-// submit actions carry. A promotion must not slip past it.
 func TestPromoteChannelToProductionRequiresTheConfirmPhrase(t *testing.T) {
 	svc, f := newReleaseTestService(t, "trooper")
 	ctx := context.Background()
@@ -188,9 +164,6 @@ func TestPromoteChannelToProductionRequiresTheConfirmPhrase(t *testing.T) {
 	}
 }
 
-// An app that has not gone live yet may still move between the test channels,
-// but production is out of reach until the first manual store submit landed —
-// the same gate SubmitIOS and PromoteAndroid apply.
 func TestPromoteChannelRefusesProductionForAnAppThatIsNotLive(t *testing.T) {
 	svc, f := newReleaseTestService(t, "trooper")
 	ctx := context.Background()
@@ -207,9 +180,6 @@ func TestPromoteChannelRefusesProductionForAnAppThatIsNotLive(t *testing.T) {
 	}
 }
 
-// Android speaks Play's track names, not the product's channel words, and
-// which of Play's two testing tracks `external` means is only knowable from
-// the Tracks read — the adapter records it in the channel's Audience.
 func TestPromoteChannelTranslatesAndroidTrackNames(t *testing.T) {
 	svc, f := newReleaseTestService(t, "trooper")
 	ctx := context.Background()
@@ -240,8 +210,6 @@ func TestPromoteChannelTranslatesAndroidTrackNames(t *testing.T) {
 	}
 }
 
-// iOS is addressed by its ASC resource id and speaks the channel words
-// directly — the adapter is what knows they mean TestFlight groups.
 func TestPromoteChannelUsesTheASCResourceIDForIOS(t *testing.T) {
 	svc, f := newReleaseTestService(t, "trooper")
 	if err := svc.PromoteChannel(context.Background(), f.repoID, domain.MobileStorePlatformIOS,

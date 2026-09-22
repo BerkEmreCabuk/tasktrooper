@@ -12,30 +12,20 @@ const (
 	PlanStatusRunning   = "running"
 	PlanStatusCompleted = "completed"
 	PlanStatusFailed    = "failed"
-	// PlanStatusIncomplete is a plan that ran all the way to the end and whose
-	// result was never confirmed — the verifier's last word was that the goal
-	// was not met, and no repair round fixed it. Nothing died: the subtasks ran,
-	// the output exists and is handed back to the stakeholder. "failed" is the
-	// other thing entirely — the process stopped (an executor error, a pod
-	// replaced under a live run, an exit that settled nothing) — and carrying
-	// both on one status is why a plan outcome could not be acted on: you could
-	// not tell a run that broke from one that merely went unverified. Same line
-	// the domain already draws one level down at TaskStatusIncomplete. Terminal
-	// like "completed" and "failed": nothing waits on it, and only a plan still
-	// claiming to run gets closed out by the reconciler.
+	// PlanStatusIncomplete is a plan that ran to the end without its result
+	// ever being confirmed: nothing died and the output is handed back, unlike
+	// "failed" (the process stopped). Terminal like "completed" — nothing waits
+	// on it, and only a run still claiming to run gets closed by the
+	// reconciler.
 	PlanStatusIncomplete = "incomplete"
 
 	TaskStatusPending   = "pending"
 	TaskStatusRunning   = "running"
 	TaskStatusCompleted = "completed"
 	TaskStatusFailed    = "failed"
-	// TaskStatusIncomplete is a subtask that returned output without doing what
-	// it was for — the canonical case is one whose whole tool ledger was "claim
-	// the task, move it to in_progress". The run does not stop for it: the result
-	// is kept and the plan carries on. Recording that as "failed" is what put a
-	// red cross on a subtask of a run that was still working, so it gets its own
-	// status. Like "failed" it is non-terminal for a resume, which re-runs
-	// anything that is not completed.
+	// TaskStatusIncomplete is a subtask that returned output without doing
+	// what it was for; the run does not stop, the result is kept, and like
+	// "failed" a resume re-runs it.
 	TaskStatusIncomplete = "incomplete"
 )
 
@@ -49,14 +39,12 @@ type Skill struct {
 	Content     string    `json:"content"`
 	Embedding   []float32 `json:"embedding,omitempty"`
 	Enabled     bool      `json:"enabled"`
-	// TechStackID is the one TechStack of this agent the skill belongs to.
-	// Nil is the general skill, which is a different thing from "unset" and is
-	// why the field is always rendered.
+	// TechStackID is the one TechStack of this agent the skill belongs to; nil
+	// is the general skill, a different thing from "unset", so it always
+	// renders.
 	TechStackID *uuid.UUID `json:"tech_stack_id"`
-	// CatalogSha is the content hash of the external-catalog revision this
-	// skill was last applied from. Empty means the skill never came from the
-	// external catalog (seeded, template copy, or user-written), so nothing
-	// reconciles it.
+	// CatalogSha is the content hash of the catalog revision this skill was
+	// last applied from; empty means it never came from the external catalog.
 	CatalogSha string    `json:"catalog_sha,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 }
@@ -69,45 +57,31 @@ type Agent struct {
 	SystemPrompt string          `json:"system_prompt"`
 	ProviderType LLMProviderType `json:"provider_type"`
 	Model        string          `json:"model"`
-	// ModelHeavy is an optional stronger model used for subtasks the planner
-	// rates as "hard". Empty = always use Model. The planner itself runs on the
-	// session's model and decides each subtask's difficulty; the executor then
-	// picks Model vs ModelHeavy.
+	// ModelHeavy is an optional stronger model for subtasks the planner rates
+	// as "hard"; empty = always Model.
 	ModelHeavy string `json:"model_heavy"`
-	// MaxTurns caps one claude_code CLI session for this agent. 0 = the
-	// executor's own default. It is per-agent because a session's cost grows
-	// with the SQUARE of its turns — every turn resends the whole transcript —
-	// so one global ceiling was priced for the most open-ended agent and
-	// charged to all of them. A reviewer that reads and reports has no use for
-	// the turns an implementer needs.
+	// MaxTurns caps one claude_code CLI session; 0 = executor default. Per-agent
+	// because a session's cost grows with the SQUARE of its turns — a global
+	// ceiling priced for the most open-ended agent was charged to all of them.
 	MaxTurns int `json:"max_turns"`
-	// Effort is the CLI's --effort level (low, medium, high, xhigh, max) for
-	// this agent. Empty = the CLI's own default. It is the most direct control
-	// over how much a session thinks, and the right level is a property of the
-	// work: a verification pass and a multi-file refactor do not want the same
-	// one.
+	// Effort is the CLI's --effort level (low…max); empty = CLI default. The
+	// right level is a property of the work, which is why it is per-agent.
 	Effort               string      `json:"effort"`
 	ToolPolicy           ToolPolicy  `json:"tool_policy"`
 	SkillIDs             []uuid.UUID `json:"skill_ids"`
 	Enabled              bool        `json:"enabled"`
 	SelfEvolutionEnabled bool        `json:"self_evolution_enabled"`
-	// CatalogSlug names this agent's definition in the external catalog
-	// (agents/<slug>). Empty means the agent does not come from there, so no
-	// sync touches it.
+	// CatalogSlug names this agent's definition in the external catalog; empty
+	// means no sync touches it.
 	CatalogSlug string `json:"catalog_slug,omitempty"`
-	// CatalogEtag is the hash of the catalog revision applied to this agent.
-	// The sync compares it against the repo's current hash to decide whether a
-	// definition changed, and only rewrites it when an update was actually
-	// applied.
+	// CatalogEtag is the hash of the catalog revision applied; the sync
+	// rewrites it only when an update was actually applied.
 	CatalogEtag string `json:"catalog_etag,omitempty"`
-	// AutoPullAgentUpdates lets the user say "I edited this agent, do not
-	// overwrite my prompt/roles/etc from the catalog" without losing the other
-	// skills the catalog still supplies.
+	// AutoPullAgentUpdates lets the user keep their own prompt/roles edits
+	// without losing the skills the catalog still supplies.
 	AutoPullAgentUpdates bool `json:"auto_pull_agent_updates"`
-	// KeepSkillsUpdated gates LLM-merged skill conflict resolution: when both
-	// the catalog and this agent's own copy changed, the two are merged (and a
-	// version logged) only while this is true.
-	KeepSkillsUpdated bool `json:"keep_skills_updated"`
+	// KeepSkillsUpdated gates LLM-merged skill conflict resolution.
+	KeepSkillsUpdated bool      `json:"keep_skills_updated"`
 	CreatedAt         time.Time `json:"created_at"`
 }
 
@@ -154,8 +128,8 @@ type PlanTask struct {
 	SkillIDs    []uuid.UUID `json:"skill_ids"`
 	ToolNames   []string    `json:"tool_names"`
 	DependsOn   []string    `json:"depends_on"`
-	// Difficulty is the planner's rating of this subtask ("easy"/"hard"); the
-	// executor uses it to pick the assigned agent's Model vs ModelHeavy.
+	// Difficulty is the planner's easy/hard rating; the executor uses it to
+	// pick the assigned agent's Model vs ModelHeavy.
 	Difficulty string    `json:"difficulty,omitempty"`
 	Status     string    `json:"status"`
 	Result     string    `json:"result,omitempty"`
@@ -204,18 +178,10 @@ type CreateAgentRequest struct {
 	ProviderType LLMProviderType `json:"provider_type"`
 	Model        string          `json:"model"`
 	ModelHeavy   string          `json:"model_heavy"`
-	// MaxTurns caps one claude_code CLI session for this agent. 0 = the
-	// executor's own default. It is per-agent because a session's cost grows
-	// with the SQUARE of its turns — every turn resends the whole transcript —
-	// so one global ceiling was priced for the most open-ended agent and
-	// charged to all of them. A reviewer that reads and reports has no use for
-	// the turns an implementer needs.
+	// MaxTurns caps one claude_code CLI session; 0 = executor default. Per-agent
+	// because a session's cost grows with the SQUARE of its turns.
 	MaxTurns int `json:"max_turns"`
-	// Effort is the CLI's --effort level (low, medium, high, xhigh, max) for
-	// this agent. Empty = the CLI's own default. It is the most direct control
-	// over how much a session thinks, and the right level is a property of the
-	// work: a verification pass and a multi-file refactor do not want the same
-	// one.
+	// Effort is the CLI's --effort level (low…max); empty = CLI default.
 	Effort               string     `json:"effort"`
 	ToolPolicy           ToolPolicy `json:"tool_policy"`
 	Enabled              bool       `json:"enabled"`
@@ -230,26 +196,17 @@ type UpdateAgentRequest struct {
 	ProviderType LLMProviderType `json:"provider_type"`
 	Model        string          `json:"model"`
 	ModelHeavy   string          `json:"model_heavy"`
-	// MaxTurns caps one claude_code CLI session for this agent. 0 = the
-	// executor's own default. It is per-agent because a session's cost grows
-	// with the SQUARE of its turns — every turn resends the whole transcript —
-	// so one global ceiling was priced for the most open-ended agent and
-	// charged to all of them. A reviewer that reads and reports has no use for
-	// the turns an implementer needs.
+	// MaxTurns caps one claude_code CLI session; 0 = executor default. Per-agent
+	// because a session's cost grows with the SQUARE of its turns.
 	MaxTurns int `json:"max_turns"`
-	// Effort is the CLI's --effort level (low, medium, high, xhigh, max) for
-	// this agent. Empty = the CLI's own default. It is the most direct control
-	// over how much a session thinks, and the right level is a property of the
-	// work: a verification pass and a multi-file refactor do not want the same
-	// one.
+	// Effort is the CLI's --effort level (low…max); empty = CLI default.
 	Effort               string     `json:"effort"`
 	ToolPolicy           ToolPolicy `json:"tool_policy"`
 	Enabled              bool       `json:"enabled"`
 	SelfEvolutionEnabled bool       `json:"self_evolution_enabled"`
-	// AutoPullAgentUpdates / KeepSkillsUpdated are pointers: nil keeps the
-	// current value, so a PUT from a client that predates the toggle (or does
-	// not send it) cannot silently switch a synced agent's sync off. CatalogSlug/
-	// CatalogEtag are not writable here at all — the catalog sync owns them.
+	// Pointers so a PUT from a client that omits them cannot silently switch a
+	// synced agent's sync off. CatalogSlug/CatalogEtag are not writable here at
+	// all — the catalog sync owns them.
 	AutoPullAgentUpdates *bool `json:"auto_pull_agent_updates"`
 	KeepSkillsUpdated    *bool `json:"keep_skills_updated"`
 }
@@ -277,8 +234,8 @@ type PlannerTask struct {
 	ToolNames    []string `json:"tool_names"`
 	SubtaskRules []string `json:"subtask_rules"`
 	DependsOn    []string `json:"depends_on"`
-	// Difficulty ("easy"/"hard") drives per-subtask model selection: the
-	// executor runs "hard" subtasks on the assigned agent's ModelHeavy.
+	// Difficulty ("easy"/"hard") drives per-subtask model selection: hard runs
+	// on the assigned agent's ModelHeavy.
 	Difficulty    string `json:"difficulty"`
 	ParallelGroup int    `json:"parallel_group"`
 }
@@ -297,8 +254,8 @@ const (
 	SubtaskHistoryModeFull     = "full"
 )
 
-// Subtask difficulty ratings emitted by the planner and consumed by the
-// executor to pick between an agent's default Model and its ModelHeavy.
+// Subtask difficulty ratings emitted by the planner, consumed by the executor
+// to pick between an agent's Model and its ModelHeavy.
 const (
 	TaskDifficultyEasy = "easy"
 	TaskDifficultyHard = "hard"

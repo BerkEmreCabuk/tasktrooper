@@ -7,10 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The automation set is DEFERRED, not deleted: the QA agent keeps owning every
-// one of those skills and rules, and none of them reaches its prompt — skill
-// loading injects enabled entries only. Deleting them instead would have made
-// the next iteration a restoration job.
 func TestQAAutomationSetIsParkedNotRemoved(t *testing.T) {
 	catalog := repoCatalogAgents(t)
 	qa, ok := catalog["qa-agent"]
@@ -44,7 +40,6 @@ func TestQAAutomationSetIsParkedNotRemoved(t *testing.T) {
 	}
 	assert.Equal(t, len(parkedRules), rulesSeen)
 
-	// The manual round is what stays on, for all three task kinds.
 	for _, name := range []string{"backend-manual-testing", "frontend-manual-testing", "mobile-manual-testing"} {
 		assert.True(t, byName[name], "%s must still be owned by the role", name)
 	}

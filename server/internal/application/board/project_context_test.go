@@ -7,9 +7,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// TestPrependProjectContext pins the run-context injection: description and
-// profile share one system message, the profile rides under its header and is
-// capped at maxInjectedProfileChars, and an empty pair injects nothing.
 func TestPrependProjectContext(t *testing.T) {
 	history := []domain.Message{{Role: domain.RoleUser, Content: "task"}}
 

@@ -11,8 +11,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// tree describes a repository layout as relative path -> file content. A path
-// ending in "/" is created as a directory.
 type tree map[string]string
 
 func materialise(t *testing.T, layout tree) string {

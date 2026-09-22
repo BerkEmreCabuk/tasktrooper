@@ -1,6 +1,3 @@
-// Package ci turns parsed GitHub Actions workflow jobs into per-category
-// pipeline mapping suggestions, using a type-aware keyword set (e.g. a mobile
-// repo never auto-picks a docker build).
 package ci
 
 import (
@@ -10,40 +7,27 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// JobRef is one workflow job (neutral input, decoupled from the github adapter).
 type JobRef struct {
 	Key          string `json:"key"`
 	Name         string `json:"name"`
 	WorkflowFile string `json:"workflow_file"`
 }
 
-// CategorySuggestion is the resolved state of one (sub-repo, category) slot for
-// the settings UI: an auto-pick when exactly one candidate matched, an
-// ambiguity flag when 2+ matched, and the full candidate list for manual
-// selection.
 type CategorySuggestion struct {
-	// SubProjectPath identifies which sub-project this slot is for ("" = the
-	// repository itself). SubRepoKind is descriptive (which kind, for the
-	// keyword set) — SubProjectPath is the identity that keeps two
-	// same-kind sub-projects from colliding on one slot.
 	SubProjectPath string      `json:"sub_project_path,omitempty"`
 	SubRepoKind    string      `json:"sub_repo_kind"`
 	Category       string      `json:"category"`
 	TargetKind     string      `json:"target_kind"`
-	Auto           string      `json:"auto"`      // auto-detected target_ref, "" if 0 or 2+ matches
-	Ambiguous      bool        `json:"ambiguous"` // 2+ matched → user must pick
+	Auto           string      `json:"auto"`
+	Ambiguous      bool        `json:"ambiguous"`
 	Candidates     []Candidate `json:"candidates"`
 }
 
-// Candidate is one selectable target (a job name, or a workflow file).
 type Candidate struct {
 	Ref          string `json:"ref"`
 	WorkflowFile string `json:"workflow_file,omitempty"`
 }
 
-// ConfigView is the settings payload for a repo's pipeline configuration: its
-// type fields, whether GitHub workflows were found, per-slot auto-detect
-// suggestions, and the currently saved mappings.
 type ConfigView struct {
 	Kind              string                         `json:"kind"`
 	SubRepoKinds      []string                       `json:"sub_repo_kinds"`
@@ -53,7 +37,6 @@ type ConfigView struct {
 	Saved             []domain.RepositoryPipelineJob `json:"saved"`
 }
 
-// jobCategories are the status-read categories (map to a run job).
 var jobCategories = []string{
 	domain.PipelineCategoryValidate,
 	domain.PipelineCategoryBuild,
@@ -61,8 +44,6 @@ var jobCategories = []string{
 	domain.PipelineCategoryMutationTest,
 }
 
-// workflowCategories map to a workflow file rather than a job: the deploy
-// categories are dispatched, pr_open is listed only (see the domain constant).
 var workflowCategories = []string{
 	domain.PipelineCategoryPROpen,
 	domain.PipelineCategoryStageDeploy,
@@ -70,12 +51,8 @@ var workflowCategories = []string{
 	domain.PipelineCategoryProdDeploy,
 }
 
-// keywords[category][kind] lists substrings that mark a job as that category
-// for that repo kind. Deploy keywords are kind-independent.
 var keywords = map[string]map[string][]string{
-	// "validate" leads every list: a job named after the category itself is the
-	// convention these repos now follow, and it must win over a tool name that
-	// happens to appear in a longer job title.
+
 	domain.PipelineCategoryValidate: {
 		domain.RepoKindBackend:  {"validate", "lint", "vet", "staticcheck"},
 		domain.RepoKindFrontend: {"validate", "lint", "tsc", "typecheck", "type-check"},
@@ -94,9 +71,7 @@ var keywords = map[string]map[string][]string{
 		domain.RepoKindMobile:   {"test"},
 		domain.RepoKindWorker:   {"test"},
 	},
-	// Mutation runners are named after the tool as often as after the
-	// technique, so match both. Kind-independent in practice, but the map is
-	// keyed by kind like the rest.
+
 	domain.PipelineCategoryMutationTest: {
 		domain.RepoKindBackend:  mutationKeywords,
 		domain.RepoKindFrontend: mutationKeywords,
@@ -107,15 +82,11 @@ var keywords = map[string]map[string][]string{
 
 var mutationKeywords = []string{"mutation", "mutant", "gremlins", "stryker", "mutmut", "pitest"}
 
-// excludes[category][kind] rules out candidates even if a keyword matched — e.g.
-// a mobile build must never auto-pick a docker job.
 var excludes = map[string]map[string][]string{
 	domain.PipelineCategoryBuild: {
 		domain.RepoKindMobile: {"docker"},
 	},
-	// "mutation test" contains "test": without this the unit-test slot would
-	// also match the mutation job, turning both into 2-candidate ambiguities
-	// that force a manual pick on every repo.
+
 	domain.PipelineCategoryTest: {
 		domain.RepoKindBackend:  mutationKeywords,
 		domain.RepoKindFrontend: mutationKeywords,
@@ -131,18 +102,10 @@ var workflowKeywords = map[string][]string{
 	domain.PipelineCategoryProdDeploy:    {"prod", "production", "release"},
 }
 
-// workflowExcludes rules a workflow out of a category even if a keyword
-// matched — the prod keyword "prod" is a substring of "preprod", so a preprod
-// workflow must not also auto-pick the prod slot.
 var workflowExcludes = map[string][]string{
 	domain.PipelineCategoryProdDeploy: {"preprod", "pre-prod"},
 }
 
-// Suggest builds one CategorySuggestion per (sub-project, category).
-// subProjects is nil/empty for single-kind repos (yields a single ""
-// sub-project group whose keywords come from repoKind); for a monorepo it
-// iterates the given sub-projects, one group per PATH (not per kind, so two
-// sub-projects sharing a kind each get their own slots).
 func Suggest(repoKind string, subProjects []domain.RepoSubProject, jobs []JobRef) []CategorySuggestion {
 	groups := groupSubProjects(repoKind, subProjects)
 	workflows := distinctWorkflows(jobs)
@@ -160,9 +123,9 @@ func Suggest(repoKind string, subProjects []domain.RepoSubProject, jobs []JobRef
 }
 
 type kindGroup struct {
-	subProjectPath string // "" for the repository itself
-	subRepoKind    string // "" for single-kind repos
-	keywordKind    string // which keyword set to use
+	subProjectPath string
+	subRepoKind    string
+	keywordKind    string
 }
 
 func groupSubProjects(repoKind string, subProjects []domain.RepoSubProject) []kindGroup {
@@ -207,7 +170,7 @@ func suggestWorkflowCategory(g kindGroup, category string, jobs []JobRef, workfl
 	for _, w := range workflows {
 		hay := strings.ToLower(w.Ref)
 		if containsAny(hay, exc) {
-			continue // e.g. a preprod workflow must not auto-pick the prod slot ("prod" ⊂ "preprod")
+			continue
 		}
 		if containsAny(hay, kws) && !seen[w.Ref] {
 			seen[w.Ref] = true
@@ -227,7 +190,7 @@ func finalize(g kindGroup, category, targetKind string, matched []Candidate) Cat
 	}
 	switch len(matched) {
 	case 0:
-		// leave unset — category is skipped by the pipeline
+
 	case 1:
 		s.Auto = matched[0].Ref
 	default:
@@ -250,12 +213,6 @@ func distinctWorkflows(jobs []JobRef) []Candidate {
 	return out
 }
 
-// isReusableCall reports whether a job name is GitHub's composite name for a
-// job reached through `uses: ./.github/workflows/x.yml` — "caller / callee".
-// Those are the SAME jobs the called workflow already reported, so counting
-// them would turn every category into a 2-candidate ambiguity and force a
-// manual pick on repos whose mapping is otherwise unambiguous. A plain job name
-// cannot contain " / ": GitHub reserves the separator for this.
 func isReusableCall(name string) bool {
 	return strings.Contains(name, " / ")
 }

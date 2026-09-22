@@ -13,9 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// stubSessionQuotaTaker stands in for the store's one atomic
-// claim-and-unpark statement — SessionQuotaSweeper's twin of
-// board.stubQuotaTaker.
 type stubSessionQuotaTaker struct {
 	pending []domain.PendingSessionTurn
 	calls   int
@@ -37,10 +34,6 @@ func (s *stubSessionQuotaTaker) TakePendingSessionTurn(_ context.Context, now ti
 	return next, true, nil
 }
 
-// erroringSessionStore fails Get, which is as far as resumeParkedTurn needs
-// to go for these tests: they are about the sweep LOOP's claim/cap/pass
-// behaviour, not about a resumed run's outcome (covered separately by
-// TestParkTurnOnQuota* and by SendMessage's own, already-passing tests).
 type erroringSessionStore struct {
 	port.SessionStore
 }

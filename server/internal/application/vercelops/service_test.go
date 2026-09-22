@@ -15,10 +15,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// --- fakes ------------------------------------------------------------------
-
 type fakeLinks struct {
-	rows      map[string]domain.VercelProjectLink // sub-project path → link
+	rows      map[string]domain.VercelProjectLink
 	saveErr   error
 	getErr    error
 	lastSaved domain.VercelProjectLink
@@ -76,15 +74,13 @@ func (f *fakeCreds) DeleteVercelToken(context.Context) error         { return ni
 func (f *fakeCreds) VercelTeam(context.Context) (string, error)      { return f.team, nil }
 func (f *fakeCreds) SetVercelTeam(_ context.Context, s string) error { f.team = s; return nil }
 
-// fakeAPI answers per scope, so a test can make one team refuse the token and
-// another answer normally.
 type fakeAPI struct {
 	user      domain.VercelUser
 	userErr   error
 	teams     []domain.VercelTeam
 	teamsErr  error
-	projects  map[string][]domain.VercelProject // teamID → projects
-	scopeErr  map[string]error                  // teamID → error
+	projects  map[string][]domain.VercelProject
+	scopeErr  map[string]error
 	byScope   map[string]map[string]domain.VercelProject
 	projectHi int
 }
@@ -141,15 +137,10 @@ func unauthorized() error {
 	return &vercelapi.APIError{Status: http.StatusForbidden, Message: "not authorized"}
 }
 
-// --- listing: not connected vs. connected-but-unlistable ---------------------
-
-// TestListProjectsReportsNotConnectedWhenNoTokenIsStored pins the first half of
-// the split the console depends on: with nothing in the vault the answer is
-// ErrNotConnected, never a listing failure and never a generic error.
 func TestListProjectsReportsNotConnectedWhenNoTokenIsStored(t *testing.T) {
 	svc := vercelops.NewService(vercelops.Deps{
 		Links: newFakeLinks(),
-		Creds: &fakeCreds{token: "   "}, // whitespace is still "no token"
+		Creds: &fakeCreds{token: "   "},
 		API:   &fakeAPI{},
 	})
 
@@ -162,10 +153,6 @@ func TestListProjectsReportsNotConnectedWhenNoTokenIsStored(t *testing.T) {
 	}
 }
 
-// TestListProjectsReportsListingUnavailableWhenVercelRefusesTheToken is the
-// other half: a token IS stored, and every scope refuses it. That is a stable
-// property of the token, not a server fault, so it must be its own sentinel
-// rather than an error the HTTP layer would turn into a 500.
 func TestListProjectsReportsListingUnavailableWhenVercelRefusesTheToken(t *testing.T) {
 	api := &fakeAPI{
 		scopeErr: map[string]error{"": unauthorized()},
@@ -184,9 +171,6 @@ func TestListProjectsReportsListingUnavailableWhenVercelRefusesTheToken(t *testi
 	}
 }
 
-// TestListProjectsKeepsAnInfrastructureFailureAsAPlainError guards the third
-// case the two sentinels must not swallow: Vercel is reachable but broken. A
-// 500 there is correct, and retrying may work, so it must be neither sentinel.
 func TestListProjectsKeepsAnInfrastructureFailureAsAPlainError(t *testing.T) {
 	boom := &vercelapi.APIError{Status: http.StatusBadGateway, Message: "upstream"}
 	api := &fakeAPI{scopeErr: map[string]error{"": boom}, teamsErr: boom}
@@ -203,10 +187,6 @@ func TestListProjectsKeepsAnInfrastructureFailureAsAPlainError(t *testing.T) {
 	}
 }
 
-// TestListProjectsWalksEveryScopeAndStampsTheTeam proves the picker sees the
-// personal account AND each team, and that each project carries the scope it
-// was listed under — /v9/projects does not echo the team back, so a project
-// with a blank TeamID would be addressed against the wrong account next.
 func TestListProjectsWalksEveryScopeAndStampsTheTeam(t *testing.T) {
 	api := &fakeAPI{
 		teams: []domain.VercelTeam{{ID: "team_1", Slug: "acme"}},
@@ -241,8 +221,6 @@ func TestListProjectsWalksEveryScopeAndStampsTheTeam(t *testing.T) {
 	}
 }
 
-// TestListProjectsSurvivesOneUnreachableTeam: a token that can read three of
-// four scopes should still produce a picker for the three.
 func TestListProjectsSurvivesOneUnreachableTeam(t *testing.T) {
 	api := &fakeAPI{
 		teams:    []domain.VercelTeam{{ID: "team_ok", Slug: "ok"}, {ID: "team_bad", Slug: "bad"}},
@@ -262,8 +240,6 @@ func TestListProjectsSurvivesOneUnreachableTeam(t *testing.T) {
 	}
 }
 
-// TestListProjectsReportsAnEmptyAccountAsSuccess: no projects is an answer, not
-// a failure — the console must not send that operator to Settings.
 func TestListProjectsReportsAnEmptyAccountAsSuccess(t *testing.T) {
 	svc := vercelops.NewService(vercelops.Deps{
 		Links: newFakeLinks(), Creds: &fakeCreds{token: "tok"}, API: &fakeAPI{},
@@ -278,8 +254,6 @@ func TestListProjectsReportsAnEmptyAccountAsSuccess(t *testing.T) {
 	}
 }
 
-// --- linking ----------------------------------------------------------------
-
 func monorepo(paths ...string) domain.Repository {
 	repo := domain.Repository{ID: uuid.New(), Name: "monorepo", Kind: domain.RepoKindMonorepo}
 	for _, p := range paths {
@@ -288,9 +262,6 @@ func monorepo(paths ...string) domain.Repository {
 	return repo
 }
 
-// TestLinkProjectRefusesAProjectTheTokenCannotRead is the guard that keeps a
-// stale picker from writing a binding every later read fails on: the project
-// must resolve in some scope the token can act in, or nothing is stored.
 func TestLinkProjectRefusesAProjectTheTokenCannotRead(t *testing.T) {
 	links := newFakeLinks()
 	repo := monorepo("web")
@@ -311,8 +282,6 @@ func TestLinkProjectRefusesAProjectTheTokenCannotRead(t *testing.T) {
 	}
 }
 
-// TestLinkProjectStoresWhatVercelSaysNotWhatTheRequestClaimed: the picker sends
-// only an id, and every other recorded fact comes from the API answer.
 func TestLinkProjectStoresWhatVercelSaysNotWhatTheRequestClaimed(t *testing.T) {
 	links := newFakeLinks()
 	repo := monorepo("web")
@@ -346,8 +315,6 @@ func TestLinkProjectStoresWhatVercelSaysNotWhatTheRequestClaimed(t *testing.T) {
 	}
 }
 
-// TestLinkProjectRejectsASubProjectPathTheRepositoryDoesNotHave: a link on a
-// path nothing else knows about is a link no panel can ever find again.
 func TestLinkProjectRejectsASubProjectPathTheRepositoryDoesNotHave(t *testing.T) {
 	repo := monorepo("web")
 	api := &fakeAPI{byScope: map[string]map[string]domain.VercelProject{
@@ -367,8 +334,6 @@ func TestLinkProjectRejectsASubProjectPathTheRepositoryDoesNotHave(t *testing.T)
 	}
 }
 
-// TestLinkProjectRejectsABlankProjectID covers the other caller mistake, and
-// pins that it is refused BEFORE any Vercel call is made.
 func TestLinkProjectRejectsABlankProjectID(t *testing.T) {
 	repo := monorepo("web")
 	api := &fakeAPI{}
@@ -384,8 +349,6 @@ func TestLinkProjectRejectsABlankProjectID(t *testing.T) {
 	}
 }
 
-// TestLinkProjectBindsTheWholeRepositoryOnAnEmptyPath: "" is a real key, not a
-// missing one.
 func TestLinkProjectBindsTheWholeRepositoryOnAnEmptyPath(t *testing.T) {
 	links := newFakeLinks()
 	repo := domain.Repository{ID: uuid.New(), Name: "site", Kind: domain.RepoKindFrontend}
@@ -405,9 +368,6 @@ func TestLinkProjectBindsTheWholeRepositoryOnAnEmptyPath(t *testing.T) {
 	}
 }
 
-// TestLinkProjectReportsNotConnectedBeforeTouchingVercel: with no token the
-// answer is the connection sentinel, not "project unreachable" — those send
-// the operator to two different places.
 func TestLinkProjectReportsNotConnectedBeforeTouchingVercel(t *testing.T) {
 	repo := monorepo("web")
 	api := &fakeAPI{}
@@ -424,8 +384,6 @@ func TestLinkProjectReportsNotConnectedBeforeTouchingVercel(t *testing.T) {
 	}
 }
 
-// --- details ----------------------------------------------------------------
-
 func linkedService(t *testing.T, api *fakeAPI, deps *fakeDeployments, creds *fakeCreds) (*vercelops.Service, uuid.UUID) {
 	t.Helper()
 	links := newFakeLinks()
@@ -441,8 +399,6 @@ func linkedService(t *testing.T, api *fakeAPI, deps *fakeDeployments, creds *fak
 	return svc, repoID
 }
 
-// TestProjectDetailsReturnsTheLiveDeployment is the happy path: state, time,
-// commit and the production address all come back.
 func TestProjectDetailsReturnsTheLiveDeployment(t *testing.T) {
 	shipped := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
 	api := &fakeAPI{byScope: map[string]map[string]domain.VercelProject{
@@ -478,9 +434,6 @@ func TestProjectDetailsReturnsTheLiveDeployment(t *testing.T) {
 	}
 }
 
-// TestProjectDetailsSurvivesAVercelOutage is the partial-data guard: the link
-// row is durable and worth rendering, so a dead API becomes warnings and the
-// recorded values — never an error page and never a panic on a nil deployment.
 func TestProjectDetailsSurvivesAVercelOutage(t *testing.T) {
 	boom := &vercelapi.APIError{Status: http.StatusBadGateway, Message: "upstream"}
 	api := &fakeAPI{scopeErr: map[string]error{"team_1": boom}}
@@ -502,8 +455,6 @@ func TestProjectDetailsSurvivesAVercelOutage(t *testing.T) {
 	}
 }
 
-// TestProjectDetailsWithoutAConnectionStillRendersTheLink: disconnecting Vercel
-// must not turn every linked repository's panel into an error.
 func TestProjectDetailsWithoutAConnectionStillRendersTheLink(t *testing.T) {
 	svc, repoID := linkedService(t, &fakeAPI{}, &fakeDeployments{}, &fakeCreds{})
 
@@ -519,9 +470,6 @@ func TestProjectDetailsWithoutAConnectionStillRendersTheLink(t *testing.T) {
 	}
 }
 
-// TestProjectDetailsReportsTheLastFailedBuildBesideAGreenLatest is the reason
-// the two deployment fields are separate: a project that failed and was then
-// fixed still wants the failure visible.
 func TestProjectDetailsReportsTheLastFailedBuildBesideAGreenLatest(t *testing.T) {
 	api := &fakeAPI{byScope: map[string]map[string]domain.VercelProject{
 		"team_1": {"prj_1": {ID: "prj_1", Name: "acme-web"}},
@@ -550,9 +498,6 @@ func TestProjectDetailsReportsTheLastFailedBuildBesideAGreenLatest(t *testing.T)
 	}
 }
 
-// TestProjectDetailsFallsBackToPreviewDeployments: a project that has only ever
-// had preview builds still has a last deployment worth showing, and the row
-// carries its own Target so the caller can see it is not production.
 func TestProjectDetailsFallsBackToPreviewDeployments(t *testing.T) {
 	api := &fakeAPI{byScope: map[string]map[string]domain.VercelProject{
 		"team_1": {"prj_1": {ID: "prj_1", Name: "acme-web"}},
@@ -575,8 +520,6 @@ func TestProjectDetailsFallsBackToPreviewDeployments(t *testing.T) {
 	}
 }
 
-// TestProjectDetailsReportsAMissingLinkAsNotFound: the one case that IS an
-// error, so the HTTP layer can answer 404 instead of an empty 200.
 func TestProjectDetailsReportsAMissingLinkAsNotFound(t *testing.T) {
 	svc, repoID := linkedService(t, &fakeAPI{}, &fakeDeployments{}, &fakeCreds{token: "tok"})
 

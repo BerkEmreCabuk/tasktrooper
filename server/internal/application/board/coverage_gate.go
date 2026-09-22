@@ -235,10 +235,6 @@ func parseStrykerScore(_, out string) (float64, bool) {
 	return pct, err == nil
 }
 
-// coverageThreshold resolves the bar for one scope — a monorepo sub-project
-// may set its own, otherwise the repository's, otherwise the default. A repo
-// where the frontend has tests and the freshly-scaffolded worker does not
-// cannot be described by one number.
 func coverageThreshold(repo domain.Repository, subProjectPath string) float64 {
 	if gate := repo.EffectiveCoverageGate(subProjectPath); gate.Threshold > 0 {
 		return gate.Threshold
@@ -286,10 +282,6 @@ func overallCoverageNote(repo domain.Repository, subProjectPath string, percent 
 	return fmt.Sprintf("[coverage] overall %.1f%% (reported only — this repository sets no overall bar)", percent)
 }
 
-// runMutation reports the mutation score and, where the scope arms a bar,
-// whether the score cleared it. Like coverage it reports and does not hold:
-// mutation score moves with the assertions a task did not write, and stopping
-// work over it stops the work rather than raising the number.
 func runMutation(ctx context.Context, dir string, repo domain.Repository, subProjectPath string) string {
 	stage := detectMutation(dir)
 	if stage == nil {

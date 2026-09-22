@@ -6,30 +6,20 @@ import (
 )
 
 // Memory is what an agent still needs to know weeks from now, on a task nobody
-// has written yet. Runs kept filing something else into it: the state of the
-// card they were on — "T-28 PR #8 head b06f146 fixed the gap I flagged", "moved
-// code_review→ready_for_qa despite gh pr checks showing red". Every one of those
-// is true for about an hour and is already recorded where it belongs (the task's
-// comments and its event history), and because recall pulls a handful of
-// memories into every future run, they crowd out the facts that were worth
-// keeping — the same billing block written five times, each pinned to a
-// different card.
-//
-// The test applied here is anchoring, because it is the one an agent can act on
-// without judgement: a note that names a task key, a PR number, a commit SHA or
-// a column transition is about one card. The durable version of the same lesson
-// exists — it is that sentence with the card taken out ("this org's GitHub
-// Actions billing is blocked, so CI check runs fail in seconds with a billing
-// annotation; a human has to fix the billing, no code change helps") — and that
-// is what the agent is told to write instead.
+// has written yet. Runs kept filing the state of the card they were on into it,
+// and because recall pulls memories into every future run they crowded out the
+// facts worth keeping. The test applied here is anchoring, because it is the
+// one an agent can act on without judgement: a note that names a task key, a PR
+// number, a commit SHA or a column transition is about one card. The durable
+// version of the same lesson has the card taken out, and that is what the agent
+// is told to write instead.
 
 // A board key: T-28, B-3, DE-14. Standards and protocol names take the same
 // shape, so the ones that turn up in real engineering notes are excluded rather
 // than left to produce false rejections.
 var (
 	taskKeyPattern = regexp.MustCompile(`\b([A-Z]{1,4})-(\d{1,6})\b`)
-	// Only multi-letter standards names are excluded. Single letters are left
-	// in: the board's key prefix is per workspace, so "T-28" and "S-4" are both
+	// Only multi-letter standards names are excluded; "T-28" and "S-4" are
 	// plausible task keys and neither is a standard.
 	notTaskKeys = map[string]bool{
 		"UTF": true, "HTTP": true, "SHA": true, "ISO": true, "RFC": true, "MD": true,
@@ -50,8 +40,8 @@ var memoryDurabilityRules = []memoryDurabilityRule{
 		reason:  "it is pinned to one pull request",
 	},
 	{
-		// A commit SHA: hex, long enough not to be a word, and mixed enough not
-		// to be a plain number or a version.
+		// A commit SHA: hex, long enough not to be a word, mixed enough not to
+		// be a plain number or a version.
 		pattern: regexp.MustCompile(`\b(?:[0-9a-f]{7,40})\b`),
 		reason:  "it quotes a commit SHA",
 	},
@@ -72,8 +62,8 @@ var memoryDurabilityRules = []memoryDurabilityRule{
 	},
 }
 
-// mixedHex keeps the SHA rule from firing on a plain number or a word made of
-// hex letters ("deadbeef" is a SHA-shaped joke; "1234567" is a number).
+// memoryLooksLikeSHA keeps the SHA rule from firing on a plain number or a word
+// made of hex letters ("deadbeef" is a SHA-shaped joke; "1234567" is a number).
 func memoryLooksLikeSHA(text string) bool {
 	for _, match := range regexp.MustCompile(`\b[0-9a-f]{7,40}\b`).FindAllString(text, -1) {
 		hasDigit, hasLetter := false, false
@@ -100,8 +90,8 @@ func memoryMentionsTaskKey(text string) bool {
 	return false
 }
 
-// runLogReason reports why this content is a run log rather than a memory, or
-// "" when it is worth keeping.
+// MemoryRunLogReason reports why this content is a run log rather than a
+// memory, or "" when it is worth keeping.
 func MemoryRunLogReason(content string) string {
 	text := strings.TrimSpace(content)
 	if text == "" {
@@ -131,9 +121,9 @@ const MemoryRunLogHint = "Memory is for what a DIFFERENT task will need, months 
 	"What happened on the card you are working — what you verified, what you moved, which commit fixed it — belongs in that task's comments (add_task_comment), where it is already recorded and where people look for it. " +
 	"If there is a durable fact underneath, save that instead, with the card taken out of it: not \"T-28's checks failed on billing\" but \"this org's GitHub Actions billing is blocked: check runs fail within seconds with a billing annotation and only a human can clear it\"."
 
-// memoryTokenSet reduces a memory to the words that carry its meaning, so two notes
-// that say the same thing in a slightly different order are recognisably the
-// same note.
+// memoryTokenSet reduces a memory to the words that carry its meaning, so two
+// notes that say the same thing in a slightly different order are recognisably
+// the same note.
 func memoryTokenSet(text string) map[string]struct{} {
 	fields := strings.FieldsFunc(strings.ToLower(text), func(r rune) bool {
 		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9')
@@ -148,8 +138,8 @@ func memoryTokenSet(text string) map[string]struct{} {
 	return set
 }
 
-// similarity is the Jaccard overlap of two memories' word sets: 1 means the same
-// words, 0 means nothing in common.
+// memorySimilarity is the Jaccard overlap of two memories' word sets: 1 means
+// the same words, 0 means nothing in common.
 func memorySimilarity(a, b string) float64 {
 	setA, setB := memoryTokenSet(a), memoryTokenSet(b)
 	if len(setA) == 0 || len(setB) == 0 {
@@ -168,11 +158,13 @@ func memorySimilarity(a, b string) float64 {
 	return float64(shared) / float64(union)
 }
 
-// memoryDuplicateThreshold is deliberately high: refusing a save is only correct when
-// the memory really is already there. A related-but-different lesson must go in.
+// memoryDuplicateThreshold is deliberately high: refusing a save is only
+// correct when the memory really is already there; a related-but-different
+// lesson must go in.
 const memoryDuplicateThreshold = 0.6
 
-// duplicateOf returns the existing memory this content merely repeats, if any.
+// MemoryDuplicateOf returns the existing memory this content merely repeats, if
+// any.
 func MemoryDuplicateOf(existing []AgentMemory, content string) (AgentMemory, bool) {
 	best := AgentMemory{}
 	bestScore := 0.0

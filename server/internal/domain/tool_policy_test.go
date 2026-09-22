@@ -13,13 +13,9 @@ func TestMissingAnalizTools_UnrestrictedPolicyHasNoneMissing(t *testing.T) {
 	assert.Empty(t, got)
 }
 
-// Shaped like the developer role policy (roleShellTools + roleWebTools +
-// roleCodeTools + roleBrowserTools + roleBoardReadTools + roleBoardClaimTools
-// + roleMemoryTools + roleSkillTools + roleProfileTools + rolePRReadTools +
-// rolePRReplyTools + rolePRCommitTools), minus roleBoardCreateTools — the
-// gap that let a PM assign an analiz task to backend-developer and leave it
-// stuck with no way to open the implementation tasks the approval decomposes
-// into.
+// Developer-shaped policy, minus roleBoardCreateTools — the gap that left an
+// analiz task stuck with no way to open the implementation tasks the approval
+// decomposes into.
 func TestMissingAnalizTools_DeveloperShapedPolicyIsMissingBoardCreateTools(t *testing.T) {
 	p := domain.ToolPolicy{AllowTools: []string{
 		"run_terminal", "write_file", "edit_file", "edit_lines", "delete_file", "move_file", "download_file",
@@ -39,12 +35,8 @@ func TestMissingAnalizTools_DeveloperShapedPolicyIsMissingBoardCreateTools(t *te
 	assert.ElementsMatch(t, []string{"add_task_document", "update_task_document", "create_board_task"}, got)
 }
 
-// Shaped like the architect role policy (roleShellTools + roleWebTools +
-// roleCodeTools + roleBoardReadTools + roleBoardCreateTools +
-// roleBoardClaimTools + get_pipeline_status + rolePRReadTools +
-// rolePRReplyTools + roleMemoryTools + roleSkillTools + roleProfileTools):
-// the architect already holds every required tool, so routing an analiz task
-// to it (the default) never asks for a tool-grant confirmation.
+// Architect-shaped policy already holds every required tool, so routing an
+// analiz task to it (the default) never asks for a tool-grant confirmation.
 func TestMissingAnalizTools_ArchitectShapedPolicyHasNoneMissing(t *testing.T) {
 	p := domain.ToolPolicy{AllowTools: []string{
 		"run_terminal", "write_file", "edit_file", "edit_lines", "delete_file", "move_file", "download_file",
@@ -90,10 +82,7 @@ func TestIntersectToolPolicy_CannotWidenBase(t *testing.T) {
 	assert.Empty(t, got.AllowTools)
 }
 
-// The failure this function exists for: a subtask told to change a website
-// declared only board tools, the executor intersected its agent down to them,
-// and the run asked the human where the files were because it had no way to
-// look. A short declaration must never cost an agent its eyes.
+// A short declaration must never cost an agent its eyes.
 func TestRestrictToPlannedTools_BoardOnlyDeclarationKeepsCodeTools(t *testing.T) {
 	base := domain.ToolPolicy{AllowTools: []string{
 		"run_terminal", "codebase_search", "grep_code", "get_repo_tree",
@@ -110,8 +99,8 @@ func TestRestrictToPlannedTools_BoardOnlyDeclarationKeepsCodeTools(t *testing.T)
 	assert.Contains(t, got.AllowTools, domain.AskUserToolName)
 }
 
-// The one thing the declaration still decides: an undeclared board write is
-// withheld, so two concurrent subtasks cannot open the same record.
+// Undeclared board writes stay withheld, so two concurrent subtasks cannot open
+// the same record.
 func TestRestrictToPlannedTools_WithholdsUndeclaredBoardWrites(t *testing.T) {
 	base := domain.ToolPolicy{AllowTools: []string{
 		"grep_code", "create_board_task", "move_board_task", "update_board_task", "add_task_comment",
@@ -166,13 +155,9 @@ func TestIntersectMCPServers_NarrowsOnly(t *testing.T) {
 		"an unrestricted base accepts the requested set")
 }
 
-// A role agent's persisted allowlist is written once, when the agent row is
-// created, and never reconciled afterwards — so an install seeded before the
-// code tools were added to a role keeps a policy without them. The uplift is
-// the runtime net for exactly that, but it skipped every code tool as soon as
-// the agent held any board tool: the system-architect dispatched into
-// code_review had no way to read the diff it was there to review, and said so
-// in a task comment instead ("I don't have the necessary tools").
+// A role agent's persisted allowlist is written once at creation and never
+// reconciled, so an install seeded before the code tools were added to a role
+// keeps a policy without them. The uplift is the runtime net for exactly that.
 func TestUpliftWorkspaceTools_BoardScopedAgentKeepsCodeExplorationTools(t *testing.T) {
 	stale := domain.ToolPolicy{AllowTools: []string{
 		"list_board_tasks", "move_board_task", "add_task_comment",
@@ -185,9 +170,9 @@ func TestUpliftWorkspaceTools_BoardScopedAgentKeepsCodeExplorationTools(t *testi
 	}
 }
 
-// Read-only is the whole justification for granting these without the operator
-// asking. A board-scoped agent still does not get the shell or filesystem
-// writes its policy withholds.
+// Read-only is the whole justification for granting these without asking: a
+// board-scoped agent still does not get the shell or filesystem writes its
+// policy withholds.
 func TestUpliftWorkspaceTools_BoardScopedAgentGetsNoWriteTools(t *testing.T) {
 	stale := domain.ToolPolicy{AllowTools: []string{"list_board_tasks", "add_task_comment"}}
 
@@ -195,16 +180,16 @@ func TestUpliftWorkspaceTools_BoardScopedAgentGetsNoWriteTools(t *testing.T) {
 
 	assert.NotContains(t, got.AllowTools, "run_terminal")
 	assert.NotContains(t, got.AllowTools, "mcp_filesystem_*")
-	// The file writers ride with the shell, not with the read-only uplift: an
-	// agent kept away from `sed -i` must not get edit_file through the back door.
+	// The file writers ride with the shell, not with the read-only uplift, so
+	// an agent kept away from `sed -i` must not get edit_file through the back
+	// door.
 	for _, tool := range domain.WorkspaceWriteTools {
 		assert.NotContains(t, got.AllowTools, tool)
 	}
 }
 
-// An agent that holds the shell already writes files; the file tools write the
-// same things, confined to the workspace, and reading a result that says what
-// changed is what keeps a run from grepping to check.
+// An agent that holds the shell already writes files; reading a result that
+// says what changed is what keeps a run from grepping to check.
 func TestUpliftWorkspaceTools_ShellAgentGetsTheFileWriters(t *testing.T) {
 	policy := domain.ToolPolicy{AllowTools: []string{"run_terminal", "grep_code"}}
 
@@ -216,7 +201,6 @@ func TestUpliftWorkspaceTools_ShellAgentGetsTheFileWriters(t *testing.T) {
 	}
 }
 
-// An agent with no board tools keeps the full workspace uplift, shell included.
 func TestUpliftWorkspaceTools_NonBoardAgentStillGetsShell(t *testing.T) {
 	got := domain.UpliftWorkspaceTools(domain.ToolPolicy{AllowTools: []string{"web_search"}})
 
@@ -224,8 +208,8 @@ func TestUpliftWorkspaceTools_NonBoardAgentStillGetsShell(t *testing.T) {
 	assert.Contains(t, got.AllowTools, "codebase_search")
 }
 
-// An unrestricted policy (no allowlist at all) already permits everything;
-// materialising a list would narrow it.
+// An unrestricted policy already permits everything; materialising a list would
+// narrow it.
 func TestUpliftWorkspaceTools_UnrestrictedPolicyUntouched(t *testing.T) {
 	assert.Empty(t, domain.UpliftWorkspaceTools(domain.ToolPolicy{}).AllowTools)
 }
@@ -270,9 +254,7 @@ func fullCodeToolsPolicy() domain.ToolPolicy {
 }
 
 // wfStage looks up one stage of the named workflowtest task type — a real
-// migration-143 fixture rather than a hand-built WorkflowStage, so these
-// tests exercise RestrictToolsForStage against the exact behaviour
-// combinations migration 143 seeds.
+// migration-143 fixture rather than a hand-built WorkflowStage.
 func wfStage(t *testing.T, taskType domain.TaskType, col domain.TaskColumn) (domain.WorkflowStage, domain.TaskTypeDef) {
 	t.Helper()
 	wf, ok := workflowtest.Default().Workflows[taskType]
@@ -286,8 +268,7 @@ func wfStage(t *testing.T, taskType domain.TaskType, col domain.TaskColumn) (dom
 	return stage, wf.Type
 }
 
-// RestrictToolsForStage replaces the three functions above end to end: the
-// architect held the file writers for its other columns, and on an analiz
+// The architect held the file writers for its other columns, and on an analiz
 // task (no_workspace_writes, a TYPE behaviour) it used them on a run whose
 // deliverable was never committed.
 func TestRestrictToolsForStage_TypeNoWorkspaceWritesStripsFileWriters(t *testing.T) {
@@ -318,8 +299,8 @@ func TestRestrictToolsForStage_ImplementationStagesKeepEverything(t *testing.T) 
 	}
 }
 
-// code_review carries strip_writers with no "allow" — every writer, the
-// commit and the merge tool must go.
+// code_review carries strip_writers with no "allow" — every writer, the commit
+// and the merge tool must go.
 func TestRestrictToolsForStage_StripWritersOnCodeReview(t *testing.T) {
 	stage, typeDef := wfStage(t, "task", domain.TaskColumnCodeReview)
 	policy := domain.ToolPolicy{AllowTools: append([]string{
@@ -373,8 +354,8 @@ func TestRestrictToolsForStage_NoCodeReadingOnPMUATAndHumanUAT(t *testing.T) {
 	}
 }
 
-// ready_for_qa/in_qa carry no_read_file only: QA keeps the tree/diff-level
-// code tools, it just loses read_file.
+// ready_for_qa/in_qa carry no_read_file only: QA keeps the tree/diff-level code
+// tools, it just loses read_file.
 func TestRestrictToolsForStage_NoReadFileOnQAColumns(t *testing.T) {
 	for _, col := range []domain.TaskColumn{domain.TaskColumnReadyForQA, domain.TaskColumnInQA} {
 		t.Run(string(col), func(t *testing.T) {

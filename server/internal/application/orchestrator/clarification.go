@@ -42,10 +42,7 @@ func buildClarificationResponse(req domain.ClarificationRequest) domain.AgentRes
 }
 
 func validateClarificationQuestions(questions []domain.ClarificationQuestion) error {
-	// Return the specific violation (not a generic "invalid" string): this error
-	// is fed verbatim back to the model as a self-correction hint, so a vague
-	// message leaves it guessing and it fails every retry. Field names match the
-	// JSON schema the model is asked to emit (prompt, options[].id/label).
+	// The specific violation is fed back to the model as a self-correction hint.
 	if len(questions) == 0 {
 		return fmt.Errorf("provide at least one clarification question")
 	}

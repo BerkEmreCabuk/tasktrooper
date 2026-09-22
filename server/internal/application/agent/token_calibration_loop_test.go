@@ -79,7 +79,6 @@ func (f *scaledUsageLLM) Chat(_ context.Context, req domain.AgentRequest) (domai
 	f.requests = append(f.requests, append([]domain.Message(nil), req.Messages...))
 	f.turn++
 	if len(req.Tools) == 0 {
-		// The wrap-up turn: no tools offered, so answer in prose.
 		return domain.AgentResponse{Message: domain.Message{Role: domain.RoleAssistant, Content: "wrapped up"}}, nil
 	}
 	estimated := appcontext.CountTokens(req.Messages)

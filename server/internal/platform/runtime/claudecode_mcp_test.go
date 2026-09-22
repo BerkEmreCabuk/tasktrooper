@@ -17,8 +17,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// The URL a CHILD is handed is always loopback, whatever the listener bound. A
-// cloud pod listens on 0.0.0.0, which nothing can connect to.
+// The URL a CHILD is handed is always loopback, whatever the listener bound.
 func TestMCPEndpointPublishesALoopbackURL(t *testing.T) {
 	var endpoint mcpEndpoint
 	assert.Empty(t, endpoint.get(), "nothing is reachable before the listener binds")
@@ -33,9 +32,6 @@ func TestMCPEndpointPublishesALoopbackURL(t *testing.T) {
 	assert.Equal(t, "http://127.0.0.1:54321/mcp", endpoint.get(), "an unparseable address must not blank a working URL")
 }
 
-// One run, one token: minted with the run's own context and policy so the
-// endpoint can execute its calls as that run, and revoked the moment the run
-// releases it.
 func TestForRunMintsAndRevokes(t *testing.T) {
 	tokens := mcpserver.NewRunTokenRegistry()
 	endpoint := &mcpEndpoint{}
@@ -79,8 +75,7 @@ func TestForRunIssuesADistinctTokenPerRun(t *testing.T) {
 	assert.True(t, ok, "one run ending must not revoke another's credential")
 }
 
-// A CHAT turn that starts before the listener does still does real work on the
-// CLI's native tools: fewer tools is a worse conversation, not a broken one.
+// A chat turn with no endpoint is a worse conversation, not a broken one.
 func TestForRunDegradesAChatBeforeTheListenerExists(t *testing.T) {
 	provider := &claudeCodeMCP{endpoint: &mcpEndpoint{}, tokens: mcpserver.NewRunTokenRegistry()}
 
@@ -92,10 +87,9 @@ func TestForRunDegradesAChatBeforeTheListenerExists(t *testing.T) {
 	release()
 }
 
-// A TASK does not degrade. A board run with no TaskTrooper tools cannot move its
-// card, tick an acceptance criterion or record a verdict — so it finishes
-// looking successful, fails the criteria gate, and is dispatched again, forever,
-// spending the subscription on every lap. Failing once is the cheaper answer.
+// A task run with no board tools cannot move its card or tick a criterion, so
+// it finishes "successful", fails the criteria gate, and is re-dispatched
+// forever; failing once is the cheaper answer.
 func TestForRunRefusesATaskBeforeTheListenerExists(t *testing.T) {
 	provider := &claudeCodeMCP{endpoint: &mcpEndpoint{}, tokens: mcpserver.NewRunTokenRegistry()}
 
@@ -120,20 +114,10 @@ func TestConfiguredPortPrefersTheOptionsOverride(t *testing.T) {
 	assert.Equal(t, 0, configuredPort(cfg, Options{}), "0 is 'let the kernel pick', not a missing value")
 }
 
-// The ordering regression, stated as the two facts that used to contradict each
-// other.
-//
-// buildHandler used to publish from the CONFIGURED port on the reasoning that
-// the board workers it activates at its end must not start before the URL
-// exists. That publish was guarded by `port > 0` — and the port is 0 on exactly
-// the hosts that can run a claude_code agent: the cloud image ships no `claude`
-// binary, so the executor only registers on a desktop or runner install, where
-// applyDesktopOverrides sets Server.Port to 0. The guard therefore never fired
-// where it was needed, and the endpoint was published only after buildHandler
-// had already started the workers.
-//
-// Run now binds the listener BEFORE buildHandler and publishes the address the
-// kernel actually gave it, so the URL is a fact rather than a configured guess.
+// The ordering regression: publish used to happen from the CONFIGURED port,
+// which is 0 on exactly the hosts that can run claude_code — applyLocalOverrides
+// zeroes Server.Port on a desktop install, only the cloud image ships no
+// `claude` binary — so the guard never fired where it was needed.
 func TestEndpointIsPublishedFromTheBoundPortNotTheConfiguredOne(t *testing.T) {
 	cfg := &domain.Config{}
 	cfg.Server.Port = 8085
@@ -141,8 +125,7 @@ func TestEndpointIsPublishedFromTheBoundPortNotTheConfiguredOne(t *testing.T) {
 	require.Equal(t, 0, configuredPort(cfg, Options{}),
 		"a desktop install lets the kernel pick, so there is no configured port to publish")
 
-	// What Run does, in Run's order: bind, then publish, then build the handler
-	// (which is what starts the board workers).
+	// What Run does, in Run's order: bind, then publish, then build the handler.
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	defer listener.Close()
@@ -156,8 +139,7 @@ func TestEndpointIsPublishedFromTheBoundPortNotTheConfiguredOne(t *testing.T) {
 		"a board run dispatched by the activation must find a reachable url")
 }
 
-// stubTool is enough of a port.ToolExecutor to be registered and to have a
-// definition; nothing here calls it.
+// stubTool is enough of a port.ToolExecutor to be registered; nothing calls it.
 type stubTool struct{ name string }
 
 func (t stubTool) Name() string { return t.name }
@@ -173,16 +155,11 @@ func (t stubTool) Execute(context.Context, string) domain.ToolResult {
 
 var _ port.ToolExecutor = stubTool{}
 
-// SkillsOnDisk narrows the surface exactly as the policy does, so it has to
-// travel with the credential in exactly the same way: the endpoint only ever
-// sees a bearer token, and whatever the Run behind it does not say is a
-// restriction the endpoint cannot apply.
-//
-// The manifest is asserted from the same call because the two must be one
-// answer. The manifest is what the session's system prompt tells the model it
-// holds, so a manifest naming load_skill on a run the endpoint will refuse it
-// for produces the worst outcome available: a model that has been handed the
-// exact tool name, retries it, and is refused every time.
+// SkillsOnDisk rides the credential exactly as the policy does — the endpoint
+// sees only a bearer token, and whatever the Run behind it does not say is a
+// restriction it cannot apply. The manifest is asserted from the same call
+// because the two must be one answer: a manifest promising load_skill on a run
+// the endpoint refuses it for hands the model the exact name to keep retrying.
 func TestForRunCarriesSkillsOnDiskToTheEndpointAndTheManifest(t *testing.T) {
 	base := registry.New()
 	base.Register(stubTool{name: "load_skill"})
@@ -204,7 +181,6 @@ func TestForRunCarriesSkillsOnDiskToTheEndpointAndTheManifest(t *testing.T) {
 	assert.NotContains(t, cfg.Tools, "load_skill", "the manifest must not promise a tool the endpoint refuses")
 	assert.Contains(t, cfg.Tools, "create_skill", "authoring a skill survives the cut")
 
-	// A chat turn, whose workspace nothing materialised into.
 	chat, releaseChat, err := provider.ForRun(context.Background(), claudecode.MCPRun{Label: "chat-1"})
 	require.NoError(t, err)
 	defer releaseChat()
@@ -215,8 +191,7 @@ func TestForRunCarriesSkillsOnDiskToTheEndpointAndTheManifest(t *testing.T) {
 	assert.Contains(t, chat.Tools, "load_skill", "a chat turn has no skill files to read instead")
 }
 
-// A token that never leaves this host gets no ceiling: its run's lifetime is
-// its lifetime, ended by the executor's revoke.
+// A token that never leaves this host gets no ceiling: its run bounds it.
 func TestLoopbackForRunMintsATokenWithNoCeiling(t *testing.T) {
 	endpoint := &mcpEndpoint{}
 	endpoint.publish("127.0.0.1:8080")
@@ -232,10 +207,10 @@ func TestLoopbackForRunMintsATokenWithNoCeiling(t *testing.T) {
 	assert.True(t, run.ExpiresAt.IsZero(), "a token that never leaves this host needs no ceiling")
 }
 
-// An off-host token expires. It is a backstop, not the revocation — the
-// executor's defer is that — so it is set PAST the run's own timeout, or it
-// would start 401ing sessions that are still working, which Claude Code reports
-// as `requires re-authorization` and then gives up on the server for.
+// The ceiling is a backstop, not the revocation (the executor's defer is), so
+// it sits PAST the run's own timeout — at the run timeout it would start 401ing
+// sessions still working, which Claude Code reports as `requires
+// re-authorization` and then gives up on the server for.
 func TestOffHostForRunStampsAnExpiryPastTheRunTimeout(t *testing.T) {
 	now := time.Now()
 	runTimeout := 45 * time.Minute
@@ -258,10 +233,9 @@ func TestOffHostForRunStampsAnExpiryPastTheRunTimeout(t *testing.T) {
 		"a ceiling at the run timeout would expire healthy sessions in their last minutes")
 }
 
-// No public base URL is a real deployment state, not a failure: the remote
-// session runs on the CLI's native tools, exactly as it did before there was an
-// endpoint to offer it. RequiresTools is false on that path for the same
-// reason — see RemoteExecutor.Execute.
+// No public base URL is a real deployment state, and the remote session runs
+// on native tools exactly as before there was an endpoint — RequiresTools is
+// false on that path for the same reason (see RemoteExecutor.Execute).
 func TestOffHostForRunWithNoPublicAddressDegrades(t *testing.T) {
 	provider := &claudeCodeMCP{
 		endpoint: publicEndpoint(""),

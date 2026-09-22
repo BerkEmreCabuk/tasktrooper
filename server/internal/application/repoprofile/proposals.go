@@ -14,15 +14,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// syncProposals turns what the facts imply into repository settings.
-//
-// The split is deliberate: a proposal whose target field is still empty is
-// applied immediately (nobody is being overruled, and leaving the field blank
-// next to a profile that already knows the answer is just make-work), while a
-// proposal that would overwrite a human's choice is stored pending and shown
-// in the settings UI with its evidence. Silently rewriting a kind or a build
-// command someone set by hand would be the kind of "helpfulness" that teaches
-// people to distrust the feature.
 func (s *Service) syncProposals(ctx context.Context, repo domain.Repository, facts repofacts.Facts) {
 	if s.profiles == nil {
 		return
@@ -46,7 +37,7 @@ func (s *Service) syncProposals(ctx context.Context, repo domain.Repository, fac
 		proposedText := valueText(p)
 		switch {
 		case proposedText == current:
-			continue // the setting already says this; nothing to propose
+			continue
 		case current == "":
 			if err := s.applyProposalValue(ctx, repo, p); err != nil {
 				log.Warn().Err(err).Str("field", p.Field).Str("repository", repo.Name).Msg("profile proposal auto-apply failed")
@@ -71,8 +62,6 @@ func (s *Service) syncProposals(ctx context.Context, repo domain.Repository, fac
 	}
 }
 
-// slotOf keys the several proposals one field can carry at once. Only pipeline
-// jobs need it: one per (category, sub-repo kind).
 func slotOf(p domain.ProfileProposal) string {
 	if p.Field != domain.ProposalFieldPipelineJob {
 		return ""
@@ -84,9 +73,6 @@ func slotOf(p domain.ProfileProposal) string {
 	return job.Category + ":" + job.SubRepoKind
 }
 
-// valueText renders a proposal's value the way the corresponding setting
-// stores it, so "already set to this" is a string comparison rather than a
-// per-field special case at every call site.
 func valueText(p domain.ProfileProposal) string {
 	switch p.Field {
 	case domain.ProposalFieldSubRepoKinds:
@@ -144,7 +130,6 @@ func (s *Service) currentValue(ctx context.Context, repo domain.Repository, p do
 	return "", fmt.Errorf("unknown proposal field %q", p.Field)
 }
 
-// applyProposalValue writes one proposal into the repository's settings.
 func (s *Service) applyProposalValue(ctx context.Context, repo domain.Repository, p domain.ProfileProposal) error {
 	switch p.Field {
 	case domain.ProposalFieldRepoKind:
@@ -189,9 +174,6 @@ func (s *Service) applyProposalValue(ctx context.Context, repo domain.Repository
 	return fmt.Errorf("unknown proposal field %q", p.Field)
 }
 
-// applyPipelineJob replaces one slot of the pipeline mapping and leaves every
-// other slot as it was — the store's only write is a full replace, so the
-// existing set has to be read and merged rather than overwritten.
 func (s *Service) applyPipelineJob(ctx context.Context, repo domain.Repository, p domain.ProfileProposal) error {
 	if s.pipelines == nil {
 		return errors.New("pipeline settings are not wired")
@@ -227,8 +209,6 @@ func (s *Service) applyPipelineJob(ctx context.Context, repo domain.Repository, 
 	return err
 }
 
-// ApplyProposal writes a pending proposal into the repository settings and
-// marks it applied.
 func (s *Service) ApplyProposal(ctx context.Context, repositoryID, proposalID uuid.UUID) (domain.ProfileProposal, error) {
 	if s.profiles == nil {
 		return domain.ProfileProposal{}, errors.New("profile proposals are not available on this deployment")
@@ -250,9 +230,6 @@ func (s *Service) ApplyProposal(ctx context.Context, repositoryID, proposalID uu
 	return s.profiles.SetProposalStatus(ctx, proposalID, domain.ProposalApplied)
 }
 
-// DismissProposal records that a human said no. Dismissals survive later
-// refreshes — re-asking a question that was already answered is how a
-// suggestion feature becomes noise people stop reading.
 func (s *Service) DismissProposal(ctx context.Context, repositoryID, proposalID uuid.UUID) (domain.ProfileProposal, error) {
 	if s.profiles == nil {
 		return domain.ProfileProposal{}, errors.New("profile proposals are not available on this deployment")

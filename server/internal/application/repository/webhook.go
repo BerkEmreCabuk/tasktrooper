@@ -17,19 +17,10 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// defaultPushReindexInterval is the per-repo floor between webhook-triggered
-// reindex passes. Every pass embeds every changed chunk, so push spam without
-// this floor converts directly into an embedding bill.
 const defaultPushReindexInterval = 2 * time.Minute
 
-// pushDeliveryTTL is how long a GitHub delivery id is remembered. GitHub
-// retries failed deliveries within minutes; anything older is a new event.
 const pushDeliveryTTL = 15 * time.Minute
 
-// pushRepoState is the per-repo debounce ledger. At most one webhook-triggered
-// pass runs at a time; triggers landing during a pass collapse into a single
-// "pending" rerun, and triggers landing inside the interval collapse into a
-// single scheduled timer.
 type pushRepoState struct {
 	running   bool
 	pending   bool
@@ -37,24 +28,14 @@ type pushRepoState struct {
 	timer     *time.Timer
 }
 
-// SetPublicBaseURL wires the externally reachable base URL GitHub webhooks
-// must target (e.g. "https://bridge.example.com"). Empty leaves webhook setup
-// disabled with an explanatory error.
 func (s *Service) SetPublicBaseURL(u string) {
 	s.publicBaseURL = strings.TrimSuffix(strings.TrimSpace(u), "/")
 }
 
-// WebhooksReachable reports whether GitHub can deliver webhooks to this
-// instance. When it cannot, pushes reach the index and the project profile
-// through the periodic freshness sweep instead (see SweepIndexFreshness).
 func (s *Service) WebhooksReachable() bool {
 	return webhooksReachable(s.publicBaseURL)
 }
 
-// webhooksReachable is false for an empty, loopback, private or link-local
-// base URL. GitHub refuses to register a hook on such an address with 422
-// Validation Failed, and a desktop install is exactly that: the backend
-// listens on 127.0.0.1.
 func webhooksReachable(base string) bool {
 	if base == "" {
 		return false
@@ -73,7 +54,6 @@ func webhooksReachable(base string) bool {
 	return true
 }
 
-// webhookTargetURL is the delivery URL registered with GitHub.
 func (s *Service) webhookTargetURL() string {
 	return s.publicBaseURL + "/v1/github/webhook"
 }
@@ -85,13 +65,6 @@ func (s *Service) pushInterval() time.Duration {
 	return defaultPushReindexInterval
 }
 
-// SetupWebhook generates a fresh secret, installs (or refreshes) the repository
-// webhook on GitHub, and stores the secret encrypted. Safe to call again: the
-// GitHub side is updated in place and the secret is rotated atomically with it.
-//
-// The hook covers githubapi.WebhookEvents — push AND the Actions events the
-// code-review gate needs. It used to be push only, which is why a green CI run
-// had no way of reaching the board at all.
 func (s *Service) SetupWebhook(ctx context.Context, repositoryID uuid.UUID) (domain.Repository, error) {
 	repo, err := s.repos.Get(ctx, repositoryID)
 	if err != nil {
@@ -127,8 +100,7 @@ func (s *Service) SetupWebhook(ctx context.Context, repositoryID uuid.UUID) (dom
 		return domain.Repository{}, fmt.Errorf("github webhook setup: %w", err)
 	}
 	if err := s.repos.SetWebhook(ctx, repositoryID, secret, hookID); err != nil {
-		// GitHub now signs with a secret we failed to store; the next setup run
-		// rotates both sides back into agreement.
+
 		return domain.Repository{}, fmt.Errorf("webhook created on GitHub but its secret could not be stored, run setup again: %w", err)
 	}
 	return s.repos.Get(ctx, repositoryID)
@@ -142,12 +114,6 @@ func generateWebhookSecret() (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-// setupWebhookAsync is the best-effort install at repo registration time. A
-// failure only costs the automation: the UI shows a warning with a retry
-// button as long as the repo has no webhook.
-// It keeps the caller's context values but not its cancellation
-// (context.WithoutCancel): the request that imported the repository is answered
-// before the install finishes.
 func (s *Service) setupWebhookAsync(ctx context.Context, repositoryID uuid.UUID) {
 	if s.githubToken == nil || !webhooksReachable(s.publicBaseURL) {
 		return
@@ -162,26 +128,6 @@ func (s *Service) setupWebhookAsync(ctx context.Context, repositoryID uuid.UUID)
 	}()
 }
 
-// ReconcileWebhooksAsync is the boot-time convergence pass over every
-// registered repository's GitHub webhook. It does two different jobs, and the
-// split matters:
-//
-//	NO HOOK — install one (SetupWebhook). This is the original backfill, for
-//	  repositories created before webhook support existed or whose setup failed.
-//	  It mints a fresh secret, because there is no hook to keep one for.
-//	HOOK, WRONG EVENTS — repair it in place (ReconcileRepoWebhookEvents),
-//	  WITHOUT rotating the secret. Every repository registered before the
-//	  Actions events were added is subscribed to `push` and nothing else, which
-//	  is exactly why the code-review gate had no signal. Fixing them through
-//	  SetupWebhook would work, but it would rotate every secret on every boot
-//	  forever — and each rotation has a window where in-flight deliveries are
-//	  signed with the old secret and rejected — to fix a list of strings.
-//
-// Converged repositories cost one GET each and nothing else, so this is safe to
-// run on every boot. Failures cost only the automation; the UI's warning with
-// its retry button stays until a setup succeeds.
-//
-// The goroutine is the caller's, the same way it is for every other sweep.
 func (s *Service) ReconcileWebhooks(ctx context.Context) {
 	if s.githubToken == nil || !webhooksReachable(s.publicBaseURL) {
 		return
@@ -189,7 +135,7 @@ func (s *Service) ReconcileWebhooks(ctx context.Context) {
 	func() {
 		token, err := s.githubToken(ctx)
 		if err != nil || token == "" {
-			// GitHub not connected: nothing can be installed, nothing to log.
+
 			return
 		}
 		repos, err := s.repos.List(ctx)
@@ -228,10 +174,6 @@ func (s *Service) ReconcileWebhooks(ctx context.Context) {
 	}()
 }
 
-// ResolvePushTarget maps a webhook payload's repository full_name
-// ("owner/repo") onto a registered repository via its stored remote URL, and
-// returns the repo together with its decrypted webhook secret. ok=false means
-// the push belongs to nobody we know — the caller answers 204 and does nothing.
 func (s *Service) ResolvePushTarget(ctx context.Context, fullName string) (domain.Repository, string, bool) {
 	fullName = strings.TrimSuffix(strings.TrimSpace(fullName), ".git")
 	if fullName == "" {
@@ -250,7 +192,7 @@ func (s *Service) ResolvePushTarget(ctx context.Context, fullName string) (domai
 		if strings.EqualFold(owner+"/"+name, fullName) {
 			secret, err := s.repos.WebhookSecret(ctx, repo.ID)
 			if err != nil {
-				// Fail closed: no secret means the signature check rejects.
+
 				log.Error().Err(err).Str("repository_id", repo.ID.String()).Msg("webhook: could not read secret")
 				return repo, "", true
 			}
@@ -260,20 +202,15 @@ func (s *Service) ResolvePushTarget(ctx context.Context, fullName string) (domai
 	return domain.Repository{}, "", false
 }
 
-// HandleGitHubPush is called after the HTTP layer has verified the payload
-// signature. It decides whether the push warrants a reindex and, if so, feeds
-// it through the per-repo debounce. The returned reason is diagnostic only.
 func (s *Service) HandleGitHubPush(ctx context.Context, repositoryID uuid.UUID, deliveryID, ref, defaultBranch, afterSHA string) (bool, string) {
-	// Task-branch pushes churn constantly and never feed the index: the index
-	// walks the default-branch working tree.
+
 	if defaultBranch == "" || ref != "refs/heads/"+defaultBranch {
 		return false, "ref is not the default branch"
 	}
 	if s.seenDelivery(ctx, deliveryID, time.Now()) {
 		return false, "duplicate delivery"
 	}
-	// A completed index already at the pushed head has nothing to do. A failed
-	// or stale pass at the same SHA still reruns.
+
 	if s.indexer != nil && afterSHA != "" {
 		if idx, err := s.indexer.GetProjectStatus(ctx, repositoryID); err == nil &&
 			idx.Status == domain.IndexStatusCompleted && idx.CommitSHA == afterSHA {
@@ -283,24 +220,11 @@ func (s *Service) HandleGitHubPush(ctx context.Context, repositoryID uuid.UUID, 
 	return true, s.schedulePushReindex(repositoryID)
 }
 
-// HandleGitHubWorkflowEvent is called after the HTTP layer has verified the
-// signature of a workflow_run or check_suite delivery. It turns "GitHub
-// finished a run on commit X" into the task_pipelines write and the board move
-// that implies, by handing the commit to the pipeline runner's resolver.
-//
-// It acts only on a COMPLETED event. An in-progress one carries no conclusion,
-// so resolving on it would spend a round-trip to learn nothing; the run's own
-// completion is moments away and carries the answer.
-//
-// The reason is diagnostic only, echoed back to GitHub's delivery log so a
-// human debugging a hook can see what the endpoint made of it.
 func (s *Service) HandleGitHubWorkflowEvent(ctx context.Context, repositoryID uuid.UUID, deliveryID, action, status, headSHA string) (bool, string) {
 	if strings.TrimSpace(headSHA) == "" {
 		return false, "no head sha in payload"
 	}
-	// workflow_run reports both: `action` is requested/in_progress/completed and
-	// `status` is queued/in_progress/completed. check_suite reports only
-	// `action`. Either saying "completed" is enough.
+
 	if action != "completed" && status != "completed" {
 		return false, "run is not completed yet"
 	}
@@ -317,36 +241,20 @@ func (s *Service) HandleGitHubWorkflowEvent(ctx context.Context, repositoryID uu
 		return false, "resolving pipelines failed: " + err.Error()
 	}
 	if n == 0 {
-		// Every run on the default branch lands here, and so does every run for
-		// a task whose pipeline already settled. Not an error — most deliveries
-		// are legitimately about nothing the board is waiting for.
+
 		return false, "no pipeline is waiting on this commit"
 	}
 	return true, fmt.Sprintf("resolved %d pipeline(s)", n)
 }
 
-// DeliveryLedger records a GitHub delivery id and reports whether this caller
-// was the first to record it. Satisfied by postgres.WebhookDeliveryStore.
 type DeliveryLedger interface {
 	MarkSeen(ctx context.Context, deliveryID string, retain time.Duration) (bool, error)
 }
 
-// SetDeliveryLedger wires the durable dedupe. Without it the in-memory map
-// below is the whole mechanism, which is correct on a single-process install
-// and is what a self-hosted deployment gets.
 func (s *Service) SetDeliveryLedger(l DeliveryLedger) {
 	s.deliveries = l
 }
 
-// seenDelivery reports whether this delivery has already been handled.
-//
-// Two ledgers, and the order matters. The DATABASE is asked first and is
-// authoritative: GitHub retries to whichever pod the load balancer picks, so
-// the only ledger that can answer for the fleet is the shared one. The
-// in-memory map stays underneath it as the answer for a deployment with no
-// Postgres and as the answer when the database cannot be reached — because
-// failing CLOSED here would drop a delivery, and a dropped push is a card that
-// never moves, while a duplicated one costs a reindex.
 func (s *Service) seenDelivery(ctx context.Context, deliveryID string, now time.Time) bool {
 	if deliveryID == "" {
 		return false
@@ -388,8 +296,6 @@ func (s *Service) pushStateLocked(repositoryID uuid.UUID) *pushRepoState {
 	return st
 }
 
-// schedulePushReindex is the debounce gate: at most one pass per repo per
-// interval, one pass in flight, and at most one queued rerun behind it.
 func (s *Service) schedulePushReindex(repositoryID uuid.UUID) string {
 	s.pushMu.Lock()
 	st := s.pushStateLocked(repositoryID)
@@ -422,7 +328,6 @@ func (s *Service) launchPushReindex(repositoryID uuid.UUID) {
 	s.startPushReindex(repositoryID)
 }
 
-// firePushReindex is the timer callback for a debounced trigger.
 func (s *Service) firePushReindex(repositoryID uuid.UUID) {
 	s.pushMu.Lock()
 	st := s.pushStateLocked(repositoryID)
@@ -438,14 +343,8 @@ func (s *Service) firePushReindex(repositoryID uuid.UUID) {
 	s.launchPushReindex(repositoryID)
 }
 
-// startPushReindex runs one pass through the same pull-then-reindex path the
-// manual reindex button uses, and reports back to the debounce ledger when the
-// pass (or its failure) is over. Once the pass completes, the project profile
-// is refreshed too — scoped to the sections whose source files the push
-// touched, so push spam cannot turn into an LLM bill while a commit that does
-// change the deploy workflow or the build command is picked up immediately.
 func (s *Service) startPushReindex(repositoryID uuid.UUID) {
-	// No deadline on the pass itself: a reindex of a large repository is long.
+
 	pushCtx := context.Background()
 
 	ctx, cancel := context.WithTimeout(pushCtx, 30*time.Second)
@@ -466,8 +365,6 @@ func (s *Service) startPushReindex(repositoryID uuid.UUID) {
 	})
 }
 
-// pushReindexDone closes out a pass and, when pushes arrived mid-pass,
-// schedules exactly one rerun on the other side of the interval.
 func (s *Service) pushReindexDone(repositoryID uuid.UUID) {
 	s.pushMu.Lock()
 	defer s.pushMu.Unlock()
@@ -478,11 +375,11 @@ func (s *Service) pushReindexDone(repositoryID uuid.UUID) {
 	}
 	st.pending = false
 	if st.timer != nil {
-		// A scheduled run already covers the queued pushes.
+
 		return
 	}
 	wait := s.pushInterval() - time.Since(st.lastStart)
-	// Never rerun back-to-back, but never wait longer than the interval either.
+
 	if minWait := min(time.Second, s.pushInterval()); wait < minWait {
 		wait = minWait
 	}

@@ -16,17 +16,13 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// fakeChatExecutor stands in for the local Claude Code CLI. It records the
-// request it was given — which is the whole point of these tests: the bug was
-// never that the executor misbehaved, it was that it was never called.
 type fakeChatExecutor struct {
 	supports bool
 	got      domain.ChatExecution
 	calls    int
 	result   domain.ChatResult
 	err      error
-	// stream, when set, is played into the caller's ChatStream before returning,
-	// so the streaming contract can be asserted without a subprocess.
+
 	stream func(port.ChatStream)
 }
 
@@ -43,8 +39,6 @@ func (f *fakeChatExecutor) ExecuteChat(_ context.Context, req domain.ChatExecuti
 	return f.result, f.err
 }
 
-// recordingSessionStore is the chat row. Only the two methods this path uses do
-// anything; the rest satisfy the interface.
 type recordingSessionStore struct {
 	port.SessionStore
 	cliSessionID string
@@ -84,10 +78,6 @@ func runTurn(
 	)
 }
 
-// The bug, stated as a test: a chat turn for an agent on a host-executed
-// provider must reach the executor, carrying the workspace, the policy and the
-// model — never the HTTP LLM client, which has no base URL for this provider and
-// built the empty string as its endpoint.
 func TestChatTurnGoesToTheExecutorNotTheHTTPClient(t *testing.T) {
 	executor := &fakeChatExecutor{
 		supports: true,
@@ -112,9 +102,6 @@ func TestChatTurnGoesToTheExecutorNotTheHTTPClient(t *testing.T) {
 	assert.Empty(t, executor.got.ResumeSessionID, "a fresh chat has nothing to resume")
 }
 
-// Continuity across turns is what makes this a conversation rather than a series
-// of unrelated questions: the id is recorded on the chat row, and the next turn
-// hands it back.
 func TestChatRecordsTheCLISessionAndResumesItOnTheNextTurn(t *testing.T) {
 	executor := &fakeChatExecutor{
 		supports: true,
@@ -131,8 +118,6 @@ func TestChatRecordsTheCLISessionAndResumesItOnTheNextTurn(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "cli-77", store.cliSessionID, "the id is the conversation's continuity, and only the caller can persist it")
 
-	// The second turn: the row now carries the id, so it must be resumed and the
-	// user's new message must be sent on its own.
 	sess.CLISessionID = store.cliSessionID
 	_, err = runTurn(t, svc, sess, port.ChatStream{})
 	require.NoError(t, err)
@@ -144,9 +129,6 @@ func TestChatRecordsTheCLISessionAndResumesItOnTheNextTurn(t *testing.T) {
 	assert.Equal(t, 1, store.writes, "an unchanged id is not rewritten on every turn")
 }
 
-// A turn that failed still leaves a live CLI session behind, and that session
-// holds everything said so far. Losing its id would silently restart the
-// conversation — and re-pay for it — on the next message.
 func TestChatRecordsTheCLISessionEvenWhenTheTurnFailed(t *testing.T) {
 	executor := &fakeChatExecutor{
 		supports: true,
@@ -161,10 +143,6 @@ func TestChatRecordsTheCLISessionEvenWhenTheTurnFailed(t *testing.T) {
 	assert.Equal(t, "cli-parked", store.cliSessionID)
 }
 
-// A spent subscription is not a park here — there is no card and no sweeper —
-// and it is not a generic failure either. It has to become a sentence the person
-// who just pressed enter can act on, and the fact that makes it actionable is
-// when the quota comes back.
 func TestQuotaBlockBecomesAnActionableChatMessage(t *testing.T) {
 	resumeAt := time.Now().Add(90 * time.Minute)
 	executor := &fakeChatExecutor{
@@ -177,23 +155,16 @@ func TestQuotaBlockBecomesAnActionableChatMessage(t *testing.T) {
 	_, err := runTurn(t, svc, chatSession(), port.ChatStream{})
 	require.Error(t, err)
 
-	// Still recognisable as the typed condition, so the transport can render it
-	// as a calm warning rather than a red failure.
 	block, ok := domain.QuotaBlockOf(err)
 	require.True(t, ok)
 	assert.Equal(t, "cli-limited", block.CLISessionID)
 
-	// And already a sentence, in the reader's own local time — the transport
-	// runs after the request context is gone and must not have to look up a
-	// language on an error path.
 	assert.Contains(t, err.Error(), "usage limit")
 	assert.Contains(t, err.Error(), resumeAt.Local().Format("15:04"),
 		"a limit with no time attached is not actionable")
 	assert.NotContains(t, err.Error(), "unsupported protocol scheme")
 }
 
-// The Turkish rendering exists because this is a user-facing sentence and the
-// operator's language is already loaded where it is built.
 func TestQuotaMessageFollowsTheTenantLanguage(t *testing.T) {
 	block := &domain.QuotaBlock{ResumeAt: time.Now().Add(time.Hour)}
 
@@ -205,9 +176,6 @@ func TestQuotaMessageFollowsTheTenantLanguage(t *testing.T) {
 	assert.Contains(t, en, "usage limit is spent")
 }
 
-// A transcript is read back by the user AND replayed to the model, so a quota
-// notice must not be stored as "**Error:** ..." — it is an account condition
-// with a time on it, not a fault in the run.
 func TestQuotaNoticeIsWrittenToTheTranscriptAsAWarning(t *testing.T) {
 	store := &capturingStore{}
 	notice := domain.NewQuotaNotice(&domain.QuotaBlock{ResumeAt: time.Now().Add(time.Hour)}, "en")
@@ -220,9 +188,6 @@ func TestQuotaNoticeIsWrittenToTheTranscriptAsAWarning(t *testing.T) {
 	assert.NotContains(t, store.appended[0], "**Error:**")
 }
 
-// The guard, from the chat side: on a host with no CLI — every cloud pod — the
-// turn must fail with the sentence that names the actual problem, not fall
-// through to a client that will build an empty URL.
 func TestChatWithoutAnExecutorFailsWithOneClearSentence(t *testing.T) {
 	for name, executor := range map[string]port.ChatExecutor{
 		"no executor registered at all":  nil,
@@ -240,9 +205,6 @@ func TestChatWithoutAnExecutorFailsWithOneClearSentence(t *testing.T) {
 	}
 }
 
-// A chat with nowhere to run says so. Falling back to the server's own working
-// directory would point the CLI's file and shell tools at the server's source
-// tree.
 func TestChatRequiresAWorkspace(t *testing.T) {
 	executor := &fakeChatExecutor{supports: true}
 	svc := session.NewHostExecutedServiceForTest(&recordingSessionStore{}, executor)
@@ -257,9 +219,6 @@ func TestChatRequiresAWorkspace(t *testing.T) {
 	assert.Contains(t, err.Error(), "workspace")
 }
 
-// The streamed text reaches the caller's callback exactly as the agent loop's
-// does — same callback, same ordering, same segment boundary — so the SSE
-// transcript needs no knowledge of which engine answered.
 func TestChatStreamsThroughTheCallersCallback(t *testing.T) {
 	var got []string
 	executor := &fakeChatExecutor{
@@ -281,7 +240,6 @@ func TestChatStreamsThroughTheCallersCallback(t *testing.T) {
 	assert.Equal(t, []string{"t:thinking out loud", "break", "t:final"}, got)
 }
 
-// capturingStore records what was written into the transcript.
 type capturingStore struct {
 	port.SessionStore
 	appended []string

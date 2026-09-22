@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// mockEndpointStore is a single-endpoint in-memory port.LLMEndpointStore.
 type mockEndpointStore struct {
 	ep domain.LLMEndpoint
 }
@@ -81,9 +80,6 @@ func newEmbeddingModelsServiceWithStatus(t *testing.T, status int, catalog strin
 	return llmprovider.NewService(store, endpoints, nil, 0, nil), id
 }
 
-// A named endpoint (Mistral & friends) has no LM Studio catalog, so the plain
-// /models list is the only source. Only the embedding models belong in the
-// embedding picker — the chat models would silently produce 4xx at index time.
 func TestListEmbeddingModelsForEndpointKeepsOnlyEmbeddingModels(t *testing.T) {
 	svc, id := newEmbeddingModelsService(t, `{"data":[
 		{"id":"mistral-large-latest"},
@@ -97,9 +93,6 @@ func TestListEmbeddingModelsForEndpointKeepsOnlyEmbeddingModels(t *testing.T) {
 	require.Equal(t, []string{"codestral-embed", "mistral-embed"}, models)
 }
 
-// When no model advertises itself as an embedding model the full catalog is
-// returned: an unfiltered list the user can pick from beats an empty dropdown
-// with no explanation.
 func TestListEmbeddingModelsForEndpointFallsBackToFullCatalog(t *testing.T) {
 	svc, id := newEmbeddingModelsService(t, `{"data":[
 		{"id":"nomic-text-v1.5"},
@@ -111,8 +104,6 @@ func TestListEmbeddingModelsForEndpointFallsBackToFullCatalog(t *testing.T) {
 	require.Equal(t, []string{"nomic-text-v1.5", "bge-m3"}, models)
 }
 
-// Mistral answers an exhausted quota with 401, not 429 — the status alone reads
-// as a bad API key. The provider's own sentence has to reach the user.
 func TestListEmbeddingModelsSurfacesProviderErrorMessage(t *testing.T) {
 	svc, id := newEmbeddingModelsServiceWithStatus(t, http.StatusUnauthorized,
 		`{"message":"Inactive subscription or usage limit reached","request_id":"abc"}`)
@@ -123,7 +114,6 @@ func TestListEmbeddingModelsSurfacesProviderErrorMessage(t *testing.T) {
 	require.Contains(t, err.Error(), "Inactive subscription or usage limit reached")
 }
 
-// OpenAI-shaped errors nest the message one level down.
 func TestListEmbeddingModelsSurfacesNestedProviderErrorMessage(t *testing.T) {
 	svc, id := newEmbeddingModelsServiceWithStatus(t, http.StatusTooManyRequests,
 		`{"error":{"message":"You exceeded your current quota","type":"insufficient_quota"}}`)
@@ -133,8 +123,6 @@ func TestListEmbeddingModelsSurfacesNestedProviderErrorMessage(t *testing.T) {
 	require.Contains(t, err.Error(), "You exceeded your current quota")
 }
 
-// A gateway in front of the provider answers with plain text; its body is still
-// more informative than a bare status code.
 func TestListEmbeddingModelsSurfacesNonJSONErrorBody(t *testing.T) {
 	svc, id := newEmbeddingModelsServiceWithStatus(t, http.StatusBadGateway, "upstream connect error")
 

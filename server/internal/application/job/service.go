@@ -18,10 +18,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// callbackTimeout budgets one callback POST end to end. There was no client
-// timeout at all before — http.DefaultClient has none — so a callback host that
-// accepted the connection and then said nothing held a goroutine forever, and
-// every completed job leaked another one.
 const callbackTimeout = 30 * time.Second
 
 type Service struct {
@@ -31,10 +27,7 @@ type Service struct {
 	maxWorkers    int
 	timeout       time.Duration
 	defaultPolicy domain.ToolPolicy
-	// urlPolicy vets callback_url. It comes straight off the request body and is
-	// POSTed to with the job's result, so it is an attacker-chosen destination
-	// with a body attached — and loopback, which is what makes it interesting,
-	// is invisible to the cluster NetworkPolicy.
+
 	urlPolicy urlguard.Policy
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
@@ -56,9 +49,6 @@ func NewService(store port.JobStore, agentLoop *agent.Loop, rag RAGInjector, max
 	}
 }
 
-// SetURLPolicy overrides what counts as an acceptable callback_url. Unset means
-// urlguard.Default: the public internet, plus loopback when a self-hosted
-// operator has set ALLOW_LOOPBACK_TOOL_URLS.
 func (s *Service) SetURLPolicy(p urlguard.Policy) { s.urlPolicy = p }
 
 func (s *Service) Start(ctx context.Context) {
@@ -77,11 +67,7 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) Create(ctx context.Context, req domain.JobRequest, policy domain.ToolPolicy) (domain.Job, error) {
-	// Reject a callback pointing at ourselves or at the cluster before the job
-	// is queued, so the caller finds out now rather than by watching what the
-	// worker does minutes later. Offline only — the resolving check happens in
-	// fireCallback, which is where the connection is actually made and the only
-	// place a rebind can be caught.
+
 	req.CallbackURL = strings.TrimSpace(req.CallbackURL)
 	if req.CallbackURL != "" {
 		if _, err := s.urlPolicy.Precheck(req.CallbackURL); err != nil {
@@ -185,8 +171,6 @@ func (s *Service) processOne(ctx context.Context) {
 	s.fireCallback(ctx, job.CallbackURL, job.ID, domain.JobStatusCompleted, raw, "")
 }
 
-// ctx is stripped of its cancellation (context.WithoutCancel), not its
-// lifetime: the callback outlives the job whose result it reports.
 func (s *Service) fireCallback(ctx context.Context, url string, jobID uuid.UUID, status domain.JobStatus, result []byte, errMsg string) {
 	if url == "" {
 		return
@@ -206,8 +190,6 @@ func (s *Service) fireCallback(ctx context.Context, url string, jobID uuid.UUID,
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), callbackTimeout)
 		defer cancel()
 
-		// Resolved and checked here, not just at Create: the row was written
-		// minutes ago and the name is free to answer something else now.
 		target, err := s.urlPolicy.Validate(ctx, url)
 		if err != nil {
 			log.Warn().Err(err).Str("url", urlguard.LogRaw(url)).Msg("job callback destination refused")
@@ -221,17 +203,12 @@ func (s *Service) fireCallback(ctx context.Context, url string, jobID uuid.UUID,
 		req.Header.Set("Content-Type", "application/json")
 
 		client := s.urlPolicy.ClientFor(target, callbackTimeout)
-		// A callback is a delivery, not a fetch: there is nothing to read at the
-		// other end of a redirect, and following one only widens where the job
-		// result — which contains the model's output — can be posted. Take the
-		// 3xx as the answer and stop.
+
 		client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 
 		resp, err := client.Do(req)
 		if err != nil {
-			// LogValue, not the raw URL: a callback URL routinely carries the
-			// caller's own signature or token in its query string, and this log
-			// line used to write the whole thing out on every failure.
+
 			log.Warn().Err(err).Str("url", urlguard.LogValue(target.URL)).Msg("job callback failed")
 			return
 		}

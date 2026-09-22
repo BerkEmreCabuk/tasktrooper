@@ -13,25 +13,16 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// settlingCriteriaUpdater answers the sweep the way the database would: the
-// criteria list it returns changes as the fake agent "settles" them, so the
-// loop's own termination condition is what is under test rather than a counter.
 type settlingCriteriaUpdater struct {
 	fakeTaskUpdater
-	criteria []domain.AcceptanceCriterion
-	// settleAfter is the read on which every criterion becomes settled; 0 means
-	// never.
+	criteria    []domain.AcceptanceCriterion
 	settleAfter int
-	// canceled settles by cancellation instead of by a tick, which is the case
-	// that must ALSO end the loop — a dropped criterion carries its reason and
-	// owes nothing more.
-	canceled bool
-	reads    int
+	canceled    bool
+	reads       int
 }
 
 func (u *settlingCriteriaUpdater) ListTaskCriteria(context.Context, uuid.UUID) ([]domain.AcceptanceCriterion, error) {
 	u.reads++
-	// The first read is the pre-loop one; a round's read is every read after it.
 	if u.settleAfter > 0 && u.reads > u.settleAfter {
 		out := make([]domain.AcceptanceCriterion, len(u.criteria))
 		copy(out, u.criteria)
@@ -55,9 +46,6 @@ func sweepJob() RunJob {
 	}
 }
 
-// The completion check is a LOOP, not a single question. A run that answers the
-// first round with a comment ("I did not get to this") used to end there, with
-// the work never done and the card parked in front of the criteria gate.
 func TestSweepOpenCriteriaKeepsAskingUntilTheCriteriaAreSettled(t *testing.T) {
 	ex := &fakeExecutor{
 		supports: domain.LLMProviderClaudeCode,
@@ -81,8 +69,6 @@ func TestSweepOpenCriteriaKeepsAskingUntilTheCriteriaAreSettled(t *testing.T) {
 	require.Empty(t, updater.comments, "a sweep that settled needs no explanatory comment")
 }
 
-// Cancelling is a real answer: it settles the criterion, so the loop stops
-// instead of driving the agent at a decision it already made and explained.
 func TestSweepOpenCriteriaStopsOnACancelledCriterion(t *testing.T) {
 	ex := &fakeExecutor{
 		supports: domain.LLMProviderClaudeCode,
@@ -106,8 +92,6 @@ func TestSweepOpenCriteriaStopsOnACancelledCriterion(t *testing.T) {
 	require.Equal(t, 1, ex.callCount(), "a cancelled criterion is settled; the loop must not ask again")
 }
 
-// The loop is bounded, and what it leaves behind when it gives up is a written
-// explanation on the card — not silence in front of a gate nobody can see.
 func TestSweepOpenCriteriaStopsAtTheRoundCapAndSaysSo(t *testing.T) {
 	ex := &fakeExecutor{
 		supports: domain.LLMProviderClaudeCode,
@@ -132,8 +116,6 @@ func TestSweepOpenCriteriaStopsAtTheRoundCapAndSaysSo(t *testing.T) {
 	require.Contains(t, updater.comments[0].Content, "unsettled")
 }
 
-// Round one asks; every round after it demands the work. An escalation that
-// only repeated itself would let a run answer "noted" three times.
 func TestCriteriaSweepPromptEscalates(t *testing.T) {
 	open := []domain.AcceptanceCriterion{{ID: uuid.New(), Text: "criterion"}}
 

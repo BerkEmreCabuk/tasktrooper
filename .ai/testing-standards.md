@@ -5,7 +5,7 @@ See [coding-standards.md](coding-standards.md) for everything else.
 
 | Package | Command | Notes |
 |---|---|---|
-| `server/` | `go build ./... && go vet ./... && go test ./...` | Tests needing Postgres start their own embedded instance (`platform/database.StartEmbedded`) — nothing external has to be running. One embedded cluster per test binary, a database per suite. `CGO_ENABLED=1` required (tree-sitter). |
+| `server/` | `go build ./... && go vet ./... && go test ./...` | Tests needing Postgres start their own embedded instance (`platform/database.StartEmbedded`) — nothing external has to be running. One embedded cluster per test binary, a database per suite. `CGO_ENABLED=1` required (tree-sitter). Mocks are mockery-generated via `go generate ./internal/port/...` and used with expectations; suites for shared setup, table-driven for branching behaviors — see [server/.ai/testing-standards.md](../server/.ai/testing-standards.md). |
 | `desktop/` | `npm run typecheck && npm run lint && npm test` | Vitest, Node environment, Electron mocked per suite. `detect.test.ts` spawns real fake CLIs rather than stubbing `execFile`. |
 | `desktop/ui/` | `npx tsc --noEmit && npm run build && npm run check:locales` | `npm test` (Vitest) also exists and should stay green; `check:locales` fails the build if `en.ts`/`tr.ts` key sets diverge. |
 

@@ -1,33 +1,9 @@
 package orchestrator
 
-// JSON Schemas for the pipeline stages' structured output (planner, intake,
-// verifier, replanner). Passed via domain.JSONSchemaResponseFormat, these let
-// a provider that supports constrained decoding (the OpenAI-compatible
-// adapter's json_schema+strict, Gemini's ResponseJsonSchema, Anthropic's
-// output_config) guarantee the shape instead of relying on the model reading
-// the prose "Respond with ONLY valid JSON matching this exact schema" rule —
-// which is what fed the parse-repair retry loop (pipelineCorrection /
-// pipelineRejection in conversation.go) on every stray comma or dropped field.
-//
-// Every object below lists ALL of its properties in "required" and sets
-// "additionalProperties": false. That is not a parser requirement — none of
-// these fields are ever range-checked for extra keys — it is what OpenAI's
-// strict json_schema mode itself demands: a schema with an optional property,
-// or one that allows unlisted keys, is rejected outright. It costs nothing
-// here: a field the Go parser treats as optional (an empty array, an empty
-// string) is still satisfied by the provider always including the key, and
-// the parse/repair/retry path in conversation.go stays exactly as it was for
-// providers that fall back to the prose rule instead.
-//
-// Each schema mirrors what its stage's system prompt actually advertises
-// (buildPlannerSystemPrompt, buildReplannerSystemPrompt, ...), not the raw
-// unmarshal target's full field set: the planner's parse struct also reads
-// "purpose"/"goal", for instance, but the prompt never asks for them and the
-// caller always overwrites them with the intake's values afterward, so a
-// strict schema omits them rather than force the model to invent content for
-// a field nothing downstream reads.
+// Strict JSON Schemas for the toolless stages' structured output — required,
+// all-properties, additionalProperties:false — so providers can constrain decoding
+// instead of relying on the prose rule, at no cost to the prose-only fallback.
 
-// clarificationOptionSchema mirrors domain.ClarificationOption.
 func clarificationOptionSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type":                 "object",
@@ -40,9 +16,6 @@ func clarificationOptionSchema() map[string]interface{} {
 	}
 }
 
-// clarificationQuestionSchema mirrors domain.ClarificationQuestion — the
-// "questions" array item shared by the planner and intake schemas (see
-// prompt.AskUserQuestionJSONShape, the prose template both prompts embed).
 func clarificationQuestionSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type":                 "object",
@@ -60,9 +33,6 @@ func clarificationQuestionSchema() map[string]interface{} {
 	}
 }
 
-// stringArraySchema is the recurring "array of strings" shape (skill_ids,
-// tool_names, subtask_rules, depends_on, constraints, issues, source_urls —
-// all []string on the Go side).
 func stringArraySchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type":  "array",
@@ -70,10 +40,7 @@ func stringArraySchema() map[string]interface{} {
 	}
 }
 
-// plannerTaskSchema mirrors the per-task object in planner.go's
-// parsePlannerJSON raw struct / domain.PlannerTask, including "difficulty" —
-// present in the planner's own advertised shape (buildPlannerSystemPrompt)
-// but not the replanner's (see repairTaskSchema).
+// Planner's task shape; carries "difficulty", which the replanner's does not.
 func plannerTaskSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type":                 "object",
@@ -97,9 +64,6 @@ func plannerTaskSchema() map[string]interface{} {
 	}
 }
 
-// repairTaskSchema is plannerTaskSchema without "difficulty" — the
-// replanner's prompt (buildReplannerSystemPrompt) never asks for it, and a
-// repair task with none defaults to "easy" via normalizeDifficulty.
 func repairTaskSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type":                 "object",
@@ -122,8 +86,6 @@ func repairTaskSchema() map[string]interface{} {
 	}
 }
 
-// plannerOutputSchema is the planner's structured-output contract — see
-// buildPlannerSystemPrompt's JSON template and parsePlannerJSON.
 func plannerOutputSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type":                 "object",
@@ -138,8 +100,6 @@ func plannerOutputSchema() map[string]interface{} {
 	}
 }
 
-// replannerOutputSchema is the replanner's structured-output contract — see
-// buildReplannerSystemPrompt's JSON template and parseRepairPlanOutput.
 func replannerOutputSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type":                 "object",
@@ -152,8 +112,6 @@ func replannerOutputSchema() map[string]interface{} {
 	}
 }
 
-// intakeOutputSchema is goal intake's structured-output contract — see
-// buildIntakeSystemPrompt's JSON template and parseGoalIntake.
 func intakeOutputSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type":                 "object",
@@ -169,8 +127,6 @@ func intakeOutputSchema() map[string]interface{} {
 	}
 }
 
-// verifierOutputSchema is the verifier's structured-output contract — see
-// buildVerifierSystemPrompt's JSON template and parseVerificationResult.
 func verifierOutputSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type":                 "object",

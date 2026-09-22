@@ -29,7 +29,6 @@ func TestCoverageThresholdHonoursTheSubProjectOverride(t *testing.T) {
 		},
 	}
 	assert.Equal(t, 40.0, coverageThreshold(repo, "apps/web"))
-	// No opinion of its own, and an unknown path, both fall back to the repo.
 	assert.Equal(t, 55.0, coverageThreshold(repo, "apps/api"))
 	assert.Equal(t, 55.0, coverageThreshold(repo, "apps/nope"))
 }

@@ -50,22 +50,21 @@ func Start(ctx context.Context, dataDir, cacheDir string) (string, func(), error
 
 	backupDir := filepath.Join(dataDir, preDropTenancyBackup)
 	if port, ok := liveCluster(ctx, pgData); ok {
+		// Copying the files of a running cluster would not be a backup.
 		if !backupSettled(pgData, backupDir) {
-			// Copying the files of a running cluster would not be a backup.
 			log.Warn().Str("data_dir", pgData).
 				Msg("postgres is already running on this data directory, so no copy was taken before migration 133")
 		}
 		log.Info().Uint32("port", port).Msg("reusing the embedded postgres already running on this data directory")
 		return dsn(port), func() {}, nil
 	}
-	// pg_ctl refuses to start while a postmaster.pid is present even when the
-	// process it names died with the machine, which is how a crash turns into a
+	// A dead postmaster.pid blocks pg_ctl, which is how a crash turns into a
 	// desktop that never starts again.
 	clearStalePID(pgData)
 
-	// The cluster is stopped here, which is the only point a file copy is a
-	// consistent backup. Migration 133 cannot be undone, so an install that
-	// cannot be copied does not start rather than migrate unprotected.
+	// Migration 133 cannot be undone, so a cluster that cannot be copied does
+	// not start rather than migrate unprotected. The copy is only consistent
+	// while the cluster is stopped, which it is here.
 	fresh := !fileExists(filepath.Join(pgData, "PG_VERSION"))
 	copied, err := backupClusterOnce(pgData, backupDir)
 	if err != nil {
@@ -124,13 +123,9 @@ func Start(ctx context.Context, dataDir, cacheDir string) (string, func(), error
 	}, nil
 }
 
-// wrapStartError diagnoses the OS-level failure this library reports as
-// nothing more than "unable to init/start postgres" text. On Windows the
-// pg_ctl/initdb binaries downloaded into the cache directory are unsigned, so
-// the OS itself can refuse to run them (a Defender/antivirus quarantine or a
-// missing VC++ runtime), which surfaces here as an *exec.Error or
-// *fs.PathError. This does not fix or work around the failure; it only makes
-// the cause distinguishable in a shared log.
+// wrapStartError surfaces exe/initdb failures the OS itself caused (unsigned
+// binaries quarantined by antivirus, a missing VC++ runtime). It does not fix
+// them, only makes the cause distinguishable in the log.
 func wrapStartError(err error) error {
 	var execErr *exec.Error
 	var pathErr *fs.PathError
@@ -220,9 +215,9 @@ func processAlive(pid int) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
-// logWriter carries the cluster's own stdout/stderr into the process log
-// instead of the terminal, where it would interleave with the LISTENING line
-// the desktop parses.
+// logWriter routes the cluster's own output into the process log instead of
+// the terminal, where it would interleave with the LISTENING line the desktop
+// parses.
 type logWriter struct{}
 
 func (logWriter) Write(p []byte) (int, error) {

@@ -31,10 +31,7 @@ func (b Budget) Apply(messages []domain.Message) []domain.Message {
 			working = append(working[:idx], working[idx+1:]...)
 			continue
 		}
-		// Nothing may be removed whole any more — but a protected turn can
-		// still be over the limit purely on pictures, and one image is worth
-		// hundreds of tokens. Shedding the oldest image keeps the words the
-		// user wrote, which is the part the model cannot guess.
+		// A protected turn can still exceed the limit on pictures alone; shedding the oldest image keeps the words, which the model cannot guess.
 		if dropOldestImage(working) {
 			continue
 		}
@@ -43,13 +40,7 @@ func (b Budget) Apply(messages []domain.Message) []domain.Message {
 	return working
 }
 
-// dropOldestImage sheds the single oldest image in the history — oldest message
-// first, first image within that message — and reports whether it found one.
-// The message itself stays, text intact, even once it has no images left.
-//
-// The Images slice is cloned before the mutation: Apply's messages are a
-// shallow copy, so writing through the shared backing array would strip images
-// out of the caller's own history for good.
+// dropOldestImage sheds the single oldest image while keeping the message and its text intact. The Images slice is cloned because Apply's messages are a shallow copy — writing through the shared backing array would strip the caller's own history.
 func dropOldestImage(messages []domain.Message) bool {
 	for i := range messages {
 		if len(messages[i].Images) == 0 {
@@ -63,10 +54,7 @@ func dropOldestImage(messages []domain.Message) bool {
 	return false
 }
 
-// TokenLimit is the largest history, in tokens, that may be sent: the whole
-// window minus the room the answer needs. Exported because callers that trim
-// before handing a history over need to ask the same question Apply asks, and
-// two copies of the arithmetic are two copies that can drift.
+// TokenLimit is the whole window minus the room the answer needs; exported so callers that trim before handing a history over ask the same question Apply asks.
 func (b Budget) TokenLimit() int {
 	limit := b.MaxTokens - b.ReserveOutput
 	if limit < 1 {

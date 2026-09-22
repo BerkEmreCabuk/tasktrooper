@@ -45,9 +45,7 @@ func (f *fakeManager) UpdateRuleForAgent(_ context.Context, agentID, ruleID uuid
 
 func (f *fakeManager) DeleteRuleForAgent(_ context.Context, _, _ uuid.UUID) error { return nil }
 
-// noopRecordEvent/noopRecordOutcome stand in for applyOutput's real callbacks
-// in tests that exercise applySkillChanges/applyRuleChanges directly and don't
-// care about the event or outcome bookkeeping, only the manager calls.
+// No-op stand-ins for applyOutput's real callbacks, in tests that exercise applySkillChanges/applyRuleChanges directly and only care about the manager calls.
 func noopRecordEvent(domain.AgentEvolutionEvent) (domain.AgentEvolutionEvent, error) {
 	return domain.AgentEvolutionEvent{}, nil
 }
@@ -190,10 +188,7 @@ func TestReflectionPromptCarriesBudgetAndGate(t *testing.T) {
 	}
 }
 
-// --- the golden gate with no grader ----------------------------------------
-
-// erroringLLM answers every call with one error. Stands in for a judge (or a
-// golden suite) running on an agent whose engine cannot serve the call.
+// Stands in for a judge (or golden suite) running on an engine that cannot serve the call.
 type erroringLLM struct {
 	err   error
 	calls int
@@ -213,27 +208,13 @@ func (e *erroringLLM) Embed(context.Context, string, string) ([]float32, error) 
 	return nil, nil
 }
 
-// A LOAD-BEARING step failing rather than appearing to succeed.
-//
-// The golden gate decides whether an agent keeps the skills and rules it just
-// rewrote about itself. Its fallback for an unreachable judge is "keep only if
-// the suite did not get worse", which is sound — as long as the suite RAN.
-//
-// It did not, and the old silent provider fallback is why: the judge call was
-// rerouted to the active default HTTP provider, which at the time
-// was a dead `gemini-2.0-flash`. So the judge failed, `after >= before` held
-// trivially, and the change set was kept with the reason "kept on
-// non-regression" — a phrase that reads on the dashboard exactly like evidence,
-// attached to a grading that never happened.
-//
-// With no grader, the answer is REVERT.
+// LOAD-BEARING regression test. The judge fallback is "keep only if the suite ran and did not get worse"; the old silent provider fallback rerouted the judge to a dead default HTTP provider, so after >= before held trivially and an ungraded change set was kept as "non-regression". With no grader, the answer is REVERT.
 func TestGoldenGateRevertsWhenTheJudgeCannotRun(t *testing.T) {
 	refusal := domain.ErrHostExecutedProvider(domain.LLMProviderClaudeCode)
 	llm := &erroringLLM{err: refusal}
 	svc := &Service{llm: llm}
 
-	// Deliberately the shape that used to be "kept on non-regression": the suite
-	// ran, and the rate held exactly level.
+	// Deliberately the shape that used to be "kept on non-regression": the suite ran, and the rate held exactly level.
 	before := goldenRun{Rate: 0.8, Evaluated: 5}
 	after := goldenRun{Rate: 0.8, Evaluated: 5}
 
@@ -252,9 +233,7 @@ func TestGoldenGateRevertsWhenTheJudgeCannotRun(t *testing.T) {
 	}
 }
 
-// A transient judge failure keeps the old, deliberate behaviour: the suite ran,
-// it did not regress, and one bad minute from the judge is not a reason to throw
-// away a change set the evidence supports.
+// A transient judge failure keeps the old deliberate behaviour: the suite ran and did not regress, and one bad minute from the judge is not a reason to throw away an evidence-supported change set.
 func TestGoldenGateStillKeepsOnNonRegressionForATransientJudgeFailure(t *testing.T) {
 	svc := &Service{llm: &erroringLLM{err: errors.New("connection reset by peer")}}
 
@@ -269,9 +248,7 @@ func TestGoldenGateStillKeepsOnNonRegressionForATransientJudgeFailure(t *testing
 	}
 }
 
-// The suite itself being unrunnable is the same verdict, reached earlier and
-// without spending a judge call: two rates of zero over zero tasks satisfy
-// `after >= before` perfectly, and that is not evidence of anything.
+// Same verdict, reached earlier and without spending a judge call: two zero rates satisfy after >= before perfectly, and that is not evidence of anything.
 func TestGoldenGateRevertsWhenTheSuiteCouldNotRunAtAll(t *testing.T) {
 	llm := &erroringLLM{err: errors.New("should not be reached")}
 	svc := &Service{llm: llm}
@@ -291,8 +268,7 @@ func TestGoldenGateRevertsWhenTheSuiteCouldNotRunAtAll(t *testing.T) {
 	}
 }
 
-// A real regression still reverts before anything else is consulted — the
-// deterministic floor the gate has always had must not have moved.
+// A real regression still reverts before anything else is consulted — the deterministic floor the gate has always had must not have moved.
 func TestGoldenGateStillRevertsARealRegressionFirst(t *testing.T) {
 	llm := &erroringLLM{err: errors.New("should not be reached")}
 	svc := &Service{llm: llm}

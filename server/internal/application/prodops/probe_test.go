@@ -16,13 +16,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 )
 
-// ─── F6: the probe loop is not an internal scanner ────────────────────────────
-
-// TestProbeRefusesInternalHealthURLs is the finding: a health_url is
-// agent-writable and this loop GETs it every minute forever. With the production
-// policy the pod's own listener is never reached, and — just as important — the
-// incident the failure opens says the same thing for every blocked range, so the
-// remedy text an agent reads is not a network map.
 func TestProbeRefusesInternalHealthURLs(t *testing.T) {
 	var hits atomic.Int32
 	internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -46,7 +39,7 @@ func TestProbeRefusesInternalHealthURLs(t *testing.T) {
 			HealthURL:    healthURL,
 		}}}
 		ingester := &fakeIngester{}
-		monitor := prodops.NewMonitor(targets, ingester) // production default
+		monitor := prodops.NewMonitor(targets, ingester)
 
 		monitor.Sweep(context.Background())
 		monitor.Sweep(context.Background())
@@ -66,9 +59,6 @@ func TestProbeRefusesInternalHealthURLs(t *testing.T) {
 	}
 }
 
-// TestProbeIncidentDropsTheQueryString: the incident text is rendered into
-// agent-facing remedy steps, and a health endpoint routinely carries a token in
-// its query string.
 func TestProbeIncidentDropsTheQueryString(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
@@ -157,10 +147,7 @@ func (s *ProbeSuite) SetupTest() {
 	}}}
 	s.ingester = &fakeIngester{}
 	s.monitor = prodops.NewMonitor(s.targets, s.ingester)
-	// httptest listens on loopback, which the production policy refuses on
-	// purpose. The behaviour suite runs with the self-hosted policy so it keeps
-	// testing the state machine; the guard itself is tested below with the
-	// default policy in place.
+
 	s.monitor.SetURLPolicy(loopbackPolicy())
 }
 
@@ -179,8 +166,6 @@ func (s *ProbeSuite) TestHealthySweepsIngestNothing() {
 	s.Empty(s.ingester.ingested)
 }
 
-// One failure is noise (a restart, a dropped packet); the incident opens on the
-// second consecutive failure.
 func (s *ProbeSuite) TestIncidentOpensOnlyAfterTwoFailures() {
 	s.healthy.Store(false)
 
@@ -213,7 +198,6 @@ func (s *ProbeSuite) TestRecoveryResolvesTheIncident() {
 		"the recovery must carry the same fingerprint or it closes nothing")
 }
 
-// A single blip followed by a success must not leave the failure counter armed.
 func (s *ProbeSuite) TestFailureCounterResetsOnSuccess() {
 	s.healthy.Store(false)
 	s.monitor.Sweep(context.Background())

@@ -12,9 +12,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// originGit answers OriginURL per path, which is what every adoption check
-// turns on: two checkouts can both be repositories and only one of them can be
-// the one on record.
 type originGit struct {
 	fakeRestoreGit
 	origins map[string]string
@@ -22,9 +19,6 @@ type originGit struct {
 
 func (g *originGit) OriginURL(_ context.Context, path string) string { return g.origins[path] }
 
-// TestRepoPathRefusesATraversingName: the name is the repository's directory
-// name, joined onto the workspace root, so one that could climb out of repos/
-// is refused rather than sanitised.
 func TestRepoPathRefusesATraversingName(t *testing.T) {
 	root := t.TempDir()
 	svc := &Service{workspaceRoot: root}
@@ -41,10 +35,6 @@ func TestRepoPathRefusesATraversingName(t *testing.T) {
 	}
 }
 
-// EnsureIndexMirror is the adoption path that needs no user action at all — a
-// webhook or a freshness check reaches it. It used to return nil for any
-// directory with a .git in it, so an index pass walked whatever was at the
-// shared path and wrote its contents into this repository's chunks.
 func TestIndexMirrorRefusesADifferentRepository(t *testing.T) {
 	root := t.TempDir()
 	repo := domain.Repository{
@@ -73,8 +63,6 @@ func TestIndexMirrorRefusesADifferentRepository(t *testing.T) {
 	}
 }
 
-// The same origin in either of git's two spellings is the same repository, and
-// must still be adopted — a check that refused this would be turned off.
 func TestIndexMirrorAdoptsTheSameRepositoryInAnotherSpelling(t *testing.T) {
 	root := t.TempDir()
 	repo := domain.Repository{
@@ -93,9 +81,6 @@ func TestIndexMirrorAdoptsTheSameRepositoryInAnotherSpelling(t *testing.T) {
 	}
 }
 
-// The restore button adopts a checkout that is already at the destination. Its
-// comment enumerated two benign reasons a directory might be there and never
-// considered a different customer's.
 func TestRestoreRefusesToAdoptADifferentRepository(t *testing.T) {
 	repo := missingRepo()
 	git := &originGit{origins: map[string]string{}}

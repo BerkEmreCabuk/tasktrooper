@@ -11,8 +11,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// notReadyEmbedLLM is an embedder whose model has not loaded: every call waits
-// until the caller gives up, as a client retrying a 503 would.
+// Embedder whose model has not loaded: every call waits until the caller gives up, as a client retrying a 503 would.
 type notReadyEmbedLLM struct {
 	stubLLMClient
 	calls atomic.Int32
@@ -34,9 +33,7 @@ func (r *readyEmbedLLM) Embed(context.Context, string, string) ([]float32, error
 	return []float32{0.25, 0.5}, nil
 }
 
-// seedTemplatesWithSkills wires the built-in templates a test creates agents
-// from. Templates are no longer boot-time seeded — they are rows the user
-// saved, or freshly upserted from the catalog — so each test states its own.
+// Templates are no longer boot-time seeded, so each test states its own.
 func seedTemplatesWithSkills(t *testing.T, templates *memTemplateStore, names ...string) {
 	t.Helper()
 	ctx := context.Background()
@@ -52,18 +49,13 @@ func seedTemplatesWithSkills(t *testing.T, templates *memTemplateStore, names ..
 	}
 }
 
-// Creating agents from templates must never wait on the embedder: seedSkill
-// copies every skill without a vector, the same way the template-creation
-// path always has.
 func TestCreateAgentFromTemplate_NeverWaitsOnTheEmbedder(t *testing.T) {
 	store := newMemCatalogStore()
 	templates := &memTemplateStore{}
 	llm := &notReadyEmbedLLM{}
 	svc := NewService(store, llm, "")
 	svc.SetTemplateStore(templates)
-	// A safety net, not the point of the test: if this ever regressed into
-	// waiting on the embedder, ctx.Done() unblocks notReadyEmbedLLM.Embed
-	// instead of hanging the suite.
+	// Safety net: if creation ever waited on the embedder, ctx.Done() unblocks instead of hanging the suite.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
@@ -86,8 +78,6 @@ func TestCreateAgentFromTemplate_NeverWaitsOnTheEmbedder(t *testing.T) {
 	}
 }
 
-// The backfill fills exactly the skills seedSkill left without a vector, and a
-// second pass finds nothing left to do.
 func TestBackfillSkillEmbeddings_FillsOnlyTheSkillsWithoutAVector(t *testing.T) {
 	ctx := context.Background()
 	store := newMemCatalogStore()
@@ -107,7 +97,7 @@ func TestBackfillSkillEmbeddings_FillsOnlyTheSkillsWithoutAVector(t *testing.T) 
 	if err != nil {
 		t.Fatalf("BackfillSkillEmbeddings: %v", err)
 	}
-	want := 4 // two templates, two skills each
+	want := 4
 	if updated != want || int(ready.calls.Load()) != updated {
 		t.Fatalf("updated %d skills with %d embed calls; want %d calls", updated, ready.calls.Load(), want)
 	}

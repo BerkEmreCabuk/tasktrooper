@@ -33,10 +33,8 @@ type Embedded struct {
 type EmbeddedConfig struct {
 	DataDir string
 	Port    uint32
-	// RuntimePath isolates the extracted binaries. Two instances sharing the
-	// default cache race each other while extracting/initialising, which shows
-	// up as a killed initdb; tests that may run alongside another embedded
-	// instance set their own path.
+	// RuntimePath isolates the extracted binaries; two instances sharing the
+	// default cache race while extracting, which shows up as a killed initdb.
 	RuntimePath string
 }
 
@@ -119,10 +117,9 @@ func StartEmbedded(ctx context.Context, cfg EmbeddedConfig) (*Embedded, error) {
 	return e, nil
 }
 
-// NewDatabase returns a fresh, fully migrated database on the same cluster,
-// copied from the one StartEmbedded migrated. A suite gets the isolation of its
-// own instance for the price of a file copy instead of an initdb, a server
-// start and every migration again.
+// NewDatabase returns a fresh, fully migrated database copied from the one
+// StartEmbedded migrated: suite isolation for the price of a file copy instead
+// of an initdb, a server start and every migration again.
 func (e *Embedded) NewDatabase(ctx context.Context) (*Embedded, error) {
 	admin, err := pgxpool.New(ctx, e.dsnFor("postgres"))
 	if err != nil {
@@ -130,11 +127,10 @@ func (e *Embedded) NewDatabase(ctx context.Context) (*Embedded, error) {
 	}
 	defer admin.Close()
 
-	// CREATE DATABASE refuses a template that has sessions, after waiting five
-	// seconds for them. The embedded-postgres library leaves its health-check
-	// connection open until the garbage collector gets to it, which held the
-	// first clone up for minutes. Nothing uses the template directly, so
-	// whatever is connected to it is a leftover.
+	// CREATE DATABASE refuses a template with live sessions; the library leaves
+	// its health-check connection open until GC, which held the first clone up
+	// for minutes. Nothing uses the template directly, so anything connected is
+	// leftover.
 	if _, err := admin.Exec(ctx,
 		`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`,
 		dbName); err != nil {

@@ -36,8 +36,6 @@ func (f *fakeBoardTaskStore) ListAll(context.Context) ([]domain.BoardTask, error
 	return f.tasks, nil
 }
 
-// The board view drops long-released tasks; the reconciler works off the
-// same set as ListAll here, so nothing in these tests depends on the cutoff.
 func (f *fakeBoardTaskStore) ListBoardVisible(context.Context, time.Time) ([]domain.BoardTask, error) {
 	return f.tasks, nil
 }
@@ -150,8 +148,6 @@ func (s *ReconcilerSuite) TestRecoversStaleRunAndRedispatchesAssignee() {
 	s.Equal(assignee, s.runner.jobs[0].Run.AgentID)
 }
 
-// fakePlanSettler answers the plan lookup for a dead run and records what the
-// reconciler closed out.
 type fakePlanSettler struct {
 	plan         domain.PlanView
 	planStatus   string
@@ -175,10 +171,6 @@ func (f *fakePlanSettler) UpdateTaskStatus(_ context.Context, taskID uuid.UUID, 
 	return nil
 }
 
-// DE-1 kept a spinning subtask on the board while the pod that ran it had
-// already been replaced. Failing the run row alone was not enough: the plan and
-// its subtasks carry their own status, and the UI reads the plan to decide the
-// run is still live.
 func (s *ReconcilerSuite) TestRecoveredRunAlsoSettlesItsOrchestrationPlan() {
 	assignee := uuid.New()
 	taskID := uuid.New()
@@ -254,8 +246,6 @@ func (s *ReconcilerSuite) TestNeverStartedAssignedTaskIsDispatched() {
 		Column:          domain.TaskColumnTodo,
 		AssigneeAgentID: &assignee,
 	}}
-	// No stale runs and no run history at all — this is the DE2-1 case:
-	// dispatch never fired for this task (e.g. config gap at creation time).
 
 	s.rec.Run(context.Background())
 
@@ -264,10 +254,6 @@ func (s *ReconcilerSuite) TestNeverStartedAssignedTaskIsDispatched() {
 	s.Equal(assignee, s.runner.jobs[0].Run.AgentID)
 }
 
-// A task parked on work_order stays in todo/in_progress with zero run
-// history (Park returns before any run is ever created), so without the
-// BlockedResource check this would look identical to a never-started task
-// and get re-dispatched — re-triggering the park's comment — on every sweep.
 func (s *ReconcilerSuite) TestWorkOrderParkedTaskNotRedispatched() {
 	assignee := uuid.New()
 	taskID := uuid.New()
@@ -291,8 +277,6 @@ func (s *ReconcilerSuite) TestTaskWithRunHistoryNotDoubleDispatched() {
 		Column:          domain.TaskColumnInProgress,
 		AssigneeAgentID: &assignee,
 	}}
-	// A completed run exists and the task is not stale — reconciler must
-	// leave it alone (already picked up once; not this sweep's job).
 	s.runs.runs = []domain.TaskAgentRun{{
 		ID:      uuid.New(),
 		TaskID:  taskID,
@@ -305,9 +289,6 @@ func (s *ReconcilerSuite) TestTaskWithRunHistoryNotDoubleDispatched() {
 	s.Empty(s.runner.jobs, "task with existing run history must not be re-dispatched by the never-started path")
 }
 
-// With the self-dispatch guard in place, a failed run's task gets no follow-up
-// event — the reconciler is now the only retry path, bounded at three
-// consecutive failures.
 func (s *ReconcilerSuite) TestFailedRunIsRetried() {
 	assignee := uuid.New()
 	taskID := uuid.New()
@@ -353,8 +334,6 @@ func (s *ReconcilerSuite) TestThreeConsecutiveFailuresParkTask() {
 	s.Empty(s.runner.jobs, "a task failing three times in a row waits for a human")
 }
 
-// A success between failures resets the consecutive count: latest failed run
-// after a completed one is retried.
 func (s *ReconcilerSuite) TestSuccessResetsFailureCount() {
 	assignee := uuid.New()
 	taskID := uuid.New()
@@ -363,7 +342,6 @@ func (s *ReconcilerSuite) TestSuccessResetsFailureCount() {
 		Column:          domain.TaskColumnInProgress,
 		AssigneeAgentID: &assignee,
 	}}
-	// Insertion order oldest→newest; ListByTask returns newest first.
 	s.runs.runs = []domain.TaskAgentRun{
 		{ID: uuid.New(), TaskID: taskID, AgentID: assignee, Status: domain.TaskAgentRunStatusFailed},
 		{ID: uuid.New(), TaskID: taskID, AgentID: assignee, Status: domain.TaskAgentRunStatusFailed},
@@ -401,8 +379,6 @@ func (s *ReconcilerSuite) TestUnassignedTaskNotDispatched() {
 	s.tasks.tasks = []domain.BoardTask{{
 		ID:     taskID,
 		Column: domain.TaskColumnTodo,
-		// no AssigneeAgentID — out of scope: reconciler only recovers work
-		// already assigned to a specific agent, never auto-assigns idle work.
 	}}
 
 	s.rec.Run(context.Background())
@@ -410,9 +386,6 @@ func (s *ReconcilerSuite) TestUnassignedTaskNotDispatched() {
 	s.Empty(s.runner.jobs, "unassigned tasks are not auto-dispatched by the reconciler")
 }
 
-// The reconciler is the second path into a run: it revives assigned tasks with
-// no live run. Backlog tasks are not on the board, so reviving one there would
-// start work nobody scheduled — the same DE-1 failure by another route.
 func (s *ReconcilerSuite) TestBacklogTaskNotDispatched() {
 	assignee := uuid.New()
 	s.tasks.tasks = []domain.BoardTask{{
@@ -427,16 +400,6 @@ func (s *ReconcilerSuite) TestBacklogTaskNotDispatched() {
 	s.Empty(s.runner.jobs, "a backlog task must not be dispatched by the reconciler")
 }
 
-// Failing a run that is still executing does not stop it; it only re-dispatches
-// the task, putting a second agent on the same branch. There is no in-process
-// "is this mine" oracle to consult any more — it answered for one replica's
-// memory and reported every other replica's live run as abandoned — so the
-// guard is the heartbeat, re-read inside the write.
-//
-// This is the cross-replica interleaving stated as a test: the run is LISTED as
-// stale (its row was old when the sweep started) and then its owner — a
-// different pod, as far as this one is concerned — heartbeats before the write
-// lands. The list is advisory; the write is authoritative; the run survives.
 func (s *ReconcilerSuite) TestRunThatHeartbeatsDuringTheSweepIsNotRecovered() {
 	assignee := uuid.New()
 	taskID := uuid.New()
@@ -447,7 +410,6 @@ func (s *ReconcilerSuite) TestRunThatHeartbeatsDuringTheSweepIsNotRecovered() {
 		Column:          domain.TaskColumnInProgress,
 		AssigneeAgentID: &assignee,
 	}}
-	// What the sweep SAW: a row whose heartbeat had stopped an hour ago.
 	s.runs.stale = []domain.TaskAgentRun{{
 		ID:        runID,
 		TaskID:    taskID,
@@ -455,8 +417,6 @@ func (s *ReconcilerSuite) TestRunThatHeartbeatsDuringTheSweepIsNotRecovered() {
 		Status:    domain.TaskAgentRunStatusRunning,
 		UpdatedAt: time.Now().Add(-time.Hour),
 	}}
-	// What the DATABASE holds by the time the write runs: the owner, on another
-	// replica, touched it.
 	s.runs.runs = []domain.TaskAgentRun{{
 		ID:        runID,
 		TaskID:    taskID,
@@ -471,9 +431,6 @@ func (s *ReconcilerSuite) TestRunThatHeartbeatsDuringTheSweepIsNotRecovered() {
 	s.Empty(s.runner.jobs, "and must not be re-dispatched behind its own back")
 }
 
-// The other half of the same rule: a run whose heartbeat really has stopped IS
-// recovered, whichever replica notices. Without this the previous test would
-// pass just as well against a reconciler that never recovers anything.
 func (s *ReconcilerSuite) TestRunWithNoHeartbeatIsRecovered() {
 	assignee := uuid.New()
 	taskID := uuid.New()
@@ -501,16 +458,6 @@ func (s *ReconcilerSuite) TestRunWithNoHeartbeatIsRecovered() {
 	s.Len(s.runner.jobs, 1, "and its task is re-dispatched")
 }
 
-// A pod terminated mid-run (a deploy, an eviction, a drain that ran out of
-// budget) leaves a 'running' row behind whose heartbeat has stopped. It used to
-// take half an hour to recover, because the periodic sweep only looked at rows
-// older than a configured 30 minutes; a startup sweep with a cutoff of NOW made
-// up the difference by assuming that anything unfinished at boot was dead.
-//
-// That assumption is fatal with more than one replica, so it is gone — and it
-// is not missed, because the configured window is now clamped to eighteen
-// missed heartbeats (board.maxRunStale). The ordinary sweep recovers the dead
-// run in minutes and can never touch a live one, whichever pod is running it.
 func (s *ReconcilerSuite) TestStaleWindowIsClampedToTheHeartbeat() {
 	assignee := uuid.New()
 	taskID := uuid.New()
@@ -529,8 +476,6 @@ func (s *ReconcilerSuite) TestStaleWindowIsClampedToTheHeartbeat() {
 	}
 	s.runs.stale = []domain.TaskAgentRun{dead}
 	s.runs.runs = []domain.TaskAgentRun{dead}
-	// Asking for half an hour of patience: ten minutes of silence would not be
-	// enough, and the card would spin for another twenty.
 	rec := board.NewReconciler(s.runs, s.tasks, s.disp, 30*time.Minute)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -543,10 +488,6 @@ func (s *ReconcilerSuite) TestStaleWindowIsClampedToTheHeartbeat() {
 	s.Equal(domain.TaskAgentRunStatusFailed, s.runs.updated[0].Status)
 }
 
-// And the boot sweep must not do what it used to: a run that another replica is
-// executing right now, heartbeating normally, has to survive a fresh pod
-// starting up beside it. This is the deploy case — the reason replicas: 1 with
-// Recreate was the only safe setting.
 func (s *ReconcilerSuite) TestBootSweepLeavesAnotherReplicasLiveRunAlone() {
 	assignee := uuid.New()
 	taskID := uuid.New()
@@ -563,8 +504,6 @@ func (s *ReconcilerSuite) TestBootSweepLeavesAnotherReplicasLiveRunAlone() {
 		Status:    domain.TaskAgentRunStatusRunning,
 		UpdatedAt: time.Now(),
 	}
-	// Deliberately listed as stale: this models the worst case, where the
-	// sweep's own read is behind. The write still refuses.
 	s.runs.stale = []domain.TaskAgentRun{live}
 	s.runs.runs = []domain.TaskAgentRun{live}
 	rec := board.NewReconciler(s.runs, s.tasks, s.disp, 0)
@@ -578,8 +517,6 @@ func (s *ReconcilerSuite) TestBootSweepLeavesAnotherReplicasLiveRunAlone() {
 	s.Empty(s.runner.jobs, "and must not put a second agent on the same branch")
 }
 
-// The startup cutoff is what keeps the sweep from failing a run that a request
-// arriving during the sweep just created: such a row is newer than the cutoff.
 func (s *ReconcilerSuite) TestStartupSweepLeavesRunsCreatedAfterBootAlone() {
 	assignee := uuid.New()
 	taskID := uuid.New()
@@ -622,10 +559,6 @@ func (f *fakeBoardTaskStore) TakeBlockedResourceTask(context.Context, string, uu
 	return domain.BoardTask{}, false, nil
 }
 
-// A pending run is not a running one: nothing heartbeats it, so the 30-minute
-// window that protects a long healthy run only hid an orphan. This is the row a
-// control-plane handover leaves behind — created by the process that went away,
-// never started by the one that took over.
 func (s *ReconcilerSuite) TestOrphanedPendingRunIsRecoveredWellBeforeTheStaleWindow() {
 	assignee := uuid.New()
 	taskID := uuid.New()
@@ -650,8 +583,6 @@ func (s *ReconcilerSuite) TestOrphanedPendingRunIsRecoveredWellBeforeTheStaleWin
 	s.Require().Len(s.runner.jobs, 1, "and the task must be re-dispatched")
 }
 
-// The other half of the same rule: a run queued seconds ago is normal, and
-// failing it would race the worker that is about to start it.
 func (s *ReconcilerSuite) TestFreshPendingRunIsLeftAlone() {
 	assignee := uuid.New()
 	taskID := uuid.New()
@@ -668,8 +599,6 @@ func (s *ReconcilerSuite) TestFreshPendingRunIsLeftAlone() {
 		Status:    domain.TaskAgentRunStatusPending,
 		UpdatedAt: time.Now().Add(-20 * time.Second),
 	}}
-	// Pass 2 reads the same row: a task whose latest run is queued is not a task
-	// that was never dispatched.
 	s.runs.runs = s.runs.stale
 
 	s.rec.Run(context.Background())
@@ -678,15 +607,6 @@ func (s *ReconcilerSuite) TestFreshPendingRunIsLeftAlone() {
 	s.Empty(s.runner.jobs, "and nothing may be dispatched beside it")
 }
 
-// Age beats ownership now, and that is the deliberate change.
-//
-// A pending row used to be protected by asking THIS process whether it still
-// held the job in its queue. That answer is worthless on a shared deployment —
-// every other replica's queued job reads as orphaned — and it is no longer
-// needed: a re-dispatch produces a new pending row, and the losing worker's
-// claim then fails with not_pending, so the worst case is a redundant dispatch
-// rather than two agents on one branch. Trading a durable park for a two-minute
-// wait is the whole point: the old in-memory park died with its pod.
 func (s *ReconcilerSuite) TestLongQueuedPendingRunIsRecovered() {
 	assignee := uuid.New()
 	taskID := uuid.New()

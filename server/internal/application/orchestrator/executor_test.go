@@ -57,8 +57,7 @@ func (s *ExecutorMessagesSuite) TestBuildTaskMessages_IsolatedHistoryKeepsEveryU
 	s.Require().Len(messages, 5)
 	s.Equal("first", messages[1].Content)
 	s.Equal("done", messages[2].Content)
-	// Dropping this turn made the agent read the session's opening instruction
-	// as the current one, so "move that task" was executed as "create a task".
+	// Dropping this turn made the agent read the session's opening instruction as the current one.
 	s.Equal("second", messages[3].Content)
 }
 

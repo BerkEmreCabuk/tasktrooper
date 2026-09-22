@@ -9,18 +9,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// DetectAppIdentity reads a mobile working copy's store identifiers off disk —
-// the iOS bundle id and the Android package name — the same way DetectRepoKind
-// and DetectMobilePlatform read its shape: marker files, no network, no LLM.
-//
-// It exists so the deploy settings screen can PREFILL the store identity
-// fields instead of asking a human to retype what the build files already say;
-// a wrong prefill is worse than none, so every rule below refuses rather than
-// guesses, and both halves answer "" independently.
-//
-// Never returns an error: a repository with an unparseable, half-written or
-// unreadable build file is not a failed import, it is a repository whose
-// identifiers nobody could read.
 func DetectAppIdentity(rootPath string) domain.AppIdentity {
 	root := strings.TrimSpace(rootPath)
 	if root == "" {
@@ -32,18 +20,8 @@ func DetectAppIdentity(rootPath string) domain.AppIdentity {
 	}
 }
 
-// maxIdentityFileSize caps what this file will read into memory. A project.pbxproj
-// of a large app runs into the low megabytes; anything past this is not one.
 const maxIdentityFileSize = 8 << 20
 
-// detectPackageName answers the Android half: applicationId from Gradle, and
-// only then the manifest's package attribute. That order is the shipping
-// order — applicationId is what lands on Play, while the manifest package is
-// the code's namespace and merely coincides with it on most projects (and is
-// absent entirely on AGP 8 projects, which moved it to `namespace`).
-//
-// Both the Flutter layout (android/app/…) and a plain Android repo (app/… at
-// the root) are covered, most specific first.
 func detectPackageName(root string) string {
 	for _, rel := range []string{
 		"android/app/build.gradle", "android/app/build.gradle.kts",
@@ -76,10 +54,6 @@ func detectPackageName(root string) string {
 	return ""
 }
 
-// detectBundleID answers the Apple half: PRODUCT_BUNDLE_IDENTIFIER from the
-// Xcode project, and only then Info.plist — which on every modern project
-// holds $(PRODUCT_BUNDLE_IDENTIFIER) rather than a literal, and is therefore
-// the fallback for the hand-written projects that still spell it out.
 func detectBundleID(root string) string {
 	for _, dir := range []string{root, filepath.Join(root, "ios")} {
 		for _, proj := range xcodeProjects(dir) {
@@ -118,10 +92,6 @@ func xcodeProjects(dir string) []string {
 	return out
 }
 
-// infoPlistPaths lists where an Info.plist worth reading lives: Flutter's
-// ios/Runner first, then any other target folder under ios/, then the target
-// folders of a native iOS repo whose project sits at the root. One level down
-// only — deeper is Pods/, build output and vendored copies.
 func infoPlistPaths(root string) []string {
 	paths := []string{filepath.Join(root, "ios", "Runner", "Info.plist")}
 	for _, dir := range []string{filepath.Join(root, "ios"), root} {
@@ -139,9 +109,6 @@ func infoPlistPaths(root string) []string {
 	return append(paths, filepath.Join(root, "Info.plist"))
 }
 
-// applicationIDPattern matches `applicationId "com.x"` (Groovy) and
-// `applicationId = "com.x"` (Kotlin DSL). applicationIdSuffix cannot match it:
-// the quote has to follow the name, and there a letter does.
 var applicationIDPattern = regexp.MustCompile(`applicationId\s*=?\s*["']([^"']*)["']`)
 
 func gradleApplicationID(body string) string {
@@ -163,9 +130,6 @@ var (
 	manifestPackagePattern = regexp.MustCompile(`(?:^|\s)package\s*=\s*"([^"]*)"`)
 )
 
-// manifestPackage reads the package attribute off the <manifest> element and
-// nowhere else: <queries> ships <package android:name="…"/> children, and
-// answering with one of those would name somebody else's app.
 func manifestPackage(body string) string {
 	tag := manifestTagPattern.FindString(body)
 	if tag == "" {
@@ -180,10 +144,6 @@ func manifestPackage(body string) string {
 
 var pbxBundleIDPattern = regexp.MustCompile(`PRODUCT_BUNDLE_IDENTIFIER\s*=\s*("[^"\n]*"|[^;\n]*);`)
 
-// pbxBundleIDs collects every literal PRODUCT_BUNDLE_IDENTIFIER in a
-// project.pbxproj, in file order. There is one per build configuration per
-// target, so a Flutter project alone yields six — pickBundleID decides which
-// of them is the app.
 func pbxBundleIDs(body string) []string {
 	var out []string
 	for _, m := range pbxBundleIDPattern.FindAllStringSubmatch(body, -1) {
@@ -195,12 +155,6 @@ func pbxBundleIDs(body string) []string {
 	return out
 }
 
-// pickBundleID chooses the app's own identifier out of every target's. Two
-// rules, in order: an id that extends another one belongs to something the app
-// ships INSIDE it (com.acme.app.RunnerTests, .widget, .NotificationService),
-// and a target whose last segment names a test bundle or an app extension is
-// not the app either. Shortest wins among what is left, which is the app on
-// every layout where the extensions were named independently.
 func pickBundleID(candidates []string) string {
 	if len(candidates) == 0 {
 		return ""
@@ -233,9 +187,6 @@ func extendsAnother(candidate string, all []string) bool {
 	return false
 }
 
-// auxiliarySuffixes are the last-segment names Xcode's own templates give to
-// something that is not the app: test bundles, app extensions, watch targets,
-// app clips.
 var auxiliarySuffixes = []string{
 	"test", "tests", "uitest", "uitests", "testing",
 	"widget", "widgets", "widgetextension", "extension",
@@ -275,10 +226,6 @@ func plistBundleID(body string) string {
 	return value
 }
 
-// plausibleAppID rejects everything that is not a literal identifier: a build
-// variable ($(PRODUCT_BUNDLE_IDENTIFIER), ${applicationId}), an interpolated
-// flavour, a placeholder with spaces in it, or a bare word with no dot. A
-// prefill the user has to delete is worse than an empty field.
 func plausibleAppID(value string) bool {
 	value = strings.TrimSpace(value)
 	if len(value) < 3 || !strings.Contains(value, ".") {

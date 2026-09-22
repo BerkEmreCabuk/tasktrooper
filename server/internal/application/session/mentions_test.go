@@ -21,7 +21,7 @@ func TestParseMentions(t *testing.T) {
 	cases := []struct {
 		name    string
 		content string
-		want    []string // "kind:name"
+		want    []string
 	}{
 		{"simple", "ask @QA about it", []string{"agent:QA"}},
 		{"longest match wins over prefix", "@QA Agent please review", []string{"agent:QA Agent"}},
@@ -63,25 +63,21 @@ func TestResolveExplicitMentions(t *testing.T) {
 		{kind: "repository", id: repoID, name: "acme", detail: "kind=service"},
 	}
 
-	// Same name, different kinds: the id picks the exact entity.
 	got := resolveExplicitMentions([]domain.MessageMention{{Kind: "project", ID: projectID, Name: "acme"}}, candidates)
 	if len(got) != 1 || got[0].kind != "project" || got[0].id != projectID || got[0].detail != "mobile initiative" {
 		t.Fatalf("id match failed: %+v", got)
 	}
 
-	// Unknown id falls back to a name match within the same kind.
 	got = resolveExplicitMentions([]domain.MessageMention{{Kind: "repository", ID: uuid.New(), Name: "Acme"}}, candidates)
 	if len(got) != 1 || got[0].id != repoID {
 		t.Fatalf("name fallback failed: %+v", got)
 	}
 
-	// Nothing matches: keep a bare reference rather than dropping it.
 	got = resolveExplicitMentions([]domain.MessageMention{{Kind: "agent", ID: uuid.New(), Name: "Ghost"}}, candidates)
 	if len(got) != 1 || got[0].name != "Ghost" || got[0].detail != "" {
 		t.Fatalf("bare reference failed: %+v", got)
 	}
 
-	// Empty reference is ignored.
 	if got = resolveExplicitMentions([]domain.MessageMention{{Kind: "agent"}}, candidates); len(got) != 0 {
 		t.Fatalf("empty ref must be dropped: %+v", got)
 	}

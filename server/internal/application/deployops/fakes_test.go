@@ -15,16 +15,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// Fakes for the deployops package's collaborators, modelled on
-// apps/backend/internal/application/storeops/fakes_test.go. Some of these
-// (fakeActionsClient in particular) are not yet exercised by this task's
-// tests but are infrastructure the dispatch/rollback task after this one
-// needs ready to go — keep them complete and reusable rather than growing a
-// second set later.
-
-// runTime returns r.StartedAt dereferenced, or the zero time when nil, so
-// "newest" comparisons never have to special-case an in-flight run that
-// hasn't started yet.
 func runTime(r domain.DeploymentRun) time.Time {
 	if r.StartedAt != nil {
 		return *r.StartedAt
@@ -32,8 +22,6 @@ func runTime(r domain.DeploymentRun) time.Time {
 	return time.Time{}
 }
 
-// runIsNewer mirrors the postgres store's ordering: started_at desc nulls
-// last, then created_at desc.
 func runIsNewer(a, b domain.DeploymentRun) bool {
 	at, bt := runTime(a), runTime(b)
 	if !at.Equal(bt) {
@@ -42,7 +30,6 @@ func runIsNewer(a, b domain.DeploymentRun) bool {
 	return a.CreatedAt.After(b.CreatedAt)
 }
 
-// fakeDeploymentRunStore is an in-memory port.DeploymentRunStore.
 type fakeDeploymentRunStore struct {
 	mu   sync.Mutex
 	rows []domain.DeploymentRun
@@ -186,7 +173,6 @@ func (f *fakeDeploymentRunStore) Stamp(_ context.Context, repositoryID uuid.UUID
 	return fmt.Errorf("stamp run: %w", port.ErrNotFound)
 }
 
-// fakeDeployDispatchStore is an in-memory port.DeployDispatchStore.
 type fakeDeployDispatchStore struct {
 	mu   sync.Mutex
 	rows []domain.DeployDispatch
@@ -233,7 +219,6 @@ func (f *fakeDeployDispatchStore) Resolve(_ context.Context, id uuid.UUID, state
 	return fmt.Errorf("resolve dispatch: %w", port.ErrNotFound)
 }
 
-// fakeOpsAuditStore is an in-memory port.OpsAuditStore.
 type fakeOpsAuditStore struct {
 	mu   sync.Mutex
 	rows []domain.OpsAuditEntry
@@ -251,7 +236,7 @@ func (f *fakeOpsAuditStore) Log(_ context.Context, entry domain.OpsAuditEntry) e
 	if entry.ID == uuid.Nil {
 		entry.ID = uuid.New()
 	}
-	// Newest first, mirroring the postgres store's ORDER BY created_at DESC.
+
 	f.rows = append([]domain.OpsAuditEntry{entry}, f.rows...)
 	return nil
 }
@@ -274,8 +259,6 @@ func (f *fakeOpsAuditStore) List(_ context.Context, repositoryID *uuid.UUID, lim
 	return out, nil
 }
 
-// fakeDeployTargetStore is an in-memory port.DeployTargetStore, keyed on
-// (repository_id, env) like the postgres store's unique constraint.
 type fakeDeployTargetStore struct {
 	mu   sync.Mutex
 	rows []domain.DeployTarget
@@ -341,9 +324,6 @@ func (f *fakeDeployTargetStore) Delete(_ context.Context, repositoryID uuid.UUID
 	return nil
 }
 
-// fakeRepositoryStore is an in-memory port.RepositoryStore, keyed on ID.
-// Matrix only exercises List, but the fake implements the full interface
-// since that is the type the constructor consumes.
 type fakeRepositoryStore struct {
 	mu   sync.Mutex
 	rows map[uuid.UUID]domain.Repository
@@ -689,7 +669,6 @@ func (f *fakeRepositoryStore) ListProjectIDsByRepositories(_ context.Context, re
 	return out, nil
 }
 
-// fakeRepositoryPipelineJobStore is an in-memory port.RepositoryPipelineJobStore.
 type fakeRepositoryPipelineJobStore struct {
 	mu   sync.Mutex
 	rows []domain.RepositoryPipelineJob
@@ -732,11 +711,6 @@ func (f *fakeRepositoryPipelineJobStore) ReplaceForRepository(_ context.Context,
 	return jobs, nil
 }
 
-// fakeActionsClient is a settable, call-recording port.ActionsClient, wired
-// into the Service via newTestServiceWithActions for the dispatch/rollback
-// tests. The lastX/count fields are a convenience projection over the
-// *Calls slices so a test can assert "the last ref dispatched was X" without
-// indexing into the slice itself.
 type fakeActionsClient struct {
 	mu sync.Mutex
 
@@ -759,11 +733,11 @@ type fakeActionsClient struct {
 	DispatchWorkflowCalls []dispatchWorkflowCall
 	CreateTagCalls        []createTagCall
 
-	dispatches int    // count of DispatchWorkflow calls
-	lastRef    string // ref of the most recent DispatchWorkflow call
-	tags       int    // count of CreateTag calls
-	lastTag    string // tag of the most recent CreateTag call
-	lastTagSHA string // sha of the most recent CreateTag call
+	dispatches int
+	lastRef    string
+	tags       int
+	lastTag    string
+	lastTagSHA string
 }
 
 type listWorkflowRunsCall struct {
@@ -806,8 +780,6 @@ func (f *fakeActionsClient) CreateTag(_ context.Context, owner, repo, tag, sha s
 	return f.CreateTagErr
 }
 
-// fixture is the input to newTestService: the rows each fake store starts
-// with. Every field is optional — a nil slice is an empty store.
 type fixture struct {
 	repos      []domain.Repository
 	targets    []domain.DeployTarget
@@ -816,32 +788,18 @@ type fixture struct {
 	dispatches []domain.DeployDispatch
 	audit      []domain.OpsAuditEntry
 
-	// dispatchErr and createTagErr seed fakeActionsClient's injectable errors
-	// for the dispatch/rollback tests — e.g. "GitHub exploded mid-dispatch".
 	dispatchErr  error
 	createTagErr error
 
-	// actionsRuns seeds fakeActionsClient.ListWorkflowRunsResult for the
-	// monitor tests — every ListWorkflowRuns call returns this same slice,
-	// regardless of which dispatchable target asked, since the fake does not
-	// model per-repository GitHub state.
 	actionsRuns []port.ActionsRun
 }
 
-// newTestService builds a deployops.Service wired to fresh in-memory fakes
-// seeded from fixture. It is a thin wrapper over newTestServiceWithActions
-// for the (majority of) tests that don't need to assert against the
-// ActionsClient fake.
 func newTestService(t *testing.T, f fixture) *deployops.Service {
 	t.Helper()
 	svc, _ := newTestServiceWithActions(t, f)
 	return svc
 }
 
-// newTestServiceWithActions builds a deployops.Service wired to fresh
-// in-memory fakes seeded from fixture, and also returns the fakeActionsClient
-// it was wired with so dispatch/rollback tests can assert on what was
-// dispatched/tagged.
 func newTestServiceWithActions(t *testing.T, f fixture) (*deployops.Service, *fakeActionsClient) {
 	t.Helper()
 	actions := &fakeActionsClient{
@@ -861,9 +819,6 @@ func newTestServiceWithActions(t *testing.T, f fixture) (*deployops.Service, *fa
 	return svc, actions
 }
 
-// fakeIncidentIngester is an in-memory deployops.IncidentIngester recording
-// every call, used by the monitor tests to assert dedupe: exactly one
-// ingest per newly failed run, no matter how many sweeps see it.
 type fakeIncidentIngester struct {
 	mu    sync.Mutex
 	count int
@@ -878,10 +833,6 @@ func (f *fakeIncidentIngester) Ingest(_ context.Context, in domain.IncidentInput
 	return domain.Incident{}, nil
 }
 
-// monitorFakes exposes the concrete fakes newTestMonitor wired the Service
-// and Monitor with, so a monitor test can inspect store/ingester state
-// directly — Sweep's side effects — without needing the Service's own read
-// methods.
 type monitorFakes struct {
 	runs       *fakeDeploymentRunStore
 	dispatches *fakeDeployDispatchStore
@@ -889,15 +840,6 @@ type monitorFakes struct {
 	ingester   *fakeIncidentIngester
 }
 
-// newTestMonitor builds a deployops.Monitor wired to fresh in-memory fakes
-// seeded from fixture, keeping direct references to the concrete
-// runs/dispatches fakes so a test can read the exact store state Sweep
-// mutated (deployops.New only exposes them through the port interfaces).
-// It also wires a default repo resolver deriving an arbitrary but stable
-// owner/name from the repository row — resolver wiring itself is covered by
-// the dedicated service-level tests in service_test.go, not the monitor's,
-// so every monitor test would otherwise have to set one up just to get past
-// resolveRepoCoordinates.
 func newTestMonitor(t *testing.T, f fixture) (*deployops.Monitor, monitorFakes) {
 	t.Helper()
 	runsStore := newFakeDeploymentRunStore(f.runs)
@@ -923,13 +865,6 @@ func newTestMonitor(t *testing.T, f fixture) (*deployops.Monitor, monitorFakes) 
 	monitor := deployops.NewMonitor(svc, ingester)
 	return monitor, monitorFakes{runs: runsStore, dispatches: dispatchesStore, actions: actions, ingester: ingester}
 }
-
-// ---- deploy-watch reads (migration 105) -------------------------------------
-//
-// Settable like the rest of this fake, because the deploy-watch tests in
-// application/deploywatch drive the same interface through their own fake —
-// these exist so deployops' own tests keep compiling and so a future test here
-// can seed them without a second fake appearing.
 
 func (f *fakeActionsClient) ListRunsForCommit(_ context.Context, owner, repo, sha string) ([]port.ActionsRun, error) {
 	f.mu.Lock()

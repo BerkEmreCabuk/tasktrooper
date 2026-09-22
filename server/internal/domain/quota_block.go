@@ -7,23 +7,15 @@ import (
 	"time"
 )
 
-// DefaultQuotaParkWindow is how long a run waits when the CLI said the usage
-// limit was reached but not when it reopens.
-//
-// Half an hour rather than the five-hour window a Claude subscription actually
-// rolls on: the reset epoch is normally present, so this only covers the case
-// where it is missing, and there guessing SHORT is the cheaper mistake. A sweep
-// that wakes the task early finds the limit still in force and parks it again
-// for another window — one wasted CLI start. A sweep that wakes it hours late
-// leaves a task idle for hours after the quota came back, and nothing else in
-// the system would notice.
+// DefaultQuotaParkWindow is how long a run waits when the CLI hit the usage
+// limit without saying when it reopens. Guessing SHORT is the cheaper mistake:
+// a sweep that wakes a task early finds the limit still in force and parks it
+// again, while one that wakes it late leaves a task idle that nothing else
+// would notice.
 const DefaultQuotaParkWindow = 30 * time.Minute
 
-// QuotaParkWindow escalates the fallback window with consecutive parks that
-// found no reset time. A repeated 30m guess on a 5h window re-hits the same
-// limit every half hour and burns a CLI start each time; doubling backs off
-// toward the window's own length instead of hammering it, and the 5h cap is
-// the longest a Claude subscription window actually runs.
+// QuotaParkWindow backs off the fallback window across consecutive parks that
+// found no reset time (doubling up to the 5h a Claude window actually runs).
 func QuotaParkWindow(consecutiveParks int) time.Duration {
 	if consecutiveParks < 0 {
 		consecutiveParks = 0
@@ -39,54 +31,35 @@ func QuotaParkWindow(consecutiveParks int) time.Duration {
 }
 
 // QuotaQueuedNoticePrefix marks a transcript line as a queued turn — parked,
-// not failed, and due to answer itself once SessionQuotaSweeper resumes it —
-// rather than a run failure or an ordinary (unqueued) rate-limit notice.
-// Clients key a calmer, non-retry styling off it, the same way they key the
-// warning bubble off RateLimitNoticePrefix.
+// not failed, and due to answer itself once SessionQuotaSweeper resumes it.
 const QuotaQueuedNoticePrefix = "**Queued:**"
 
-// QuotaBlock is the CLI saying "this account has nothing left to spend until
-// T". It is an ERROR type, unlike ResourceBlock, because it comes back from an
-// executor rather than from a tool: the run did not finish and has no response
-// to hand over, so there is no AgentResponse to carry a block on.
-//
-// What it shares with ResourceBlock is the treatment. Neither is a failure of
-// the work: there is nothing to fix, nothing to retry now, and a run that fails
-// on it would spend one of the task's three consecutive-failure lives on a
-// billing window. So the board runner parks the task instead of failing it, and
-// a sweeper — not a human, not a retry — releases it once ResumeAt has passed
-// (see application/board/quota_sweeper.go).
-//
-// CLISessionID is what makes the resume a continuation rather than a restart:
-// the parked session already read the repository, wrote some of the change and
-// knows what it was in the middle of. Handing that id back to `claude -p
-// --resume <id>` is the difference between finishing the task and paying for
-// the exploration twice.
+// QuotaBlock is the CLI saying "this account has nothing left until T". It is
+// an ERROR type, unlike ResourceBlock, because it comes back from an executor
+// rather than from a tool: the run did not finish and has no response to hand
+// over. What it shares with ResourceBlock is the treatment: neither is a
+// failure of the work, so the board parks the task instead of failing it, and a
+// sweeper — not a human, not a retry — releases it once ResumeAt passes.
+// CLISessionID is what makes the resume a continuation rather than a restart.
 type QuotaBlock struct {
-	// ResumeAt is when the limit is expected to lift. Always set: a caller that
-	// could not parse a reset time uses DefaultQuotaParkWindow rather than a
-	// zero time, because a zero time would read as "resume immediately" to the
-	// sweeper and spin.
+	// ResumeAt is when the limit is expected to lift, always set: a caller
+	// that could not parse a reset time uses DefaultQuotaParkWindow, because a
+	// zero time would read as "resume immediately" to the sweeper and spin.
 	ResumeAt time.Time
-	// CLISessionID is the parked CLI session. Empty when the limit was hit
-	// before the session announced itself (an init event that never arrived),
-	// which is survivable: the resumed run starts a fresh session with the
-	// same task context instead.
+	// CLISessionID is the parked CLI session, empty when the limit was hit
+	// before the session announced itself (survivable — the resumed run starts
+	// fresh with the same context).
 	CLISessionID string
-	// Detail is the CLI's own wording, kept for the board card so a human can
-	// see which limit was hit rather than a paraphrase of it.
+	// Detail is the CLI's own wording, kept for the board card.
 	Detail string
-	// Provider names which host-executed CLI hit the limit. Every producer in
-	// the tree sets it; an empty value reads as an unnamed limit and renders as
-	// a generic sentence rather than a guess about which engine spent it.
+	// Provider names which host-executed CLI hit the limit; empty reads as a
+	// generic sentence rather than a guess about which engine spent it.
 	Provider LLMProviderType
 }
 
-// ProviderLabel is the human name this block's messages use: the provider
-// catalog's own label, or the raw type string for one the catalog does not
-// recognise. Empty when no provider is set, which the message functions render
-// generically — naming "Claude Code" here would lie to someone whose block
-// actually came from Cursor, AGY or OpenCode.
+// ProviderLabel is the human name for the block's provider, empty when none is
+// set — naming "Claude Code" here would lie to someone whose block came from
+// Cursor, AGY or OpenCode.
 func (q *QuotaBlock) ProviderLabel() string {
 	if q == nil {
 		return ""
@@ -106,9 +79,8 @@ func (q *QuotaBlock) Error() string {
 }
 
 // QuotaBlockOf reports the usage-limit block behind err, anywhere in its wrap
-// chain. It mirrors RateLimitOf, and for the same reason: the condition has to
-// be recognisable at the transport, several wraps away from where it was
-// raised.
+// chain — the condition has to be recognisable at the transport, several wraps
+// away from where it was raised.
 func QuotaBlockOf(err error) (*QuotaBlock, bool) {
 	var q *QuotaBlock
 	if !errors.As(err, &q) || q == nil {
@@ -117,18 +89,10 @@ func QuotaBlockOf(err error) (*QuotaBlock, bool) {
 	return q, true
 }
 
-// UserMessage is the sentence a person sees in a CHAT when the subscription is
-// spent and, for whatever reason, the turn could not be queued (see
-// QueuedMessage for the normal case). It tells the human to retry by hand,
-// because that is the only recourse left once queueing itself has failed. The
-// one fact that makes it actionable either way is WHEN, which is why the time
-// is always named.
-//
-// Local time, not UTC: the reader is sitting at this host's clock, and "resumes
-// at 14:20Z" is a sentence nobody can act on without doing arithmetic.
-//
-// Error() is left alone — it is the log line and the board card's detail, where
-// UTC and RFC3339 are the right choices.
+// UserMessage is the sentence a CHAT reader sees when the subscription is spent
+// and the turn could not be queued: the only recourse left is retrying by hand.
+// Local time, not UTC — "resumes at 14:20Z" is a sentence nobody can act on
+// without arithmetic. Error() stays UTC/RFC3339: it is the log line.
 func (q *QuotaBlock) UserMessage(lang string) string {
 	if q == nil {
 		switch lang {
@@ -160,11 +124,9 @@ func (q *QuotaBlock) UserMessage(lang string) string {
 	}
 }
 
-// QueuedMessage is the sentence a person sees in a CHAT when the subscription
-// is spent and the turn HAS been queued: it will rerun itself once ResumeAt
-// passes, the same way a parked board task resumes on its own sweeper. No
-// action is asked of the reader, unlike UserMessage — the point of queueing is
-// that there is nothing left for them to do but wait.
+// QueuedMessage is the sentence a CHAT reader sees when the turn HAS been
+// queued and will rerun itself once ResumeAt passes — no action is asked,
+// unlike UserMessage.
 func (q *QuotaBlock) QueuedMessage(lang string) string {
 	if q == nil {
 		switch lang {
@@ -196,53 +158,36 @@ func (q *QuotaBlock) QueuedMessage(lang string) string {
 	}
 }
 
-// QuotaNotice is a QuotaBlock that has already been turned into the sentence a
-// particular reader gets.
-//
-// It exists because the two things that need it sit on opposite sides of the
-// process. The LANGUAGE is known in the session service, which has just loaded
-// the user's settings; the TRANSPORT is the SSE writer, which runs after the
-// HTTP handler has returned and has no business making a database read on an
-// error path to find out what language to apologise in. Localising once, where
-// the answer is already in hand, and carrying the finished sentence on the error
-// settles that without either layer reaching into the other.
-//
-// The block itself is still underneath and still findable with QuotaBlockOf, so
-// nothing that wants the structured facts (ResumeAt, the CLI session) loses
-// them.
+// QuotaNotice is a QuotaBlock already turned into the sentence a particular
+// reader gets: the LANGUAGE is known where the notice is raised (the session
+// service), the TRANSPORT is the SSE writer that runs after the handler returns
+// and must not make a DB read on an error path. The block stays underneath,
+// findable with QuotaBlockOf.
 type QuotaNotice struct {
 	block   *QuotaBlock
 	message string
 }
 
-// NewQuotaNotice localises block for lang. A nil block still yields a usable
-// notice — the generic sentence — because the caller is on an error path and
-// must not have to branch.
+// NewQuotaNotice localises block for lang; a nil block still yields the generic
+// sentence because the caller is on an error path.
 func NewQuotaNotice(block *QuotaBlock, lang string) *QuotaNotice {
 	return &QuotaNotice{block: block, message: block.UserMessage(lang)}
 }
 
-// NewQuotaQueuedNotice is NewQuotaNotice's twin for a turn that WAS
-// successfully parked — see QueuedMessage.
+// NewQuotaQueuedNotice is NewQuotaNotice's twin for a turn that was parked.
 func NewQuotaQueuedNotice(block *QuotaBlock, lang string) *QuotaNotice {
 	return &QuotaNotice{block: block, message: block.QueuedMessage(lang)}
 }
 
-// Error is the localised sentence itself, not a description of it. That is
-// deliberate: every generic error path in the transport prints err.Error(), so
-// the default rendering of this error is already the right one even where
-// nothing has been taught to recognise the type.
+// Error is the localised sentence itself: every generic error path prints
+// err.Error(), so the default rendering is already right.
 func (n *QuotaNotice) Error() string { return n.message }
 
-// Unwrap exposes the block so QuotaBlockOf and errors.As keep working through
-// the notice.
+// Unwrap exposes the block so QuotaBlockOf keeps working through the notice.
 func (n *QuotaNotice) Unwrap() error { return n.block }
 
-// resumeLabel renders ResumeAt for a human on this host.
-//
-// The date is included only when the reset is not today: "18:40" is unambiguous
-// for the common case (a window that reopens in a few hours) and a bare "18:40"
-// for tomorrow morning would be a lie by omission.
+// resumeLabel renders ResumeAt in local time, including the date only when the
+// reset is not today.
 func (q *QuotaBlock) resumeLabel() string {
 	local := q.ResumeAt.Local()
 	now := time.Now().Local()

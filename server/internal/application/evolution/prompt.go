@@ -63,25 +63,9 @@ func reflectionSystemPrompt(agentRec domain.Agent, cfg domain.EvolutionConfig) s
 	return b.String()
 }
 
-// fencedBlockRe matches a ``` or ```json fenced code block, capturing its body.
 var fencedBlockRe = regexp.MustCompile("(?s)```[a-zA-Z]*[ \\t]*\\r?\\n?(.*?)```")
 
-// parseReflectionOutput recovers the reflection's structured decision from raw
-// model output. Reflection runs on two paths: an HTTP call with a JSON schema
-// attached (a provider that supports constrained decoding cannot deviate), and
-// the Claude Code CLI path (runLLM's AllowWebResearch branch), which has no
-// schema at all — the CLI protocol has no place to put one. On that path the
-// model free-writes markdown analysis followed by a JSON block, using whatever
-// key names it invents (summary/reasoning/skill_changes/id/justification...).
-// A plain json.Unmarshal into domain.ReflectionOutput silently zeroes every
-// field it doesn't recognize — no error, so runLLM's retry never fires, and the
-// reflection completes with an empty summary and no evolution events even
-// though the raw output holds a full analysis. This parser tolerates that:
-// it locates the JSON block (preferring the LAST fenced block, since a model
-// that second-guesses itself keeps the earlier one as narrated draft), aliases
-// common synonyms onto the canonical keys, and returns the surrounding prose as
-// analysis so it isn't lost when self_assessment is thin or absent. It still
-// errors — triggering the existing retry — when nothing recognizable is found.
+// The CLI path (no schema to constrain it) free-writes markdown plus a JSON block; a plain Unmarshal silently zeroes unrecognized keys, no error, so the reflection completed empty and the retry never fired. This locates the block, aliases model-invented key names onto the canonical ones, and returns the surrounding prose as analysis so it is not lost.
 func parseReflectionOutput(raw string) (domain.ReflectionOutput, string, error) {
 	block, analysis, err := extractReflectionJSON(raw)
 	if err != nil {
@@ -116,11 +100,7 @@ func parseReflectionOutput(raw string) (domain.ReflectionOutput, string, error) 
 	return out, analysis, nil
 }
 
-// extractReflectionJSON finds the JSON object the model produced and returns it
-// alongside the surrounding text with that block removed (the "analysis").
-// Fenced blocks are preferred, last-match-wins, over the naive first-'{'..
-// last-'}' scan: a model that writes example JSON in its analysis before its
-// real answer would otherwise have the example mistaken for the answer.
+// Last fenced block wins: a model that writes example JSON in its analysis before its real answer would otherwise have the example taken as the answer.
 func extractReflectionJSON(raw string) (json.RawMessage, string, error) {
 	if matches := fencedBlockRe.FindAllStringSubmatchIndex(raw, -1); len(matches) > 0 {
 		for i := len(matches) - 1; i >= 0; i-- {
@@ -152,9 +132,6 @@ func looksLikeJSONObject(s string) bool {
 	return json.Valid([]byte(s))
 }
 
-// normalizeReflectionFields rewrites the common synonyms a schema-less model
-// invents onto the canonical keys domain.ReflectionOutput expects, both at the
-// top level and inside each change object.
 func normalizeReflectionFields(fields map[string]json.RawMessage) {
 	aliasReflectionKey(fields, "self_assessment", "summary", "reasoning", "analysis", "assessment")
 	aliasReflectionKey(fields, "skills", "skill_changes")
@@ -176,9 +153,7 @@ func normalizeReflectionFields(fields map[string]json.RawMessage) {
 	}
 }
 
-// aliasReflectionKey copies the first present alias onto canonical, only when
-// canonical is itself absent — a model that gets the real key right must never
-// be second-guessed by a synonym it also happened to emit.
+// Only when canonical is absent — a model that gets the real key right must never be second-guessed by a synonym it also emitted.
 func aliasReflectionKey(fields map[string]json.RawMessage, canonical string, aliases ...string) {
 	if _, ok := fields[canonical]; ok {
 		return
@@ -191,10 +166,7 @@ func aliasReflectionKey(fields map[string]json.RawMessage, canonical string, ali
 	}
 }
 
-// renameArrayItemKeys renames keys inside every object of a JSON array. Not
-// valid JSON, or not an array of objects, passes through unchanged — that
-// shape mismatch surfaces later as a decode into the wrong Go field, which is
-// no worse than what an untouched key would have done.
+// A malformed item passes through unchanged, surfacing later as a decode into the wrong Go field — no worse than an untouched key.
 func renameArrayItemKeys(raw json.RawMessage, renames map[string]string) json.RawMessage {
 	var items []map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &items); err != nil {
@@ -228,9 +200,7 @@ func hasAnyReflectionField(fields map[string]json.RawMessage) bool {
 	return false
 }
 
-// gatherEvidence builds the incremental evidence bundle for the reflection
-// window. Only window data is included — previously reviewed material stays
-// out; the previous reflection's snapshot serves as the comparison baseline.
+// Only window data, excluding previously reviewed material; the previous reflection's snapshot is the comparison baseline.
 func (s *Service) gatherEvidence(
 	ctx context.Context,
 	agentRec domain.Agent,
@@ -365,9 +335,7 @@ func (s *Service) gatherEvidence(
 		b.WriteString("\n")
 	}
 	if s.memories != nil {
-		// Reflection looks across every repository the agent worked in, so it
-		// reads all scopes — otherwise it would propose deleting memories it
-		// cannot see.
+		// Reads every scope, otherwise it would propose deleting memories it cannot see.
 		q := domain.MemoryQuery{AgentID: agentRec.ID, Owner: domain.MemoryOwnerAgent, Repo: domain.MemoryRepoScopeAny, Limit: 20}
 		if mems, err := s.memories.List(ctx, q); err == nil && len(mems) > 0 {
 			b.WriteString("## Current memories (id | scope | content)\n")
@@ -422,8 +390,6 @@ func (s *Service) appendChatEvidence(ctx context.Context, b *strings.Builder, ag
 	}
 }
 
-// appendRegressionReport surfaces regressed, not-yet-reverted changes so the
-// agent can decide to revert them.
 func (s *Service) appendRegressionReport(ctx context.Context, b *strings.Builder, agentID uuid.UUID) {
 	allEvents, err := s.store.ListEvents(ctx, agentID, 100)
 	if err != nil {

@@ -74,16 +74,8 @@ func (s *ServiceSuite) TestIndexSessionIncrementalSkipsUnchanged() {
 	s.Equal(first.SymbolCount, second.SymbolCount)
 }
 
-// An interrupted pass keeps the files it finished. Before per-file persistence
-// the index was wiped in the first second of every full pass and the hashes
-// were written only at the very end, so a run that died at file N left nothing
-// behind and the next run started from zero — forever, if it kept dying.
 func (s *ServiceSuite) TestInterruptedPassKeepsFinishedFilesAndResumes() {
-	// Stop the pass on the SECOND file: the embed input starts with the file
-	// path, so the first file completes and is persisted, and the pass is
-	// cancelled after it. A single chunk the embedder rejects no longer ends a
-	// pass (it is stored without a vector), so the interruption here is a real
-	// cancellation, the way a shutdown or a stop request ends one.
+
 	passCtx, cancelPass := context.WithCancel(context.Background())
 	defer cancelPass()
 	var firstFile string
@@ -110,8 +102,6 @@ func (s *ServiceSuite) TestInterruptedPassKeepsFinishedFilesAndResumes() {
 	s.Require().NoError(err)
 	s.NotEmpty(done, "the file that finished before the failure kept its rows and its hash")
 
-	// Second pass: the embedder works again, and only the files with no hash
-	// are re-embedded.
 	var reEmbedded []string
 	s.llm.embedFn = func(_ context.Context, input string, _ string) ([]float32, error) {
 		reEmbedded = append(reEmbedded, strings.Fields(input)[0])
@@ -129,16 +119,12 @@ func (s *ServiceSuite) TestInterruptedPassKeepsFinishedFilesAndResumes() {
 	}
 }
 
-// A rate limit is the provider pacing us, not a broken index: the pass waits
-// and continues from the same chunk. Failing here is what used to leave an
-// index stopped at 9% with a person having to press re-index.
 func (s *ServiceSuite) TestRateLimitedEmbeddingIsWaitedOutNotFailed() {
 	var calls int
 	s.llm.embedFn = func(_ context.Context, input string, _ string) ([]float32, error) {
 		calls++
 		if calls == 1 {
-			// "retry after 1 seconds" would really sleep, so this one carries no
-			// hint and takes the (also real, but short) first backoff step.
+
 			return nil, errors.New("embeddings returned 429: too many requests")
 		}
 		return []float32{float32(len(input))}, nil

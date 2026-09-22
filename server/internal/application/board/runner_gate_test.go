@@ -12,7 +12,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// limitSettings is the app_settings source for the gate tests.
 type limitSettings struct {
 	agents, tasks int
 }
@@ -25,9 +24,6 @@ func (l *limitSettings) Update(context.Context, domain.UpdateSettingsRequest) (d
 	return domain.AppSettings{}, nil
 }
 
-// entryCountingCatalog records how many runs are inside the agent loop at once
-// and which ones arrived, so a test can see that only a capped number ever run
-// concurrently and can name the one currently executing.
 type entryCountingCatalog struct {
 	port.CatalogStore
 	entries atomic.Int32
@@ -71,14 +67,10 @@ func TestAgentSlotCapsConcurrentRuns(t *testing.T) {
 		t.Fatalf("ran %d runs at once under a cap of one", got)
 	}
 
-	// Which run won the slot is up to the scheduler; cancel the one that is
-	// actually executing, not the one still waiting outside the cap.
 	active := cat.runningAgentID()
 	if active == uuid.Nil || !r.Cancel(active) {
 		t.Fatal("cancel did not reach the active run")
 	}
-	// A one-slot cap still blocks anything else from running at the same
-	// moment, so wait until a *different* run reaches the loop instead.
 	if !waitFor(func() bool {
 		seen, _ := cat.seen.Load().(uuid.UUID)
 		return seen != uuid.Nil && seen != active

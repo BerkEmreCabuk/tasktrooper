@@ -12,8 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// agentStore answers the two agent lookups UpdateAgent performs; the embedded
-// interface leaves the rest unimplemented on purpose.
+// Answers the two agent lookups UpdateAgent performs; the embedded interface leaves the rest unimplemented.
 type agentStore struct {
 	port.CatalogStore
 	existing domain.Agent
@@ -29,10 +28,6 @@ func (s *agentStore) UpdateAgent(_ context.Context, agent domain.Agent) (domain.
 	return agent, nil
 }
 
-// An agent's model and heavy model only mean anything to the provider they were
-// picked from. Switching providers while carrying the old names over produced an
-// agent whose provider was Mistral and whose heavy model was an Anthropic one —
-// every "hard" subtask then died with "Invalid model: anthropic/claude-opus-5".
 func TestUpdateAgent_ProviderSwitchDropsTheOldProvidersModels(t *testing.T) {
 	id := uuid.New()
 	store := &agentStore{existing: domain.Agent{

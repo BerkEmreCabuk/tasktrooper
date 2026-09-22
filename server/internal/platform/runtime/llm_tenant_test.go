@@ -15,10 +15,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/secrets"
 )
 
-// These tests drive the whole chain the product uses rather than asserting that
-// a field was reassigned: a store, a real cipher so the key is genuinely
-// encrypted and decrypted, llmprovider.Service, the cache, the
-// MultiProviderClient, and a real HTTP round trip — so what is asserted is the
+// These tests drive the whole chain (store, real cipher, service, cache,
+// MultiProviderClient, a real HTTP round trip), so what is asserted is the
 // Authorization header that actually left the process.
 
 // memProviderStore is llm_provider_configs and app_settings, in memory.
@@ -121,9 +119,8 @@ func (s *memProviderStore) SetEmbeddingModel(_ context.Context, model string) er
 	return nil
 }
 
-// keyRecorder is a stand-in for a provider's API. It records the bearer token
-// each request presented, which is the thing under test: a credential that
-// reached the wire is a credential that was spent.
+// keyRecorder records the bearer token each request presented — a credential
+// that reached the wire is a credential that was spent.
 type keyRecorder struct {
 	mu   sync.Mutex
 	seen []string
@@ -166,8 +163,7 @@ func newProviderFixture(t *testing.T) *providerFixture {
 
 	f := &providerFixture{store: store}
 	// The same construction order buildHandler uses: the cache is built first
-	// so the service can be given its invalidation hook, then installed on the
-	// client.
+	// so the service can receive its invalidation hook, then installed.
 	f.cache = newProviderCache(func(ctx context.Context) (llmprovider.Resolved, error) {
 		return f.svc.Resolve(ctx)
 	}, 30*time.Second)
@@ -176,10 +172,8 @@ func newProviderFixture(t *testing.T) *providerFixture {
 	return f
 }
 
-// connect saves a provider, writing straight to the store and then
-// invalidating exactly as Service.Connect does. Connect itself probes the
-// provider over the network before saving, which is not what this test is
-// about.
+// connect saves a provider, bypassing Service.Connect's network probe, writing
+// straight to the store and invalidating exactly as Connect does.
 func (f *providerFixture) connect(t *testing.T, ctx context.Context, baseURL, apiKey string) {
 	t.Helper()
 	cfg := domain.LLMProviderConfig{
@@ -241,8 +235,7 @@ func chat(t *testing.T, c *llm.MultiProviderClient, ctx context.Context) {
 }
 
 // A rotated key takes effect at once — that is what the invalidation hook is
-// for. Without it the next calls would keep spending the old credential until
-// the TTL expired.
+// for; otherwise the next calls would keep spending the old credential.
 func TestRotatingAKeyTakesEffectImmediately(t *testing.T) {
 	f := newProviderFixture(t)
 	server := newKeyRecorder(t)
@@ -259,8 +252,8 @@ func TestRotatingAKeyTakesEffectImmediately(t *testing.T) {
 	}
 }
 
-// A change that reached the database without passing through the service —
-// which therefore cannot invalidate — is picked up when the entry ages out.
+// A change that reached the database without the service (which therefore
+// cannot invalidate) is picked up when the entry ages out.
 func TestCacheEntryExpires(t *testing.T) {
 	f := newProviderFixture(t)
 	server := newKeyRecorder(t)

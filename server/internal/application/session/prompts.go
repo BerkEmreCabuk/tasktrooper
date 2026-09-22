@@ -12,23 +12,13 @@ func prependProjectPrompt(history []domain.Message, description string) []domain
 	return append([]domain.Message{{Role: domain.RoleSystem, Content: content}}, history...)
 }
 
-// maxInjectedProfileChars mirrors the board runner's cap: the profile is a
-// brief, and past this size it eats the budget the chat needs for real work.
 const maxInjectedProfileChars = 8000
 
-// prependProjectProfilePrompt injects the agent-maintained project profile
-// into a repository-scoped chat, truncated the same way board runs cap it.
 func prependProjectProfilePrompt(history []domain.Message, profile string) []domain.Message {
 	content := "## Project profile (maintained by agents)\n" + domain.TruncateHead(profile, maxInjectedProfileChars)
 	return append([]domain.Message{{Role: domain.RoleSystem, Content: content}}, history...)
 }
 
-// prependTaskChatPrompt states what a task-bound chat is about: the task, its
-// branch, its pull request, and how to reach the PR.
-//
-// Compact by design — no diff, no review comments. Those live behind
-// get_task_pull_request because a diff pasted into the prompt is paid for on
-// every turn of the conversation and is stale as soon as the agent commits.
 func prependTaskChatPrompt(history []domain.Message, task TaskBinding) []domain.Message {
 	content := prompt.TaskChatContextMessage(task.Task, task.Criteria, task.Branch, task.WorkspaceDir)
 	if content == "" {
@@ -52,10 +42,6 @@ func toolSelectionSystemMessage() domain.Message {
 	return domain.Message{Role: domain.RoleSystem, Content: prompt.ToolSelectionGuidance()}
 }
 
-// repeatCallSystemMessage carries the no-repeat contract into workspace chats.
-// An agentless session never builds an agent system prompt, so without this the
-// only path that runs raw shell commands was also the only one missing the rule
-// that keeps it from re-issuing the same command until the loop guard fires.
 func repeatCallSystemMessage() domain.Message {
 	return domain.Message{Role: domain.RoleSystem, Content: prompt.RepeatCallGuidance()}
 }

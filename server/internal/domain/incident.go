@@ -13,7 +13,7 @@ import (
 // ErrIncidentNotFound signals that no incident matches the id/filter.
 var ErrIncidentNotFound = errors.New("incident not found")
 
-// IncidentSeverity orders how loudly an incident interrupts. Only high and
+// IncidentSeverity orders how loudly an incident interrupts; only high and
 // critical open a remediation task on their own.
 type IncidentSeverity string
 
@@ -24,8 +24,8 @@ const (
 	IncidentSeverityLow      IncidentSeverity = "low"
 )
 
-// Rank returns a comparable weight (higher = worse), used to decide whether an
-// incident clears the auto-triage threshold and to sort lists.
+// Rank returns a comparable weight (higher = worse), used for auto-triage
+// thresholds and list sorting.
 func (s IncidentSeverity) Rank() int {
 	switch s {
 	case IncidentSeverityCritical:
@@ -41,8 +41,8 @@ func (s IncidentSeverity) Rank() int {
 }
 
 // NormalizeSeverity maps the many spellings alerting systems use (P1, error,
-// warning, fatal, …) onto the four levels; unknown input becomes medium so an
-// alert is never silently downgraded to noise.
+// fatal, …) onto the four levels; unknown input becomes medium so an alert is
+// never silently downgraded to noise.
 func NormalizeSeverity(raw string) IncidentSeverity {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "critical", "crit", "fatal", "p1", "sev1", "page", "emergency", "down":
@@ -61,20 +61,15 @@ func NormalizeSeverity(raw string) IncidentSeverity {
 type IncidentStatus string
 
 const (
-	// IncidentStatusOpen: ingested, not yet analysed.
-	IncidentStatusOpen IncidentStatus = "open"
-	// IncidentStatusTriaging: a remediation task exists and an agent is on it.
+	IncidentStatusOpen     IncidentStatus = "open"
 	IncidentStatusTriaging IncidentStatus = "triaging"
-	// IncidentStatusProposed: a remedy is written and waits for a human (or the
-	// auto-fix policy) to act on it.
 	IncidentStatusProposed IncidentStatus = "proposed"
-	// IncidentStatusFixing: the remedy is being applied through the board.
 	IncidentStatusFixing   IncidentStatus = "fixing"
 	IncidentStatusResolved IncidentStatus = "resolved"
-	// IncidentStatusIgnored: deliberately muted; recurrences do not reopen it.
-	IncidentStatusIgnored IncidentStatus = "ignored"
+	IncidentStatusIgnored  IncidentStatus = "ignored"
 )
 
+// ValidIncidentStatus reports whether a value is one of the six statuses.
 func ValidIncidentStatus(s IncidentStatus) bool {
 	switch s {
 	case IncidentStatusOpen, IncidentStatusTriaging, IncidentStatusProposed,
@@ -103,13 +98,8 @@ const (
 type IncidentPolicy string
 
 const (
-	// IncidentPolicyOff records incidents but never opens a task.
-	IncidentPolicyOff IncidentPolicy = "off"
-	// IncidentPolicySuggest (default) opens a diagnosis task that must stop at
-	// a written remedy — a human decides whether to apply it.
+	IncidentPolicyOff     IncidentPolicy = "off"
 	IncidentPolicySuggest IncidentPolicy = "suggest"
-	// IncidentPolicyAutoFix lets the diagnosis task carry the fix through the
-	// normal board pipeline (tests + review + deploy still gate it).
 	IncidentPolicyAutoFix IncidentPolicy = "auto_fix"
 )
 
@@ -127,9 +117,9 @@ type Incident struct {
 	RepositoryID uuid.UUID `json:"repository_id"`
 	Env          string    `json:"env"`
 	Source       string    `json:"source"`
-	// Fingerprint deduplicates recurrences: the same fingerprint in the same
-	// (repository, env) folds into the existing non-terminal incident instead
-	// of opening a second task for the same outage.
+	// Fingerprint dedupes recurrences: the same fingerprint in the same
+	// (repository, env) folds into an existing non-terminal incident instead of
+	// opening a second task for the same outage.
 	Fingerprint string           `json:"fingerprint"`
 	Title       string           `json:"title"`
 	Detail      string           `json:"detail,omitempty"`
@@ -143,8 +133,7 @@ type Incident struct {
 	Remedy     string `json:"remedy,omitempty"`
 	RemedyKind string `json:"remedy_kind,omitempty"`
 	// RemedyAuthor says who produced the current proposal — one of the
-	// RemedyAuthor* values. Empty means unknown: the incident predates the
-	// column, or nothing has been written yet.
+	// RemedyAuthor* values; empty means unknown.
 	RemedyAuthor string `json:"remedy_author,omitempty"`
 	Confidence   int    `json:"confidence"`
 	Occurrences  int    `json:"occurrences"`
@@ -179,7 +168,7 @@ type IncidentEvent struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
-// IncidentInput is a normalized alert, ready to be ingested. It is what every
+// IncidentInput is a normalized alert, ready to be ingested — what every
 // webhook shape and the health probe both collapse to.
 type IncidentInput struct {
 	RepositoryID uuid.UUID        `json:"repository_id"`
@@ -214,33 +203,31 @@ const (
 	RemedyKindUnknown    = "unknown"
 )
 
-// Remedy authorship — who wrote the proposal currently on the incident. The
-// distinction is what lets a recurrence tell the rules engine's own earlier
-// output apart from a diagnosis somebody actually reached, so machine triage
-// never clobbers a human's write.
+// Remedy authorship — who wrote the proposal currently on the incident: the
+// distinction lets a recurrence tell the rules engine's own earlier output
+// apart from a diagnosis somebody actually reached, so machine triage never
+// clobbers a human's write.
 const (
-	// RemedyAuthorAutoTriage is the rules-engine first pass at ingest (and the
-	// on-demand re-triage): a hypothesis, not a conclusion.
+	// RemedyAuthorAutoTriage is the rules-engine first pass at ingest: a
+	// hypothesis, not a conclusion.
 	RemedyAuthorAutoTriage = "auto_triage"
-	// RemedyAuthorAgent is an agent working the remediation task.
-	RemedyAuthorAgent = "agent"
-	// RemedyAuthorHuman is a person writing through the API/UI.
-	RemedyAuthorHuman = "human"
+	RemedyAuthorAgent      = "agent"
+	RemedyAuthorHuman      = "human"
 )
 
 // Remedy is what the suggestion engine produces: a named hypothesis with
-// concrete steps, so nobody has to dig through logs to know what to do next.
+// concrete steps.
 type Remedy struct {
 	Kind    string   `json:"kind"`
 	Summary string   `json:"summary"`
 	Steps   []string `json:"steps,omitempty"`
-	// Confidence is 0-100. Auto-fix only engages above a high threshold.
+	// Confidence is 0-100; auto-fix only engages above a high threshold.
 	Confidence int `json:"confidence"`
 	// Rollback marks the remedy as "redeploy the last good ref", which the
 	// engine can execute rather than merely describe.
 	Rollback bool `json:"rollback"`
 	// Evidence lists the facts the hypothesis rests on (recent deploy, prior
-	// occurrence, probe history), so a human can judge it fast.
+	// occurrence, probe history).
 	Evidence []string `json:"evidence,omitempty"`
 }
 
@@ -264,9 +251,8 @@ func (r Remedy) Text() string {
 }
 
 // IncidentFingerprint derives a stable dedupe key from the parts an alert
-// identifies itself by. Callers pass whatever they have (alert name, service,
-// error signature); empty parts are skipped so a missing field does not create
-// a second identity for the same alert.
+// identifies itself by; empty parts are skipped so a missing field does not
+// create a second identity for the same alert.
 func IncidentFingerprint(parts ...string) string {
 	var kept []string
 	for _, p := range parts {

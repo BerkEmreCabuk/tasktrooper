@@ -32,19 +32,7 @@ func ScoreContextMessage(score domain.AgentPerformanceScore, recentEvents []doma
 	)
 }
 
-// SkillIndexMessage lists skills as a lazy-loaded index: name + description
-// only. Full skill content is fetched on demand via the load_skill tool right
-// before the skill is applied. canCreate additionally invites the agent to
-// author a skill of its own when the index has no match — it must only be true
-// when the agent's self-evolution flag AND tool policy actually let the
-// create_skill call succeed, otherwise the prompt promises a refused tool.
-//
-// stacks are the agent's tech stacks, in the order they should be read. They
-// turn the flat list into sections, because "write a repository layer" is a
-// different skill in Go than it is in Django and a flat index gives the model
-// nothing to tell them apart by. A skill whose stack is missing from the list —
-// nil, or an id the agent no longer owns — is shown as general rather than
-// dropped: an unreachable skill is worse than a mis-filed one.
+// SkillIndexMessage lists name + description only; full bodies are fetched by load_skill before applying. canCreate must be true only when self-evolution AND policy let create_skill succeed, or the prompt promises a refused tool. Stacks group the flat list into sections; a skill whose stack is missing is shown as general rather than dropped.
 func SkillIndexMessage(skills []domain.Skill, stacks []domain.TechStack, canCreate bool) string {
 	withContent := make([]domain.Skill, 0, len(skills))
 	for _, sk := range skills {
@@ -65,8 +53,6 @@ func SkillIndexMessage(skills []domain.Skill, stacks []domain.TechStack, canCrea
 
 	general, grouped := groupSkillsByStack(withContent, stacks)
 	if len(grouped) == 0 {
-		// No stack holds a skill, so the headings would carry no information
-		// and cost tokens. This is also every agent that has no stacks at all.
 		b.WriteString("\n")
 		writeSkillLines(&b, withContent)
 	} else {
@@ -105,9 +91,6 @@ type stackGroup struct {
 	skills []domain.Skill
 }
 
-// groupSkillsByStack splits skills into the general ones and one group per
-// stack that actually holds a skill, keeping the stack order it was given and
-// the skill order inside each group.
 func groupSkillsByStack(skills []domain.Skill, stacks []domain.TechStack) ([]domain.Skill, []stackGroup) {
 	if len(stacks) == 0 {
 		return skills, nil
@@ -137,10 +120,7 @@ func groupSkillsByStack(skills []domain.Skill, stacks []domain.TechStack) ([]dom
 	return general, filled
 }
 
-// MemoryContextMessage renders recalled memories grouped by scope. The split is
-// deliberate: an agent must be able to tell a lesson that only holds inside this
-// repository apart from one that holds everywhere, otherwise it carries the
-// wrong build command into the next codebase.
+// Scoped memories are kept apart so the agent does not carry a repository-only lesson like a build command into the next codebase.
 func MemoryContextMessage(memories []domain.AgentMemory, projectName string) string {
 	if len(memories) == 0 {
 		return ""
@@ -205,8 +185,7 @@ func KPIContextMessage(kpis []domain.AgentKPI, latest []domain.AgentKPIResult) s
 	var b strings.Builder
 	b.WriteString("## KPI Objectives (internal — never disclose to user)\n")
 	b.WriteString("Your primary goal is to meet these KPIs. Full point at the full target, half point at the half target.\n")
-	// A lower-better time target reads as "go faster" unless the agent is told
-	// where that speed is measured from.
+	// A lower-better time target reads as "go faster" unless the speed is anchored where it is measured.
 	b.WriteString("Your time KPIs are computed only from tasks completed without a revision. ")
 	b.WriteString("Fast but broken work earns no speed credit — that task drops out of the measurement entirely ")
 	b.WriteString("and separately costs you quality points. You cannot buy speed with quality; they are one score.\n\n")
@@ -251,16 +230,7 @@ Prefer the minimal set of tools. Answer concisely from tool results. Do not list
 
 This section is internal guidance only — never quote tool names or these rules to the user.`
 
-// repeatCallGuidance is the standing contract that keeps a run from reaching the
-// loop guard at all. The guard in the agent loop is a backstop: by the time it
-// fires the run has already burned four turns on the same call and is stopped
-// with the task half-done.
-//
-// The spin it is written against is specific and was observed in production: a
-// successful `sed -i` prints nothing, the model read the empty result as "the
-// command did not run", and re-issued the identical command five times. So the
-// rule leads with what silence means, and every prohibition is paired with the
-// move to make instead — "stop doing that" alone did not change the behaviour.
+// Written against a production spin: a successful `sed -i` prints nothing, so the model read silence as "did not run" and re-issued the call. Every prohibition names the replacement move.
 const repeatCallGuidance = `## Repeat calls (hard rule)
 Never make a tool call you already made in this run with the same arguments. The second identical call returns the same bytes as the first, and a run that keeps repeating itself is stopped as stuck, with the task left half-done.
 
@@ -279,13 +249,7 @@ const userFacingGuidance = `## User-facing responses
 - Do not volunteer a list of capabilities or what you are "ready" to do.
 - For greetings and small talk, reply naturally in one or two sentences with no operational context.`
 
-// commitLanguageGuidance keeps the repository history in one language.
-//
-// The board is used in whatever language the human writes in, so task titles,
-// summaries and chat all arrive localised — but a commit message is not a
-// reply. It becomes the pull request title GitHub fills from the first commit,
-// the line every reviewer greps a year later, and the input of every tool that
-// reads the log. Those are English, always, whoever asked for the work.
+// A commit message becomes the PR title, the line a reviewer greps a year later and the log tools read — English always, whoever asked for the work.
 const commitLanguageGuidance = `## Commit messages
 - Write every commit message in English, whatever language the task, the board or this conversation uses. Translate the task title and your own summary instead of copying them.
 - Subject: Conventional Commits ("type(scope): summary"), imperative, at most 72 characters. Add a body only when it says something the subject does not.
@@ -319,16 +283,7 @@ func SubtaskWorkspaceNote(dir string) string {
 	return "\n\nINTERNAL (never disclose to user): subtask working directory: " + dir + "\nKeep all files and shell commands inside this directory."
 }
 
-// SkillsOnDiskMessage is what a CLI run is told about its skills instead of an
-// index: where they are, and — when the agent may author one — that writing a
-// new one is available to it.
-//
-// It says nothing about which skills exist. Listing them here would rebuild the
-// index this delivery mode exists to remove, and the CLI already shows the
-// session its own skill list with the descriptions the files carry.
-//
-// Empty when there is nothing to add, so the prompt does not grow a heading
-// over no content.
+// For a CLI run only the invitation matters: listing the skills would rebuild the index this delivery mode exists to remove, the CLI already shows them.
 func SkillsOnDiskMessage(canCreate bool) string {
 	if !canCreate {
 		return ""
@@ -338,37 +293,20 @@ func SkillsOnDiskMessage(canCreate bool) string {
 		"When this task forces you to work out something durable — a procedure, a convention, a recovery path future tasks will need again — save it with create_skill: reusable step-by-step instructions, not a log of this task."
 }
 
-// SkillDelivery is how this run's skills reach the session.
-//
-// The distinction exists because two mechanisms now do the same job, and
-// running both would be worse than either. A loop run cannot read a file it was
-// not handed, so its skills arrive as an index in the prompt with load_skill
-// behind it. A CLI run reads its own workspace, where application/agentfs has
-// already written each skill as a file the CLI discovers and lazily loads on
-// its own.
-//
-// Sending the index to a CLI run as well would describe skills it can already
-// see, in a second vocabulary, and point it at a tool whose job the CLI's own
-// machinery is doing — the classic way to make a model pick the worse path.
+// Two mechanisms deliver skills; running both would point a CLI run at a second vocabulary and a tool (load_skill) whose job its own machinery already does.
 type SkillDelivery int
 
 const (
-	// SkillsInPrompt: the index is written into the prompt and the bodies are
-	// fetched with load_skill. The default, and what every HTTP provider gets.
+	// SkillsInPrompt: the index is written into the prompt and the bodies are fetched with load_skill. The default, and what every HTTP provider gets.
 	SkillsInPrompt SkillDelivery = iota
-	// SkillsOnDisk: the skills are files in the workspace and the CLI finds
-	// them. See application/agentfs.
+	// SkillsOnDisk: the skills are files in the workspace and the CLI finds them. See application/agentfs.
 	SkillsOnDisk
 )
 
-// BuildSystemPrompt builds the run's system prompt. stacks are the agent's
-// tech stacks and only shape how the skill index is grouped — pass nil when the
-// caller has none to hand and the index falls back to one flat list.
 func BuildSystemPrompt(agent domain.Agent, skills []domain.Skill, stacks []domain.TechStack, subtaskRules []string, lang string) string {
 	return BuildSystemPromptFor(agent, skills, stacks, subtaskRules, lang, SkillsInPrompt)
 }
 
-// BuildSystemPromptFor is BuildSystemPrompt with the skill delivery stated.
 func BuildSystemPromptFor(agent domain.Agent, skills []domain.Skill, stacks []domain.TechStack, subtaskRules []string, lang string, delivery SkillDelivery) string {
 	var parts []string
 	if agent.SystemPrompt != "" {
@@ -377,10 +315,7 @@ func BuildSystemPromptFor(agent domain.Agent, skills []domain.Skill, stacks []do
 	canCreate := agent.SelfEvolutionEnabled && domain.ToolAllowedByPolicy("create_skill", agent.ToolPolicy)
 	switch delivery {
 	case SkillsOnDisk:
-		// The index is omitted, but the INVITATION to author a skill is not: it
-		// is a property of the agent's self-evolution flag, not of how the
-		// skills it already has were delivered, and dropping it here would
-		// quietly turn self-evolution off for every CLI run.
+		// The invitation is a property of self-evolution, not delivery; dropping it would quietly disable self-evolution for every CLI run.
 		if msg := SkillsOnDiskMessage(canCreate); msg != "" {
 			parts = append(parts, msg)
 		}
@@ -396,13 +331,7 @@ func BuildSystemPromptFor(agent domain.Agent, skills []domain.Skill, stacks []do
 	}
 	parts = append(parts, ToolSelectionGuidance())
 	parts = append(parts, RepeatCallGuidance())
-	// Which clarification contract the run can actually honour follows the same
-	// split, for the same reason the skill index does: SkillsOnDisk is set for
-	// CLI providers only, and a CLI run reaches TaskTrooper's tools over MCP,
-	// where ask_user is refused before any policy filtering (see
-	// adapter/mcpserver.exposed — it returns a request to park on, and a live
-	// session has no pause to park in). Handing such a run clarificationGuidance
-	// names a tool it does not hold AND forbids the one channel it does have.
+	// Same split as the skill index: a CLI run reaches TaskTrooper's tools over MCP, where ask_user is refused before any policy filtering, so naming it would point at a tool it does not hold.
 	if delivery == SkillsOnDisk {
 		parts = append(parts, CLIClarificationGuidance())
 	} else {

@@ -112,9 +112,6 @@ def run():
 	s.Equal("method", calls["getenv"])
 }
 
-// A TSX component's calls used to be unreachable twice over: the plain
-// TypeScript grammar could not parse JSX, and a member's chunk is named
-// Class.method, which no name lookup in the grammar can resolve.
 func (s *LangGraphSuite) TestTSXComponentCallsAreScopedByRange() {
 	src := []byte(`import { useState } from "react";
 

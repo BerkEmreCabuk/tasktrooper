@@ -8,8 +8,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// evaluateImpacts classifies pending evolution events whose observation window
-// has elapsed by comparing score events before vs after the change.
 func (s *Service) evaluateImpacts(ctx context.Context) {
 	cutoff := time.Now().Add(-s.cfg.ImpactWindow)
 	pending, err := s.store.ListEventsByImpact(ctx, domain.EvolutionImpactPending, cutoff, 100)
@@ -35,10 +33,7 @@ func (s *Service) evaluateImpacts(ctx context.Context) {
 	}
 }
 
-// ClassifyImpact compares score-event windows around an evolution change.
-// effective: revision rate dropped ≥0.15 OR net delta improved ≥5.
-// regressed: the opposite by the same margins. Otherwise neutral.
-// Too little after-data → insufficient_data.
+// effective: revision rate dropped ≥0.15 OR net delta improved ≥5; regressed the opposite by the same margins; otherwise neutral. Too little after-data → insufficient_data.
 func ClassifyImpact(before, after []domain.AgentScoreEvent, minEvents int) string {
 	if len(after) < minEvents {
 		return domain.EvolutionImpactInsufficientData
@@ -47,7 +42,6 @@ func ClassifyImpact(before, after []domain.AgentScoreEvent, minEvents int) strin
 	afterRev, afterNet := windowStats(after)
 
 	if len(before) < minEvents {
-		// Not enough baseline: judge on net delta alone.
 		switch {
 		case afterNet >= 5:
 			return domain.EvolutionImpactEffective

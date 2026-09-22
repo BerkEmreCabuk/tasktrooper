@@ -94,14 +94,10 @@ func TestCriteriaSweepRunsOnTheHostExecutor(t *testing.T) {
 	out, _, _ := r.sweepOpenCriteria(ctx, job, claudeCodeAgent(),
 		[]domain.Message{{Role: domain.RoleUser, Content: "do the work"}}, resp, "opus", domain.ToolPolicy{})
 
-	// criteriaUpdater never settles the criterion, so the completion loop asks
-	// its full round budget — every round on the SAME engine, which is what
-	// this test is about (see criteria_sweep_loop_test.go for the loop itself).
 	require.Equal(t, criteriaSweepRounds, ex.callCount(), "the open criterion must be put to the agent on its own engine")
 	require.Equal(t, dir, ex.request().WorkDir)
 	require.Contains(t, messageContents(ex.request().History), "settle its acceptance criteria")
 	require.Empty(t, llm.requests)
-	// The sweep's own bookkeeping talk never replaces the run's summary.
 	require.Equal(t, "implemented", out.Message.Content)
 }
 
@@ -136,7 +132,6 @@ func TestReviewVerdictFinalizeRunsOnTheHostExecutor(t *testing.T) {
 	require.Len(t, updater.calls, 1)
 	require.NotNil(t, updater.calls[0].Column)
 	require.Equal(t, domain.TaskColumnReadyForQA, *updater.calls[0].Column)
-	// Attributed to the reviewing agent, like every other hand-off move.
 	require.Equal(t, domain.TaskActorAgent, updater.calls[0].Actor)
 }
 
@@ -174,8 +169,5 @@ func TestHTTPProviderStillRunsOnTheLoop(t *testing.T) {
 		nil, domain.AgentResponse{Message: domain.Message{Content: "implemented"}}, "gpt-4o", domain.ToolPolicy{})
 
 	require.Zero(t, ex.callCount(), "an HTTP agent's run must not be handed to the CLI")
-	// One request per completion-check round: criteriaUpdater never settles the
-	// criterion, so the loop spends its whole budget — on the HTTP loop, which
-	// is what this test is about.
 	require.Len(t, llm.requests, criteriaSweepRounds)
 }

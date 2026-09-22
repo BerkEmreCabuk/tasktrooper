@@ -15,7 +15,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// subtaskCLI is the Claude Code executor for one plan subtask.
+// The Claude Code executor for one plan subtask.
 type subtaskCLI struct {
 	mu    sync.Mutex
 	calls int
@@ -42,13 +42,7 @@ func (c *subtaskCLI) snapshot() (int, domain.TaskExecution) {
 	return c.calls, c.last
 }
 
-// A plan subtask assigned to an agent on a host-executed provider runs on that
-// host's CLI, in the subtask's OWN workspace.
-//
-// Before the router this was the plainest failure of the lot: the executor
-// called agentLoop.RunTask with the agent's provider, the loop refused it, and
-// the subtask burned all its retries on an error that described a configuration
-// problem nobody had.
+// A subtask on a host-executed provider runs on the host's CLI, in the subtask's OWN workspace.
 func TestSubtaskRunsOnTheHostExecutor(t *testing.T) {
 	cli := &subtaskCLI{}
 	llm := &attemptLLM{}
@@ -62,7 +56,6 @@ func TestSubtaskRunsOnTheHostExecutor(t *testing.T) {
 	}}
 	exec := orchestrator.NewExecutor(router, catalog, domain.OrchestrationConfig{MaxParallelTasks: 1})
 
-	// The session workspace the subtask carves its own directory out of.
 	ctx := registry.ContextWithWorkspaceDir(context.Background(), t.TempDir())
 
 	output := domain.PlannerOutput{Summary: "plan", Tasks: []domain.PlannerTask{{

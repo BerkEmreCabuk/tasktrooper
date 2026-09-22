@@ -13,11 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// --- fakes ------------------------------------------------------------------
-
-// gateTaskStore is the TaskUpdater + TaskRunbookReader the resolver needs: it
-// hands back the task, and it records the moves and comments the gate makes so a
-// test can tell "the reviewer was dispatched" from "the card was sent back".
 type gateTaskStore struct {
 	task     domain.BoardTask
 	getErr   error
@@ -50,7 +45,6 @@ func (g *gateTaskStore) ListComments(_ context.Context, _, _ uuid.UUID) ([]domai
 	return nil, nil
 }
 
-// gateRepos resolves the repository the resolver reads owner/repo out of.
 type gateRepos struct {
 	repo domain.Repository
 	err  error
@@ -63,7 +57,6 @@ func (g *gateRepos) ResolveRepository(_ context.Context, _ uuid.UUID) (domain.Re
 }
 func (g *gateRepos) ProfileForRun(context.Context, uuid.UUID, string) string { return "" }
 
-// gateJobStore serves the repository's category → Actions job mapping.
 type gateJobStore struct {
 	mappings []domain.RepositoryPipelineJob
 }
@@ -80,8 +73,6 @@ func (g *gateJobStore) ReplaceForRepository(_ context.Context, _ uuid.UUID, jobs
 	return jobs, nil
 }
 
-// --- harness ----------------------------------------------------------------
-
 type gateHarness struct {
 	store    *fakePipelineStore
 	qa       *fakeQADispatcher
@@ -93,7 +84,6 @@ type gateHarness struct {
 	pipeline domain.TaskPipeline
 }
 
-// buildJobMapping is the everyday repository: one mapped build job to wait on.
 func buildJobMapping(repoID uuid.UUID) []domain.RepositoryPipelineJob {
 	return []domain.RepositoryPipelineJob{{
 		RepositoryID: repoID,
@@ -103,8 +93,6 @@ func buildJobMapping(repoID uuid.UUID) []domain.RepositoryPipelineJob {
 	}}
 }
 
-// newGateHarness wires a resolver over fakes with a single unfinished QA-gate
-// pipeline created `age` ago, for a task sitting in code_review.
 func newGateHarness(t *testing.T, age time.Duration, mappings []domain.RepositoryPipelineJob) *gateHarness {
 	t.Helper()
 	repoID := uuid.New()
@@ -142,8 +130,6 @@ func newGateHarness(t *testing.T, age time.Duration, mappings []domain.Repositor
 	if err != nil {
 		t.Fatalf("create pipeline: %v", err)
 	}
-	// The fake store keeps CreatedAt as given, so age is set here rather than
-	// by sleeping.
 	created.CreatedAt = time.Now().Add(-age)
 	if _, err := h.store.Update(context.Background(), created); err != nil {
 		t.Fatalf("age pipeline: %v", err)
@@ -152,7 +138,6 @@ func newGateHarness(t *testing.T, age time.Duration, mappings []domain.Repositor
 	return h
 }
 
-// stubGitHub replaces the two Actions reads for the duration of a test.
 func stubGitHub(t *testing.T, runs []githubapi.WorkflowRun, runsErr error, jobs []githubapi.RunJob) {
 	t.Helper()
 	prevRuns, prevJobs := gateListRunsByHeadSHA, gateListRunJobs
@@ -165,7 +150,6 @@ func stubGitHub(t *testing.T, runs []githubapi.WorkflowRun, runsErr error, jobs 
 	t.Cleanup(func() { gateListRunsByHeadSHA, gateListRunJobs = prevRuns, prevJobs })
 }
 
-// settled reads back the pipeline row the resolver wrote.
 func (h *gateHarness) settled(t *testing.T) domain.TaskPipeline {
 	t.Helper()
 	out, err := h.store.Get(context.Background(), h.pipeline.ID)
@@ -175,10 +159,6 @@ func (h *gateHarness) settled(t *testing.T) domain.TaskPipeline {
 	return out
 }
 
-// assertGateOpened is the shared shape of every gate-open outcome: the pipeline
-// is terminal and SKIPPED (not success — nothing built), it carries the reason,
-// the reviewer was dispatched carrying that same reason, the task was NOT sent
-// back for revision, and the card was told why.
 func (h *gateHarness) assertGateOpened(t *testing.T, wantReason string) {
 	t.Helper()
 	settled := h.settled(t)
@@ -208,14 +188,8 @@ func (h *gateHarness) assertGateOpened(t *testing.T, wantReason string) {
 	}
 }
 
-// --- 1. the window ----------------------------------------------------------
-
-// The case the three wedged cards were in: a pipeline nobody is driving, no
-// answer from anywhere, and a card that would otherwise sit in code_review with
-// a spinner forever.
 func TestGateOpensOnTimeout(t *testing.T) {
 	h := newGateHarness(t, PipelineGateWindow+time.Minute, buildJobMapping(uuid.New()))
-	// A run exists and is still going — GitHub has nothing conclusive to say.
 	stubGitHub(t,
 		[]githubapi.WorkflowRun{{ID: 7, Status: "in_progress"}}, nil,
 		[]githubapi.RunJob{{Name: "build", Status: "in_progress"}})
@@ -229,8 +203,6 @@ func TestGateOpensOnTimeout(t *testing.T) {
 	}
 }
 
-// Inside the window nothing happens. This is the guard against the gate opening
-// early and converting a build that was about to go red into a review.
 func TestGateStaysClosedInsideTheWindow(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	stubGitHub(t,
@@ -248,9 +220,6 @@ func TestGateStaysClosedInsideTheWindow(t *testing.T) {
 	}
 }
 
-// The window has to outlast the in-process poll, or the sweeper would give up on
-// pipelines that were about to produce a real verdict — turning red builds into
-// opened review gates.
 func TestGateWindowOutlastsTheInProcessPoll(t *testing.T) {
 	if PipelineGateWindow <= pipelineMaxWait {
 		t.Fatalf("PipelineGateWindow (%s) must exceed pipelineMaxWait (%s), or a live pipeline is abandoned before it can answer",
@@ -258,11 +227,6 @@ func TestGateWindowOutlastsTheInProcessPoll(t *testing.T) {
 	}
 }
 
-// --- 2. GitHub refusing to run ---------------------------------------------
-
-// The user's actual repository: Actions minutes exhausted. Waiting out the
-// window would be 45 minutes spent on a signal that cannot exist, so a 402 opens
-// the gate immediately.
 func TestGateOpensOnQuotaRefusalWithoutWaitingOutTheWindow(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	stubGitHub(t, nil, githubapi.NewAPIErrorForTest(402, "Actions minutes exhausted for this account"), nil)
@@ -273,8 +237,6 @@ func TestGateOpensOnQuotaRefusalWithoutWaitingOutTheWindow(t *testing.T) {
 	h.assertGateOpened(t, domain.PipelineGateReasonCIUnavailable)
 }
 
-// A 403 that names billing is permanent; a 403 that is plain rate limiting is
-// not, and must leave the gate closed so the next pass can ask again.
 func TestGateTellsBillingRefusalsFromRateLimits(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -299,9 +261,6 @@ func TestGateTellsBillingRefusalsFromRateLimits(t *testing.T) {
 	}
 }
 
-// No Actions run exists for the head commit at all, well past the grace period:
-// no workflow triggers on this branch, Actions is off, or there are no minutes.
-// Decidable, so it does not wait for the window either.
 func TestGateOpensWhenNoRunEverAppearedForTheCommit(t *testing.T) {
 	h := newGateHarness(t, pipelineNoRunGrace+time.Minute, buildJobMapping(uuid.New()))
 	stubGitHub(t, nil, nil, nil)
@@ -315,8 +274,6 @@ func TestGateOpensWhenNoRunEverAppearedForTheCommit(t *testing.T) {
 	}
 }
 
-// Inside the grace period a missing run is just a run that has not been created
-// yet — a couple of seconds is normal.
 func TestGateWaitsOutTheNoRunGraceBeforeCallingCIUnavailable(t *testing.T) {
 	h := newGateHarness(t, 10*time.Second, buildJobMapping(uuid.New()))
 	stubGitHub(t, nil, nil, nil)
@@ -329,14 +286,8 @@ func TestGateWaitsOutTheNoRunGraceBeforeCallingCIUnavailable(t *testing.T) {
 	}
 }
 
-// --- 3. nothing configured to run ------------------------------------------
-
-// A repository with no validate/build/test job mapped has nothing to wait for,
-// ever. Answered without touching GitHub at all.
 func TestGateOpensWhenNoWorkflowIsMapped(t *testing.T) {
 	h := newGateHarness(t, time.Second, nil)
-	// Deliberately made fatal: reaching GitHub would mean the resolver waited
-	// on a repository that has nothing to report.
 	prevRuns := gateListRunsByHeadSHA
 	gateListRunsByHeadSHA = func(context.Context, string, string, string, string) ([]githubapi.WorkflowRun, error) {
 		t.Error("asked GitHub about a repository with no mapped checks")
@@ -350,12 +301,6 @@ func TestGateOpensWhenNoWorkflowIsMapped(t *testing.T) {
 	h.assertGateOpened(t, domain.PipelineGateReasonNoCI)
 }
 
-// --- 4. failure is a result too --------------------------------------------
-
-// The three live cards' CI actually FAILED. A newly-arriving failure must take
-// the need_revision path, not open the review gate: a red build is an answer,
-// and the whole point of the gate is that the architect does not review work
-// that does not compile.
 func TestFailedPipelineStillRoutesToNeedRevision(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	stubGitHub(t,
@@ -383,8 +328,6 @@ func TestFailedPipelineStillRoutesToNeedRevision(t *testing.T) {
 	}
 }
 
-// A build that went red while another job hangs is still a red build. Reaching
-// the deadline must not launder it into a gate-open.
 func TestTimeoutWithAReportedFailurePrefersNeedRevision(t *testing.T) {
 	repoID := uuid.New()
 	mappings := append(buildJobMapping(repoID), domain.RepositoryPipelineJob{
@@ -413,10 +356,6 @@ func TestTimeoutWithAReportedFailurePrefersNeedRevision(t *testing.T) {
 	}
 }
 
-// --- 5. the reconciling poll resolving a real result -----------------------
-
-// The belt to the in-process poll's braces: a pipeline whose poller died with
-// its pod, whose build has since gone green, resolved from the API alone.
 func TestPollResolvesAnUnfinishedPipelineFromGitHub(t *testing.T) {
 	h := newGateHarness(t, 10*time.Minute, buildJobMapping(uuid.New()))
 	stubGitHub(t,
@@ -436,8 +375,6 @@ func TestPollResolvesAnUnfinishedPipelineFromGitHub(t *testing.T) {
 	if len(h.qa.calls) != 1 {
 		t.Fatalf("got %d reviewer dispatches, want 1", len(h.qa.calls))
 	}
-	// A genuine green build carries no gate reason: the UI must paint this as a
-	// pass, not as an excuse.
 	if h.qa.gateReasons[0] != "" {
 		t.Errorf("a real success carried gate reason %q, want empty", h.qa.gateReasons[0])
 	}
@@ -446,8 +383,6 @@ func TestPollResolvesAnUnfinishedPipelineFromGitHub(t *testing.T) {
 	}
 }
 
-// A pipeline this process is already polling is left to it. Two resolvers on one
-// pipeline would write two sets of job rows for the same run.
 func TestSweepSkipsPipelinesThisProcessIsAlreadyPolling(t *testing.T) {
 	h := newGateHarness(t, PipelineGateWindow+time.Minute, buildJobMapping(uuid.New()))
 	h.runner.inflight.Store(h.pipeline.ID, struct{}{})
@@ -463,8 +398,6 @@ func TestSweepSkipsPipelinesThisProcessIsAlreadyPolling(t *testing.T) {
 	}
 }
 
-// A deploy pipeline is not a review gate. Settling one from here would move a
-// task DeploySweeper is responsible for.
 func TestSweepIgnoresDeployPipelines(t *testing.T) {
 	h := newGateHarness(t, PipelineGateWindow+time.Minute, buildJobMapping(uuid.New()))
 	p := h.settled(t)
@@ -483,8 +416,6 @@ func TestSweepIgnoresDeployPipelines(t *testing.T) {
 	}
 }
 
-// A card that moved on while its pipeline hung gets its ROW settled and nothing
-// else. Dispatching here would put an agent on whatever column it reached.
 func TestResolveFiresNoSideEffectsOnceTheTaskLeftCodeReview(t *testing.T) {
 	h := newGateHarness(t, PipelineGateWindow+time.Minute, buildJobMapping(uuid.New()))
 	h.tasks.task.Column = domain.TaskColumnInQA
@@ -503,8 +434,6 @@ func TestResolveFiresNoSideEffectsOnceTheTaskLeftCodeReview(t *testing.T) {
 	}
 }
 
-// An unreadable task leaves everything alone. Opening a gate because the
-// database had a bad second would dispatch a reviewer for no reason.
 func TestResolveLeavesThePipelineAloneWhenTheTaskCannotBeRead(t *testing.T) {
 	h := newGateHarness(t, PipelineGateWindow+time.Minute, buildJobMapping(uuid.New()))
 	h.tasks.getErr = errors.New("connection reset")
@@ -521,10 +450,6 @@ func TestResolveLeavesThePipelineAloneWhenTheTaskCannotBeRead(t *testing.T) {
 	}
 }
 
-// --- 6. the webhook's entry point ------------------------------------------
-
-// A workflow_run delivery names a head SHA and nothing else that identifies a
-// task. This is the whole join, and the reason the hook needed the event at all.
 func TestResolveByHeadSHAUpdatesTaskPipelinesFromAWorkflowRun(t *testing.T) {
 	h := newGateHarness(t, 30*time.Second, buildJobMapping(uuid.New()))
 	stubGitHub(t,
@@ -551,8 +476,6 @@ func TestResolveByHeadSHAUpdatesTaskPipelinesFromAWorkflowRun(t *testing.T) {
 	}
 }
 
-// A failing delivery is the important half. This is the case the three live
-// cards were actually in — CI red — and it must reach need_revision.
 func TestResolveByHeadSHARoutesAFailingRunToNeedRevision(t *testing.T) {
 	h := newGateHarness(t, 30*time.Second, buildJobMapping(uuid.New()))
 	stubGitHub(t,
@@ -570,9 +493,6 @@ func TestResolveByHeadSHARoutesAFailingRunToNeedRevision(t *testing.T) {
 	}
 }
 
-// A delivery for a commit nothing is waiting on does nothing. Most deliveries
-// are like this (every push to the default branch), so it must be cheap and
-// silent rather than an error.
 func TestResolveByHeadSHAIgnoresCommitsNobodyIsWaitingOn(t *testing.T) {
 	h := newGateHarness(t, 30*time.Second, buildJobMapping(uuid.New()))
 	stubGitHub(t, nil, nil, nil)
@@ -589,11 +509,6 @@ func TestResolveByHeadSHAIgnoresCommitsNobodyIsWaitingOn(t *testing.T) {
 	}
 }
 
-// --- 7. a pipeline with no recorded commit ---------------------------------
-
-// Rows written before migration 107 carry no head_sha — including the three the
-// user is looking at. Nothing can be asked about them, so only the clock can
-// settle them, and it must.
 func TestGateOpensOnTimeoutForAPipelineWithNoRecordedCommit(t *testing.T) {
 	h := newGateHarness(t, PipelineGateWindow+time.Minute, buildJobMapping(uuid.New()))
 	p := h.settled(t)
@@ -614,7 +529,6 @@ func TestGateOpensOnTimeoutForAPipelineWithNoRecordedCommit(t *testing.T) {
 	h.assertGateOpened(t, domain.PipelineGateReasonTimeout)
 }
 
-// mustGet is a test-only read that fails rather than returning an error.
 func (f *fakePipelineStore) mustGet(t *testing.T, id uuid.UUID) domain.TaskPipeline {
 	t.Helper()
 	p, err := f.Get(context.Background(), id)
@@ -624,11 +538,6 @@ func (f *fakePipelineStore) mustGet(t *testing.T, id uuid.UUID) domain.TaskPipel
 	return p
 }
 
-// --- 8. gate reason labels -------------------------------------------------
-
-// Every reason the gate can open with has a human phrase, and every one of them
-// is recognised as "opened without a build". A code that fell through either
-// switch would reach the card as "gate opened" with nothing to act on.
 func TestEveryGateReasonIsLabelledAndRecognised(t *testing.T) {
 	for _, reason := range []string{
 		domain.PipelineGateReasonTimeout,

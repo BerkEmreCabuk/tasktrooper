@@ -6,26 +6,21 @@ import (
 )
 
 // SameGitRemote reports whether two git remote URLs address the same
-// repository.
-//
-// It is the identity test every path that ADOPTS an existing checkout applies
-// before acting on one: on a volume shared by every customer, "there is a git
-// repository at this path" and "there is THIS repository at this path" are
-// different questions, and only the second one is safe to answer yes to.
-//
-// Both spellings GitHub hands out have to compare equal — https and the
-// scp-style ssh form — along with the optional .git suffix, embedded
-// credentials and case. A comparison that refused legitimate adoptions would be
-// turned off, and then the check would protect nothing.
+// repository. It is the identity test every path that ADOPTS an existing
+// checkout applies before acting on one: "there is a git repository at this
+// path" and "there is THIS repository at this path" are different questions,
+// and only the second is safe to answer yes to. Both GitHub spellings — https
+// and the scp-style ssh form — must compare equal, along with the optional .git
+// suffix, credentials and case; a comparison that refused legitimate adoptions
+// would be turned off.
 func SameGitRemote(a, b string) bool {
 	na, nb := NormalizeGitRemote(a), NormalizeGitRemote(b)
 	return na != "" && na == nb
 }
 
 // NormalizeGitRemote reduces a remote URL to "host/path", lowercased, without
-// credentials, port, trailing slash or .git suffix. It returns "" for anything
-// it cannot read as a remote, which callers treat as "no answer" rather than as
-// a match.
+// credentials, port, trailing slash or .git suffix. "" for anything it cannot
+// read as a remote, which callers treat as "no answer" rather than a match.
 func NormalizeGitRemote(raw string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {

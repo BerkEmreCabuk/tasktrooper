@@ -15,21 +15,10 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// TaskPRRecorder persists the pull request a task's branch got. Nil-safe at every
-// call site: a build with no board store still opens PRs, it just cannot remember
-// them.
 type TaskPRRecorder interface {
 	SetTaskPullRequest(ctx context.Context, taskID uuid.UUID, url string, number int) error
 }
 
-// recordTaskPR stores a PR URL on its task, parsing the number out of the URL.
-//
-// A URL that does not parse is still stored: the number is what the PR API is
-// keyed by, but the link is what a human clicks, and the whole point of the
-// column is that "which PR is this task in?" stops requiring a working copy and a
-// GitHub round-trip. Best-effort by design — every caller has already opened the
-// PR by the time it gets here, so failing the run over the bookkeeping would
-// trade a real result for a lost one.
 func recordTaskPR(ctx context.Context, rec TaskPRRecorder, taskID uuid.UUID, prURL string) {
 	if rec == nil || strings.TrimSpace(prURL) == "" {
 		return
@@ -41,8 +30,6 @@ func recordTaskPR(ctx context.Context, rec TaskPRRecorder, taskID uuid.UUID, prU
 	}
 }
 
-// TaskPRGit is the slice of the git client the task-PR path needs. Satisfied by
-// the git adapter; declared here so the service is testable against a fake.
 type TaskPRGit interface {
 	HasGit(rootPath string) bool
 	CommitAndPush(ctx context.Context, workspacePath, message string) error
@@ -50,81 +37,41 @@ type TaskPRGit interface {
 	TaskGitInfo(ctx context.Context, workspacePath string) (domain.TaskGitInfo, error)
 	TaskChangedFiles(ctx context.Context, workspacePath string) ([]string, error)
 	OriginURL(ctx context.Context, rootPath string) string
-	// MergePullRequest squash-merges a PR every gate above it has already
-	// cleared, and deletes its branch.
 	MergePullRequest(ctx context.Context, req domain.PullRequestMergeRequest) (domain.PullRequestMergeResult, error)
 }
 
-// TaskPRTasks is the task half: read one task (repository-scoped, which is the
-// ownership check) and record the PR it ends up with.
 type TaskPRTasks interface {
 	Get(ctx context.Context, repositoryID, taskID uuid.UUID) (domain.BoardTask, error)
 	SetTaskPullRequest(ctx context.Context, taskID uuid.UUID, url string, number int) error
-	// SetTaskMergeCommit records the commit the merge produced. It is the board's
-	// only record that the PR landed, and the dispatcher reads it.
 	SetTaskMergeCommit(ctx context.Context, taskID uuid.UUID, sha string) error
 }
 
-// TaskPRLifecycleGates is the repository-level half of the merge decision, kept
-// as an interface so this package does not import application/repository (which
-// imports this one). Satisfied by *repository.Service.
-//
-// Both methods are the EXISTING gates, not new ones: CheckReviewChain is the
-// same require_review_chain check that guards a move into done, and
-// LatestTaskPipeline is the same build/test result QA reads with
-// get_pipeline_status. The merge asks them again rather than trusting that the
-// task is in done, because the column says a task passed the gates ONCE — and
-// merging is irreversible.
 type TaskPRLifecycleGates interface {
 	CheckReviewChain(ctx context.Context, repositoryID, taskID uuid.UUID) error
 	LatestTaskPipeline(ctx context.Context, repositoryID, taskID uuid.UUID) (domain.TaskPipeline, error)
-	// AutoReleaseIfUndeployable moves the task to released when the
-	// repository has no deploy_target configured anywhere. Reports whether
-	// it did.
 	AutoReleaseIfUndeployable(ctx context.Context, repositoryID, taskID uuid.UUID) bool
 }
 
-// RootPathResolver resolves a repository's shared working copy. Used only to find
-// origin's owner/repo when the task has no workspace of its own on this machine.
 type RootPathResolver interface {
 	ResolveRootPath(ctx context.Context, repositoryID uuid.UUID) (string, error)
 }
 
-// AgentResolver reads the agent a run belongs to, so a commit made from a tool
-// call can say which agent made it. Optional everywhere: an unresolved agent
-// costs the trailer, not the commit.
 type AgentResolver interface {
 	GetAgent(ctx context.Context, id uuid.UUID) (domain.Agent, error)
 }
 
-// TaskPRServiceDeps wires the collaborators of the task↔pull-request use cases.
 type TaskPRServiceDeps struct {
-	Tasks  TaskPRTasks
-	Repos  RootPathResolver
-	Git    TaskPRGit
-	PRs    port.PullRequestClient
-	Tokens TokenSource
-	// Agents and LLM are what turn an agent-written commit message into the
-	// same English, agent-stamped message the board runner writes. Both
-	// optional: without them the agent's own wording is committed as-is.
-	Agents AgentResolver
-	LLM    port.LLMClient
-	// Gates are the repository lifecycle checks the merge re-asks. Nil disables
-	// merging entirely rather than merging ungated — a deployment that cannot
-	// prove the review chain must not be the one that lands code.
+	Tasks         TaskPRTasks
+	Repos         RootPathResolver
+	Git           TaskPRGit
+	PRs           port.PullRequestClient
+	Tokens        TokenSource
+	Agents        AgentResolver
+	LLM           port.LLMClient
 	Gates         TaskPRLifecycleGates
 	WorkspaceRoot string
 }
 
-// TaskPRService is what lets a human discuss a task's pull request with an agent
-// and then have the agent act on it: read the PR (metadata, files, comments,
-// bounded diff), commit and push what was asked for so the PR updates, and answer
-// a reviewer in their own thread.
-//
-// It is deliberately one service rather than three tools' worth of logic: all
-// three need the same four things resolved first (the task, its workspace, the
-// PR's owner/repo/number, a token), and resolving that four ways would let them
-// disagree about which PR a task is in.
 type TaskPRService struct {
 	tasks         TaskPRTasks
 	repos         RootPathResolver
@@ -151,22 +98,10 @@ func NewTaskPRService(deps TaskPRServiceDeps) *TaskPRService {
 	}
 }
 
-// maxPRDiffChars bounds the diff a tool result carries. The diff is the single
-// biggest thing an agent can pull into its context, and a PR that touches a
-// lockfile can be megabytes of it; past this size it crowds out the conversation
-// it was fetched to inform. The agent is told the diff was cut so it reads the
-// rest per-file rather than assuming it saw everything.
 const maxPRDiffChars = 40000
 
-// maxPRCommentBody keeps one runaway review comment from filling the result.
 const maxPRCommentBody = 4000
 
-// TaskWorkspacePath is where a task's isolated checkout lives. Derived, not
-// stored — the same derivation the runner, the pipeline and the repository
-// service already use.
-//
-// An empty string means "no workspace here", which every caller already
-// handles.
 func (s *TaskPRService) TaskWorkspacePath(taskID uuid.UUID) string {
 	if s.workspaceRoot == "" {
 		return ""
@@ -178,13 +113,6 @@ func (s *TaskPRService) TaskWorkspacePath(taskID uuid.UUID) string {
 	return path
 }
 
-// PullRequest reads the task's pull request.
-//
-// A task with no PR recorded is a normal answer (Known=false plus a note saying
-// when one gets opened), not an error: an agent asked about a PR that does not
-// exist yet must say so, and an error result would have it report a broken
-// system instead. The same goes for GitHub not being connected — the URL we
-// already know is still worth handing back.
 func (s *TaskPRService) PullRequest(ctx context.Context, repositoryID, taskID uuid.UUID, includeDiff bool) (domain.TaskPullRequest, error) {
 	task, err := s.tasks.Get(ctx, repositoryID, taskID)
 	if err != nil {
@@ -231,9 +159,6 @@ func (s *TaskPRService) PullRequest(ctx context.Context, repositoryID, taskID uu
 		out.URL = pr.HTMLURL
 	}
 
-	// Everything below is additive context. One of these failing (a permission
-	// the token lacks, a rate limit) must not cost the caller the PR state it
-	// already has, so each failure becomes a note instead of an error.
 	var notes []string
 	if files, ferr := s.prs.ListPullRequestFiles(ctx, token, owner, repo, number); ferr != nil {
 		notes = append(notes, "changed files could not be listed: "+ferr.Error())
@@ -278,17 +203,7 @@ func (s *TaskPRService) PullRequest(ctx context.Context, repositoryID, taskID uu
 	return out, nil
 }
 
-// CommitTaskChanges commits whatever is in the task's workspace, pushes it,
-// makes sure the PR exists and records it. This is the step that makes "apply
-// the change I just described" actually reach the pull request: until now only
-// the board runner committed, at the end of its own run, so an agent asked to
-// fix something in a chat changed files nobody would ever see.
-//
-// Nothing to commit is a result, not an error. The check is HEAD before against
-// HEAD after rather than a dirty-tree probe, because the commit path stages with
-// `git add -A` — a probe that missed untracked files would report "nothing to
-// commit" for a change that consists entirely of new files, which is what a
-// first implementation looks like.
+// HEAD-before-vs-after, not a dirty-tree probe: git add -A stages untracked files, and a first implementation is all new files.
 func (s *TaskPRService) CommitTaskChanges(ctx context.Context, repositoryID, taskID uuid.UUID, message string) (domain.TaskCommitResult, error) {
 	task, err := s.tasks.Get(ctx, repositoryID, taskID)
 	if err != nil {
@@ -303,8 +218,6 @@ func (s *TaskPRService) CommitTaskChanges(ctx context.Context, repositoryID, tas
 	}
 	workspaceDir := s.TaskWorkspacePath(taskID)
 	if workspaceDir == "" || !s.git.HasGit(workspaceDir) {
-		// No workspace means no edits were made here — there is literally
-		// nothing to push. Creating one now would only produce an empty branch.
 		return domain.TaskCommitResult{
 			Message: "This task has no working copy on this machine, so there is nothing to commit. Make the changes in the task workspace first (an agent run on the task creates it).",
 		}, nil
@@ -327,11 +240,6 @@ func (s *TaskPRService) CommitTaskChanges(ctx context.Context, repositoryID, tas
 		result.ChangedFiles = files
 	}
 
-	// Ensure the PR even when nothing new was committed: the branch may have
-	// been pushed for the first time just now, and a branch with no PR is a
-	// change nobody can review. It is best-effort because GitHub refuses a PR
-	// whose head has no commits beyond base, which is exactly the
-	// nothing-to-commit case.
 	prURL, prErr := s.git.EnsurePullRequest(ctx, workspaceDir)
 	if prErr != nil {
 		log.Info().Err(prErr).Str("task_id", taskID.String()).Msg("ensure PR after commit_task_changes failed")
@@ -358,12 +266,6 @@ func (s *TaskPRService) CommitTaskChanges(ctx context.Context, repositoryID, tas
 	return result, nil
 }
 
-// commitMessage renders what an agent asked to commit into repository English
-// and stamps the agent onto it, so a tool-driven commit is indistinguishable
-// from one the board runner made. The agent is told to write English already;
-// this is the guarantee, not the request — a board used in Turkish still
-// produces an English history, which is what the PR title, `git log` and every
-// reviewer downstream read.
 func (s *TaskPRService) commitMessage(ctx context.Context, task domain.BoardTask, message string) string {
 	agentRec := s.runningAgent(ctx)
 	return writeCommitMessage(ctx, s.llm, commitDetails{
@@ -374,9 +276,6 @@ func (s *TaskPRService) commitMessage(ctx context.Context, task domain.BoardTask
 	})
 }
 
-// runningAgent reads the agent behind the current tool call. Zero-valued when
-// there is no agent in context or it cannot be read — the message is then
-// committed as the agent wrote it, unstamped.
 func (s *TaskPRService) runningAgent(ctx context.Context) domain.Agent {
 	if s.agents == nil {
 		return domain.Agent{}
@@ -393,12 +292,6 @@ func (s *TaskPRService) runningAgent(ctx context.Context) domain.Agent {
 	return agentRec
 }
 
-// CommentOnPullRequest posts a comment on the task's PR, or answers one review
-// comment inside its own thread when replyTo names it.
-//
-// Replying in-thread rather than starting a new conversation comment is the whole
-// point when a reviewer asked for something: a top-level comment leaves their
-// thread unanswered and GitHub keeps showing it as unresolved.
 func (s *TaskPRService) CommentOnPullRequest(ctx context.Context, repositoryID, taskID uuid.UUID, body string, replyTo int64) (domain.PullRequestComment, error) {
 	task, err := s.tasks.Get(ctx, repositoryID, taskID)
 	if err != nil {
@@ -435,9 +328,6 @@ func (s *TaskPRService) CommentOnPullRequest(ctx context.Context, repositoryID, 
 	return mapPRComment(comment), nil
 }
 
-// taskPRRef returns the task's PR number and URL, filling in the number from the
-// URL when only the URL was stored (a row written before the number could be
-// parsed, or by a path that had only the link).
 func taskPRRef(task domain.BoardTask) (int, string) {
 	url := strings.TrimSpace(task.PRURL)
 	number := task.PRNumber
@@ -458,9 +348,6 @@ func (s *TaskPRService) token(ctx context.Context) string {
 	return strings.TrimSpace(token)
 }
 
-// ownerRepo resolves the GitHub coordinates of the task's repository, preferring
-// the task's own workspace (whose origin is the one its branch was pushed to) and
-// falling back to the shared working copy when the task has no workspace here.
 func (s *TaskPRService) ownerRepo(ctx context.Context, repositoryID, taskID uuid.UUID) (string, string, error) {
 	if s.git == nil {
 		return "", "", fmt.Errorf("git is not configured on this deployment")

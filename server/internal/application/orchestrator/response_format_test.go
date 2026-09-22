@@ -11,14 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Every pipeline stage used to send domain.JSONResponseFormat() — bare
-// {"type":"json_object"}, no schema — leaving a provider with strict
-// structured-output support nothing to constrain decoding against. These pin
-// the remaining three stages (planner has its own test in
-// planner_retry_test.go) onto domain.JSONSchemaResponseFormat, using the
-// scriptedLLM fixture from planner_retry_test.go — package-visible since both
-// files are compiled into orchestrator_test.
-
+// These pin the remaining stages (planner has its own test) onto the schema response format, via the scriptedLLM fixture.
 func TestIntakeExtract_RequestCarriesTheJSONSchema(t *testing.T) {
 	llm := &scriptedLLM{responses: []string{`{"ready":true,"purpose":"p","goal":"g","constraints":[],"questions":[]}`}}
 

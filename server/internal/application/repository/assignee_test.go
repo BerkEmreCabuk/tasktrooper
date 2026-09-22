@@ -1,8 +1,5 @@
 package repository
 
-// The agent a card is given to, through the service that writes it: the
-// omitted / null / value contract the field carries on update.
-
 import (
 	"context"
 	"encoding/json"
@@ -17,9 +14,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/taskkey"
 )
 
-// assigneeTaskStore is fakePackageTaskStore with a Create that actually
-// persists — the shared fake's returns a zero task, which would hide exactly
-// the field under test.
 type assigneeTaskStore struct {
 	*fakePackageTaskStore
 }
@@ -78,8 +72,6 @@ func TestUpdateTaskAppliesTheAgent(t *testing.T) {
 	assert.Equal(t, agentID, *updated.AssigneeAgentID)
 }
 
-// An omitted key leaves the agent on the card alone, which is why a PATCH that
-// only renames or moves a card cannot unassign it as a side effect.
 func TestUpdateTaskLeavesTheAgentAloneWhenOmitted(t *testing.T) {
 	f := newAssigneeFixture()
 	agentID := uuid.New()
@@ -95,9 +87,6 @@ func TestUpdateTaskLeavesTheAgentAloneWhenOmitted(t *testing.T) {
 	assert.Equal(t, agentID, *updated.AssigneeAgentID)
 }
 
-// `null` is the spelling a client with an object reference in hand reaches for
-// to say "no reference", and until domain.Nullable it decoded to the same nil
-// pointer as an omitted key — so it was a clear that silently did nothing.
 func TestUpdateTaskClearsTheAgentWithNull(t *testing.T) {
 	f := newAssigneeFixture()
 	agentID := uuid.New()
@@ -113,8 +102,6 @@ func TestUpdateTaskClearsTheAgentWithNull(t *testing.T) {
 	assert.Nil(t, f.tasks.tasks[task.ID].AssigneeAgentID)
 }
 
-// The wire, not the Go struct: this is the decode that used to lose the
-// difference, so it is the one worth pinning.
 func TestUpdateRequestTellsNullApartFromAnOmittedAssignee(t *testing.T) {
 	var omitted domain.UpdateBoardTaskRequest
 	require.NoError(t, json.Unmarshal([]byte(`{"title":"x"}`), &omitted))

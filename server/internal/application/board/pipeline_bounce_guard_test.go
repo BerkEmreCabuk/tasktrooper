@@ -1,13 +1,5 @@
 package board
 
-// The same-commit re-bounce brake.
-//
-// Reproduced from the production loop it was written for: the org's GitHub
-// Actions were billing-blocked, so every check failed instantly with no commit
-// ever changing, and the board sent task B-4 back to the developer eleven times
-// in forty minutes — ~40 agent runs, all on the user's paid quota, all about
-// one commit nobody had touched since the first failure.
-
 import (
 	"context"
 	"encoding/json"
@@ -21,17 +13,12 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// bounceParker is the board task store's park, remembered — and applied. The
-// real BlockOnResource writes the column and the resource onto the row, which
-// is what the guard's own re-read finds on its next firing, so a fake that only
-// recorded the call could never exercise the idempotency that re-read buys.
 type bounceParker struct {
 	resources []string
 	details   []string
 	previous  domain.TaskColumn
 	err       error
-	// onto is the task the park is applied to, so a later GetTask sees it.
-	onto *gateTaskStore
+	onto      *gateTaskStore
 }
 
 func (b *bounceParker) BlockOnResource(_ context.Context, _, _ uuid.UUID, resource, detail string) (domain.TaskColumn, error) {
@@ -49,7 +36,6 @@ func (b *bounceParker) BlockOnResource(_ context.Context, _, _ uuid.UUID, resour
 	return b.previous, nil
 }
 
-// bounceEventStore is the board history the human-touch reset reads.
 type bounceEventStore struct {
 	events []domain.BoardEvent
 	limits []int
@@ -64,7 +50,6 @@ func (s *bounceEventStore) ListByTask(_ context.Context, _ uuid.UUID, limit int)
 	return s.events, nil
 }
 
-// humanTouch is the cheapest human event there is: somebody typed on the card.
 func humanTouch(at time.Time) domain.BoardEvent {
 	raw, _ := json.Marshal(map[string]interface{}{"author_type": "user"})
 	return domain.BoardEvent{
@@ -75,12 +60,6 @@ func humanTouch(at time.Time) domain.BoardEvent {
 	}
 }
 
-// bounceCommenter is the guard's commenter, which in production is
-// repository.Service: AddComment emits task.commented, Dispatch resolves the
-// column's agents for it and enqueues a run. That is why WHEN it is called
-// matters, so this records the card's column and blocked resource as of every
-// comment — a comment written while the card was still in code_review would
-// have started the agent run the guard exists to prevent.
 type bounceCommenter struct {
 	tasks    *gateTaskStore
 	contents []string
@@ -95,7 +74,6 @@ func (c *bounceCommenter) AddComment(ctx context.Context, repositoryID, taskID u
 	return c.tasks.AddComment(ctx, repositoryID, taskID, req)
 }
 
-// bounceRig is the wired guard and the collaborators a test asserts on.
 type bounceRig struct {
 	guard     *PipelineBounceGuard
 	parker    *bounceParker
@@ -105,14 +83,10 @@ type bounceRig struct {
 	spans     *parkSpanStore
 }
 
-// withBounceGuard installs a fully wired guard on the harness's runner and
-// hands back the collaborators a test asserts on.
 func withBounceGuard(h *gateHarness) *bounceRig {
 	return withBounceGuardHistory(h, nil)
 }
 
-// withBounceGuardHistory is the same wiring plus the board-event history the
-// human-touch reset reads.
 func withBounceGuardHistory(h *gateHarness, history []domain.BoardEvent) *bounceRig {
 	rig := &bounceRig{
 		parker:    &bounceParker{previous: domain.TaskColumnCodeReview, onto: h.tasks},
@@ -129,15 +103,6 @@ func withBounceGuardHistory(h *gateHarness, history []domain.BoardEvent) *bounce
 	return rig
 }
 
-// holdOnRepeatFailure asks the guard the question PipelineRunner asks it on a
-// red build — with the task as it looked when the pipeline was QUEUED, one
-// earlier failure for the same commit already on the record.
-//
-// Called directly rather than through ResolveUnfinished because the resolver
-// re-reads the task first and settles a pipeline quietly the moment the card is
-// not in code_review: every case about a card that MOVED while the pipeline was
-// hanging is a case the runner never lets the guard see, so driving them through
-// it asserts nothing about the guard at all.
 func holdOnRepeatFailure(t *testing.T, h *gateHarness, rig *bounceRig) bool {
 	t.Helper()
 	seedFailedPipeline(t, h, h.pipeline.HeadSHA, time.Now().Add(-30*time.Minute))
@@ -148,8 +113,6 @@ func holdOnRepeatFailure(t *testing.T, h *gateHarness, rig *bounceRig) bool {
 	return rig.guard.Hold(context.Background(), h.repoID, snapshot, h.pipeline)
 }
 
-// filledWindow is reviewLoopHistoryDepth events, i.e. exactly the ceiling
-// ListByTask returns — the shape that proves nothing about what came after it.
 func filledWindow(at time.Time) []domain.BoardEvent {
 	out := make([]domain.BoardEvent, 0, 500)
 	for i := 0; i < 500; i++ {
@@ -162,10 +125,6 @@ func filledWindow(at time.Time) []domain.BoardEvent {
 	return out
 }
 
-// seedFailedPipeline writes an already-settled failed pipeline for the same
-// task: a build that RAN, reported to a provider and went red. That is the only
-// shape that counts as a lap the board has already done — see
-// seedNonVerdictPipeline for the three that write `failed` without it.
 func seedFailedPipeline(t *testing.T, h *gateHarness, headSHA string, createdAt time.Time) domain.TaskPipeline {
 	t.Helper()
 	return seedPipelineRow(t, h, domain.TaskPipeline{
@@ -178,8 +137,6 @@ func seedFailedPipeline(t *testing.T, h *gateHarness, headSHA string, createdAt 
 	}, createdAt, &createdAt)
 }
 
-// seedPipelineRow creates a pipeline and back-dates it, since the fake store
-// keeps whatever CreatedAt it is handed.
 func seedPipelineRow(t *testing.T, h *gateHarness, row domain.TaskPipeline, createdAt time.Time, finishedAt *time.Time) domain.TaskPipeline {
 	t.Helper()
 	created, err := h.store.Create(context.Background(), row)
@@ -194,8 +151,6 @@ func seedPipelineRow(t *testing.T, h *gateHarness, row domain.TaskPipeline, crea
 	return created
 }
 
-// stubRedBuild makes GitHub report the billing-block shape: the run completed,
-// the mapped job did not succeed, and no commit is involved in the answer.
 func stubRedBuild(t *testing.T) {
 	t.Helper()
 	stubGitHub(t,
@@ -203,8 +158,6 @@ func stubRedBuild(t *testing.T) {
 		[]githubapi.RunJob{{Name: "build", Status: "completed", Conclusion: "failure"}})
 }
 
-// assertOrdinaryBounce is the shape of "the guard stayed out of it": the task
-// went back to the developer and nothing was parked.
 func assertOrdinaryBounce(t *testing.T, h *gateHarness, rig *bounceRig, why string) {
 	t.Helper()
 	if len(h.tasks.moves) != 1 || h.tasks.moves[0] != domain.TaskColumnNeedRevision {
@@ -218,8 +171,6 @@ func assertOrdinaryBounce(t *testing.T, h *gateHarness, rig *bounceRig, why stri
 	}
 }
 
-// The first red build on a commit is news, and news goes back to the developer.
-// The guard must be invisible here or it would swallow every real failure.
 func TestFirstFailureOnACommitStillBouncesTheTask(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuard(h)
@@ -238,9 +189,6 @@ func TestFirstFailureOnACommitStillBouncesTheTask(t *testing.T) {
 	}
 }
 
-// The lap that must not happen. The identical commit fails again, so there is
-// nothing to tell the developer that the card does not already say: no move, no
-// re-dispatch, one explanation, and the card parked for a person.
 func TestSameCommitFailingAgainParksInsteadOfBouncing(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuard(h)
@@ -274,8 +222,6 @@ func TestSameCommitFailingAgainParksInsteadOfBouncing(t *testing.T) {
 	if len(rig.parker.resources) != 1 || rig.parker.resources[0] != domain.ResourceHumanDecision {
 		t.Fatalf("parked on %v, want one park on %q", rig.parker.resources, domain.ResourceHumanDecision)
 	}
-	// The origin column has to survive the park, or a human dragging the card
-	// back out lands it in whatever the store's fallback is.
 	payloads := rig.events.payloads()
 	if len(payloads) != 1 {
 		t.Fatalf("got %d park events, want 1: a card that jumps to blocked with no history is the gap ParkJournal closes",
@@ -296,15 +242,9 @@ func TestSameCommitFailingAgainParksInsteadOfBouncing(t *testing.T) {
 	}
 }
 
-// Second firing on a card that is already parked: still held, still unmoved,
-// and SILENT. The idempotency is read off the task, not off an arithmetic
-// coincidence — the re-read is what makes it hold across pods, where the first
-// park may well have been written by a different process.
 func TestAFailureOnAnAlreadyParkedTaskIsHeldSilently(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuard(h)
-	// The pipeline was queued on a card in code_review; by the time it settles,
-	// somebody's guard — this pod's or another's — has already parked it.
 	h.tasks.task.Column = domain.TaskColumnBlocked
 	h.tasks.task.BlockedResource = domain.ResourceHumanDecision
 
@@ -324,9 +264,6 @@ func TestAFailureOnAnAlreadyParkedTaskIsHeldSilently(t *testing.T) {
 	}
 }
 
-// A NEW commit is new information, whatever happened to the old one. The guard
-// is per head SHA precisely so a developer who pushed a fix still gets told
-// their fix did not work.
 func TestFailureOnANewCommitBouncesEvenAfterAnEarlierOneFailed(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuard(h)
@@ -340,16 +277,10 @@ func TestFailureOnANewCommitBouncesEvenAfterAnEarlierOneFailed(t *testing.T) {
 	assertOrdinaryBounce(t, h, rig, "a commit that has not failed before")
 }
 
-// The three writers that stamp `failed` on a row where nothing ever ran. Each
-// one of them, counted, turns a task's genuine FIRST red build into a park —
-// and the interrupted case is not hypothetical: PipelineRunner.Start calls
-// FailStaleRunning(0) at every process boot, so a single restart used to be
-// enough to arm this against the next real failure.
 func TestPipelinesThatNeverReachedAVerdictAreNotPriorFailures(t *testing.T) {
 	cases := []struct {
-		name string
-		row  domain.TaskPipeline
-		// unfinished leaves finished_at nil.
+		name       string
+		row        domain.TaskPipeline
 		unfinished bool
 	}{
 		{
@@ -357,9 +288,6 @@ func TestPipelinesThatNeverReachedAVerdictAreNotPriorFailures(t *testing.T) {
 			row:  domain.TaskPipeline{Provider: domain.PipelineProviderGitHubActions, Note: "superseded"},
 		},
 		{
-			// FailStaleRunning at process start, and finishInterrupted on
-			// shutdown. Both keep whatever provider was already stamped, so the
-			// note is the only thing telling them apart from a red build.
 			name: "interrupted by a restart",
 			row:  domain.TaskPipeline{Provider: domain.PipelineProviderGitHubActions, Note: "interrupted"},
 		},
@@ -404,14 +332,8 @@ func TestPipelinesThatNeverReachedAVerdictAreNotPriorFailures(t *testing.T) {
 	}
 }
 
-// A person who has been shown the red build gets told about the next one. They
-// have the information the guard suppresses; whatever they did with it, the
-// following failure is news to them again — and a card that silently stops
-// after a human touched it is exactly the "work just stopped" report the guard
-// was written to avoid producing.
 func TestFailureAfterAHumanTouchBouncesAgain(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
-	// The failure the human saw, then the human.
 	seedFailedPipeline(t, h, h.pipeline.HeadSHA, time.Now().Add(-30*time.Minute))
 	rig := withBounceGuardHistory(h, []domain.BoardEvent{humanTouch(time.Now().Add(-20 * time.Minute))})
 	stubRedBuild(t)
@@ -423,8 +345,6 @@ func TestFailureAfterAHumanTouchBouncesAgain(t *testing.T) {
 	assertOrdinaryBounce(t, h, rig, "a human has looked at the card since that failure")
 }
 
-// The reset is about failures the human has ALREADY seen. One that landed after
-// they walked away still counts, or the streak would never restart.
 func TestFailureAfterAHumanTouchStillCountsLaterFailures(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuardHistory(h, []domain.BoardEvent{humanTouch(time.Now().Add(-30 * time.Minute))})
@@ -443,11 +363,6 @@ func TestFailureAfterAHumanTouchStillCountsLaterFailures(t *testing.T) {
 	}
 }
 
-// The human-touch reset is the only thing that can say "a person has already
-// been told". An unreadable board history is not evidence they have NOT been —
-// counting the whole history there parks tasks people are working on, on the
-// strength of a store hiccup — so the guard steps aside and the failure is
-// reported the ordinary way.
 func TestUnreadableBoardHistoryLetsTheBounceThrough(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuardHistory(h, nil)
@@ -462,10 +377,6 @@ func TestUnreadableBoardHistoryLetsTheBounceThrough(t *testing.T) {
 	assertOrdinaryBounce(t, h, rig, "an unreadable history proves nothing about who has seen what")
 }
 
-// BoardEventStore.ListByTask is `ORDER BY created_at ASC LIMIT n`, so a full
-// window is the OLD end of a busy task's history. A human touch from ten minutes
-// ago is not in it, and holding on that window suppresses a failure the person
-// working the card has never seen.
 func TestAHistoryWindowThatDoesNotReachThePresentLetsTheBounceThrough(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuardHistory(h, filledWindow(time.Now().Add(-3*time.Hour)))
@@ -479,9 +390,6 @@ func TestAHistoryWindowThatDoesNotReachThePresentLetsTheBounceThrough(t *testing
 	assertOrdinaryBounce(t, h, rig, "the window stops three hours short of the pipeline being judged")
 }
 
-// …and the check is about REACH, not about size. A full window whose newest
-// event postdates the pipeline has seen everything that matters, so the brake
-// still works on the busiest task on the board.
 func TestAFullHistoryWindowThatReachesThePresentStillParks(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuardHistory(h, filledWindow(time.Now()))
@@ -500,10 +408,6 @@ func TestAFullHistoryWindowThatReachesThePresentStillParks(t *testing.T) {
 	}
 }
 
-// The re-read is the ONLY thing standing between this park and somebody else's
-// (a quota park it would strand, a column a human moved the card to). A task the
-// guard could not re-read is one it knows nothing about, so it does not act at
-// all — the stale snapshot is exactly what the re-read exists to distrust.
 func TestATaskThatCannotBeReReadLetsTheBounceThrough(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuardHistory(h, nil)
@@ -524,10 +428,6 @@ func TestATaskThatCannotBeReReadLetsTheBounceThrough(t *testing.T) {
 	}
 }
 
-// The park is what makes the comment safe, so a park that did not happen means
-// no comment AND no hold: the commenter is repository.Service, and a comment on
-// a card still sitting in code_review dispatches an agent onto the red commit.
-// Holding without parking would swallow the failure report and stop nothing.
 func TestAFailedParkLetsTheBounceThrough(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuardHistory(h, nil)
@@ -545,13 +445,6 @@ func TestAFailedParkLetsTheBounceThrough(t *testing.T) {
 	}
 }
 
-// The ordering the whole guard turns on.
-//
-// The commenter is repository.Service: AddComment → emit → Dispatch →
-// resolveAgents, i.e. a comment is a dispatch trigger. Commenting first put an
-// agent run on a task still in code_review — the guard starting the loop it
-// exists to stop. Parking first makes the same comment inert, because Dispatch
-// suspends every event on a `blocked` task.
 func TestTheParkHappensBeforeTheComment(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuardHistory(h, nil)
@@ -575,14 +468,9 @@ func TestTheParkHappensBeforeTheComment(t *testing.T) {
 	}
 }
 
-// The snapshot on a pipeline job is from when it was QUEUED. A pipeline that
-// settles half an hour later must not drag a card a human has since moved back
-// into `blocked` for a verdict about a column it has left.
 func TestATaskThatLeftTheColumnIsHeldSilently(t *testing.T) {
 	h := newGateHarness(t, time.Minute, buildJobMapping(uuid.New()))
 	rig := withBounceGuardHistory(h, nil)
-	// The pipeline was queued on a card in code_review; a human has dragged it
-	// on since. The guard still gets handed the old snapshot.
 	h.tasks.task.Column = domain.TaskColumnInProgress
 
 	if !holdOnRepeatFailure(t, h, rig) {
@@ -595,8 +483,6 @@ func TestATaskThatLeftTheColumnIsHeldSilently(t *testing.T) {
 	if len(rig.parker.resources) != 0 {
 		t.Errorf("parked a task a human had moved on: %v", rig.parker.resources)
 	}
-	// Silence is the point: in_progress is a DISPATCHABLE column, so a comment
-	// here would emit task.commented and put an agent on the card.
 	if len(rig.commenter.contents) != 0 {
 		t.Errorf("commented on a dispatchable card in another column: %v", rig.commenter.contents)
 	}
@@ -605,12 +491,6 @@ func TestATaskThatLeftTheColumnIsHeldSilently(t *testing.T) {
 	}
 }
 
-// human_decision is the one park no sweeper releases. Overwriting a quota,
-// device or work-order park with it strands the task forever, so somebody
-// else's park is never touched — but the card still gets told why the board
-// stopped, because a quota park IS swept back into circulation and the next lap
-// would start with no record of what happened. A blocked card dispatches
-// nothing, so that comment cannot start a run.
 func TestATaskParkedOnAnotherResourceKeepsItsParkAndGetsTheExplanation(t *testing.T) {
 	for _, resource := range []string{
 		domain.ResourceClaudeCodeQuota, domain.ResourceMobileDevice, domain.ResourceWorkOrder,
@@ -642,9 +522,6 @@ func TestATaskParkedOnAnotherResourceKeepsItsParkAndGetsTheExplanation(t *testin
 	}
 }
 
-// A pipeline that never recorded its commit cannot be shown to repeat one, and
-// the guard must fail OPEN there: suppressing a failure nobody proved was a
-// repeat would silently swallow real red builds.
 func TestAPipelineWithNoHeadSHAIsNeverHeld(t *testing.T) {
 	guard := NewPipelineBounceGuard(newFakePipelineStore(), nil, nil)
 	held := guard.Hold(context.Background(), uuid.New(), domain.BoardTask{ID: uuid.New()},
@@ -654,7 +531,6 @@ func TestAPipelineWithNoHeadSHAIsNeverHeld(t *testing.T) {
 	}
 }
 
-// An unwired guard is the old behaviour, exactly.
 func TestNilBounceGuardHoldsNothing(t *testing.T) {
 	var guard *PipelineBounceGuard
 	if guard.Hold(context.Background(), uuid.New(), domain.BoardTask{}, domain.TaskPipeline{HeadSHA: "abc"}) {

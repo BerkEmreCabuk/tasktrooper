@@ -12,8 +12,6 @@ import (
 
 const embedderURL = "http://127.0.0.1:51545"
 
-// A fresh install: the OpenAI-compatible slot points at the bundled embedder
-// and is chosen for embeddings, with nobody opening the settings page.
 func TestBootstrapEmbeddings_ConfiguresTheBundledEmbedderOnAFreshInstall(t *testing.T) {
 	store := newProviderStore()
 	svc := llmprovider.NewService(store, nil, nil, 0, nil)
@@ -28,7 +26,6 @@ func TestBootstrapEmbeddings_ConfiguresTheBundledEmbedderOnAFreshInstall(t *test
 	require.Equal(t, domain.PinnedLocalEmbeddingModel, store.embeddingModel)
 }
 
-// The desktop picks a new port every launch, so a row that is ours follows it.
 func TestBootstrapEmbeddings_FollowsTheEmbedderToItsNewPort(t *testing.T) {
 	store := newProviderStore()
 	store.configs[domain.LLMProviderLocal] = domain.LLMProviderConfig{
@@ -44,9 +41,6 @@ func TestBootstrapEmbeddings_FollowsTheEmbedderToItsNewPort(t *testing.T) {
 	require.Equal(t, embedderURL, store.configs[domain.LLMProviderLocal].BaseURL)
 }
 
-// Someone connected their own OpenAI-compatible endpoint for chat. Rewriting its
-// base URL would send their chat model to the embedder, so neither the row nor
-// the embedding choice is touched.
 func TestBootstrapEmbeddings_LeavesAUserConfiguredEndpointAlone(t *testing.T) {
 	store := newProviderStore()
 	mine := domain.LLMProviderConfig{

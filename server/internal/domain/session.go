@@ -24,38 +24,28 @@ type Session struct {
 	// TaskID makes this chat be about ONE board task. It changes two things
 	// about every turn: the workspace is the task's own branch checkout instead
 	// of the shared mirror clone (which SyncDefaultBranch force-resets, so work
-	// done there would be silently thrown away and could never reach the task's
-	// PR), and the prompt carries the task and its pull request. Nil for every
-	// other chat.
+	// done there would be silently thrown away), and the prompt carries the task
+	// and its pull request. Nil for every other chat.
 	TaskID *uuid.UUID `json:"task_id,omitempty"`
-	// CLISessionID is the Claude Code conversation behind this chat, for an
-	// agent on the claude_code provider. Empty for every other chat, and for the
-	// first turn of one of these.
-	//
-	// It is what makes the chat multi-turn: with it, the next message resumes
-	// the live CLI session and sends only what the user typed; without it, every
-	// turn would re-flatten the whole transcript into a new session, paying for
-	// the conversation again each time and handing the model its own memory back
-	// as a fresh instruction. See migration 103.
-	//
-	// Not in the JSON view: it names a process-local artefact on the runner host
-	// and means nothing to a client.
+	// CLISessionID is the Claude Code conversation behind this chat — what makes
+	// it multi-turn: with it, the next message resumes the live CLI session and
+	// sends only what the user typed; without it, every turn re-flattens the
+	// whole transcript into a new session, paying for the conversation again
+	// each time. Not in the JSON view: it names a process-local artefact on the
+	// runner host and means nothing to a client.
 	CLISessionID string     `json:"-"`
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	ExpiresAt    *time.Time `json:"expires_at,omitempty"`
 }
 
-// PendingSessionTurn is a chat turn parked on the Claude Code usage limit
-// (see QuotaBlock), waiting for a SessionQuotaSweeper to rerun it once
-// ResumeAt has passed. It is the chat's counterpart to the board's own
-// quota park (migration 101) — see migration 137 for where it lives.
-//
-// The user's message is not carried here: it was already appended to the
-// session's transcript before the run that hit the limit, so the sweeper
-// rebuilds history from the store like any other turn and only needs the
-// original request (for its Content, FileIDs, Model, ...) and the policy
-// that request resolved to.
+// PendingSessionTurn is a chat turn parked on the Claude Code usage limit (see
+// QuotaBlock), waiting for a SessionQuotaSweeper to rerun it once ResumeAt has
+// passed — the chat's counterpart to the board's own quota park (migration
+// 101); see migration 137 for where it lives. The user's message is not carried
+// here: it was already appended to the session's transcript before the run that
+// hit the limit, so the sweeper rebuilds history from the store and only needs
+// the original request and the policy it resolved to.
 type PendingSessionTurn struct {
 	SessionID uuid.UUID
 	Request   SessionMessageRequest

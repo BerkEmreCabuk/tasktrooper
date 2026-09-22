@@ -16,7 +16,6 @@ type Service struct {
 	store port.AgentKPIStore
 	deps  MetricDeps
 
-	// workflows/roles: see board.Dispatcher's own fields of the same name.
 	workflows port.WorkflowReader
 	roles     port.RoleResolver
 }
@@ -123,8 +122,6 @@ func (s *Service) ListResults(ctx context.Context, agentID uuid.UUID, from, to t
 	return s.store.ListResults(ctx, agentID, from, to)
 }
 
-// PeriodBounds returns the current period window containing `now`.
-// Weekly periods are ISO weeks (Monday start); all bounds are UTC.
 func PeriodBounds(period string, now time.Time) (time.Time, time.Time) {
 	now = now.UTC()
 	switch period {
@@ -134,7 +131,7 @@ func PeriodBounds(period string, now time.Time) (time.Time, time.Time) {
 	case domain.KPIPeriodMonthly:
 		start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 		return start, start.AddDate(0, 1, 0)
-	default: // weekly
+	default:
 		weekday := int(now.Weekday())
 		if weekday == 0 {
 			weekday = 7
@@ -144,9 +141,6 @@ func PeriodBounds(period string, now time.Time) (time.Time, time.Time) {
 	}
 }
 
-// EvaluateAgent measures all enabled KPIs of the agent for the current
-// period and upserts results. Per-KPI errors are logged and
-// skipped so one broken metric cannot block the rest.
 func (s *Service) EvaluateAgent(ctx context.Context, agentID uuid.UUID, now time.Time) ([]domain.AgentKPIResult, error) {
 	kpis, err := s.store.ListByAgent(ctx, agentID)
 	if err != nil {
@@ -167,10 +161,7 @@ func (s *Service) EvaluateAgent(ctx context.Context, agentID uuid.UUID, now time
 		deps.Workflows = s.workflows
 		value, err := def.Resolve(ctx, deps, agentID, from, to)
 		if errors.Is(err, ErrInsufficientData) {
-			// Publishing nothing is deliberate: CompositeScore drops KPIs with
-			// no result from the weight sum, so an unmeasured period neither
-			// rewards nor punishes. Writing a zero would score full marks on a
-			// lower-better metric and make idleness look like maximum speed.
+
 			log.Debug().Str("metric", k.MetricKey).Msg("kpi has insufficient data this period")
 			continue
 		}
@@ -193,7 +184,6 @@ func (s *Service) EvaluateAgent(ctx context.Context, agentID uuid.UUID, now time
 	return results, nil
 }
 
-// CompositeScore returns the weighted KPI attainment 0..100.
 func CompositeScore(kpis []domain.AgentKPI, results []domain.AgentKPIResult) float64 {
 	byKPI := make(map[uuid.UUID]domain.AgentKPIResult, len(results))
 	for _, r := range results {

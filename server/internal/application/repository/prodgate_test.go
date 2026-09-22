@@ -11,8 +11,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeAutoReleaseDeployStore is a minimal port.DeployTargetStore for
-// AutoReleaseIfUndeployable tests: only ListByRepository is exercised.
 type fakeAutoReleaseDeployStore struct {
 	targets []domain.DeployTarget
 	listErr error

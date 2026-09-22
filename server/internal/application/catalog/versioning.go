@@ -10,10 +10,7 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// versionSource travels on the context instead of the method signatures: every
-// caller of CreateSkillForAgent & co. would otherwise have to pass a source it
-// does not care about. Absent attribution means a user edit, which is what an
-// unannotated HTTP write is.
+// Source travels on the context so callers never pass what they do not care about; absence means a user edit.
 type versionSourceKey struct{}
 
 type VersionSource struct {
@@ -40,9 +37,7 @@ func (s *Service) SetVersionStore(store port.CatalogVersionStore) {
 	s.versions = store
 }
 
-// recordSkillVersion appends a history row. History is best-effort: a failed
-// append must not fail the write the user asked for, it only costs the ability
-// to roll that one step back.
+// Best-effort: a failed append must not fail the write the user asked for, only costs a rollback step.
 func (s *Service) recordSkillVersion(ctx context.Context, action string, sk domain.Skill) {
 	if s.versions == nil {
 		return
@@ -92,9 +87,7 @@ func (s *Service) ListRuleVersions(ctx context.Context, agentID, ruleID uuid.UUI
 	return s.versions.ListVersions(ctx, domain.CatalogVersionKindRule, ruleID, limit)
 }
 
-// RestoreSkillVersion rewrites the live skill with the content of an earlier
-// version. The restore is itself a new version, so rolling back a rollback is
-// the same operation again — history is never rewritten.
+// The restore is itself a new version, so rolling back a rollback is the same operation again.
 func (s *Service) RestoreSkillVersion(ctx context.Context, agentID, skillID uuid.UUID, version int) (domain.Skill, error) {
 	if s.versions == nil {
 		return domain.Skill{}, fmt.Errorf("version history is not available")
@@ -116,9 +109,7 @@ func (s *Service) RestoreSkillVersion(ctx context.Context, agentID, skillID uuid
 		src.Reason = fmt.Sprintf("restored from version %d", version)
 	}
 	restoreCtx := context.WithValue(WithVersionSource(ctx, src), restoreActionKey{}, true)
-	// TechStackID comes off the live skill, not the snapshot: history predates
-	// tech stacks and does not record one, so restoring an old version would
-	// otherwise silently file the skill back as general.
+	// TechStackID comes off the live skill: history predates tech stacks and does not record one.
 	return s.UpdateSkillForAgent(restoreCtx, agentID, skillID, domain.UpdateSkillRequest{
 		Name: snap.Name, Description: snap.Description, Category: snap.Category,
 		Tags: snap.Tags, Content: snap.Content, Enabled: snap.Enabled,
@@ -151,8 +142,7 @@ func (s *Service) RestoreRuleVersion(ctx context.Context, agentID, ruleID uuid.U
 	})
 }
 
-// restoreActionKey marks the update a restore performs so its history row says
-// "restore" rather than a plain "update".
+// Marks the update a restore performs so its history row says "restore".
 type restoreActionKey struct{}
 
 func updateAction(ctx context.Context) string {

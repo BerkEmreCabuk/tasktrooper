@@ -181,11 +181,7 @@ func (s *Service) SaveAgentAsTemplate(ctx context.Context, agentID uuid.UUID) (d
 	return s.templates.UpsertByName(ctx, tpl)
 }
 
-// recreateTechStacks gives the new agent its own copy of the template's stacks
-// and returns their ids by name, so each skill can be filed under the stack it
-// was saved in. A stack named by a skill but missing from the list is created
-// too: a hand-written template that only tags its skills still groups them,
-// instead of silently filing every one as general.
+// Each skill files under the stack it was saved in; a hand-written template that tags only its skills still groups them.
 func (s *Service) recreateTechStacks(ctx context.Context, agentID uuid.UUID, tpl domain.AgentTemplate) (map[string]uuid.UUID, error) {
 	wanted := make([]domain.CreateTechStackRequest, 0, len(tpl.TechStacks))
 	seen := make(map[string]bool, len(tpl.TechStacks))
@@ -219,15 +215,7 @@ func stackKey(name string) string {
 	return strings.ToLower(strings.TrimSpace(name))
 }
 
-// fillTemplateAgentModels puts the preferred CLI provider/model pair on a
-// built-in-role create request that names none, the same thing the old
-// boot-time seed did on CREATE (fillRoleAgentModels, before this became the
-// only path that creates a role agent). Filled as a pair: an override that
-// set either name on its own is left alone rather than getting an escalation
-// bolted onto a choice made to stay cheap. The provider is stamped only when
-// firstRunnableCLI says this host can actually execute it — CreateAgent
-// refuses the provider otherwise, and every role agent creation would fail
-// instead of merely lacking a model.
+// When a create request names no model pair, fills the preferred CLI provider's defaults; an override that set either name alone is left alone, and the provider is only stamped when firstRunnableCLI says this host can execute it.
 func (s *Service) fillTemplateAgentModels(req *domain.CreateAgentRequest) {
 	if req.Model != "" || req.ModelHeavy != "" {
 		return
@@ -242,11 +230,7 @@ func (s *Service) fillTemplateAgentModels(req *domain.CreateAgentRequest) {
 	req.Model, req.ModelHeavy = domain.ProviderDefaultModels(req.ProviderType)
 }
 
-// firstRunnableCLI names the most preferred host-executed CLI this host can
-// actually run, or empty when it can run none. It asks the same question
-// checkHostExecutor does — may an agent be saved onto this CLI provider here —
-// in cliPreference order, so a built-in template never proposes a
-// configuration that guard would refuse.
+// Most preferred host-executed CLI this host can run, in cliPreference order, so a built-in template never proposes something checkHostExecutor would refuse.
 func (s *Service) firstRunnableCLI() domain.LLMProviderType {
 	if s.hostExecutor == nil {
 		return ""
@@ -259,15 +243,7 @@ func (s *Service) firstRunnableCLI() domain.LLMProviderType {
 	return ""
 }
 
-// applySuggestedSubscriptions subscribes a newly created agent to its
-// template's suggested hand-off columns, but only into a genuinely open
-// seat: only when the agent itself has no subscriptions yet (an admin who
-// customized before this ran keeps their choice), and only the suggested
-// columns nobody else already subscribes to (two agents both dispatched on
-// the same column's arrival is a bug, not a feature). It replaces the old
-// setRoleSubscriptionsIfDefault, which only ever fired for a built-in agent
-// kept under its exact seeded name; this generalizes to every template,
-// built-in or not.
+// Seeds hand-off subscriptions only into a genuinely open seat: the agent has none yet, and the column has no other subscriber.
 func (s *Service) applySuggestedSubscriptions(ctx context.Context, agent domain.Agent, suggested []domain.TaskColumn) error {
 	if s.boardConfig == nil || len(suggested) == 0 {
 		return nil
@@ -300,11 +276,7 @@ func (s *Service) applySuggestedSubscriptions(ctx context.Context, agent domain.
 	return s.boardConfig.SetAgentSubscriptions(ctx, agent.ID, slugs)
 }
 
-// applySuggestedRoles assigns a newly created agent to its template's
-// suggested roles, but only into a vacancy: the role has to exist (an admin
-// may have deleted or renamed it), and no existing assignment on that role
-// may already cover every one of the suggested Areas (nil Areas means "any
-// area", the broadest possible coverage).
+// Assigns to suggested roles only into a vacancy: the role exists and no existing assignment already covers the suggested areas.
 func (s *Service) applySuggestedRoles(ctx context.Context, agent domain.Agent, suggested []domain.TemplateRoleSuggestion) error {
 	if s.roleAdmin == nil || len(suggested) == 0 {
 		return nil
@@ -332,10 +304,7 @@ func (s *Service) applySuggestedRoles(ctx context.Context, agent domain.Agent, s
 	return nil
 }
 
-// roleHasVacancyFor reports whether role has no assignment already covering
-// areas. A nil (any-area) request is vacant only when the role has no
-// assignment at all; an area-scoped request is vacant unless some existing
-// assignment is itself any-area, or shares one of the requested areas.
+// A nil (any-area) request is vacant only when the role has no assignment at all.
 func roleHasVacancyFor(role domain.AgentRole, areas []string) bool {
 	if len(areas) == 0 {
 		return len(role.Assignments) == 0
@@ -355,8 +324,6 @@ func roleHasVacancyFor(role domain.AgentRole, areas []string) bool {
 	return true
 }
 
-// agentRoleSuggestions reads an agent's current role memberships back as
-// template suggestions, for SaveAgentAsTemplate.
 func (s *Service) agentRoleSuggestions(ctx context.Context, agentID uuid.UUID) []domain.TemplateRoleSuggestion {
 	if s.roleAdmin == nil {
 		return nil
@@ -382,8 +349,6 @@ func (s *Service) agentRoleSuggestions(ctx context.Context, agentID uuid.UUID) [
 	return out
 }
 
-// agentSubscriptionColumns reads an agent's current column subscriptions
-// back as template suggestions, for SaveAgentAsTemplate.
 func (s *Service) agentSubscriptionColumns(ctx context.Context, agentID uuid.UUID) []domain.TaskColumn {
 	if s.boardConfig == nil {
 		return nil

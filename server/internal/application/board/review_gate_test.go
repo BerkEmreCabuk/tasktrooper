@@ -11,11 +11,6 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
-// newReviewGate builds a ReviewGate wired against the default workflow
-// fixture — InterceptAgentMove now reads hold_for_human_approval off the
-// task's workflow (task.TaskType is "" in every test below, which the fixture
-// resolves to the default "task" type), rather than a hardcoded column
-// compare.
 func newReviewGate(spans board.VerdictStore, escapes board.EscapeCharger) *board.ReviewGate {
 	gate := board.NewReviewGate(spans, escapes)
 	gate.SetWorkflows(workflowtest.Default().Reader())
@@ -23,7 +18,7 @@ func newReviewGate(spans board.VerdictStore, escapes board.EscapeCharger) *board
 }
 
 type verdictSpans struct {
-	set     map[string]string // column -> verdict
+	set     map[string]string
 	open    domain.TaskColumnSpan
 	hasOpen bool
 }
@@ -74,10 +69,6 @@ func (s *ReviewGateSuite) TestAgentRejectionMovesImmediately() {
 	s.Equal(domain.ReviewVerdictReject, spans.set["code_review"])
 }
 
-// pm_uat is NOT held: its forward move lands in human_uat, which is already a
-// person's sign-off. Holding it too made the same human approve the same task
-// twice and parked tasks in pm_uat waiting for an approval that human_uat was
-// about to ask for anyway.
 func (s *ReviewGateSuite) TestPMApprovalIsNotHeldBecauseHumanUATIsTheHumanGate() {
 	spans := &verdictSpans{}
 	gate := newReviewGate(spans, &escapeRecorder{})

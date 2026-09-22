@@ -12,20 +12,16 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// taskChatWorkspace prepares the git checkout a task-bound chat runs in, and is
-// the session service's session.TaskWorkspaceResolver.
+// taskChatWorkspace prepares the git checkout a task-bound chat runs in — the
+// session service's session.TaskWorkspaceResolver. It lives here as pure
+// wiring: session must not know about board stores or git, board must not know
+// about sessions, and the two facts meet once.
 //
-// It exists in this package because it is pure wiring: the session package must
-// not know about board task stores or git, and the board package must not know
-// about sessions. Both facts meet here, once.
-//
-// What it decides is which tree the agent edits. A repository-scoped chat points
-// at the SHARED mirror clone, which git.SyncDefaultBranch force-resets onto
-// origin's default branch — an edit made there is on the wrong branch and is
-// discarded by the next index pass, so it could never reach the task's pull
-// request. A task-bound chat gets the task's own checkout on the task's own
-// branch instead — the SAME checkout the board runner and the pipeline use for
-// that task, so a chat and a run are working the same tree.
+// A TASK-bound chat gets the task's own checkout on the task's own branch —
+// the SAME checkout the board runner uses, so a chat and a run edit the same
+// tree. A repository-scoped chat points at the SHARED mirror clone, which
+// git.SyncDefaultBranch resets onto origin's default branch, so an edit there
+// is on the wrong branch and would be discarded by the next index pass.
 type taskChatWorkspace struct {
 	tasks         port.BoardTaskStore
 	criteria      port.AcceptanceCriterionStore
@@ -35,8 +31,8 @@ type taskChatWorkspace struct {
 }
 
 func (w taskChatWorkspace) ResolveTaskWorkspace(ctx context.Context, repositoryID, taskID uuid.UUID) (session.TaskBinding, error) {
-	// Repository-scoped read: a task id from another repository comes back
-	// not-found rather than handing this chat that repository's checkout.
+	// A task id from another repository comes back not-found rather than
+	// handing this chat that repository's checkout.
 	task, err := w.tasks.Get(ctx, repositoryID, taskID)
 	if err != nil {
 		return session.TaskBinding{}, err
@@ -53,10 +49,9 @@ func (w taskChatWorkspace) ResolveTaskWorkspace(ctx context.Context, repositoryI
 	if err != nil {
 		return session.TaskBinding{}, err
 	}
-	// Same guard the runner applies before it insists on a task workspace: a
-	// project that is not a git working copy has no branch to check out, so the
-	// chat runs in the repository root and Branch stays empty (nothing can be
-	// committed or pushed there, and commit_task_changes says so).
+	// A non-git project has no branch to check out: the chat runs in the
+	// repository root with Branch empty (nothing can be committed/pushed there,
+	// and commit_task_changes says so).
 	if w.git == nil || w.workspaceRoot == "" || !w.git.HasGit(root) {
 		binding.WorkspaceDir = root
 		return binding, nil

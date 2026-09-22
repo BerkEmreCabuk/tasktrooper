@@ -30,8 +30,6 @@ func newEmbedTestService(store *fakeIndexStore, llm *fakeLLM, cfg domain.Indexer
 	)
 }
 
-// A connection the embedder dropped under a request is retried for the same
-// chunk instead of failing the index.
 func TestIndexRetriesATransientEmbedderError(t *testing.T) {
 	var calls atomic.Int64
 	llm := &fakeLLM{embedFn: func(_ context.Context, input string, _ string) ([]float32, error) {
@@ -48,8 +46,6 @@ func TestIndexRetriesATransientEmbedderError(t *testing.T) {
 	require.Greater(t, calls.Load(), int64(1))
 }
 
-// A chunk the embedder cannot take is stored without a vector and the rest of
-// the repository is still indexed.
 func TestIndexCompletesWhenSomeChunksCannotBeEmbedded(t *testing.T) {
 	var calls, failures atomic.Int64
 	llm := &fakeLLM{embedFn: func(_ context.Context, input string, _ string) ([]float32, error) {
@@ -68,8 +64,6 @@ func TestIndexCompletesWhenSomeChunksCannotBeEmbedded(t *testing.T) {
 	require.Greater(t, idx.ChunkCount, 0)
 }
 
-// An embedder that refuses everything stops the pass instead of storing a
-// whole repository of chunks nothing can find by meaning.
 func TestIndexFailsAfterManyConsecutiveEmbedFailures(t *testing.T) {
 	llm := &fakeLLM{embedFn: func(context.Context, string, string) ([]float32, error) {
 		return nil, errors.New("embeddings returned 500: inference_failed")
@@ -87,8 +81,6 @@ func TestIndexFailsAfterManyConsecutiveEmbedFailures(t *testing.T) {
 	require.Equal(t, domain.IndexStatusFailed, stored.Status)
 }
 
-// However many files are read in parallel, embedding calls stay within the
-// shared limit.
 func TestIndexKeepsEmbedCallsWithinTheSharedLimit(t *testing.T) {
 	var inFlight, peak atomic.Int64
 	llm := &fakeLLM{embedFn: func(_ context.Context, input string, _ string) ([]float32, error) {
@@ -112,8 +104,6 @@ func TestIndexKeepsEmbedCallsWithinTheSharedLimit(t *testing.T) {
 	require.Greater(t, peak.Load(), int64(0))
 }
 
-// A file with a chunk that could not be embedded keeps no hash, so the next
-// incremental pass embeds that file again, and only the files that need it.
 func TestNextPassReembedsOnlyFilesWithUnembeddedChunks(t *testing.T) {
 	var failNow atomic.Bool
 	failNow.Store(true)

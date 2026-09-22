@@ -16,22 +16,19 @@ import (
 )
 
 // wireRepositoryStore is the composition buildHandler used to skip: construct
-// the store, then never call SetCipher on it, leaving every webhook install
-// to derive one lazily on first use — always after scrubProcessSecrets has
-// wiped MCP_SECRETS_KEY. These drive the wired store through SetWebhook,
-// which fails on the cipher before it ever touches the pool: that failure
-// shape (a cipher error vs. a pool error) can only tell the two cases apart
-// if the injected cipher/cipherErr actually reached the store through this
-// composition, not just through RepositoryStore.SetCipher in isolation.
+// the store, never SetCipher, letting every webhook install derive a cipher
+// lazily — always after scrubProcessSecrets wiped MCP_SECRETS_KEY. SetWebhook
+// fails on the cipher before it touches the pool, and only that failure shape
+// proves the injected cipher/cipherErr really reached the store through this
+// composition rather than RepositoryStore.SetCipher in isolation.
 func TestWireRepositoryStoreInjectsTheBootCipher(t *testing.T) {
 	cfg := &domain.Config{}
 	cipher, err := secrets.NewCipher(make([]byte, 32))
 	if err != nil {
 		t.Fatalf("build cipher: %v", err)
 	}
-	// Unreachable on purpose: SetWebhook must get past the cipher check and
-	// fail on the pool instead, which is only possible if the cipher above
-	// actually arrived through the wiring.
+	// The pool is unreachable on purpose: SetWebhook must get past the cipher
+	// check and fail on the pool instead.
 	pool, err := pgxpool.New(context.Background(), "postgres://user:pass@127.0.0.1:1/db?sslmode=disable")
 	if err != nil {
 		t.Fatalf("build pool: %v", err)
@@ -55,8 +52,8 @@ func TestWireRepositoryStorePropagatesABootCipherFailure(t *testing.T) {
 	cfg := &domain.Config{}
 	bootErr := errors.New("boot cipher unavailable")
 
-	// The nil pool is deliberate: with the boot cipher error correctly wired,
-	// SetWebhook must fail on the cipher and never reach it.
+	// The nil pool is deliberate: with the boot cipher error wired, SetWebhook
+	// must fail on the cipher and never reach it.
 	store := wireRepositoryStore(nil, cfg, nil, bootErr)
 
 	err := store.SetWebhook(context.Background(), uuid.New(), "secret", 1)

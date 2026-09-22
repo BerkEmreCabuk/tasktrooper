@@ -32,9 +32,7 @@ diff --git a/b.go b/b.go
 	got := parseDiffLines(diff)
 
 	assert.Equal(t, map[int]bool{11: true, 12: true, 13: true, 43: true}, got["a.go"])
-	// A deleted file contributes nothing: there are no new lines to cover.
 	assert.NotContains(t, got, "gone.go")
-	// Neither does a pure deletion hunk (new-side count 0).
 	assert.NotContains(t, got, "b.go")
 }
 
@@ -45,7 +43,6 @@ func TestGoProfileLinesStripsTheModulePathAndKeepsTheHighestCount(t *testing.T) 
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "coverage.out"), []byte(
 		"mode: atomic\n"+
 			"github.com/acme/thing/internal/a.go:3.10,5.2 2 4\n"+
-			// Overlapping block, lower count: the line still ran 4 times.
 			"github.com/acme/thing/internal/a.go:4.2,4.20 1 0\n"+
 			"github.com/acme/thing/internal/b.go:7.1,7.30 1 0\n"), 0o600))
 
@@ -70,12 +67,9 @@ func TestLcovLinesNormalisesAbsolutePaths(t *testing.T) {
 	assert.Equal(t, map[int]int{9: 1}, hits["src/util.ts"])
 }
 
-// A changed line the tool never instrumented — a comment, an import, a bare
-// declaration — must not land in the denominator. Counting them is how a
-// documentation commit fails a coverage gate.
 func TestMeasureNewCodeCountsOnlyInstrumentedChangedLines(t *testing.T) {
 	dir := initGitRepoWithChange(t, map[string]int{"a.go": 4})
-	hits := lineHits{"a.go": {1: 1, 2: 0, 3: 5}} // line 4 is not instrumented
+	hits := lineHits{"a.go": {1: 1, 2: 0, 3: 5}}
 
 	res := measureNewCode(context.Background(), dir, hits)
 
@@ -85,8 +79,6 @@ func TestMeasureNewCodeCountsOnlyInstrumentedChangedLines(t *testing.T) {
 	assert.Equal(t, []string{"a.go:2"}, res.Uncovered)
 }
 
-// A changed file the profile has never heard of is a config or a fixture, and
-// no suite covers those. It must not drag the percentage down.
 func TestMeasureNewCodeIgnoresFilesTheProfileDoesNotMention(t *testing.T) {
 	dir := initGitRepoWithChange(t, map[string]int{"a.go": 2, "docker-compose.yml": 3})
 	hits := lineHits{"a.go": {1: 1, 2: 1}}
@@ -120,11 +112,7 @@ func TestNewCodeCoverageReportStatesTheFigureWithoutGating(t *testing.T) {
 		assert.Contains(t, report, coverageWarningMarker)
 		assert.Contains(t, report, "50.0%")
 		assert.Contains(t, report, "a.go:4")
-		// The message has to say WHOSE coverage this is, or the agent reads a
-		// number under a threshold and goes off testing unrelated code.
 		assert.Contains(t, report, "not the repository's overall figure")
-		// …and that nothing is waiting on it, or a run nothing is holding
-		// spends its next rounds chasing the number anyway.
 		assert.Contains(t, report, "the task moves on either way")
 	})
 
@@ -139,10 +127,6 @@ func TestNewCodeCoverageReportStatesTheFigureWithoutGating(t *testing.T) {
 	})
 }
 
-// initGitRepoWithChange builds a throwaway repository whose HEAD differs from
-// its merge base by whole new files, so the diff parser and the git plumbing are
-// exercised for real rather than stubbed. files maps a path to its line count;
-// every one of those lines is an addition.
 func initGitRepoWithChange(t *testing.T, files map[string]int) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -154,11 +138,7 @@ func initGitRepoWithChange(t *testing.T, files map[string]int) string {
 	run("init", "--initial-branch=main")
 	run("config", "user.email", "test@example.com")
 	run("config", "user.name", "test")
-	// A base commit with an empty tree: every line written below is then an
-	// addition, which is exactly the shape the gate reads.
 	run("commit", "--allow-empty", "-m", "base")
-	// origin/main is what mergeBase looks for; a local ref standing in for it is
-	// enough to resolve the merge base without a second repository.
 	run("update-ref", "refs/remotes/origin/main", "HEAD")
 
 	for path, lineCount := range files {

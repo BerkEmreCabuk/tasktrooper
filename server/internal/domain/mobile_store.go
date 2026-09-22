@@ -34,8 +34,8 @@ var (
 	// ErrMobileAppNotLive blocks TriggerRelease: the first store submit is a
 	// manual product decision (listing, screenshots, privacy forms).
 	ErrMobileAppNotLive = errors.New("mobile app is not live in the store yet: finish the first manual store submit; automatic prod submits start after that")
-	// ErrMobileAppNotTestReady blocks stage deploys while onboarding items
-	// (app record, first Play upload) are still open.
+	// ErrMobileAppNotTestReady blocks stage deploys while onboarding items (app
+	// record, first Play upload) are still open.
 	ErrMobileAppNotTestReady = errors.New("mobile app onboarding is not finished: complete the store onboarding checklist task first")
 )
 
@@ -56,8 +56,7 @@ type MobileStoreApp struct {
 	Identifier   string    `json:"identifier"` // bundle ID / package name
 	StoreAppID   string    `json:"store_app_id,omitempty"`
 	// AppName is the store console's own display name, written the moment the
-	// app is chosen (from AppStoreClient/GooglePlayClient.ListApps, or the one
-	// app an account has). "" = not chosen yet.
+	// app is chosen; "" = not chosen yet.
 	AppName              string          `json:"app_name,omitempty"`
 	State                string          `json:"state"`
 	ReviewState          string          `json:"review_state,omitempty"`
@@ -67,13 +66,12 @@ type MobileStoreApp struct {
 	OnboardingTaskID     *uuid.UUID      `json:"onboarding_task_id,omitempty"`
 	FirstPublishedAt     *time.Time      `json:"first_published_at,omitempty"`
 	// Tracks is a cache of the three store channels — see StoreTracks. Always
-	// serialised, zero value included, because a consumer diffing "have we
-	// ever synced" needs {} and an absent key to read the same way JSON
-	// already treats a struct value.
+	// serialised, zero value included, because a consumer diffing "have we ever
+	// synced" needs {} and an absent key to read the same way.
 	Tracks StoreTracks `json:"tracks"`
-	// TracksSyncedAt is when Tracks was last refreshed from the store console,
-	// nil when it never has been. Distinct from a zero StoreTracks, which
-	// cannot by itself tell "never synced" from "synced once, found nothing".
+	// TracksSyncedAt is when Tracks was last refreshed, nil when it never has
+	// been — a zero StoreTracks cannot by itself tell "never synced" from
+	// "synced once, found nothing".
 	TracksSyncedAt *time.Time `json:"tracks_synced_at,omitempty"`
 	CreatedAt      time.Time  `json:"created_at"`
 	UpdatedAt      time.Time  `json:"updated_at"`
@@ -102,8 +100,8 @@ func (a MobileStoreApp) CanTransition(to string) bool {
 	return false
 }
 
-// IsStoreProvider reports whether a deploy provider ships to an app store
-// (and therefore goes through the mobile store lifecycle gates).
+// IsStoreProvider reports whether a deploy provider ships to an app store (and
+// therefore goes through the mobile store lifecycle gates).
 func IsStoreProvider(p string) bool {
 	return p == DeployProviderAppStore || p == DeployProviderGooglePlay
 }
@@ -125,8 +123,8 @@ const (
 	StoreCredentialGooglePlay = "google_play"
 )
 
-// StoreCredential is the decrypted view handed to clients; the store layer
-// only ever persists the encrypted payload.
+// StoreCredential is the decrypted view handed to clients; the store layer only
+// ever persists the encrypted payload.
 type StoreCredential struct {
 	Provider  string            `json:"provider"`
 	Data      map[string]string `json:"data"` // asc: key_id, issuer_id, p8 ; google_play: service_account_json
@@ -152,11 +150,10 @@ type SigningAsset struct {
 	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
-// Store release channels — the product's own vocabulary for where a build
-// sits. Each store spells them differently (TestFlight internal groups vs
-// Play's `internal` track; TestFlight external groups + Beta App Review vs
-// Play's `alpha`/`beta`), and the adapters are what translate; nothing above
-// them should have to know which store it is looking at.
+// Store release channels — the product's own vocabulary for where a build sits.
+// Each store spells them differently (TestFlight internal groups vs Play's
+// `internal` track), and the adapters translate; nothing above them has to know
+// which store it is looking at.
 const (
 	StoreChannelInternal   = "internal"
 	StoreChannelExternal   = "external"
@@ -172,10 +169,10 @@ func ValidStoreChannel(c string) bool {
 	return false
 }
 
-// NextChannel is the one legal promotion step out of c. Promotion is strictly
-// forward and one step at a time: nothing goes from internal straight to
-// production, because on both stores that would skip the review or testing
-// stage the middle channel exists to hold.
+// NextChannel is the one legal promotion step out of c: strictly forward, one
+// at a time — nothing goes straight from internal to production, because on
+// both stores that would skip the review/testing stage the middle channel
+// exists to hold.
 func NextChannel(c string) (string, bool) {
 	switch c {
 	case StoreChannelInternal:
@@ -187,8 +184,8 @@ func NextChannel(c string) (string, bool) {
 }
 
 // Normalized track statuses. The raw store words differ (ASC's
-// READY_FOR_SALE / WAITING_FOR_REVIEW, Play's completed / inProgress /
-// halted), so the adapters map onto this set and the UI renders one vocabulary.
+// READY_FOR_SALE/WAITING_FOR_REVIEW, Play's completed/inProgress/halted), so the
+// adapters map onto this set and the UI renders one vocabulary.
 const (
 	TrackStatusNone       = "none"        // nothing has ever reached this channel
 	TrackStatusDraft      = "draft"       // uploaded, not handed to anyone yet
@@ -196,7 +193,7 @@ const (
 	TrackStatusRollingOut = "rolling_out" // live for a fraction of users
 	TrackStatusHalted     = "halted"      // rollout stopped in place
 	TrackStatusLive       = "live"        // fully released on this channel
-	TrackStatusUnknown    = "unknown"     // the store reported a status this adapter does not map; the channel is NOT empty
+	TrackStatusUnknown    = "unknown"     // store reported a status this adapter does not map; the channel is NOT empty
 )
 
 // TrackRelease is what one channel currently holds. HasRelease false means the
@@ -217,9 +214,9 @@ type TrackRelease struct {
 	UpdatedAt *time.Time `json:"updated_at,omitempty"`
 }
 
-// StoreTracks is one app's three channels, read from the store console.
-// Persisted on the mobile_store_apps row as a cache so the panel renders
-// without a live store round-trip; TracksSyncedAt says how stale it is.
+// StoreTracks is one app's three channels, read from the store console and
+// persisted on the row as a cache so the panel renders without a live store
+// round-trip; TracksSyncedAt says how stale it is.
 type StoreTracks struct {
 	Internal   TrackRelease `json:"internal"`
 	External   TrackRelease `json:"external"`
@@ -239,22 +236,20 @@ func (t StoreTracks) Channel(name string) (TrackRelease, bool) {
 	return TrackRelease{}, false
 }
 
-// Where a mobile release is built and uploaded.
-//
 // ReleaseEngineAuto is the default and means "GitHub Actions, and the local
-// runner when Actions cannot run" — the failure this exists for is an org
-// whose Actions are blocked at the billing level, which is not a build error
-// and must not read as one. When NEITHER engine can run, the release is
-// blocked rather than quietly downgraded: an iOS build needs macOS, and an
-// install with no paired Mac and no Actions minutes has no honest way to ship.
+// runner when Actions cannot run" — the failure this exists for is an org whose
+// Actions are blocked at the billing level, which is not a build error and must
+// not read as one. When NEITHER engine can run, the release is blocked rather
+// than quietly downgraded: an iOS build needs macOS, and an install with no
+// paired Mac and no Actions minutes has no honest way to ship.
 const (
 	ReleaseEngineAuto    = "auto"
 	ReleaseEngineActions = "github_actions"
 	ReleaseEngineLocal   = "local"
 )
 
-// ValidReleaseEngine reports whether e is a known engine. "" is not valid —
-// the column defaults to ReleaseEngineAuto, so an empty value is a bug.
+// ValidReleaseEngine reports whether e is a known engine; "" is not valid — the
+// column defaults to ReleaseEngineAuto, so an empty value is a bug.
 func ValidReleaseEngine(e string) bool {
 	switch e {
 	case ReleaseEngineAuto, ReleaseEngineActions, ReleaseEngineLocal:
@@ -263,8 +258,8 @@ func ValidReleaseEngine(e string) bool {
 	return false
 }
 
-// ErrNoReleaseEngine blocks a mobile release when neither engine is available:
-// GitHub Actions cannot be dispatched (billing, or no workflow) and no local
-// runner is paired for this platform. Callers surface it by moving the task to
-// blocked — never by falling back to a third path, because there isn't one.
+// ErrNoReleaseEngine blocks a mobile release when GitHub Actions cannot be
+// dispatched and no local runner is paired — callers surface it by moving the
+// task to blocked, never by falling back to a third path, because there isn't
+// one.
 var ErrNoReleaseEngine = errors.New("no release engine available: GitHub Actions cannot run and no local runner is paired for this platform")

@@ -23,9 +23,8 @@ const (
 )
 
 // CatalogVersion is one immutable snapshot of a skill or a rule, appended on
-// every write. Skill-only fields (description, category, tags) and rule-only
-// fields (priority) share the row: the two kinds differ by four columns, and
-// one history table keeps the restore path identical for both.
+// every write. Skill-only and rule-only fields share the row so one history
+// table keeps the restore path identical for both.
 type CatalogVersion struct {
 	ID           uuid.UUID  `json:"id"`
 	AgentID      uuid.UUID  `json:"agent_id"`

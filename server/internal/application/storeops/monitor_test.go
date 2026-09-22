@@ -17,10 +17,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// MonitorSuite exercises storeops.Monitor's one-pass Sweep: the four rules
-// (verify onboarding, detect go-live, poll a live app's pending review,
-// renew signing every pass) plus the dedupe and nil-tolerance rulings the
-// Task 9 controller called out.
 type MonitorSuite struct {
 	suite.Suite
 
@@ -103,12 +99,6 @@ func (s *MonitorSuite) storePlayCredential() {
 	}))
 }
 
-// --- Rule 1: onboarding -> VerifyOnboarding --------------------------------
-
-// A row still onboarding gets re-checked against the store API; once the
-// last checklist item verifies, VerifyOnboarding's own logic advances it to
-// test_ready and posts the verification comment — the monitor's job here is
-// only to call it.
 func (s *MonitorSuite) TestSweepOnboardingVerifiesAndAdvancesToTestReady() {
 	s.storeASCCredential()
 	s.asc.AppByBundleIDFound = true
@@ -139,8 +129,6 @@ func (s *MonitorSuite) TestSweepOnboardingVerifiesAndAdvancesToTestReady() {
 	s.Equal(taskID, s.comments.Calls[0].TaskID)
 }
 
-// --- Rule 2: test_ready -> live ---------------------------------------------
-
 func (s *MonitorSuite) TestSweepTestReadyIOSGoesLiveAndComments() {
 	s.storeASCCredential()
 	s.asc.LatestVersionResult = port.AppStoreVersionInfo{Version: "1.0.0", State: "READY_FOR_SALE"}
@@ -169,8 +157,6 @@ func (s *MonitorSuite) TestSweepTestReadyIOSGoesLiveAndComments() {
 	s.Equal(taskID, s.comments.Calls[0].TaskID)
 }
 
-// A go-live with no onboarding task on file (or no Commenter wired up) must
-// not panic — ruling #4.
 func (s *MonitorSuite) TestSweepTestReadyAndroidGoesLiveWithoutTaskDoesNotPanic() {
 	s.storePlayCredential()
 	s.play.TrackInfoResult = port.PlayTrackInfo{HasRelease: true, VersionName: "2.0.0", Status: "completed"}
@@ -216,8 +202,6 @@ func (s *MonitorSuite) TestSweepTestReadyStaysWhenNotYetLive() {
 	s.Equal(domain.MobileStoreStateTestReady, got.State, "not READY_FOR_SALE yet: stays test_ready")
 }
 
-// --- Rule 3: live review polling --------------------------------------------
-
 func (s *MonitorSuite) TestSweepLiveIOSApprovedSetsLastReleasedVersionAndComments() {
 	s.storeASCCredential()
 	s.asc.LatestVersionResult = port.AppStoreVersionInfo{Version: "1.1.0", State: "READY_FOR_SALE"}
@@ -247,10 +231,6 @@ func (s *MonitorSuite) TestSweepLiveIOSApprovedSetsLastReleasedVersionAndComment
 	s.Empty(s.ingester.Calls, "an approval is not an incident")
 }
 
-// The brief's explicit dedupe requirement: a rejected version ingests
-// exactly one incident, and a second sweep over the same row must not poll
-// ASC again or re-ingest — the persisted "rejected" review_state no longer
-// matches the live sweep's poll gate, so the row is skipped outright.
 func (s *MonitorSuite) TestSweepLiveIOSRejectedIngestsIncidentExactlyOnceAcrossSweeps() {
 	s.storeASCCredential()
 	s.asc.LatestVersionResult = port.AppStoreVersionInfo{Version: "1.2.0", State: "REJECTED"}
@@ -286,10 +266,6 @@ func (s *MonitorSuite) TestSweepLiveIOSRejectedIngestsIncidentExactlyOnceAcrossS
 	s.Len(s.asc.LatestVersionCalls, 1, "a rejected row is skipped on the next sweep, not re-polled")
 }
 
-// A transient incident-ingest failure must not permanently lose the
-// incident: review_state must stay in a poll-gate state so the row is
-// retried, rather than flipping to "rejected" (and dropping out of the
-// gate) before the ingest is known to have succeeded.
 func (s *MonitorSuite) TestSweepLiveIOSRejectedRetriesAfterFailedIngest() {
 	s.storeASCCredential()
 	s.asc.LatestVersionResult = port.AppStoreVersionInfo{Version: "1.3.0", State: "REJECTED"}
@@ -315,7 +291,6 @@ func (s *MonitorSuite) TestSweepLiveIOSRejectedRetriesAfterFailedIngest() {
 	s.Equal(domain.ReviewStateWaiting, got.ReviewState, "a failed ingest must not mark the row rejected")
 	s.Require().Len(s.ingester.Calls, 1, "the ingest was attempted")
 
-	// The row is still in the poll gate, so a second sweep retries it.
 	s.monitor.Sweep(ctx)
 	s.Require().Len(s.ingester.Calls, 2, "still waiting: the row was polled and ingest retried")
 
@@ -323,8 +298,6 @@ func (s *MonitorSuite) TestSweepLiveIOSRejectedRetriesAfterFailedIngest() {
 	s.Require().NoError(err)
 	s.Equal(domain.ReviewStateWaiting, got.ReviewState, "still not marked rejected: the retry also failed")
 
-	// Clear the failure and sweep again: this time the ingest succeeds and
-	// the row finally leaves the poll gate.
 	s.ingester.Err = nil
 	s.monitor.Sweep(ctx)
 
@@ -333,14 +306,10 @@ func (s *MonitorSuite) TestSweepLiveIOSRejectedRetriesAfterFailedIngest() {
 	s.Equal(domain.ReviewStateRejected, got.ReviewState)
 	s.Require().Len(s.ingester.Calls, 3, "the retry succeeded")
 
-	// A fourth sweep must not re-ingest: the row has left the poll gate.
 	s.monitor.Sweep(ctx)
 	s.Len(s.ingester.Calls, 3, "rejected row no longer polled: no further ingest attempts")
 }
 
-// Same shape as the iOS case, for the Android in-memory notified fallback:
-// a failed ingest must not mark the fingerprint notified, or a genuinely
-// still-halted rollout would never be retried.
 func (s *MonitorSuite) TestSweepLiveAndroidHaltedRolloutRetriesAfterFailedIngest() {
 	s.storePlayCredential()
 	s.play.TrackInfoResult = port.PlayTrackInfo{HasRelease: true, Status: "halted", VersionName: "4.0.0"}
@@ -361,12 +330,9 @@ func (s *MonitorSuite) TestSweepLiveAndroidHaltedRolloutRetriesAfterFailedIngest
 	s.monitor.Sweep(ctx)
 	s.Require().Len(s.ingester.Calls, 1, "the ingest was attempted")
 
-	// Not marked notified: a second sweep (still failing) retries.
 	s.monitor.Sweep(ctx)
 	s.Require().Len(s.ingester.Calls, 2, "still not notified: the retry was attempted again")
 
-	// Clear the failure: this time the incident lands and is marked
-	// notified, so a further sweep does not re-ingest.
 	s.ingester.Err = nil
 	s.monitor.Sweep(ctx)
 	s.Require().Len(s.ingester.Calls, 3, "the retry succeeded")
@@ -375,11 +341,8 @@ func (s *MonitorSuite) TestSweepLiveAndroidHaltedRolloutRetriesAfterFailedIngest
 	s.Len(s.ingester.Calls, 3, "now notified: no further ingest attempts")
 }
 
-// One row's failure (here: an iOS row whose ASC credential is missing, so
-// VerifyOnboarding errors) must not stop the sweep from processing the
-// other rows in the same pass — ruling #1.
 func (s *MonitorSuite) TestSweepOneRowsErrorDoesNotAbortTheRest() {
-	s.storePlayCredential() // no ASC credential stored: the iOS row's client build fails
+	s.storePlayCredential()
 	s.play.TrackInfoResult = port.PlayTrackInfo{HasRelease: true, VersionName: "1.0.0", Status: "completed"}
 	ctx := context.Background()
 
@@ -413,10 +376,6 @@ func (s *MonitorSuite) TestSweepOneRowsErrorDoesNotAbortTheRest() {
 	s.Equal(domain.MobileStoreStateLive, androidRow.State, "the other row is still swept despite the first row's error")
 }
 
-// Android has no ASC-style review_state map, so the only live-poll signal
-// is a halted production rollout. There is no persisted field to flip on
-// halt (unlike rejected), so dedupe here is the documented in-memory
-// fallback — the row keeps polling, but only ingests once.
 func (s *MonitorSuite) TestSweepLiveAndroidHaltedRolloutIngestsIncidentAndDedupesInMemory() {
 	s.storePlayCredential()
 	s.play.TrackInfoResult = port.PlayTrackInfo{HasRelease: true, Status: "halted", VersionName: "3.0.0"}
@@ -464,8 +423,6 @@ func (s *MonitorSuite) TestSweepLiveSkipsWhenReviewStateNotPending() {
 	s.Empty(s.ingester.Calls)
 }
 
-// --- Rule 4: every sweep renews expiring signing ----------------------------
-
 func (s *MonitorSuite) TestSweepRenewsExpiringSigningEveryPass() {
 	ctx := context.Background()
 	s.storePlayCredential()
@@ -487,7 +444,7 @@ func (s *MonitorSuite) TestSweepRenewsExpiringSigningEveryPass() {
 	asset.ExpiresAt = &soon
 	_, err = s.signing.Upsert(ctx, asset)
 	s.Require().NoError(err)
-	s.push.Calls = nil // clear the push from the EnsureAndroidKeystore call above
+	s.push.Calls = nil
 
 	s.monitor.Sweep(ctx)
 
@@ -496,8 +453,6 @@ func (s *MonitorSuite) TestSweepRenewsExpiringSigningEveryPass() {
 	s.NotEqual(before, after.Serial, "the sweep re-minted the soon-to-expire keystore")
 	s.NotEmpty(s.push.Calls, "renewed secrets are pushed")
 }
-
-// --- Rulings: nil ingester tolerance, unregistered skip ---------------------
 
 func (s *MonitorSuite) TestSweepToleratesNilIngester() {
 	s.storeASCCredential()
@@ -542,8 +497,6 @@ func (s *MonitorSuite) TestSweepSkipsUnregisteredApp() {
 	s.Empty(s.asc.LatestVersionCalls)
 }
 
-// --- Start / Stop ------------------------------------------------------------
-
 func (s *MonitorSuite) TestStartDoesNotBlockAndStopIsSafeToCallTwice() {
 	ctx := context.Background()
 
@@ -552,15 +505,6 @@ func (s *MonitorSuite) TestStartDoesNotBlockAndStopIsSafeToCallTwice() {
 	s.NotPanics(func() { s.monitor.Stop() }, "Stop must be safe to call twice")
 }
 
-// --- The submit side: MarkSubmitted ----------------------------------------
-
-// TestMarkSubmittedOpensTheReviewGate is the regression guard for the gap
-// that made every line of review monitoring unreachable in production:
-// sweepLive polls nothing unless review_state is waiting_for_review or
-// in_review, and until MarkSubmitted existed nothing in the repository ever
-// wrote either value. The assertion that matters is the second half — after
-// the submit is recorded, a sweep really does poll App Store Connect and act
-// on the verdict.
 func (s *MonitorSuite) TestMarkSubmittedOpensTheReviewGate() {
 	s.storeASCCredential()
 	repoID := uuid.New()
@@ -575,7 +519,6 @@ func (s *MonitorSuite) TestMarkSubmittedOpensTheReviewGate() {
 	})
 	s.Require().NoError(err)
 
-	// Before the submit: a live row with no open review is not polled.
 	s.monitor.Sweep(ctx)
 	s.Empty(s.asc.LatestVersionCalls, "nothing submitted yet, nothing to poll")
 
@@ -585,8 +528,6 @@ func (s *MonitorSuite) TestMarkSubmittedOpensTheReviewGate() {
 	s.Require().NoError(err)
 	s.Equal(domain.ReviewStateWaiting, submitted.ReviewState)
 
-	// After the submit: the row is in the poll gate and a rejection is now
-	// ingested as an incident — the whole path the gap made dead.
 	s.asc.LatestVersionResult = port.AppStoreVersionInfo{Version: "2.0.0", State: "REJECTED"}
 	s.monitor.Sweep(ctx)
 
@@ -598,9 +539,6 @@ func (s *MonitorSuite) TestMarkSubmittedOpensTheReviewGate() {
 	s.Equal("Store review rejected: com.example.app 2.0.0", s.ingester.Calls[0].Title)
 }
 
-// The deploy pipeline cannot know the marketing version at dispatch time (the
-// workflow reads it out of the project), so it passes "". An empty version
-// must never wipe a version a caller did record.
 func (s *MonitorSuite) TestMarkSubmittedRecordsVersionOnlyWhenKnown() {
 	repoID := uuid.New()
 	ctx := context.Background()
@@ -625,9 +563,6 @@ func (s *MonitorSuite) TestMarkSubmittedRecordsVersionOnlyWhenKnown() {
 	s.Equal(domain.ReviewStateWaiting, got.ReviewState)
 }
 
-// A repository with no registry row for the platform simply has nothing to
-// track — the pipeline calls this for every store prod deploy and must not
-// fail the release over it.
 func (s *MonitorSuite) TestMarkSubmittedWithoutARowIsANoop() {
 	ctx := context.Background()
 	s.Require().NoError(s.svc.MarkSubmitted(ctx, uuid.New(), domain.MobileStorePlatformIOS, "1.0.0"))
@@ -636,11 +571,6 @@ func (s *MonitorSuite) TestMarkSubmittedWithoutARowIsANoop() {
 	s.Empty(all, "nothing is created for a repository that has no store app")
 }
 
-// TestConcurrentSweepsIngestHaltedRolloutOnce covers the check-then-mark race
-// on the in-memory dedupe set. The ingester is held open so the second sweep
-// is guaranteed to reach the dedupe check while the first ingest is still in
-// flight — which, with a separate check and mark, is exactly when both sweeps
-// decide to report the same halted rollout.
 func (s *MonitorSuite) TestConcurrentSweepsIngestHaltedRolloutOnce() {
 	s.storePlayCredential()
 	s.play.TrackInfoResult = port.PlayTrackInfo{HasRelease: true, Status: "halted", VersionName: "3.0.0"}
@@ -680,11 +610,6 @@ func (s *MonitorSuite) TestConcurrentSweepsIngestHaltedRolloutOnce() {
 	s.Len(s.ingester.Calls, 1, "overlapping sweeps must report a halted rollout once")
 }
 
-// TestSweepRetriesPushAfterAFailedRenewalPush covers the stranding bug: once
-// an asset is re-minted its expiry moves out of ListExpiring's window, so a
-// push that fails right after the mint would never be retried — the vault
-// holding a new keystore while GitHub Actions still runs on the old one, every
-// build failing until someone re-saved the deploy target by hand.
 func (s *MonitorSuite) TestSweepRetriesPushAfterAFailedRenewalPush() {
 	ctx := context.Background()
 	s.storePlayCredential()
@@ -707,7 +632,6 @@ func (s *MonitorSuite) TestSweepRetriesPushAfterAFailedRenewalPush() {
 	s.Require().NoError(err)
 	s.push.Calls = nil
 
-	// Sweep 1: the keystore is renewed, but GitHub rejects every push.
 	s.push.Err = errors.New("github is down")
 	s.monitor.Sweep(ctx)
 	s.NotEmpty(s.push.Calls, "the renewal attempted a push")
@@ -717,7 +641,6 @@ func (s *MonitorSuite) TestSweepRetriesPushAfterAFailedRenewalPush() {
 	s.True(renewed.ExpiresAt.After(time.Now().Add(365*24*time.Hour)),
 		"the renewed keystore is far outside the renewal window, so ListExpiring will not return it again")
 
-	// Sweep 2: nothing is expiring any more, but the owed push is retried.
 	s.push.Err = nil
 	s.push.Calls = nil
 	s.monitor.Sweep(ctx)
@@ -729,18 +652,11 @@ func (s *MonitorSuite) TestSweepRetriesPushAfterAFailedRenewalPush() {
 	}
 	s.True(names["ANDROID_UPLOAD_KEYSTORE_B64"], "the next sweep re-pushes the stranded secrets: got %v", names)
 
-	// Sweep 3: the push landed, so there is nothing left to retry.
 	s.push.Calls = nil
 	s.monitor.Sweep(ctx)
 	s.Empty(s.push.Calls, "a successful push clears the retry")
 }
 
-// TestSweepDoesNotRetryForeverWhenTheMintItselfFails is the other half of the
-// retry claim's bookkeeping. A target is claimed as owed a push before the
-// mint, so a mint that keeps failing would park it in the retry set for the
-// life of the process and re-report its error on every sweep. A failed mint
-// produced nothing new — the vault and GitHub still agree on the old asset —
-// so the claim must be released.
 func (s *MonitorSuite) TestSweepDoesNotRetryForeverWhenTheMintItselfFails() {
 	ctx := context.Background()
 	s.storePlayCredential()
@@ -762,35 +678,23 @@ func (s *MonitorSuite) TestSweepDoesNotRetryForeverWhenTheMintItselfFails() {
 	_, err = s.signing.Upsert(ctx, asset)
 	s.Require().NoError(err)
 
-	// Sweep 1: renews (expiry now 25 years out, so ListExpiring is done with
-	// it) but the push fails, leaving the target owed a push.
 	s.push.Err = errors.New("github is down")
 	s.push.Calls = nil
 	s.monitor.Sweep(ctx)
 	s.Require().NotEmpty(s.push.Calls, "the renewal attempted a push")
 
-	// Sweep 2: the retry runs, but now the mint itself fails — the credential
-	// the keystore push needs is gone.
 	s.Require().NoError(s.creds.Delete(ctx, domain.StoreCredentialGooglePlay))
 	s.push.Err = nil
 	s.push.Calls = nil
 	s.monitor.Sweep(ctx)
 	s.Empty(s.push.Calls, "a failed mint has nothing to push")
 
-	// Sweep 3: everything works again. Nothing is expiring and the claim was
-	// released on the mint failure, so there is no work left.
 	s.storePlayCredential()
 	s.push.Calls = nil
 	s.monitor.Sweep(ctx)
 	s.Empty(s.push.Calls, "a released claim must not resurrect the retry forever")
 }
 
-// The collision the narrow track writer exists for, end to end: a sweep reads
-// every row, then goes out to the store console for each one — and a prod
-// deploy that lands its submit in that window used to be erased when the
-// sweep wrote its seconds-old copy back. sweepLive only polls a row whose
-// review_state is still open, so losing it meant that release's store verdict
-// (the approval AND the rejection incident) was never seen again.
 func (s *MonitorSuite) TestTrackSyncDoesNotEraseASubmitThatLandedMidSweep() {
 	s.storePlayCredential()
 	repoID := uuid.New()
@@ -805,8 +709,6 @@ func (s *MonitorSuite) TestTrackSyncDoesNotEraseASubmitThatLandedMidSweep() {
 	})
 	s.Require().NoError(err)
 
-	// The prod deploy submits while the sweep is out reading the store's
-	// channels — after the row was listed, before the track write lands.
 	s.play.TracksHook = func() {
 		s.Require().NoError(s.svc.MarkSubmitted(ctx, repoID, domain.MobileStorePlatformAndroid, "3.1.0"))
 	}
@@ -819,7 +721,7 @@ func (s *MonitorSuite) TestTrackSyncDoesNotEraseASubmitThatLandedMidSweep() {
 	s.Require().NoError(err)
 	s.Equal(domain.ReviewStateWaiting, got.ReviewState, "the submit was erased by the track sync")
 	s.Equal("3.1.0", got.LastSubmittedVersion)
-	// The sync still did its own job.
+
 	s.Equal("3.1.0", got.Tracks.Internal.Version)
 	s.Require().NotNil(got.TracksSyncedAt)
 }

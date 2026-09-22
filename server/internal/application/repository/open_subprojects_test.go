@@ -12,8 +12,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// monorepoLayout materialises a minimal two-project monorepo on disk: a Go
-// backend under apps/api and a React frontend under apps/web.
 func monorepoLayout(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -42,9 +40,6 @@ func TestServiceOpen_DetectsAndPersistsSubProjectsForANewMonorepo(t *testing.T) 
 	svc, repos := newOpenTestService(errors.New("not found"))
 	root := monorepoLayout(t)
 
-	// Open validates the root against the workspace root's own subtree plus the
-	// operator's allowed_roots (workspace.ValidateProjectRoot), so a checkout
-	// in a temp dir has to be declared rather than waved through.
 	svc.allowedRoots = []string{root}
 
 	repo, err := svc.Open(context.Background(), domain.OpenRepositoryRequest{RootPath: root})
@@ -104,8 +99,6 @@ func TestServiceOpen_DetectsAndPersistsTheMobilePlatform(t *testing.T) {
 	require.Equal(t, []string{domain.MobilePlatformCross}, repos.mobilePlatformWrites)
 }
 
-// The platform is a fact about the tree, so it is read even when the caller
-// named the kind itself — unlike sub-projects, which an explicit kind skips.
 func TestServiceOpen_DetectsThePlatformForAnExplicitMobileKind(t *testing.T) {
 	svc, repos := newOpenTestService(errors.New("not found"))
 	root := t.TempDir()
@@ -135,9 +128,6 @@ func TestServiceOpen_WritesNoPlatformForANonMobileRepo(t *testing.T) {
 	require.Empty(t, repos.appIdentityWrites)
 }
 
-// Import is the one moment the code is guaranteed to be on the disk of the
-// host doing the reading, so the store identifiers are read and persisted
-// there rather than on every deploy-config request.
 func TestServiceOpen_DetectsAndPersistsTheAppIdentity(t *testing.T) {
 	svc, repos := newOpenTestService(errors.New("not found"))
 	root := t.TempDir()
@@ -163,10 +153,6 @@ func TestServiceOpen_DetectsAndPersistsTheAppIdentity(t *testing.T) {
 	require.Equal(t, []domain.AppIdentity{want}, repos.appIdentityWrites)
 }
 
-// The build targets are read and persisted at the same moment and for the same
-// reason as the identifiers, and for one more: the release that needs them is
-// started from a host that may hold no working copy at all, and unlike the
-// identifiers there is no form in between where a human could supply them.
 func TestServiceOpen_DetectsAndPersistsTheBuildTargets(t *testing.T) {
 	svc, repos := newOpenTestService(errors.New("not found"))
 	root := t.TempDir()
@@ -191,8 +177,6 @@ func TestServiceOpen_DetectsAndPersistsTheBuildTargets(t *testing.T) {
 	require.Equal(t, []domain.BuildTargets{want}, repos.buildTargetWrites)
 }
 
-// A mobile tree that names no build target is not written at all, and the
-// release it cannot describe is refused later rather than guessed at here.
 func TestServiceOpen_WritesNoBuildTargetsWhenNothingIsReadable(t *testing.T) {
 	svc, repos := newOpenTestService(errors.New("not found"))
 	root := t.TempDir()
@@ -209,9 +193,6 @@ func TestServiceOpen_WritesNoBuildTargetsWhenNothingIsReadable(t *testing.T) {
 	require.Empty(t, repos.buildTargetWrites)
 }
 
-// A mobile tree whose build files name no identifier is not written at all —
-// the column keeps its "nobody could read one" default rather than gaining an
-// UPDATE that says the same thing.
 func TestServiceOpen_WritesNoAppIdentityWhenNothingIsReadable(t *testing.T) {
 	svc, repos := newOpenTestService(errors.New("not found"))
 	root := t.TempDir()

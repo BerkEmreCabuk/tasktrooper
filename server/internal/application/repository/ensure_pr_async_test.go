@@ -9,8 +9,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// ensurePRGit answers "a workspace with git exists" and hands back a fixed PR
-// URL, so the test can drive ensurePullRequestAsync without a real checkout.
 type ensurePRGit struct {
 	fakeReleaseGit
 	prURL string
@@ -22,8 +20,6 @@ func (g *ensurePRGit) EnsurePullRequest(context.Context, string) (string, error)
 	return g.prURL, nil
 }
 
-// ensurePRTaskStore records every SetTaskPullRequest call so the test can
-// assert the PR still lands on the task row.
 type ensurePRTaskStore struct {
 	fakeReleaseTaskStore
 	setCalls []string
@@ -34,10 +30,6 @@ func (s *ensurePRTaskStore) SetTaskPullRequest(_ context.Context, _ uuid.UUID, u
 	return nil
 }
 
-// A system comment repeating the PR link used to be posted every time a task
-// re-entered code_review, PM UAT or done — up to three identical messages per
-// task, on top of the link already shown on the card. The task only records
-// the PR now.
 func TestEnsurePullRequestAsyncRecordsPRWithoutPostingAComment(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New()}
 	git := &ensurePRGit{prURL: "https://github.com/acme/app/pull/7"}
@@ -62,8 +54,6 @@ func TestEnsurePullRequestAsyncRecordsPRWithoutPostingAComment(t *testing.T) {
 	}
 }
 
-// Recording the PR no longer depends on a comment store, since nothing here
-// writes a comment any more.
 func TestEnsurePullRequestAsyncRecordsPRWithoutACommentStore(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New()}
 	git := &ensurePRGit{prURL: "https://github.com/acme/app/pull/9"}

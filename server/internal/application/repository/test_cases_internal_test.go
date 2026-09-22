@@ -50,9 +50,6 @@ func testCase(title string, status domain.TestCaseStatus) domain.TaskTestCase {
 	return domain.TaskTestCase{ID: uuid.New(), Title: title, Status: status, Category: domain.TestCaseCategoryOther}
 }
 
-// The QA phase owes the board the round it ran, not only its verdicts. Without
-// this gate a round that tested three obvious things and one that worked
-// through boundaries, auth and regression left the same trace on the card.
 func TestTestCaseGate(t *testing.T) {
 	taskID := uuid.New()
 	cases := []struct {
@@ -138,8 +135,6 @@ func TestTestCaseGate(t *testing.T) {
 	}
 }
 
-// Two cases with one title collapse into one row (the store matches by title),
-// so a batch that repeats a title loses a case silently. Refusing says so.
 func TestRecordTestCasesRefusesDuplicateTitles(t *testing.T) {
 	svc := &Service{testCases: &fakeTestCaseStore{}}
 
@@ -153,9 +148,6 @@ func TestRecordTestCasesRefusesDuplicateTitles(t *testing.T) {
 	}
 }
 
-// A verdict has to say what it rests on. These three refusals are the same rule
-// from three sides — an unreproducible failure, an unauditable rejection, and a
-// case reported unrun with nothing named as the blocker.
 func TestTestCaseInputDemandsTheEvidenceItsVerdictImplies(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -196,8 +188,6 @@ func TestTestCaseInputDemandsTheEvidenceItsVerdictImplies(t *testing.T) {
 		})
 	}
 
-	// And the happy path keeps its defaults: an unspecified case is planned and
-	// uncategorised rather than refused.
 	got, err := domain.TaskTestCaseInput{Title: "login"}.Normalize()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

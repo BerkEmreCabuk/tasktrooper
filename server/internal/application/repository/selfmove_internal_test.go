@@ -9,9 +9,6 @@ import (
 
 func colPtr(c domain.TaskColumn) *domain.TaskColumn { return &c }
 
-// DE-4 regression: the implementer moved its own task to need_revision, then
-// got re-dispatched to read a revision comment nobody wrote. The assignee may
-// only hand work FORWARD; need_revision/todo self-moves are reviewer moves.
 func TestValidateAgentSelfMove(t *testing.T) {
 	agentID := uuid.New()
 	otherID := uuid.New()

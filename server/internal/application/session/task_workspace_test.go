@@ -15,8 +15,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// workspaceStore records where the session's workspace_dir was moved to, which is
-// the persisted half of the decision under test.
 type workspaceStore struct {
 	stubSessionStore
 	movedTo string
@@ -27,8 +25,6 @@ func (s *workspaceStore) UpdateWorkspaceDir(_ context.Context, _ uuid.UUID, dir 
 	return nil
 }
 
-// mirrorRepos stands in for the repository resolver: it only knows the SHARED
-// mirror clone, which is exactly the wrong tree for a task-bound chat.
 type mirrorRepos struct{ root string }
 
 func (r mirrorRepos) ResolveRootPath(context.Context, uuid.UUID) (string, error) {
@@ -53,10 +49,6 @@ func (s *stubTaskWorkspaces) ResolveTaskWorkspace(_ context.Context, repositoryI
 	return s.binding, s.err
 }
 
-// The whole feature rests on this: a chat about a task must run in that task's own
-// branch checkout. The mirror clone is force-reset onto origin's default branch by
-// SyncDefaultBranch, so an edit made there is on the wrong branch and is thrown
-// away — it could never reach the task's pull request.
 func TestTaskBoundSessionRunsInTheTaskWorkspaceNotTheMirror(t *testing.T) {
 	repositoryID, taskID := uuid.New(), uuid.New()
 	task := domain.BoardTask{
@@ -72,7 +64,7 @@ func TestTaskBoundSessionRunsInTheTaskWorkspaceNotTheMirror(t *testing.T) {
 	store := &workspaceStore{}
 	sess := domain.Session{
 		ID: uuid.New(), ProjectID: &repositoryID, TaskID: &taskID,
-		WorkspaceDir: "/repos/widget", // the mirror clone recorded at creation
+		WorkspaceDir: "/repos/widget",
 	}
 
 	dir, runCtx, history, err := session.ResolveRunWorkspaceForTest(
@@ -86,18 +78,13 @@ func TestTaskBoundSessionRunsInTheTaskWorkspaceNotTheMirror(t *testing.T) {
 	assert.NotEqual(t, "/repos/widget", dir, "a task chat must never work in the shared mirror clone")
 	assert.Equal(t, repositoryID, tasks.gotRepoID)
 	assert.Equal(t, taskID, tasks.gotTaskID)
-	// The corrected path is persisted, so the next turn (and the UI) agree with it.
+
 	assert.Equal(t, "/data/workspaces/task-"+taskID.String(), store.movedTo)
 
-	// The context carries what the PR tools resolve the task from, and what
-	// retrieval prefers the branch's index by.
 	assert.Equal(t, taskID, registry.TaskIDFromContext(runCtx))
 	assert.Equal(t, "feature/task-1234abcd-add-the-store-link", registry.BranchFromContext(runCtx))
 	assert.Equal(t, "/data/workspaces/task-"+taskID.String(), registry.EffectiveWorkspaceDir(runCtx))
 
-	// The task context leads the prompt, names the PR, and points at the tools —
-	// but does not carry the diff, which is paid for per turn and belongs in a
-	// tool result.
 	require.NotEmpty(t, history)
 	first := history[0]
 	assert.Equal(t, domain.RoleSystem, first.Role)
@@ -109,9 +96,6 @@ func TestTaskBoundSessionRunsInTheTaskWorkspaceNotTheMirror(t *testing.T) {
 	assert.NotContains(t, first.Content, "diff --git")
 }
 
-// A workspace that cannot be prepared fails the turn instead of quietly falling
-// back to the mirror — the same hard gate the board runner applies, and for the
-// same reason: running on the wrong tree risks pushing to the default branch.
 func TestTaskBoundSessionFailsRatherThanFallBackToTheMirror(t *testing.T) {
 	repositoryID, taskID := uuid.New(), uuid.New()
 	tasks := &stubTaskWorkspaces{err: errors.New("branch checkout conflicts with origin")}
@@ -128,8 +112,6 @@ func TestTaskBoundSessionFailsRatherThanFallBackToTheMirror(t *testing.T) {
 	assert.Empty(t, store.movedTo, "a failed checkout must not repoint the session")
 }
 
-// A chat with no task keeps the old behaviour exactly: repository root, no task
-// context message, no branch pinned.
 func TestSessionWithoutATaskStillUsesTheRepositoryRoot(t *testing.T) {
 	repositoryID := uuid.New()
 	tasks := &stubTaskWorkspaces{}

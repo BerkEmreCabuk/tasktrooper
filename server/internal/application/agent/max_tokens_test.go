@@ -96,12 +96,10 @@ func (s *MaxTokensSuite) TestWrapUpRequestCarriesReserveOutputAsMaxTokens() {
 	tc := domain.ToolCall{ID: "tc1", Type: "function", Function: domain.FunctionCall{Name: "run_terminal", Arguments: `{"command":"true"}`}}
 
 	s.registry.On("DefinitionsForPolicy", policy).Return(toolDefs)
-	// Every tool-offering iteration turn: same reserve as any other request.
 	s.llm.On("Chat", context.Background(), mock.MatchedBy(func(req domain.AgentRequest) bool {
 		return len(req.Tools) > 0 && req.MaxTokens == 777
 	})).Return(domain.AgentResponse{Message: toolCallMsg}, nil)
 	s.registry.On("ExecuteWithPolicy", context.Background(), tc, policy).Return(toolResult)
-	// The tool-free wrap-up turn giveUp sends once the budget is spent.
 	s.llm.On("Chat", context.Background(), mock.MatchedBy(func(req domain.AgentRequest) bool {
 		return len(req.Tools) == 0 && req.MaxTokens == 777
 	})).Return(domain.AgentResponse{Message: domain.Message{Role: domain.RoleAssistant, Content: "wrapped up"}}, nil)

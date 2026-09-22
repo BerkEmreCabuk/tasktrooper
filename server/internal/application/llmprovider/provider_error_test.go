@@ -7,8 +7,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// The whole point of the classification: providers disagree on which status code
-// means "your allowance is gone", so the message has to break the tie.
 func TestClassifyProviderError(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -99,7 +97,6 @@ func TestProviderErrorMessageFormatting(t *testing.T) {
 	require.Equal(t, "/models returned status 401", bare.Error())
 }
 
-// An HTML error page from a proxy must not be pasted whole into the UI.
 func TestProviderErrorMessageTruncatesAndCollapsesWhitespace(t *testing.T) {
 	long := make([]byte, 0, 1000)
 	for i := 0; i < 500; i++ {

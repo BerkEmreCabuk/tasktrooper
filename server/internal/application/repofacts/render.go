@@ -9,9 +9,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// DerivedSections renders the collected facts into the profile's parser-owned
-// sections. These are rewritten on every refresh and are never handed to the
-// model to "improve" — that is the whole point of collecting them.
+// Renders the collected facts into the profile's parser-owned sections — rewritten on every refresh and never handed to the model to "improve", which is the point of collecting them.
 func DerivedSections(f Facts) []domain.ProfileSection {
 	if !f.HasAny() {
 		return nil
@@ -44,9 +42,7 @@ func DerivedSections(f Facts) []domain.ProfileSection {
 	return out
 }
 
-// PromptFacts renders the fact block injected into the profiling run. It is
-// framed as given truth with an explicit prohibition, because the failure mode
-// being fixed is a model that reads facts and then writes its priors anyway.
+// The fact block injected into the profiling run, framed as given truth with an explicit prohibition — the failure mode being fixed is a model that reads facts and then writes its priors anyway.
 func PromptFacts(f Facts) string {
 	if !f.HasAny() {
 		return ""
@@ -225,9 +221,7 @@ func renderGitWorkflow(f Facts) string {
 	if g.CommitStyle != "" {
 		b.WriteString("- Commit subjects: " + g.CommitStyle + "\n")
 	}
-	// The deploy consequence of landing on the default branch is repeated here
-	// on purpose: whoever is reading "git workflow" is deciding how to land a
-	// change, and that is the moment the automatic deploy matters.
+	// The deploy consequence of landing on the default branch is repeated here on purpose: whoever reads "git workflow" is deciding how to land a change, and that is the moment the automatic deploy matters.
 	for _, d := range f.Deploys {
 		if d.Automatic {
 			what := d.Provider
@@ -273,10 +267,6 @@ func renderHotspots(f Facts) string {
 	}
 	return b.String()
 }
-
-// ---------------------------------------------------------------------------
-// source path collection — what makes a section stale
-// ---------------------------------------------------------------------------
 
 func manifestPaths(f Facts) []string {
 	out := make([]string, 0, len(f.Manifests))
@@ -338,13 +328,7 @@ func evidenceFrom(paths []string) []domain.ProfileEvidence {
 	return out
 }
 
-// ---------------------------------------------------------------------------
-// settings proposals
-// ---------------------------------------------------------------------------
-
-// Proposals turns the facts into concrete settings the repository page is
-// still asking a human to fill in by hand. Nothing is applied here — the
-// service decides between auto-apply (field empty) and offer (field set).
+// Turns the facts into concrete settings the repository page is still asking a human to fill in by hand; nothing is applied here — the service decides between auto-apply (field empty) and offer (field set).
 func Proposals(f Facts) []domain.ProfileProposal {
 	var out []domain.ProfileProposal
 	add := func(field string, value any, label string, evidence []string) {
@@ -368,10 +352,7 @@ func Proposals(f Facts) []domain.ProfileProposal {
 		}
 	}
 
-	// Commands: the root-most declaration of each purpose is the one the
-	// repository settings want. A monorepo whose only build command lives in
-	// apps/web still gets a proposal — with the area spelled out, because the
-	// command is only correct when run there.
+	// Commands: the root-most declaration of each purpose is the one the repository settings want. A monorepo whose only build command lives in apps/web still gets a proposal — with the area spelled out, because the command is only correct when run there.
 	if cmd, src := primaryCommand(f, "build"); cmd != "" {
 		add(domain.ProposalFieldBuildCommand, cmd, "Build command: "+cmd, []string{src})
 	}
@@ -409,9 +390,7 @@ func kindEvidencePaths(f Facts) []string {
 	return out
 }
 
-// primaryCommand picks the command a repository-level setting should carry:
-// the one declared closest to the root, preferring a shorter area over a
-// deeper one so a monorepo's root script wins over a per-app duplicate.
+// Picks the command a repository-level setting should carry: the one declared closest to the root, preferring a shorter area over a deeper one so a monorepo's root script wins over a per-app duplicate.
 func primaryCommand(f Facts, purpose string) (cmd, source string) {
 	cmds := f.commandsFor(purpose)
 	if len(cmds) == 0 {
@@ -425,10 +404,7 @@ func primaryCommand(f Facts, purpose string) (cmd, source string) {
 	return "cd " + best.Area + " && " + best.Cmd, best.Source
 }
 
-// pipelineProposals maps deploy-capable workflows onto the pipeline slots the
-// settings page exposes. Only unambiguous cases are proposed: a workflow that
-// names its environment. Guessing between two deploy workflows is exactly the
-// choice the settings page already asks a human to make.
+// Maps deploy-capable workflows onto the pipeline slots the settings page exposes. Only unambiguous cases are proposed — a workflow that names its environment; guessing between two deploy workflows is exactly the choice the settings page already asks a human to make.
 func pipelineProposals(f Facts) []domain.PipelineJobProposal {
 	var out []domain.PipelineJobProposal
 	for _, w := range f.Workflows {

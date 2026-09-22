@@ -10,8 +10,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeArchitectRoles resolves PurposeRepoProfiler to one fixed agent id,
-// standing in for application/workflow.Service's RoleResolver.
 type fakeArchitectRoles struct{ agentID uuid.UUID }
 
 func (f fakeArchitectRoles) AgentForRole(context.Context, uuid.UUID, string) (*uuid.UUID, error) {
@@ -32,15 +30,12 @@ func (f fakeArchitectRoles) AssigneeForNewTask(_ context.Context, _ domain.TaskT
 	return requested, nil
 }
 
-// fakeArchitectGetter is the AgentGetter side: one agent row keyed by id.
 type fakeArchitectGetter struct{ agent domain.Agent }
 
 func (f fakeArchitectGetter) GetAgent(context.Context, uuid.UUID) (domain.Agent, error) {
 	return f.agent, nil
 }
 
-// refusingLoop is an HTTP loop that fails the test if it is ever asked. The
-// point of these tests is that a host-executed architect never reaches it.
 type refusingLoop struct{ t *testing.T }
 
 func (l refusingLoop) Run(context.Context, []domain.Message, string, domain.LLMProviderType, domain.ToolPolicy, ...agent.RunOption) (domain.AgentResponse, error) {
@@ -58,8 +53,6 @@ func (l refusingLoop) RunStream(context.Context, []domain.Message, string, domai
 	return domain.AgentResponse{}, nil
 }
 
-// cliStub is the CLI executor. The section it writes is the refresh's success
-// signal, so writing it from here proves the run reached an engine at all.
 type cliStub struct {
 	mu     sync.Mutex
 	calls  int
@@ -87,10 +80,6 @@ func (c *cliStub) snapshot() (int, domain.TaskExecution) {
 	return c.calls, c.last
 }
 
-// A profile refresh whose system-architect runs on claude_code used to be
-// impossible: the only engine it could ask was the HTTP loop, which refuses
-// that provider, so every refresh logged two "pass errored" warnings and ended
-// with the derived half of the profile and no judgment half at all.
 func TestRefreshRunsOnTheHostExecutor(t *testing.T) {
 	store, profiles, id := newFixture(t, "", nil)
 	var svc *Service
@@ -117,8 +106,7 @@ func TestRefreshRunsOnTheHostExecutor(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("executor calls = %d, want 1 (the section landed on the first pass)", calls)
 	}
-	// The refresh runs read-only against the shared working copy, which is what
-	// the run context carries and therefore where the CLI session is started.
+
 	if req.WorkDir != store.repo.RootPath {
 		t.Fatalf("cli work dir = %q, want the repository root %q", req.WorkDir, store.repo.RootPath)
 	}
@@ -130,9 +118,6 @@ func TestRefreshRunsOnTheHostExecutor(t *testing.T) {
 	}
 }
 
-// With no runner on this host the refresh still fails the way it always did —
-// with a warning per pass and an error naming the missing section — rather than
-// by sending an architect's exploration run to somebody else's endpoint.
 func TestRefreshFailsHonestlyWithNoRunner(t *testing.T) {
 	store, profiles, id := newFixture(t, "", nil)
 	router := agent.NewRouter(refusingLoop{t: t})

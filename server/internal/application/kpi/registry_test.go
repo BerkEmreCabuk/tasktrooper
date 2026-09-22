@@ -12,9 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// stubRuns embeds the port interface so a test only implements the one method
-// it needs (ListRecent), matching the pattern already used at
-// internal/adapter/http/handler_run_steps_test.go.
 type stubRuns struct {
 	port.TaskAgentRunStore
 	runs []domain.TaskAgentRun
@@ -68,7 +65,7 @@ func mustInfo(t *testing.T, key string) domain.KPIMetricInfo {
 }
 
 func TestCleanTimeReturnsMedianHours(t *testing.T) {
-	// Median, not mean: one monster task must not define the week.
+
 	value, err := resolveMetric(t, "clean_time_in_progress", []float64{1, 2, 60})
 	require.NoError(t, err)
 	require.InDelta(t, 2.0, value, 0.001)
@@ -81,15 +78,13 @@ func TestCleanTimeMedianOfEvenSample(t *testing.T) {
 }
 
 func TestCleanTimeBelowMinSampleIsInsufficient(t *testing.T) {
-	// Two data points cannot be trusted, and one fast task must not buy a
-	// full score.
+
 	_, err := resolveMetric(t, "clean_time_in_progress", []float64{1, 2})
 	require.ErrorIs(t, err, kpi.ErrInsufficientData)
 }
 
 func TestCleanTimeWithNoDataIsInsufficientNotZero(t *testing.T) {
-	// A zero here would score 1.0 on a lower-better metric: doing nothing
-	// would look like maximum speed.
+
 	_, err := resolveMetric(t, "clean_time_pm_uat", nil)
 	require.ErrorIs(t, err, kpi.ErrInsufficientData)
 	require.Equal(t, domain.KPIDirectionLowerBetter, mustInfo(t, "clean_time_pm_uat").Direction)
@@ -146,8 +141,7 @@ func TestTasksCompletedForDeveloperIsUnchangedByQAPMEvents(t *testing.T) {
 }
 
 func TestTasksCompletedCountsDistinctTasksNotEvents(t *testing.T) {
-	// The real bug: a task that was completed and then released writes two
-	// events for one piece of work, and must count once, not twice.
+
 	def, err := kpi.MetricByKey("tasks_completed")
 	require.NoError(t, err)
 	agentID := uuid.New()
@@ -157,7 +151,7 @@ func TestTasksCompletedCountsDistinctTasksNotEvents(t *testing.T) {
 		{AgentID: agentID, TaskID: &taskA, EventType: domain.ScoreEventTaskCompleted},
 		{AgentID: agentID, TaskID: &taskA, EventType: domain.ScoreEventTaskReleased},
 		{AgentID: agentID, TaskID: &taskB, EventType: domain.ScoreEventTaskCompleted},
-		// No TaskID: has nothing to dedupe against, counts on its own.
+
 		{AgentID: agentID, EventType: domain.ScoreEventQATaskTested},
 	}}}
 	value, err := def.Resolve(context.Background(), deps, agentID, time.Now().Add(-24*time.Hour), time.Now())
@@ -170,8 +164,7 @@ func TestFirstPassRateBelowMinSampleIsInsufficient(t *testing.T) {
 	require.NoError(t, err)
 	agentID := uuid.New()
 	taskA, taskB := uuid.New(), uuid.New()
-	// Only two distinct completed tasks: an idle-ish week must not score a
-	// 0% or 100% first-pass rate off two data points.
+
 	deps := kpi.MetricDeps{Perf: &stubPerf{events: []domain.AgentScoreEvent{
 		{AgentID: agentID, TaskID: &taskA, EventType: domain.ScoreEventTaskCompleted},
 		{AgentID: agentID, TaskID: &taskB, EventType: domain.ScoreEventTaskCompleted},
@@ -205,11 +198,11 @@ func TestGateRejectedRuns_CountsOnlyGateRejectionsInWindow(t *testing.T) {
 		{AgentID: agentID, Status: domain.TaskAgentRunStatusFailed, Summary: "Analysis rejected: no repo reads", CreatedAt: now},
 		{AgentID: agentID, Status: domain.TaskAgentRunStatusFailed, Summary: "QA round rejected: never ran the product", CreatedAt: now},
 		{AgentID: agentID, Status: domain.TaskAgentRunStatusFailed, Summary: "pm_uat rejected: never checked the product", CreatedAt: now},
-		// Infra failure, not a gate rejection: must not count.
+
 		{AgentID: agentID, Status: domain.TaskAgentRunStatusFailed, Summary: "session limit reached", CreatedAt: now},
-		// Gate-rejection text but outside the window: must not count.
+
 		{AgentID: agentID, Status: domain.TaskAgentRunStatusFailed, Summary: "Analysis rejected: no repo reads", CreatedAt: now.Add(-48 * time.Hour)},
-		// A different agent's gate rejection must not count.
+
 		{AgentID: uuid.New(), Status: domain.TaskAgentRunStatusFailed, Summary: "Analysis rejected: no repo reads", CreatedAt: now},
 	}}}
 	value, err := def.Resolve(context.Background(), deps, agentID, now.Add(-24*time.Hour), now.Add(24*time.Hour))

@@ -17,9 +17,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// Detect answers, for every web-hosted area of the repository, where the tree
-// says it ships and which Vercel projects could be it. It reads the working
-// copy and the Vercel API; it writes nothing.
 func (s *Service) Detect(ctx context.Context, repositoryID uuid.UUID) (domain.HostingDetection, error) {
 	repo, err := s.repos.Get(ctx, repositoryID)
 	if err != nil {
@@ -49,7 +46,6 @@ func (s *Service) Detect(ctx context.Context, repositoryID uuid.UUID) (domain.Ho
 		det.Warnings = append(det.Warnings, "stored links could not be read: "+lerr.Error())
 	}
 
-	// Vercel side, fetched once for every area.
 	var projects []domain.VercelProject
 	var tok, scope string
 	if t, terr := s.token(ctx); terr == nil {
@@ -91,9 +87,6 @@ func orUnknown(s string) string {
 	return s
 }
 
-// areasFor lists the areas worth asking about: the root of a backend or
-// frontend repository, or the backend/frontend halves of a monorepo (mobile
-// and worker halves ship through stores and queues, not web hosts).
 func areasFor(kind string, subKinds []string, facts repofacts.Facts) []domain.HostingAreaDetection {
 	switch kind {
 	case domain.RepoKindBackend, domain.RepoKindFrontend:
@@ -117,8 +110,6 @@ func areasFor(kind string, subKinds []string, facts repofacts.Facts) []domain.Ho
 	return nil
 }
 
-// dirForKind reads the classified sub-project directory out of the facts'
-// evidence lines ("apps/web → frontend"). "" when the collector did not say.
 func dirForKind(facts repofacts.Facts, kind string) string {
 	for _, ev := range facts.KindEvidence {
 		dir, k, ok := strings.Cut(ev, " → ")
@@ -129,8 +120,6 @@ func dirForKind(facts repofacts.Facts, kind string) string {
 	return ""
 }
 
-// hostingHintProviders maps the collector's integration names onto the keys
-// the UI and the link provider field use.
 var hostingHintProviders = map[string]string{
 	"Vercel":                      domain.DeployProviderVercel,
 	"Fly.io":                      domain.DeployProviderFly,
@@ -143,10 +132,6 @@ var hostingHintProviders = map[string]string{
 	"static host":                 "static",
 }
 
-// hintsFor attributes the tree's hosting markers and deploy workflows to one
-// area. A marker under the area's directory belongs to it; a marker at the
-// repository root is reported to every area, because a root vercel.json on a
-// monorepo says "something here is on Vercel" without saying which half.
 func hintsFor(a domain.HostingAreaDetection, facts repofacts.Facts) []domain.HostingHint {
 	var out []domain.HostingHint
 	for _, in := range facts.Integrations {
@@ -175,8 +160,6 @@ func hintsFor(a domain.HostingAreaDetection, facts repofacts.Facts) []domain.Hos
 	return out
 }
 
-// evidenceBelongs decides whether a marker path speaks for an area: root-level
-// markers speak for every area, nested ones only for the directory they sit in.
 func evidenceBelongs(evidence, dir string) bool {
 	evidence = strings.TrimPrefix(filepath.ToSlash(evidence), "./")
 	parent := path.Dir(evidence)
@@ -189,18 +172,11 @@ func evidenceBelongs(evidence, dir string) bool {
 	return strings.HasPrefix(evidence, dir+"/")
 }
 
-// vercelLink is what `vercel link` writes to .vercel/project.json.
 type vercelLink struct {
 	ProjectID string `json:"projectId"`
 	OrgID     string `json:"orgId"`
 }
 
-// linkedProject reads .vercel/project.json for the area (its own directory
-// first, then the repository root) and resolves the project it names — from
-// the listed scope when it is there, from the file's own org otherwise. The
-// file is untracked and normally gitignored, so it only ever exists on a
-// working copy where somebody ran `vercel link`; that is exactly the case
-// where it beats every other signal.
 func (s *Service) linkedProject(ctx context.Context, tok, scope, root string, a domain.HostingAreaDetection, projects []domain.VercelProject) *domain.VercelProject {
 	if root == "" {
 		return nil
@@ -225,7 +201,7 @@ func (s *Service) linkedProject(ctx context.Context, tok, scope, root string, a 
 				return &p
 			}
 		}
-		// Not in the default scope: the file says which org it belongs to.
+
 		orgScope := ""
 		if strings.HasPrefix(link.OrgID, "team_") {
 			orgScope = link.OrgID
@@ -245,8 +221,6 @@ func (s *Service) linkedProject(ctx context.Context, tok, scope, root string, a 
 
 var remoteSlugRe = regexp.MustCompile(`[:/]([^/:]+)/([^/]+?)(?:\.git)?/?$`)
 
-// remoteSlug is owner/repo of the working copy's origin, lower-cased, from
-// the facts when git answered and from the recorded remote URL otherwise.
 func remoteSlug(facts repofacts.Facts, remoteURL string) string {
 	if facts.Git.RemoteSlug != "" {
 		return strings.ToLower(strings.Trim(facts.Git.RemoteSlug, "/"))
@@ -258,7 +232,6 @@ func remoteSlug(facts repofacts.Facts, remoteURL string) string {
 	return strings.ToLower(m[1] + "/" + m[2])
 }
 
-// matchRank orders reasons strongest first.
 func matchRank(reason string) int {
 	switch reason {
 	case domain.HostingMatchProjectJSON:
@@ -273,10 +246,6 @@ func matchRank(reason string) int {
 	return 9
 }
 
-// candidatesFor scores every project against one area. The link file names
-// the project outright; a git-linked project matches by remote, and on a
-// monorepo it is only decisive when its root directory is this area's; a name
-// match is the weakest signal and never decisive on its own.
 func candidatesFor(a domain.HostingAreaDetection, repoName, slug string, projects []domain.VercelProject, linked *domain.VercelProject) []domain.HostingCandidate {
 	var out []domain.HostingCandidate
 	seen := map[string]bool{}
@@ -310,10 +279,6 @@ func candidatesFor(a domain.HostingAreaDetection, repoName, slug string, project
 	return out
 }
 
-// confidenceOf is the rule the UI relies on to decide whether to propose or
-// to ask: exactly one decisive candidate — the link file, a root-directory
-// match on a monorepo, or the single git-linked project of a single-kind
-// repository — is exact; anything else with candidates is ambiguous.
 func confidenceOf(a domain.HostingAreaDetection) string {
 	if len(a.Candidates) == 0 {
 		return domain.HostingConfidenceNone

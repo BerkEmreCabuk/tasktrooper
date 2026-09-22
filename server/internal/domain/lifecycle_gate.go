@@ -2,28 +2,21 @@ package domain
 
 import "errors"
 
-// Lifecycle-gate errors.
-//
-// The board's two terminal columns are claims about the world, and until these
-// gates existed nothing checked either one:
-//
-//   - done claims "this passed its review chain". A human (or an agent) could
-//     drag a card from in_progress straight into done and the control plane
-//     recorded a reviewed, QA'd, UAT-approved task that no reviewer, no QA
-//     round and no PM had ever seen.
-//   - released claims "this is live in production". Nothing tied it to a deploy,
-//     so a task could be marked shipped while its code sat on an unmerged
-//     branch.
-//
-// Both fail closed on unreadable evidence, for the same reason releaseTargetGate
-// does: a check that passes when its input is missing is not a check.
+// Lifecycle-gate errors. The board's two terminal columns are claims about the
+// world, and until these gates existed nothing checked either one: done claims
+// "this passed its review chain" (a card could be dragged straight into done
+// without any reviewer ever seeing it), and released claims "this is live in
+// production" (a task could be marked shipped while its code sat on an unmerged
+// branch). Both fail closed on unreadable evidence, for the same reason
+// releaseTargetGate does: a check that passes when its input is missing is not
+// a check.
 var (
 	// ErrReviewChainIncomplete blocks done/released for a task that never
-	// passed one of the stages its type requires. The wrapped detail names the
+	// passed one of the stages its type requires; the wrapped detail names the
 	// missing stages and the move that earns each one.
 	ErrReviewChainIncomplete = errors.New("done means the task passed its review chain, and this one has not")
 	// ErrReviewStageRejected blocks done/released for a task whose most recent
-	// visit to a review stage ended in a recorded rejection. Having visited a
+	// visit to a review stage ended in a recorded rejection — having visited a
 	// gate is not the same as having passed it.
 	ErrReviewStageRejected = errors.New("a review stage rejected this task and it has not been re-reviewed since")
 	// ErrReleaseNotDeployed blocks released for a task with no successful
@@ -38,7 +31,7 @@ var (
 // reviewed" without depending on who moved it or on a verdict field that is
 // only written when require_human_review is on. A task that bounced through
 // need_revision and came back keeps its earlier spans, so rework is not
-// punished — the stage stays passed.
+// punished.
 type ReviewStage struct {
 	// Column must appear in the task's span history for the stage to count.
 	Column TaskColumn

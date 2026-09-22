@@ -688,8 +688,7 @@ func (s *Service) buildMessageHistory(ctx context.Context, sessionID uuid.UUID) 
 		}
 		history = append(history, dm)
 	}
-	// history is index-parallel to msgs here — the only point where a domain
-	// message can still be traced back to the row whose attachments it owns.
+
 	attachImageAttachments(ctx, s.attachments, msgs, history)
 	return s.withActionDigest(ctx, sessionID, history), nil
 }
@@ -826,20 +825,6 @@ func (s *Service) prepareRunContext(
 	return ctx, history, nil
 }
 
-// parkTurnOnQuota is the chat equivalent of the board runner parking a task on
-// domain.QuotaBlock: instead of failing the turn, it records enough to rerun
-// it once the usage limit lifts (see SessionQuotaSweeper) and tells the user
-// their message is queued rather than that it failed.
-//
-// Best-effort by design, like appendAssistantError: this already runs on an
-// error path, so a second failure here (the park itself could not be written)
-// falls back to the plain notice rather than losing the turn's outcome
-// entirely.
-// The returned error is always a *domain.QuotaNotice (queued wording on
-// success, or the block itself when the park could not be written) — never
-// nil — so a caller that returns it straight through hands its own caller
-// (the SSE handler, in particular) the sentence a reader should see, not the
-// board-card-style Error() a bare *domain.QuotaBlock would give them.
 func (s *Service) parkTurnOnQuota(ctx context.Context, sessionID uuid.UUID, req domain.SessionMessageRequest, policy domain.ToolPolicy, block *domain.QuotaBlock, lang string) error {
 	if err := s.store.ParkPendingTurn(context.WithoutCancel(ctx), sessionID, req, policy, block.ResumeAt); err != nil {
 		log.Warn().Err(err).Str("session_id", sessionID.String()).Msg("could not park a quota-blocked chat turn; the user will have to resend it")

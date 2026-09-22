@@ -1,9 +1,8 @@
 package domain
 
 // BehaviourKey names one unit of engine behaviour a stage (or, for the three
-// marked "(type)" below, a task type itself) can carry. Each key replaces a
-// hardcoded column/type branch the engine used to read literally — see
-// release-b-plan.md §1 for the file:line each one replaces.
+// marked "(type)" below, a task type itself) can carry, replacing a hardcoded
+// branch the engine used to read literally.
 type BehaviourKey string
 
 const (
@@ -40,15 +39,14 @@ const (
 	BehaviourNoCodeReading            BehaviourKey = "no_code_reading"
 	BehaviourNoReadFile               BehaviourKey = "no_read_file"
 
-	// The three (type)-scoped behaviours live on TaskTypeDef.Behaviours, never
-	// on a stage.
+	// The three (type)-scoped behaviours live on TaskTypeDef.Behaviours.
 	BehaviourDocumentDeliverable  BehaviourKey = "document_deliverable"
 	BehaviourNoWorkspaceWrites    BehaviourKey = "no_workspace_writes"
 	BehaviourRequireRepoGrounding BehaviourKey = "require_repo_grounding"
 )
 
-// BehaviourScope says whether a behaviour attaches to a stage (a
-// column x task-type row) or to the task type itself.
+// BehaviourScope says whether a behaviour attaches to a stage or the task type
+// itself.
 type BehaviourScope string
 
 const (
@@ -56,14 +54,13 @@ const (
 	BehaviourScopeType  BehaviourScope = "type"
 )
 
-// ParamType is the shape UI and validation expect a behaviour param's value
-// to take. Every param value is still a plain string on the wire (see
-// BehaviourRef.Params) — this is what that string must parse as.
+// ParamType is the shape a behaviour param's value must parse as (params are
+// plain strings on the wire).
 type ParamType string
 
 const (
-	// ParamTypeColumn is a board column slug: a value UpdateColumns must not
-	// be able to silently orphan (see workflow.ValidateStages).
+	// ParamTypeColumn is a board column slug; UpdateColumns must not silently
+	// orphan it.
 	ParamTypeColumn ParamType = "column"
 	ParamTypeString ParamType = "string"
 	ParamTypeEnum   ParamType = "enum"
@@ -80,8 +77,7 @@ type ParamSpec struct {
 }
 
 // BehaviourSpec is one entry of BehaviourRegistry: everything validation and
-// the UI's behaviour picker need to know about a behaviour without the engine
-// package in scope.
+// the UI's behaviour picker need without the engine package in scope.
 type BehaviourSpec struct {
 	Scope       BehaviourScope
 	Label       string
@@ -89,10 +85,8 @@ type BehaviourSpec struct {
 	Params      []ParamSpec
 }
 
-// BehaviourRegistry is the single source of truth for which behaviour keys
-// exist, what scope they attach at, and what params they take. Both
-// workflow.ValidateStages and GET /v1/workflow/behaviours read this map
-// rather than keeping a second list in sync with it.
+// BehaviourRegistry is the single source of truth for behaviour keys, scopes
+// and params; workflow.ValidateStages and the behaviours endpoint read it.
 var BehaviourRegistry = map[BehaviourKey]BehaviourSpec{
 	BehaviourDispatchSuspended: {
 		Scope: BehaviourScopeStage, Label: "Dispatch suspended",

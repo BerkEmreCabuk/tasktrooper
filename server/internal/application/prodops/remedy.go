@@ -11,13 +11,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 )
 
-// deployCorrelationWindow is how long after a deploy a new incident is still
-// blamed on that deploy. Long enough to cover a slow rollout, short enough that
-// an unrelated outage hours later is not attributed to it.
 const deployCorrelationWindow = 45 * time.Minute
 
-// DeployRecord is one finished deploy of the affected repository, flattened
-// from the pipeline history so the engine does not depend on pipeline types.
 type DeployRecord struct {
 	Env        string
 	Status     domain.PipelineStatus
@@ -25,21 +20,14 @@ type DeployRecord struct {
 	TaskKey    string
 }
 
-// RemedyContext is everything the suggestion engine reasons over. It is
-// assembled by the service; the engine itself is pure so its verdicts are
-// reproducible and testable.
 type RemedyContext struct {
 	Incident domain.Incident
 	Target   domain.DeployTarget
-	Rollback string // provider rollback hint from the deploy template
+	Rollback string
 	Deploys  []DeployRecord
 	History  []domain.Incident
 }
 
-// Suggest produces the incident's remedy: what most likely broke, and the
-// concrete steps to take. It always returns something actionable — an unknown
-// cause yields a diagnostic checklist rather than silence, because "I don't
-// know how to fix this" is the failure mode this engine exists to remove.
 func Suggest(c RemedyContext) domain.Remedy {
 	if r, ok := rollbackRemedy(c); ok {
 		return r
@@ -50,9 +38,6 @@ func Suggest(c RemedyContext) domain.Remedy {
 	return signatureRemedy(c)
 }
 
-// rollbackRemedy fires when a deploy to the same environment finished shortly
-// before the incident: the newest change is the first suspect, and undoing it
-// is the fastest way back to a working production.
 func rollbackRemedy(c RemedyContext) (domain.Remedy, bool) {
 	onset := c.Incident.FirstSeenAt
 	if onset.IsZero() {
@@ -113,9 +98,6 @@ func rollbackRemedy(c RemedyContext) (domain.Remedy, bool) {
 	}, true
 }
 
-// repeatRemedy reuses what actually fixed the same fingerprint last time. A
-// recurring incident is the cheapest possible diagnosis — as long as the repeat
-// is surfaced instead of being rediscovered from scratch.
 func repeatRemedy(c RemedyContext) (domain.Remedy, bool) {
 	for _, past := range c.History {
 		if (past.ID != uuid.Nil && past.ID == c.Incident.ID) || strings.TrimSpace(past.Remedy) == "" {
@@ -145,7 +127,6 @@ func repeatRemedy(c RemedyContext) (domain.Remedy, bool) {
 	return domain.Remedy{}, false
 }
 
-// signatureClass is one keyword → hypothesis rule.
 type signatureClass struct {
 	kind     string
 	keywords []string
@@ -153,8 +134,6 @@ type signatureClass struct {
 	steps    []string
 }
 
-// signatures are checked in order; the first match wins, so the more specific
-// classes come first.
 var signatures = []signatureClass{
 	{
 		kind:     domain.RemedyKindConfig,
@@ -198,8 +177,6 @@ var signatures = []signatureClass{
 	},
 }
 
-// signatureRemedy classifies by error signature when there is no deploy to
-// blame and no history to copy.
 func signatureRemedy(c RemedyContext) domain.Remedy {
 	haystack := strings.ToLower(c.Incident.Title + "\n" + c.Incident.Detail)
 	for _, sig := range signatures {
@@ -226,8 +203,7 @@ func signatureRemedy(c RemedyContext) domain.Remedy {
 		"Compare the failing environment against the last environment where it worked.",
 	}
 	if c.Target.HealthURL != "" {
-		// Redacted: this text is handed to an agent, and a health URL with a
-		// token in its query string would otherwise land in model context.
+
 		steps = append(steps, "Probe the health endpoint directly: "+urlguard.LogRaw(c.Target.HealthURL))
 	}
 	return domain.Remedy{

@@ -16,10 +16,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// --- fakes -----------------------------------------------------------------
-
 type fakeLinks struct {
-	rows map[string]domain.HostingLink // area → link
+	rows map[string]domain.HostingLink
 }
 
 func newFakeLinks() *fakeLinks { return &fakeLinks{rows: map[string]domain.HostingLink{}} }
@@ -80,8 +78,8 @@ type fakeVercel struct {
 	user     domain.VercelUser
 	userErr  error
 	teams    []domain.VercelTeam
-	projects map[string][]domain.VercelProject // teamID → projects
-	// projectCalls records Project(ctx, …) lookups.
+	projects map[string][]domain.VercelProject
+
 	projectCalls []string
 }
 
@@ -161,8 +159,6 @@ var (
 	}
 )
 
-// --- detection ----------------------------------------------------------------
-
 func TestDetectSingleFrontendRepoGitLinkIsExact(t *testing.T) {
 	repo := domain.Repository{ID: uuid.New(), Name: "solo", Kind: domain.RepoKindFrontend, RootPath: t.TempDir()}
 	api := &fakeVercel{projects: map[string][]domain.VercelProject{"team_1": {soloProject, webProject}}}
@@ -225,8 +221,7 @@ func TestDetectMonorepoSplitsAreasByRootDirectory(t *testing.T) {
 	if fe.Confidence != domain.HostingConfidenceExact || fe.Candidates[0].Project.ID != "prj_web" || fe.Candidates[0].Reason != domain.HostingMatchGitLinkDir {
 		t.Fatalf("frontend should resolve to the apps/web project exactly, got %+v", fe.Candidates)
 	}
-	// The docs project is git-linked to the same repo but built from another
-	// folder: it must still be offered, just not as the decisive answer.
+
 	if len(fe.Candidates) != 2 || fe.Candidates[1].Reason != domain.HostingMatchGitLink {
 		t.Fatalf("frontend candidates = %+v", fe.Candidates)
 	}
@@ -237,8 +232,7 @@ func TestDetectMonorepoSplitsAreasByRootDirectory(t *testing.T) {
 	if be.Area != domain.RepoKindBackend || be.Directory != "apps/api" {
 		t.Fatalf("backend area = %+v", be)
 	}
-	// Both projects are git-linked to the repo but neither is built from
-	// apps/api, so the backend is ambiguous — the UI must ask.
+
 	if be.Confidence != domain.HostingConfidenceAmbiguous {
 		t.Fatalf("backend confidence = %s (%+v)", be.Confidence, be.Candidates)
 	}
@@ -272,7 +266,7 @@ func TestDetectProjectJSONWinsAndReachesOtherTeam(t *testing.T) {
 	if len(api.projectCalls) != 1 || api.projectCalls[0] != "team_2/prj_other" {
 		t.Fatalf("expected a direct lookup in the file's team, got %v", api.projectCalls)
 	}
-	// The git-linked project in the default team is still listed, second.
+
 	if len(a.Candidates) != 2 || a.Candidates[1].Project.ID != "prj_solo" {
 		t.Fatalf("candidates = %+v", a.Candidates)
 	}
@@ -309,8 +303,6 @@ func TestDetectSkipsMobileRepos(t *testing.T) {
 		t.Fatalf("det = %+v", det)
 	}
 }
-
-// --- linking ------------------------------------------------------------------
 
 func TestLinkVercelResolvesProjectAndFillsProdTarget(t *testing.T) {
 	repo := domain.Repository{ID: uuid.New(), Name: "solo", Kind: domain.RepoKindFrontend}
@@ -364,7 +356,7 @@ func TestLinkVercelLeavesForeignProdTargetAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Personal account: the scope slug is the username.
+
 	if link.ScopeSlug != "akif" || link.ScopeID != "" {
 		t.Fatalf("link = %+v", link)
 	}
@@ -428,8 +420,6 @@ func TestLinkVercelWithoutConnectionIsRefused(t *testing.T) {
 		t.Fatalf("err = %v", err)
 	}
 }
-
-// --- connection ---------------------------------------------------------------
 
 func TestConnectVerifiesTokenAndTeam(t *testing.T) {
 	creds := &fakeCreds{}

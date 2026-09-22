@@ -16,8 +16,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// SkillRuleManager is the narrow slice of the catalog service the evolution
-// engine needs to apply skill/rule changes (embeddings happen inside).
 type SkillRuleManager interface {
 	CreateSkillForAgent(ctx context.Context, agentID uuid.UUID, req domain.CreateSkillRequest) (domain.Skill, error)
 	UpdateSkillForAgent(ctx context.Context, agentID, skillID uuid.UUID, req domain.UpdateSkillRequest) (domain.Skill, error)
@@ -118,7 +116,7 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) tick(ctx context.Context) {
-	// Arka plan bakım döngüsü süreci asla öldürmemeli.
+	// A background maintenance loop must never take the process down with it.
 	defer func() {
 		if r := recover(); r != nil {
 			log.Error().Any("panic", r).Msg("evolution tick panicked")
@@ -152,7 +150,6 @@ func (s *Service) tick(ctx context.Context) {
 	}
 }
 
-// reflectionDue: periodic reflection interval elapsed AND the window has signal.
 func (s *Service) reflectionDue(ctx context.Context, agentRec domain.Agent, now time.Time) bool {
 	last, err := s.store.LatestReflectionByTrigger(ctx, agentRec.ID, domain.ReflectionTriggerPeriodic)
 	if err != nil {
@@ -185,11 +182,7 @@ func (s *Service) reflectionDue(ctx context.Context, agentRec domain.Agent, now 
 	return false
 }
 
-// NotifyRevision triggers a debounced mini-reflection for the task assignee.
-//
-// The reflection outlives the board move that triggered it, so ctx is
-// stripped of the request's cancellation (context.WithoutCancel) and given
-// its own timeout instead.
+// The reflection outlives the board move that triggered it, so the request's cancellation is stripped (context.WithoutCancel) and replaced with its own timeout.
 func (s *Service) NotifyRevision(ctx context.Context, task domain.BoardTask) {
 	if !s.cfg.Enabled || task.AssigneeAgentID == nil {
 		return
@@ -208,14 +201,12 @@ func (s *Service) NotifyRevision(ctx context.Context, task domain.BoardTask) {
 	}()
 }
 
-// ReflectNow starts a manual reflection; returns the running reflection row.
 func (s *Service) ReflectNow(ctx context.Context, agentID uuid.UUID) (domain.AgentReflection, error) {
 	return s.StartReflection(ctx, agentID, domain.ReflectionTriggerManual)
 }
 
 var ErrReflectionInFlight = fmt.Errorf("a reflection is already running for this agent")
 
-// StartReflection creates the reflection row and processes it asynchronously.
 func (s *Service) StartReflection(ctx context.Context, agentID uuid.UUID, trigger string) (domain.AgentReflection, error) {
 	key := agentID.String()
 	s.mu.Lock()
@@ -268,15 +259,7 @@ func (s *Service) ListReflections(ctx context.Context, agentID uuid.UUID, limit 
 	return reflections, nil
 }
 
-// deriveLegacyDecisions fills in ReflectionDecision, on the response only, for
-// completed reflections written before Decision existed — they still hold
-// RawOutput, and the fixed parseReflectionOutput can now read it. Nothing here
-// is written back: a legacy row stays legacy every time it's listed, tagged so
-// the UI can tell "derived after the fact" from "the actual apply record".
-//
-// reflections is s.store.ListReflections' own result, ordered created_at DESC,
-// which the baseline backfill below depends on: for row i, an older completed
-// reflection with a snapshot is anything at index > i.
+// Completed reflections written before Decision held only RawOutput, which the fixed parser now reads — nothing is written back, and Legacy tags the derivation so the UI can tell it from the actual apply record. The baseline backfill below relies on ListReflections being created_at DESC: an older completed snapshot for row i sits at index > i.
 func deriveLegacyDecisions(reflections []domain.AgentReflection) {
 	for i := range reflections {
 		r := &reflections[i]
@@ -320,9 +303,7 @@ func deriveLegacyDecisions(reflections []domain.AgentReflection) {
 	}
 }
 
-// legacyChangeOutcomes reconstructs the proposed-change list a legacy
-// reflection never got to apply: every change lands with outcome=not_applied,
-// since a legacy row (by definition) predates this outcome bookkeeping.
+// A legacy row never got to apply, so every change lands as not_applied.
 func legacyChangeOutcomes(output domain.ReflectionOutput) []domain.ReflectionChangeOutcome {
 	var out []domain.ReflectionChangeOutcome
 	for _, ch := range output.Skills {

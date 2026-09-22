@@ -39,17 +39,11 @@ type Dispatcher struct {
 	workOrder    *WorkOrder
 	gatePolicy   PipelineGatePolicy
 	reviewLoop   *ReviewLoopGuard
-	// workflows/roles back every mid-lifecycle-column/task-type decision in
-	// this file (see workflowFor). roles is not read directly here yet.
-	workflows port.WorkflowReader
-	roles     port.RoleResolver
+	workflows    port.WorkflowReader
+	roles        port.RoleResolver
 }
 
-// workflowFor resolves the workflow a dispatch decision for this task type
-// should read. False means "treat every workflow-gated behaviour as closed":
-// either the reader was never wired, or Workflow() itself errored (empty/not-
-// yet-loaded snapshot) — an unreadable workflow must never read the same as
-// an absent behaviour, so callers suspend rather than guess.
+// An unreadable workflow must never read the same as an empty one.
 func (d *Dispatcher) workflowFor(ctx context.Context, taskType domain.TaskType) (domain.Workflow, bool) {
 	if d.workflows == nil {
 		return domain.Workflow{}, false
@@ -148,7 +142,6 @@ func (d *Dispatcher) Dispatch(ctx context.Context, input DispatchInput) error {
 	if d.spans != nil &&
 		(input.EventType == domain.BoardEventTaskMoved || input.EventType == domain.BoardEventTaskCreated) {
 		if err := d.spans.RecordMove(ctx, input.RepositoryID, input.Task.ID, string(input.Task.Column), event.CreatedAt); err != nil {
-			// A missing span costs a KPI data point, never the move itself.
 			log.Warn().Err(err).Str("task_id", input.Task.ID.String()).Msg("record column span failed")
 		}
 	}
@@ -267,14 +260,7 @@ func (d *Dispatcher) alreadyWorkingOn(ctx context.Context, eventType domain.Boar
 	}
 }
 
-// isDispatchSuspendedTask reports whether a task must never be dispatched
-// from its own event. blocked/backlog/released are system columns every task
-// type parks in the same way, so they stay literal; done is the one column
-// whose suspension used to turn on the task's TYPE (an analiz task keeps
-// working in done, decomposing itself, while task/bug/technical stop there) —
-// that is now the presence of dispatch_suspended on the type's own done stage,
-// read off the type's workflow instead of compared against TaskTypeAnaliz.
-// !wfOK fails closed: an unreadable workflow suspends rather than guesses.
+// blocked/backlog/released are system columns every task passes through - a task must never dispatch work from its own event there.
 func isDispatchSuspendedTask(wf domain.Workflow, wfOK bool, task domain.BoardTask) bool {
 	switch task.Column {
 	case domain.TaskColumnBlocked, domain.TaskColumnBacklog, domain.TaskColumnReleased:
@@ -354,12 +340,6 @@ func actorAgentIDFromPayload(payload map[string]interface{}) uuid.UUID {
 	return id
 }
 
-// isHandoffGateColumn reports whether this column's move wakes every
-// subscriber instead of only the task's assignee — route_to_subscribers, on
-// every column that behaviour carries (the same set for every type, since
-// it is a type-uniform "all types" behaviour, not a per-type one). !wfOK
-// fails to the wider net (true): an unreadable workflow must not silently
-// narrow a handoff gate down to a single, possibly-nil assignee.
 func isHandoffGateColumn(wf domain.Workflow, wfOK bool, col domain.TaskColumn) bool {
 	if !wfOK {
 		return true
@@ -367,9 +347,7 @@ func isHandoffGateColumn(wf domain.Workflow, wfOK bool, col domain.TaskColumn) b
 	return wf.Has(col, domain.BehaviourRouteToSubscribers)
 }
 
-// columnInstructionForAgent is the per-agent per-column prompt the run should
-// carry, keyed by the column the task was in when this run was dispatched.
-// It is a config append, never an override, and a missing row is "no text".
+// A config append, never an override; a missing row is "no text".
 func (d *Dispatcher) columnInstructionForAgent(ctx context.Context, agentID uuid.UUID, column domain.TaskColumn) string {
 	instructions, err := d.board.ListAgentColumnInstructions(ctx, agentID)
 	if err != nil {
@@ -416,11 +394,6 @@ func (d *Dispatcher) resolveAgents(ctx context.Context, wf domain.Workflow, wfOK
 	}
 }
 
-// pipelineGateDecision answers whether a move into code_review defers
-// dispatch for the CI gate. wait_for_ci is a type-uniform "all types"
-// behaviour (the pipeline gate applies the same way whatever the task type),
-// so !wfOK fails closed to "defer" — an unreadable workflow must not open a
-// gate it cannot actually evaluate.
 func (d *Dispatcher) pipelineGateDecision(ctx context.Context, wf domain.Workflow, wfOK bool, input DispatchInput) (defers bool, skipReason string) {
 	if !d.pipelineGate || input.SkipPipelineGate ||
 		input.EventType != domain.BoardEventTaskMoved {

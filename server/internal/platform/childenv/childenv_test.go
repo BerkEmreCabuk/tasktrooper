@@ -9,10 +9,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/childenv"
 )
 
-// ChildEnvSuite pins the properties all three call sites depend on. The
-// end-to-end proofs live next to each caller (they run real subprocesses and
-// read real output); these are the invariants that would otherwise have to be
-// re-asserted in each of the three.
 type ChildEnvSuite struct {
 	suite.Suite
 }
@@ -21,8 +17,7 @@ func TestChildEnvSuite(t *testing.T) {
 	suite.Run(t, new(ChildEnvSuite))
 }
 
-// A parent process's environment plus the shapes a future credential is
-// likely to arrive in.
+// parentWithSecrets includes a credential that does not exist yet on purpose.
 var parentWithSecrets = []string{
 	"PATH=/usr/bin:/bin",
 	"HOME=/home/bridge",
@@ -54,8 +49,6 @@ func (s *ChildEnvSuite) TestNothingUnlistedSurvives() {
 	}
 }
 
-// The allowlist earns its keep on the variable nobody has thought of yet: a
-// prefix rule (GO*, NODE_*, GIT_*) would forward these by default.
 func (s *ChildEnvSuite) TestPrefixLookalikesAreNotForwarded() {
 	for _, name := range []string{
 		"GOOGLE_APPLICATION_CREDENTIALS",
@@ -82,9 +75,6 @@ func (s *ChildEnvSuite) TestToolchainSurfaceSurvives() {
 	}
 }
 
-// The tools image sets these so Playwright/Puppeteer drive the preinstalled
-// system Chromium instead of downloading a browser on every npm ci; forwarding
-// them must not drag the pod's own secrets through the same gap.
 func (s *ChildEnvSuite) TestBrowserVariablesForwardedPodSecretsAreNot() {
 	for _, name := range []string{
 		"CHROME_BIN", "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD",
@@ -97,9 +87,8 @@ func (s *ChildEnvSuite) TestBrowserVariablesForwardedPodSecretsAreNot() {
 	}
 }
 
-// The result is handed straight to exec.Cmd.Env. An empty slice there means
-// "inherit the parent's environment", so returning one would reinstate the
-// exact leak this package removes — the failure mode is silent and total.
+// A nil or empty Env inherits the parent's environment, so returning one would
+// reinstate the exact leak this package removes — silently and totally.
 func (s *ChildEnvSuite) TestNeverReturnsAnEmptyEnvironment() {
 	for _, parent := range [][]string{nil, {}, {"DATABASE_URL=postgres://x"}, {"malformed-no-equals"}} {
 		env := childenv.For(parent, nil)
@@ -108,8 +97,6 @@ func (s *ChildEnvSuite) TestNeverReturnsAnEmptyEnvironment() {
 	}
 }
 
-// A child with no PATH cannot run anything, and a scrub that breaks every
-// command gets switched off rather than fixed.
 func (s *ChildEnvSuite) TestPathFallsBackWhenTheParentHasNone() {
 	env := childenv.For([]string{"HOME=/home/bridge"}, nil)
 
@@ -127,10 +114,8 @@ func (s *ChildEnvSuite) TestPathFallsBackWhenTheParentHasNone() {
 	}
 }
 
-// The overlay is the call site's own statement of intent — a repo's pinned
-// toolchain, an MCP server's configured credentials — and must beat anything
-// inherited. os/exec keeps the last value for a repeated name, so "last" is the
-// whole mechanism.
+// os/exec keeps the last value for a repeated name; appending last is the whole
+// mechanism that lets an overlay beat an inherited value.
 func (s *ChildEnvSuite) TestOverlayIsAppendedLast() {
 	env := childenv.For([]string{"PATH=/usr/bin", "GOTOOLCHAIN=host-default"},
 		[]string{"PATH=/opt/go1.23/bin:/usr/bin", "GOTOOLCHAIN=go1.23.4+auto"})
@@ -139,10 +124,6 @@ func (s *ChildEnvSuite) TestOverlayIsAppendedLast() {
 	s.Equal("GOTOOLCHAIN=go1.23.4+auto", env[len(env)-1])
 }
 
-// git authentication travels in a per-command http.extraHeader in this
-// codebase, so the child has no credential to answer a prompt with. Without
-// this the command blocks on stdin until its timeout, which reads as a flaky
-// failure rather than "this remote needs auth".
 func (s *ChildEnvSuite) TestGitPromptsAreDisabled() {
 	s.Contains(childenv.For(parentWithSecrets, nil), "GIT_TERMINAL_PROMPT=0")
 }

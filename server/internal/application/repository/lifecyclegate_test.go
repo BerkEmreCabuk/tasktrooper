@@ -13,8 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeStageEvidence is the span ledger reduced to what the gate asks it: which
-// columns this task has been in, and what verdict its latest visit carried.
 type fakeStageEvidence struct {
 	verdicts map[string]string
 	err      error
@@ -27,8 +25,6 @@ func (f *fakeStageEvidence) LatestVerdicts(context.Context, uuid.UUID) (map[stri
 	return f.verdicts, nil
 }
 
-// visited builds a span history with no recorded verdicts — the shape every
-// repository has while require_human_review is off, which is the majority.
 func visited(columns ...domain.TaskColumn) *fakeStageEvidence {
 	v := make(map[string]string, len(columns))
 	for _, c := range columns {
@@ -37,15 +33,11 @@ func visited(columns ...domain.TaskColumn) *fakeStageEvidence {
 	return &fakeStageEvidence{verdicts: v}
 }
 
-// withVerdict stamps the latest visit to one column, the way ReviewGate does
-// while require_human_review is on.
 func (f *fakeStageEvidence) withVerdict(col domain.TaskColumn, verdict string) *fakeStageEvidence {
 	f.verdicts[string(col)] = verdict
 	return f
 }
 
-// fakeColumns is a ColumnValidator for a board whose columns were customised:
-// only the slugs it was given exist.
 type fakeColumns struct {
 	slugs map[string]bool
 }
@@ -66,7 +58,6 @@ func (f *fakeColumns) ValidateColumn(_ context.Context, slug string) error {
 }
 func (f *fakeColumns) ValidateTransition(context.Context, string, string) error { return nil }
 
-// fakeDeployPipelines serves a task's pipeline history to the release gate.
 type fakeDeployPipelines struct {
 	fakeReleasePipelineStore
 	runs []domain.TaskPipeline
@@ -84,8 +75,6 @@ func deployRun(trigger domain.PipelineTrigger, status domain.PipelineStatus) dom
 	return domain.TaskPipeline{ID: uuid.New(), Trigger: trigger, Status: status}
 }
 
-// fakePipelineJobs answers "does this repository map a real workflow for this
-// deploy category" — the same question PipelineRunner.deployMapped asks.
 type fakePipelineJobs struct {
 	jobs []domain.RepositoryPipelineJob
 	err  error
@@ -109,9 +98,6 @@ func mappedProdWorkflow() *fakePipelineJobs {
 	}}}
 }
 
-// done means "this passed its review chain". Which stages that is depends on
-// the task type, and the evidence is the span ledger — every visit the task
-// ever made — so rework through need_revision does not erase a passed stage.
 func TestReviewChainGate(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -121,7 +107,7 @@ func TestReviewChainGate(t *testing.T) {
 		target   domain.TaskColumn
 		off      bool
 		wantErr  error
-		wantSaid []string // fragments the block must name, so it is actionable
+		wantSaid []string
 	}{
 		{
 			name:     "task with the full chain reaches done",
@@ -190,9 +176,7 @@ func TestReviewChainGate(t *testing.T) {
 			wantSaid: []string{"released"},
 		},
 		{
-			// Otherwise every task already sitting in done on the day a
-			// repository opts in would be stranded there, including the ones
-			// the pipeline runner is about to release for real.
+
 			name:     "the ordinary done to released promotion is not re-checked",
 			taskType: "task",
 			spans:    visited(domain.TaskColumnInProgress, domain.TaskColumnDone),
@@ -285,8 +269,6 @@ func TestReviewChainGate(t *testing.T) {
 	}
 }
 
-// A repository that armed the gate but has no span ledger wired cannot prove
-// anything about any task, and an unprovable review chain is a block.
 func TestReviewChainGateWithoutSpanStoreFailsClosed(t *testing.T) {
 	svc := &Service{}
 	err := svc.reviewChainGate(context.Background(),
@@ -298,14 +280,10 @@ func TestReviewChainGateWithoutSpanStoreFailsClosed(t *testing.T) {
 	}
 }
 
-// board_columns is user-editable. A stage whose column this board does not have
-// cannot be reached by anybody, so requiring it would park every task instead of
-// checking anything — the rest of the chain is still enforced.
 func TestReviewChainGateSkipsStagesTheBoardDoesNotHave(t *testing.T) {
 	repo := domain.Repository{ID: uuid.New(), RequireReviewChain: true}
 	task := domain.BoardTask{ID: uuid.New(), Key: "APP-9", TaskType: "task"}
 
-	// A board with no QA columns at all: code review and UAT still apply.
 	noQA := &Service{
 		spans:     visited(domain.TaskColumnCodeReview, domain.TaskColumnPMUAT),
 		columns:   boardWith(domain.TaskColumnCodeReview, domain.TaskColumnPMUAT, domain.TaskColumnDone),
@@ -329,8 +307,6 @@ func TestReviewChainGateSkipsStagesTheBoardDoesNotHave(t *testing.T) {
 	}
 }
 
-// released means "live in production". The evidence is a successful deploy
-// pipeline for this very task — not a state, and not a pipeline that ran nothing.
 func TestReleaseDeployGate(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -472,9 +448,6 @@ func TestReleaseDeployGate(t *testing.T) {
 	}
 }
 
-// The gates have to bite on the real move path, for every mover. An agent's
-// move_task, a human's drag and the pipeline runner's own release all land in
-// UpdateTask, and "done means reviewed" cannot depend on who typed it.
 func TestUpdateTaskEnforcesLifecycleGatesForEveryActor(t *testing.T) {
 	agentID := uuid.New()
 
@@ -522,7 +495,7 @@ func TestUpdateTaskEnforcesLifecycleGatesForEveryActor(t *testing.T) {
 		},
 		{
 			name:  "done to released after a successful prod deploy is allowed",
-			actor: domain.TaskActorSystem, // the pipeline runner's own release move
+			actor: domain.TaskActorSystem,
 			from:  domain.TaskColumnDone,
 			to:    domain.TaskColumnReleased,
 			spans: visited(domain.TaskColumnCodeReview, domain.TaskColumnInQA,
@@ -580,9 +553,6 @@ func TestUpdateTaskEnforcesLifecycleGatesForEveryActor(t *testing.T) {
 	}
 }
 
-// Nothing changes for a repository that never opted in: the same unreviewed
-// move that is refused above is allowed here, which is what makes this shippable
-// against boards that are mid-flight, have no QA agent, or use custom columns.
 func TestUpdateTaskLeavesUnOptedRepositoriesAlone(t *testing.T) {
 	repoID, taskID := uuid.New(), uuid.New()
 	tasks := &fakeReleaseTaskStore{task: domain.BoardTask{

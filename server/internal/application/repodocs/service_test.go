@@ -13,9 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeRepos is a one-row repository store. It applies the same subset of
-// UpdateRepositoryRequest the service actually sends (docs and sub-projects),
-// so a test can assert where a doc path landed.
 type fakeRepos struct {
 	repo        domain.Repository
 	docsTaskIDs []string
@@ -84,9 +81,6 @@ func (f *fakeMerger) MergeTaskPullRequest(_ context.Context, _, taskID uuid.UUID
 	return f.result, f.err
 }
 
-// fakeRoleResolver is a fixed-response port.RoleResolver: it answers
-// AgentForPurpose(system_task_assignee) with one agent id and everything else
-// with "nobody".
 type fakeRoleResolver struct {
 	agentID uuid.UUID
 }
@@ -109,8 +103,6 @@ func (f fakeRoleResolver) AssigneeForNewTask(_ context.Context, _ domain.TaskTyp
 	return requested, nil
 }
 
-// A doc-authoring task's assignee comes from the developer role's
-// system_task_assignee purpose now, not a hardcoded agent-name lookup.
 func TestCreateDocTaskAssignsThroughRoleResolver(t *testing.T) {
 	svc, repos, tasks := newFixture(t, domain.Repository{Kind: domain.RepoKindBackend})
 	resolver := fakeRoleResolver{agentID: uuid.New()}
@@ -123,9 +115,6 @@ func TestCreateDocTaskAssignsThroughRoleResolver(t *testing.T) {
 	require.Equal(t, resolver.agentID, *tasks.created[0].AssigneeAgentID)
 }
 
-// A docs bundle spanning several sub-projects is assigned to the developer
-// covering most of the areas in it (bundleArea), still resolved through the
-// role rather than a hardcoded name.
 func TestCreateDocsBundleTaskAssignsThroughBundleArea(t *testing.T) {
 	svc, repos, tasks := newFixture(t, domain.Repository{
 		Kind: domain.RepoKindMonorepo,
@@ -179,7 +168,6 @@ func TestCreateDocsBundleTaskOpensOneTaskNamingEveryPath(t *testing.T) {
 	require.Contains(t, req.Description, "one pull request")
 	require.Contains(t, req.Description, "Do not open a pull request per document")
 
-	// Every path is claimed by the repository before the task exists.
 	require.Equal(t, ".ai/coding-standards.md", repos.repo.Docs.CodingStandards)
 	require.Equal(t, ".ai/architecture.md", repos.repo.Docs.Architecture)
 	require.Equal(t, "scripts/dev.sh", repos.repo.Docs.LocalRun)
@@ -206,8 +194,6 @@ func TestCreateDocsBundleTaskPrefixesSubProjectPaths(t *testing.T) {
 	require.Contains(t, desc, "apps/api/scripts/dev.sh")
 	require.Contains(t, desc, "docs/overview.md")
 
-	// The sub-project rows keep their own paths, unprefixed, and neither write
-	// clobbered the other.
 	byPath := map[string]domain.RepoSubProject{}
 	for _, sp := range repos.repo.SubProjects {
 		byPath[sp.Path] = sp
@@ -217,8 +203,6 @@ func TestCreateDocsBundleTaskPrefixesSubProjectPaths(t *testing.T) {
 	require.Equal(t, "docs/overview.md", repos.repo.Docs.Architecture)
 }
 
-// local_run asks for a script, not prose: the whole point of feature 3 is that
-// a task cannot be satisfied by a markdown guide.
 func TestBundleDescriptionAsksForAScriptForLocalRun(t *testing.T) {
 	svc, repos, tasks := newFixture(t, domain.Repository{Kind: domain.RepoKindBackend})
 	_, err := svc.CreateDocsBundleTask(context.Background(), repos.repo.ID, []repodocs.DocItem{
@@ -289,8 +273,6 @@ func TestDocsTaskReportsColumnAndPullRequest(t *testing.T) {
 	require.False(t, status.Merged)
 }
 
-// A task that was deleted from the board reads as "nothing outstanding", not
-// as an error: the screen asking should offer to open a new bundle.
 func TestDocsTaskForgivesAVanishedTask(t *testing.T) {
 	svc, repos, tasks := newFixture(t, domain.Repository{Kind: domain.RepoKindBackend})
 	_, err := svc.CreateDocsBundleTask(context.Background(), repos.repo.ID, []repodocs.DocItem{
@@ -328,11 +310,6 @@ func TestMergeDocsTaskRefusesWithoutABundle(t *testing.T) {
 	require.ErrorContains(t, err, "no reference-doc task is outstanding")
 }
 
-// The pull request was already merged — by an earlier call here, by the QA
-// agent's own merge_task_pull_request, or by hand on GitHub. Retrying the
-// merge is refused by the gate, but the screen must read that as "done", not
-// as a failure: it re-reads the task for the commit the gate just recorded
-// and still forgets the bundle.
 func TestMergeDocsTaskTreatsAlreadyMergedAsDoneAndForgetsTheTask(t *testing.T) {
 	svc, repos, tasks := newFixture(t, domain.Repository{Kind: domain.RepoKindBackend})
 	svc.SetTaskPRMerger(&fakeMerger{err: domain.ErrMergeAlreadyMerged})
@@ -342,7 +319,6 @@ func TestMergeDocsTaskTreatsAlreadyMergedAsDoneAndForgetsTheTask(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	// The gate would have recorded these on the task before refusing.
 	tasks.task.PRNumber = 12
 	tasks.task.PRURL = "https://github.com/acme/app/pull/12"
 	tasks.task.MergeCommitSHA = "abc1234567890000000000000000000000000000"
@@ -355,8 +331,6 @@ func TestMergeDocsTaskTreatsAlreadyMergedAsDoneAndForgetsTheTask(t *testing.T) {
 	require.Equal(t, []string{task.ID.String(), ""}, repos.docsTaskIDs, "an already-merged PR still clears the task")
 }
 
-// A refused merge leaves the task recorded: the docs are not on the default
-// branch, and forgetting the card would strand the branch.
 func TestMergeDocsTaskKeepsTheTaskWhenTheMergeIsRefused(t *testing.T) {
 	svc, repos, _ := newFixture(t, domain.Repository{Kind: domain.RepoKindBackend})
 	svc.SetTaskPRMerger(&fakeMerger{err: errors.New("merge refused: the task is in `code_review`")})
@@ -382,8 +356,7 @@ func TestBundleDescriptionListsEveryDocBeforeDetailingThem(t *testing.T) {
 	desc := tasks.created[0].Description
 	require.Contains(t, desc, "1. `.ai/coding-standards.md`")
 	require.Contains(t, desc, "2. `.ai/test-standards.md`")
-	// The numbered list comes before the per-doc sections, so an agent reading
-	// the first paragraph already knows how many files it owes.
+
 	require.Less(t, strings.Index(desc, "1. `.ai/coding-standards.md`"),
 		strings.Index(desc, "## `.ai/coding-standards.md`"))
 }

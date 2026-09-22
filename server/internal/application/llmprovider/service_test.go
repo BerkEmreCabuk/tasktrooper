@@ -14,8 +14,6 @@ type mockStore struct {
 	active  domain.LLMProviderType
 	keys    map[domain.LLMProviderType][]byte
 
-	// embeddingProvider/embeddingModel are stateful so ResolvedEmbedding tests
-	// can assert on what SetEmbedding actually stored.
 	embeddingProvider domain.LLMProviderType
 	embeddingModel    string
 }
@@ -118,11 +116,6 @@ func TestListReturnsAllProviders(t *testing.T) {
 	require.Equal(t, domain.LLMProviderLocal, out.ActiveProvider)
 }
 
-// A host-executed provider is listed so an agent can be put on it, but it is
-// not something to dial: connecting, testing or making it the default
-// would store a configured row for an endpoint that does not exist — and, for
-// Activate, break every chat turn with a missing-client error instead of one
-// honest sentence here.
 func TestHostExecutedProviderCannotBeConnectedOrActivated(t *testing.T) {
 	store := &mockStore{
 		configs: map[domain.LLMProviderType]domain.LLMProviderConfig{},
@@ -132,9 +125,6 @@ func TestHostExecutedProviderCannotBeConnectedOrActivated(t *testing.T) {
 	svc := llmprovider.NewService(store, nil, nil, 0, nil)
 	ctx := context.Background()
 
-	// The sentinel, not the prose: it is what the transport turns into a 409
-	// (adapter/http/permanent_refusal.go), so it is the part of this refusal
-	// that other code depends on.
 	_, err := svc.Connect(ctx, domain.LLMProviderClaudeCode, domain.ConnectLLMProviderRequest{})
 	require.ErrorIs(t, err, domain.ErrHostExecutedUnservable)
 	require.NotContains(t, err.Error(), "on the server host",

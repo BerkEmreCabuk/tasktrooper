@@ -17,8 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// runRecorderStore is the minimum activity store runPipeline needs: it refuses
-// to start without a run id.
+// The minimum activity store runPipeline needs: it refuses to start without a run id.
 type runRecorderStore struct{ port.ActivityStore }
 
 func (runRecorderStore) CreateRun(_ context.Context, sessionID *uuid.UUID, requestID, model string) (domain.SessionRun, error) {
@@ -31,21 +30,17 @@ func (runRecorderStore) AppendStep(_ context.Context, _ uuid.UUID, _ string, _ [
 
 func (runRecorderStore) CompleteRun(_ context.Context, _ uuid.UUID, _ string) error { return nil }
 
-// A failed attempt reads the trace back to tell the retry what it already did.
-// This store keeps none, which is the "no findings to carry" case: the retry
-// falls back to the note it always had.
+// A store with no trace is the "no findings to carry" retry case.
 func (runRecorderStore) ListStepsByRun(_ context.Context, _ uuid.UUID) ([]domain.SessionStep, error) {
 	return nil, nil
 }
 
-// toollessRegistry gives the agent loop no tools, so a subtask is one request
-// and one answer.
+// No tools, so a subtask is one request and one answer.
 type toollessRegistry struct{ port.ToolRegistry }
 
 func (toollessRegistry) DefinitionsForPolicy(_ domain.ToolPolicy) []domain.ToolDefinition { return nil }
 
-// pipelineCatalog stores a plan in memory and remembers every status it was
-// asked to write, which is the assertion these tests are about.
+// In-memory plan store that records every status write.
 type pipelineCatalog struct {
 	port.CatalogStore
 	mu           sync.Mutex
@@ -139,8 +134,7 @@ func (c *pipelineCatalog) finalPlanStatus() string {
 	return c.planStatuses[len(c.planStatuses)-1]
 }
 
-// pipelineLLM answers each stage by recognising its system prompt, so the test
-// scripts stages rather than call ordinals.
+// Answers each stage by recognising its system prompt, not by call ordinal.
 type pipelineLLM struct {
 	mu            sync.Mutex
 	intake        string
@@ -148,9 +142,7 @@ type pipelineLLM struct {
 	replans       []string
 	verifications []string
 	subtaskReply  string
-	// subtaskErr makes the executor really fail, which is the only way to reach
-	// the "the process died" exit — the one that must keep settling "failed"
-	// while a rejected verdict settles "incomplete".
+	// A really-failing subtask is the only route to the "process died" exit.
 	subtaskErr     error
 	subtaskPrompts []string
 	replanCalls    int
@@ -188,8 +180,7 @@ func (l *pipelineLLM) Chat(_ context.Context, req domain.AgentRequest) (domain.A
 		answer = scripted(l.verifications, l.verifyCalls)
 		l.verifyCalls++
 	default:
-		// The whole conversation, not just the last turn: the agent loop appends
-		// its own budget-warning system message after the task prompt.
+		// The whole conversation, not just the last turn: the agent loop appends its own system message.
 		var sb strings.Builder
 		for _, m := range req.Messages {
 			sb.WriteString(m.Content)
@@ -237,8 +228,7 @@ func firstPlanJSON(agentID uuid.UUID) string {
 		`","skill_ids":[],"tool_names":["run_terminal"],"subtask_rules":[],"depends_on":[],"parallel_group":0}]}`
 }
 
-// The repair plan the replanner prompt asks for: a new task that depends on the
-// original plan's task.
+// The repair plan the replanner prompt asks for: a new task dependent on the original plan's task.
 func repairPlanJSON(agentID uuid.UUID) string {
 	return `{"summary":"repair","tasks":[
 		{"id":"r1","title":"Run the check","description":"Run it","agent_id":"` + agentID.String() +
@@ -262,11 +252,7 @@ func runPipelineFixture(t *testing.T, llm *pipelineLLM, catalog *pipelineCatalog
 	return svc.Run(ctx, "siteye android linki ekle", nil, "test-model", domain.ToolPolicy{}, "tr")
 }
 
-// The whole failure chain, end to end: verification fails, the replanner emits
-// the repair task its own prompt describes (depends_on the original task), and
-// the run must actually repair itself. Before the fix the repair plan was
-// rejected by validation, retried three times against a rejection the prompt
-// contradicts, abandoned — and the plan was still marked completed.
+// Verification fails, the repair task runs against the original task, and the run repairs itself.
 func TestRunPipeline_RepairTaskMayDependOnTheOriginalPlan(t *testing.T) {
 	agentID := uuid.New()
 	catalog := &pipelineCatalog{agent: domain.Agent{ID: agentID, Name: "backend-developer", Enabled: true}}
@@ -290,8 +276,7 @@ func TestRunPipeline_RepairTaskMayDependOnTheOriginalPlan(t *testing.T) {
 	assert.NotEmpty(t, resp.Message.Content)
 }
 
-// The silent success: when the repair iteration gives up, the run may still hand
-// back what it produced, but the plan must not claim it finished.
+// When the repair iteration gives up, results still ship, but the plan must not claim it finished.
 func TestRunPipeline_AbandonedRepairDoesNotReportCompleted(t *testing.T) {
 	agentID := uuid.New()
 	catalog := &pipelineCatalog{agent: domain.Agent{ID: agentID, Name: "backend-developer", Enabled: true}}
@@ -312,20 +297,14 @@ func TestRunPipeline_AbandonedRepairDoesNotReportCompleted(t *testing.T) {
 		"a verification issue nothing repaired is a plan that ran without being confirmed, not one that broke")
 }
 
-// Exhaustion: every repair iteration ran, and the verifier still says the goal
-// was not met. To the stakeholder this is indistinguishable from the abandoned
-// case above — work the only judge in the system rejects — so it must not settle
-// differently. It used to fall through to "completed", which put a green badge
-// directly above the red "verification FAILED" card the web UI renders from the
-// same plan.
+// Exhaustion: every repair iteration ran and the verifier still rejects the goal.
 func TestRunPipeline_ExhaustedRepairIterationsDoNotReportCompleted(t *testing.T) {
 	agentID := uuid.New()
 	catalog := &pipelineCatalog{agent: domain.Agent{ID: agentID, Name: "backend-developer", Enabled: true}}
 	llm := &pipelineLLM{
-		intake:  readyIntake,
-		plan:    firstPlanJSON(agentID),
-		replans: []string{repairPlanJSON(agentID)},
-		// Never satisfied: failed before the repair, failed after it.
+		intake:        readyIntake,
+		plan:          firstPlanJSON(agentID),
+		replans:       []string{repairPlanJSON(agentID)},
 		verifications: []string{failedVerdict},
 		subtaskReply:  "done",
 	}
@@ -340,10 +319,7 @@ func TestRunPipeline_ExhaustedRepairIterationsDoNotReportCompleted(t *testing.T)
 		"a run the verifier still rejects after every repair round is not a completed plan — and nothing broke, so it is not a failed one either")
 }
 
-// The boundary this must not cross: a verifier that never produced a verdict is
-// inconclusive, not a failure. Convicting a run on a judge that never spoke
-// would fail good runs whenever the verifier model has a bad minute — and the
-// pipeline deliberately ships those results rather than erroring.
+// A verifier that never produced a verdict is inconclusive, not a failure.
 func TestRunPipeline_InconclusiveVerificationStillCompletes(t *testing.T) {
 	agentID := uuid.New()
 	catalog := &pipelineCatalog{agent: domain.Agent{ID: agentID, Name: "backend-developer", Enabled: true}}
@@ -363,8 +339,7 @@ func TestRunPipeline_InconclusiveVerificationStillCompletes(t *testing.T) {
 		"an unparseable verifier reply is inconclusive, not a verdict against the run")
 }
 
-// A run the verifier passes first time never enters the repair loop and is
-// unaffected by any of this.
+// A run the verifier passes first time never enters the repair loop.
 func TestRunPipeline_PassingVerificationStillCompletes(t *testing.T) {
 	agentID := uuid.New()
 	catalog := &pipelineCatalog{agent: domain.Agent{ID: agentID, Name: "backend-developer", Enabled: true}}
@@ -382,11 +357,7 @@ func TestRunPipeline_PassingVerificationStillCompletes(t *testing.T) {
 	assert.Equal(t, domain.PlanStatusCompleted, catalog.finalPlanStatus())
 }
 
-// The whole point of PlanStatusIncomplete in one table: which terminal path
-// settles which status. "failed" now means only one thing — the run stopped
-// before it reached the end — and "incomplete" means the opposite: it reached
-// the end and the verifier would not confirm it. Every row here used to be
-// reachable as "failed", which is why a plan outcome could not be acted on.
+// Which terminal path settles which status: failed = stopped early, incomplete = reached the end unverified.
 func TestRunPipeline_TerminalPlanStatus(t *testing.T) {
 	cases := []struct {
 		name    string

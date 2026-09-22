@@ -9,18 +9,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// The project profile is stored as sections rather than one markdown blob for
-// three reasons the blob could not serve:
-//
-//   - Half the profile is derivable (stack, commands, CI, deploy, git
-//     workflow). Those sections are written by a parser and must not be
-//     rewritten by a model that "remembers" npm and Vercel.
-//   - Freshness is per-fact. A push that touches apps/web does not invalidate
-//     the deploy section, and rebuilding the whole profile every 6h to catch
-//     the parts that did change is both slow and a source of drift.
-//   - Injection is per-task. A mobile task does not need the web layout; with
-//     sections the runner can spend its token budget on depth in the sections
-//     that matter instead of breadth across all of them.
+// The project profile is stored as sections rather than one markdown blob:
+// half of it is derivable and must not be rewritten by a model that "remembers"
+// npm and Vercel; freshness and injection are per-fact, so one run spends its
+// token budget on the sections that matter instead of breadth across all of
+// them.
 const (
 	ProfileSectionPurpose       = "purpose"
 	ProfileSectionStack         = "stack"
@@ -43,8 +36,8 @@ const (
 	ProfileSectionNotes = "notes"
 )
 
-// ProfileOrigin separates what a parser established from what a model judged.
-// A derived section is regenerated from the tree on every refresh; an agent
+// ProfileOrigin separates what a parser established from what a model judged:
+// a derived section is regenerated from the tree on every refresh; an agent
 // section survives until its evidence goes stale.
 type ProfileOrigin string
 
@@ -53,10 +46,10 @@ const (
 	ProfileOriginAgent   ProfileOrigin = "agent"
 )
 
-// profileSectionMeta fixes the display order, the human title, and which
-// sections an agent is allowed to write. Derived-only sections are refused
-// from the tool: they are facts, and a model overwriting them with priors is
-// exactly the failure the section split exists to end.
+// profileSectionMeta fixes display order, the human title, and which sections
+// an agent is allowed to write. Derived-only sections are refused from the
+// tool: a model overwriting facts with priors is exactly the failure the
+// section split exists to end.
 type profileSectionMeta struct {
 	Title       string
 	Order       int
@@ -92,9 +85,9 @@ func ValidProfileSection(id string) bool {
 	return ok
 }
 
-// AgentWritableProfileSections lists the sections the update tool accepts,
-// in display order — the tool's schema enumerates them so a model cannot
-// invent a section name that would never be rendered.
+// AgentWritableProfileSections lists the sections the update tool accepts, in
+// display order — the tool's schema enumerates them so a model cannot invent a
+// section name that would never be rendered.
 func AgentWritableProfileSections() []string {
 	out := make([]string, 0, len(profileSections))
 	for id, meta := range profileSections {
@@ -145,10 +138,10 @@ type ProfileSection struct {
 	Section      string            `json:"section"`
 	BodyMD       string            `json:"body_md"`
 	Evidence     []ProfileEvidence `json:"evidence,omitempty"`
-	// SourcePaths are the files this section's truth depends on. A push that
-	// touches one of them marks the section stale; a push that touches none
-	// leaves it alone. Derived sections get theirs from the collector, agent
-	// sections from their own evidence.
+	// SourcePaths are the files this section's truth depends on: a push that
+	// touches one marks the section stale; a push that touches none leaves it
+	// alone. Derived sections get theirs from the collector, agent sections
+	// from their own evidence.
 	SourcePaths  []string      `json:"source_paths,omitempty"`
 	SourceCommit string        `json:"source_commit,omitempty"`
 	Origin       ProfileOrigin `json:"origin"`
@@ -168,8 +161,8 @@ func SortProfileSections(sections []ProfileSection) {
 
 // RenderProfileMarkdown flattens sections into the single markdown document
 // that the repositories.profile_md cache holds — what existing injection sites
-// and the settings UI read. Evidence rides along as a trailing source line so
-// a human (and the next refresh) can check any claim.
+// and the settings UI read. Evidence rides along as a trailing source line so a
+// human (and the next refresh) can check any claim.
 func RenderProfileMarkdown(sections []ProfileSection) string {
 	SortProfileSections(sections)
 	var b strings.Builder
@@ -202,7 +195,7 @@ func RenderProfileMarkdown(sections []ProfileSection) string {
 
 // SelectProfileSections picks what one run needs: the always-inject set plus
 // anything whose section is relevant to the repo kind the task touches. An
-// empty kind returns everything, which is the safe default for a chat.
+// empty kind returns everything, the safe default for a chat.
 func SelectProfileSections(sections []ProfileSection, kind string) []ProfileSection {
 	if kind == "" {
 		SortProfileSections(sections)
@@ -257,11 +250,11 @@ func kindHints(kind string) []string {
 // ---------------------------------------------------------------------------
 
 // A profiling pass reads the same tree the pipeline settings ask a human to
-// describe by hand — repo kind, sub-projects, build/test commands, which
-// workflow is the deploy. Rather than leaving those fields blank next to a
-// profile that already knows the answers, the pass writes proposals: applied
-// automatically when the field is still empty, offered for one click when it
-// would overwrite something a human set.
+// describe by hand — repo kind, sub-projects, build/test commands, the deploy
+// workflow. Rather than leaving those fields blank next to a profile that
+// already knows the answers, the pass writes proposals: applied automatically
+// when the field is still empty, offered for one click when it would overwrite
+// something a human set.
 const (
 	ProposalFieldRepoKind      = "repo_kind"
 	ProposalFieldSubRepoKinds  = "sub_repo_kinds"
@@ -298,7 +291,7 @@ type ProfileProposal struct {
 }
 
 // ValidProposalField reports whether f is a field the applier knows how to
-// write. Anything else is rejected at the tool boundary.
+// write; anything else is rejected at the tool boundary.
 func ValidProposalField(f string) bool {
 	switch f {
 	case ProposalFieldRepoKind, ProposalFieldSubRepoKinds, ProposalFieldBuildCommand,

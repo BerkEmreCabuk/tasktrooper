@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/suite"
 )
 
-// stubSessionStore serves a fixed transcript; only ListMessages is exercised.
 type stubSessionStore struct {
 	messages []domain.SessionMessage
 }
@@ -85,7 +84,6 @@ func (s *HistorySuite) TestActionLedgerLandsAheadOfTheNewestUserTurn() {
 	s.Require().NoError(err)
 	s.Require().Len(history, 4)
 
-	// Directly ahead of the newest user turn, where the model will act on it.
 	s.Equal(domain.RoleSystem, history[2].Role)
 	s.Contains(history[2].Content, taskID.String())
 	s.Contains(history[2].Content, "TT-42")
@@ -136,7 +134,7 @@ func (s *HistorySuite) TestAnsweredQuestionsStayVisibleToTheModel() {
 	history, err := session.BuildMessageHistoryForTest(context.Background(), store, nil, uuid.New())
 	s.Require().NoError(err)
 	s.Require().Len(history, 2)
-	// Without this the model saw the answer but never the question it answered.
+
 	s.Contains(history[0].Content, "Which column?")
 	s.Contains(history[0].Content, "Backlog")
 	s.Contains(history[0].Content, "Sprint")

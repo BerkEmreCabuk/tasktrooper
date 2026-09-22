@@ -52,8 +52,6 @@ func (s *stubStore) SampleCodeChunks(_ context.Context, indexID uuid.UUID, limit
 	return s.total, s.chunks, s.err
 }
 
-// arcChunks builds n chunks whose embeddings are unit vectors on a short arc,
-// so they survive L2 normalization with real variance to project.
 func arcChunks(n, dim int) []port.EmbeddingChunk {
 	out := make([]port.EmbeddingChunk, n)
 	for i := range out {
@@ -126,7 +124,7 @@ func TestBuildFilesProjectsEveryChunk(t *testing.T) {
 	for _, p := range res.Points {
 		require.Len(t, p.Vector, res.Dimensions)
 	}
-	// Whitespace-collapsed preview, not the raw chunk.
+
 	require.Equal(t, "export const foo = 1", res.Points[0].Snippet)
 }
 
@@ -149,7 +147,7 @@ func TestBuildCodeCarriesBranchAndRepository(t *testing.T) {
 	require.Equal(t, 9000, res.Total)
 	require.Equal(t, 20, res.Sampled)
 	require.True(t, res.Truncated, "a source larger than the limit was sampled")
-	// dims is capped by the source's own dimension.
+
 	require.Equal(t, 32, res.Dimensions)
 	require.Equal(t, "typescript", res.Points[0].Language)
 	require.Equal(t, "foo", res.Points[0].Symbol)
@@ -216,7 +214,7 @@ func TestBuildUnindexedRepositoryIsAnEmptyMap(t *testing.T) {
 func TestBuildDropsUnusableEmbeddings(t *testing.T) {
 	chunks := arcChunks(4, 8)
 	chunks[1].Embedding = []float32{0, 0, 0, 0, 0, 0, 0, 0}
-	chunks[2].Embedding = []float32{1, 2, 3} // ragged
+	chunks[2].Embedding = []float32{1, 2, 3}
 	store := &stubStore{total: 4, chunks: chunks}
 	svc := embedmap.New(store)
 
@@ -259,7 +257,6 @@ func TestServiceWithoutStoreIsUnavailable(t *testing.T) {
 	require.ErrorIs(t, err, embedmap.ErrUnavailable)
 }
 
-// stubEmbeddingResolver stands in for llmprovider.Service.
 type stubEmbeddingResolver struct {
 	model string
 	dims  int
@@ -270,10 +267,6 @@ func (s *stubEmbeddingResolver) ResolvedEmbedding(context.Context) (string, int,
 	return s.model, s.dims, s.err
 }
 
-// The map is the one reader that draws a stale index anyway, so it is the one
-// that most needs to say so. PCA drops every row whose length differs from the
-// modal one, so a model change quietly removes half the cloud and re-derives
-// the axes from what is left — a picture that looks like a finding.
 func TestSourcesLabelAStaleIndex(t *testing.T) {
 	staleID := uuid.New()
 	freshID := uuid.New()
@@ -306,8 +299,6 @@ func TestSourcesLabelAStaleIndex(t *testing.T) {
 	require.Empty(t, fresh.EmbeddingWarning)
 }
 
-// With nothing to compare against, nothing is claimed. A settings lookup that
-// fails must not repaint every source in the picker as broken.
 func TestSourcesClaimNothingWithoutAResolver(t *testing.T) {
 	store := &stubStore{repos: []port.EmbeddingRepositorySource{
 		{RepositoryID: uuid.New(), Name: "legacy", IndexID: uuid.New(), ChunkCount: 10, EmbeddingModel: "old-model"},
@@ -325,8 +316,6 @@ func TestSourcesClaimNothingWithoutAResolver(t *testing.T) {
 	require.False(t, sources.Repositories[0].EmbeddingStale, "a failed settings lookup became a staleness verdict")
 }
 
-// The map response repeats the verdict, because the map is what a person is
-// looking at when the cloud looks wrong.
 func TestBuildCarriesTheStalenessVerdict(t *testing.T) {
 	repoID := uuid.New()
 	store := &stubStore{

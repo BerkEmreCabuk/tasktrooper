@@ -11,7 +11,6 @@ type SettingsStore interface {
 	Update(ctx context.Context, req domain.UpdateSettingsRequest) (domain.AppSettings, error)
 }
 
-// GitHubTokenStore, GitHub erişim token'ını (PAT / App token) saklar.
 type GitHubTokenStore interface {
 	GitHubToken(ctx context.Context) (string, error)
 	SetGitHubToken(ctx context.Context, token string) error

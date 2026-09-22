@@ -46,9 +46,6 @@ func rejected(role domain.CriterionReviewRole, note string) domain.CriterionChec
 	return domain.CriterionCheck{Role: role, Approved: false, Note: note}
 }
 
-// The reviewing role must have verified every criterion before the task leaves
-// its phase forward; a stale or missing verdict blocks the move, a move to
-// need_revision is never blocked.
 func TestCriteriaReviewGate(t *testing.T) {
 	taskID := uuid.New()
 
@@ -106,9 +103,7 @@ func TestCriteriaReviewGate(t *testing.T) {
 			require: true,
 		},
 		{
-			// The reported escape: QA skipped pm_uat entirely and moved the
-			// task from in_qa straight to done, taking every verdict it never
-			// recorded with it.
+
 			name:    "in_qa to done without QA verdicts blocks",
 			items:   []domain.AcceptanceCriterion{criterion("android link is on the page")},
 			prev:    domain.TaskColumnInQA,
@@ -140,8 +135,7 @@ func TestCriteriaReviewGate(t *testing.T) {
 			require: true,
 		},
 		{
-			// Backwards is not an exit. Pulling a task back to be redone must
-			// never wait on the verdict that move is about to invalidate.
+
 			name:    "in_qa back to in_progress is not gated",
 			items:   []domain.AcceptanceCriterion{criterion("a")},
 			prev:    domain.TaskColumnInQA,
@@ -185,19 +179,10 @@ func TestCriteriaReviewGate(t *testing.T) {
 	}
 }
 
-// untickedCriterion is a criterion the implementer never marked completed —
-// what update_board_task produces when a criteria list is replaced on a task
-// that is already in flight.
 func untickedCriterion(text string, checks ...domain.CriterionCheck) domain.AcceptanceCriterion {
 	return domain.AcceptanceCriterion{ID: uuid.New(), Text: text, Completed: false, Checks: checks}
 }
 
-// criteriaGate used to demand the implementer's checkmark and nothing else,
-// which deadlocked the board: the roles standing in front of it at done and
-// released are QA and the PM, and neither holds set_criterion_completed. A QA
-// run that had executed and approved every criterion was still refused, told to
-// call a tool it does not have, and answered that it had no access to it — so
-// the criteria stayed unticked and the task stopped moving.
 func TestCriteriaGateAcceptsAReviewerApprovalInPlaceOfTheImplementerTick(t *testing.T) {
 	taskID := uuid.New()
 
@@ -223,8 +208,7 @@ func TestCriteriaGateAcceptsAReviewerApprovalInPlaceOfTheImplementerTick(t *test
 			target: domain.TaskColumnReadyForQA,
 		},
 		{
-			// A rejection is a verdict, but it is the one that means the
-			// criterion is not met. The gate must not read it as settled.
+
 			name:    "a rejection does not satisfy the gate",
 			items:   []domain.AcceptanceCriterion{untickedCriterion("a", rejected(domain.CriterionReviewRoleQA, "500 on submit"))},
 			target:  domain.TaskColumnDone,
@@ -255,9 +239,7 @@ func TestCriteriaGateAcceptsAReviewerApprovalInPlaceOfTheImplementerTick(t *test
 			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 				t.Fatalf("expected error containing %q, got %v", tc.wantErr, err)
 			}
-			// Whoever is blocked must be told a tool they actually hold. The
-			// message naming only set_criterion_completed is what sent QA into
-			// the dead end above.
+
 			if !strings.Contains(err.Error(), "review_criterion") {
 				t.Fatalf("block message must name review_criterion for reviewers, got %v", err)
 			}
@@ -265,8 +247,6 @@ func TestCriteriaGateAcceptsAReviewerApprovalInPlaceOfTheImplementerTick(t *test
 	}
 }
 
-// A rejection without a note is refused before anything is stored: the note is
-// the reason the developer sees in need_revision.
 func TestReviewTaskCriterionRequiresNoteOnRejection(t *testing.T) {
 	svc := &Service{criteria: &fakeCriteriaStore{}}
 	_, err := svc.ReviewTaskCriterion(context.Background(), uuid.New(), uuid.New(), false, "   ")
@@ -275,16 +255,10 @@ func TestReviewTaskCriterionRequiresNoteOnRejection(t *testing.T) {
 	}
 }
 
-// board.Runner reads a task's criteria through an optional interface it declares
-// itself (taskCriteriaReader) — board cannot import this package, so nothing but
-// this assertion catches a signature change here silently turning the run's
-// criteria block off and bringing back the refused hand-off it was written for.
 var _ interface {
 	ListTaskCriteria(context.Context, uuid.UUID) ([]domain.AcceptanceCriterion, error)
 } = (*Service)(nil)
 
-// criterionTaskStore serves one task to both the by-id read and the
-// repository lookup ReviewTaskCriterion makes before it can see the column.
 type criterionTaskStore struct {
 	*fakeReleaseTaskStore
 }
@@ -293,10 +267,6 @@ func (c *criterionTaskStore) ListAll(context.Context) ([]domain.BoardTask, error
 	return []domain.BoardTask{c.task}, nil
 }
 
-// Both gates have to hand back the criterion IDS, not just the texts. Listing
-// texts alone is what produced the reported dead end: the agent passed the text
-// it had been shown to review_criterion as criterion_id, was told "invalid
-// criterion_id", and had no id anywhere in reach to try instead.
 func TestCriteriaRefusalsCarryCriterionIDs(t *testing.T) {
 	taskID := uuid.New()
 
@@ -334,7 +304,7 @@ func TestCriteriaRefusalsCarryCriterionIDs(t *testing.T) {
 		if want := "[" + item.ID.String() + "] android link is on the page"; !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected %q in %v", want, err)
 		}
-		// The ids are useless without the call that consumes them.
+
 		if !strings.HasSuffix(err.Error(), "— call review_criterion with each id above, then retry the move") {
 			t.Fatalf("expected the retry instruction to close the message, got %v", err)
 		}
@@ -359,10 +329,6 @@ func TestCriteriaRefusalsCarryCriterionIDs(t *testing.T) {
 	})
 }
 
-// A verdict now survives a revision round instead of being wiped on the way
-// back into ready_for_qa (that blanket clear is gone), so this is what tells a
-// later reviewer whether an old approval still means anything: the commit it
-// was checked against.
 func TestReviewTaskCriterionStampsTheCurrentHeadSHA(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), RepositoryID: uuid.New(), Key: "T-9", Column: domain.TaskColumnReadyForQA}
 	criteria := &fakeCriteriaStore{criterion: domain.AcceptanceCriterion{ID: uuid.New(), TaskID: task.ID, Text: "a"}}
@@ -383,8 +349,6 @@ func TestReviewTaskCriterionStampsTheCurrentHeadSHA(t *testing.T) {
 	}
 }
 
-// No workspace to resolve a HEAD from is not a reason to refuse the verdict —
-// only to record it without one.
 func TestReviewTaskCriterionToleratesNoGitClient(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), RepositoryID: uuid.New(), Key: "T-9", Column: domain.TaskColumnReadyForQA}
 	criteria := &fakeCriteriaStore{criterion: domain.AcceptanceCriterion{ID: uuid.New(), TaskID: task.ID, Text: "a"}}
@@ -403,10 +367,6 @@ func TestReviewTaskCriterionToleratesNoGitClient(t *testing.T) {
 	}
 }
 
-// A verdict filed from outside the review columns is refused — and the refusal
-// has to close the loop it used to open. The run that read only "task T-4 is in
-// in_progress" moved the task INTO in_qa to get at the criteria, reviewing its
-// own work; the sentence now names that move as the thing not to do.
 func TestReviewTaskCriterionRefusalForbidsMovingTheTaskToReachIt(t *testing.T) {
 	task := domain.BoardTask{ID: uuid.New(), RepositoryID: uuid.New(), Key: "T-4", Column: domain.TaskColumnInProgress}
 	criteria := &fakeCriteriaStore{criterion: domain.AcceptanceCriterion{ID: uuid.New(), TaskID: task.ID, Text: "a"}}

@@ -14,30 +14,14 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// SessionQuotaTaker is the one method SessionQuotaSweeper needs from
-// port.SessionStore — named locally, board.QuotaResumeTaker style, so the
-// dependency is obvious without following it back to the full store
-// interface.
 type SessionQuotaTaker interface {
 	TakePendingSessionTurn(ctx context.Context, now time.Time) (domain.PendingSessionTurn, bool, error)
 }
 
-// QuotaSweeperInterval mirrors board.QuotaSweeperInterval: the two sweep
-// independent state (board_tasks vs sessions) but answer the same question at
-// the same cadence, so a task and a chat parked on the same usage-limit reset
-// come back within a minute of each other rather than one waiting far longer
-// than the other for no reason.
 const QuotaSweeperInterval = time.Minute
 
-// quotaSweepBatchCap mirrors board.quotaSweepBatchCap — see that constant's
-// comment for why a pass is capped rather than draining every due row.
 const quotaSweepBatchCap = 20
 
-// SessionQuotaSweeper is board.QuotaSweeper's twin for chat sessions: it
-// releases turns parked on the local Claude Code subscription's usage limit
-// (see Service.parkTurnOnQuota), same claim-and-rerun shape, same
-// one-pass-drains-everything-due pacing, for the same reason — a quota reset
-// has no per-resume contention to pace around, unlike a held device.
 type SessionQuotaSweeper struct {
 	taker SessionQuotaTaker
 	svc   *Service
@@ -48,9 +32,6 @@ func NewSessionQuotaSweeper(taker SessionQuotaTaker, svc *Service) *SessionQuota
 	return &SessionQuotaSweeper{taker: taker, svc: svc, now: time.Now}
 }
 
-// Start runs the sweep on interval until ctx ends, sweeping once immediately
-// on boot — a parked chat's resume time is a fact already on the row, so a
-// restart changes nothing about whether it is already due.
 func (s *SessionQuotaSweeper) Start(ctx context.Context, interval time.Duration) {
 	if s == nil || s.taker == nil || s.svc == nil {
 		return
@@ -94,16 +75,6 @@ func (s *SessionQuotaSweeper) sweep(ctx context.Context) {
 		Msg("session quota sweeper: per-pass cap reached, any remaining parked turns resume on the next pass")
 }
 
-// resumeParkedTurn reruns a turn a sweep claimed. It is SendMessage's body
-// from "build history" on, minus the two steps that only make sense for a
-// brand new message: appending it (already in the transcript — that is what
-// made this a resumable turn rather than a lost one) and checking whether it
-// answers a blocked task (resumeBlockedTask never runs the agent loop at all,
-// so it could not have been the thing that hit the quota in the first place).
-//
-// A QuotaBlock hit here just re-parks: the CLI's own reset estimate corrects
-// itself on every hit, so a still-closed window is not a bug, it is the same
-// wait continuing under a fresher ResumeAt.
 func (s *Service) resumeParkedTurn(ctx context.Context, pending domain.PendingSessionTurn) (err error) {
 	sessionID := pending.SessionID
 	req := pending.Request

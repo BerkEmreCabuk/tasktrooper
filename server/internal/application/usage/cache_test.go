@@ -12,12 +12,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// fakeEmbedClient is a minimal port.LLMClient whose Embed calls are counted
-// and logged, so a test can assert whether a call actually reached the inner
-// client (a cache hit must not) and what it was asked for (a cache miss must
-// ask for exactly the right thing). The returned vector is deterministic in
-// (model, input) so two calls for the same pair are provably "the same
-// embedding" without a real provider.
 type fakeEmbedClient struct {
 	mu    sync.Mutex
 	calls []embedCall
@@ -57,10 +51,6 @@ func vecFor(model, input string) []float32 {
 	return []float32{float32(h[0]), float32(h[1]), float32(h[2]), float32(h[3])}
 }
 
-// fakeProviderClient wraps a fakeEmbedClient and reports a mutable pinned
-// embedding provider via the same EmbeddingProvider()/Unwrap() shape
-// *llm.MultiProviderClient exposes, so CachingEmbedder's provider resolution
-// can be exercised without importing the adapter package.
 type fakeProviderClient struct {
 	*fakeEmbedClient
 	provider domain.LLMProviderType
@@ -102,10 +92,10 @@ func TestCachingEmbedder_DistinctModelOrTextMisses(t *testing.T) {
 	if _, err := c.Embed(context.Background(), "hello", "m1"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
-	if _, err := c.Embed(context.Background(), "hello", "m2"); err != nil { // different model
+	if _, err := c.Embed(context.Background(), "hello", "m2"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
-	if _, err := c.Embed(context.Background(), "goodbye", "m1"); err != nil { // different text
+	if _, err := c.Embed(context.Background(), "goodbye", "m1"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 	if got := inner.callCount(); got != 3 {
@@ -113,11 +103,6 @@ func TestCachingEmbedder_DistinctModelOrTextMisses(t *testing.T) {
 	}
 }
 
-// TestCachingEmbedder_ProviderChangeMisses covers the "provider" component of
-// the (provider, model, text) cache key: hot-swapping the pinned embedding
-// provider (an admin action the running process supports, see
-// llmprovider.Service.SetEmbedding) must not serve a vector computed by the
-// old provider for the new one.
 func TestCachingEmbedder_ProviderChangeMisses(t *testing.T) {
 	inner := &fakeProviderClient{fakeEmbedClient: &fakeEmbedClient{}, provider: domain.LLMProviderLocal}
 	c := NewCachingEmbedder(inner, 8)
@@ -138,7 +123,7 @@ func TestCachingEmbedder_LRUEvictsOldestAtCapacity(t *testing.T) {
 	inner := &fakeEmbedClient{}
 	c := NewCachingEmbedder(inner, 2)
 
-	for _, text := range []string{"a", "b", "c"} { // "c" overflows capacity 2, evicting "a"
+	for _, text := range []string{"a", "b", "c"} {
 		if _, err := c.Embed(context.Background(), text, "m"); err != nil {
 			t.Fatalf("embed(%q): %v", text, err)
 		}
@@ -147,7 +132,6 @@ func TestCachingEmbedder_LRUEvictsOldestAtCapacity(t *testing.T) {
 		t.Fatalf("call count = %d, want 3", got)
 	}
 
-	// "b" is still warm (touched more recently than "a").
 	if _, err := c.Embed(context.Background(), "b", "m"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
@@ -155,7 +139,6 @@ func TestCachingEmbedder_LRUEvictsOldestAtCapacity(t *testing.T) {
 		t.Fatalf("call count after re-embedding warm entry = %d, want still 3", got)
 	}
 
-	// "a" was evicted, so it must miss again.
 	if _, err := c.Embed(context.Background(), "a", "m"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
@@ -164,14 +147,6 @@ func TestCachingEmbedder_LRUEvictsOldestAtCapacity(t *testing.T) {
 	}
 }
 
-// TestCachingEmbedder_DisabledBypassesCache covers the negative-capacity
-// escape hatch (embedding.query_cache_entries < 0).
-//
-// port.LLMClient.Embed(ctx, input string, model string) has no batch
-// parameter anywhere in this codebase — openai_compat, multi, swapping, and the
-// anthropic/gemini_vertex adapters all take exactly one input string — so
-// there is no "batch call" shape for the decorator to special-case; a
-// negative capacity is the only bypass path that exists.
 func TestCachingEmbedder_DisabledBypassesCache(t *testing.T) {
 	inner := &fakeEmbedClient{}
 	c := NewCachingEmbedder(inner, -1)
@@ -186,11 +161,6 @@ func TestCachingEmbedder_DisabledBypassesCache(t *testing.T) {
 	}
 }
 
-// TestCachingEmbedder_BulkSequentialTextsStayBoundedByCapacity stands in for
-// index-time chunk embedding: many distinct one-off texts embedded back to
-// back (each still a single-text call — see the package doc on cache.go).
-// The LRU must bound memory rather than growing without limit, which is the
-// actual risk a large initial index poses to a shared cache.
 func TestCachingEmbedder_BulkSequentialTextsStayBoundedByCapacity(t *testing.T) {
 	inner := &fakeEmbedClient{}
 	const capacity = 16

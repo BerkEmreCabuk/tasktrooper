@@ -122,9 +122,6 @@ func stageNames(stages []Stage) string {
 	return strings.Join(names, ",")
 }
 
-// A declared verify command runs in a fresh task checkout, so it gets the
-// installs a detected command would: `make lint` in a monorepo needs desktop/
-// and desktop/ui/ installed before it can typecheck anything.
 func TestResolveVerifyStages_DeclaredCommandInstallsNestedPackages(t *testing.T) {
 	dir := t.TempDir()
 	touch(t, dir, "go.mod")

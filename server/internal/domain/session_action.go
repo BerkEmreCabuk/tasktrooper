@@ -161,10 +161,10 @@ func IsSessionActionDigest(content string) bool {
 	return strings.HasPrefix(content, sessionActionDigestPrefix)
 }
 
-// SessionActionDigest renders the ledger as a system message. It is the fix for
-// the failure this ledger exists for: without it the model re-creates records
-// it made in an earlier turn, because the tool trace that held their ids was
-// never persisted.
+// SessionActionDigest renders the ledger as a system message — the fix for the
+// failure this ledger exists for: without it the model re-creates records it
+// made in an earlier turn, because the tool trace that held their ids was never
+// persisted.
 func SessionActionDigest(actions []SessionAction) string {
 	if len(actions) == 0 {
 		return ""

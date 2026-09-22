@@ -19,8 +19,7 @@ var (
 		"web_search",
 		"fetch_url",
 	}
-	// Tool names are fixed contract with the browser adapter — the definitions
-	// live there; this list must match them verbatim.
+	// Verbatim contract with the browser adapter.
 	roleBrowserTools = []string{
 		"browser_navigate",
 		"browser_screenshot",
@@ -30,11 +29,7 @@ var (
 		"browser_wait_for",
 		"browser_set_viewport",
 	}
-	// The device twin of roleBrowserTools, and the same verbatim contract with
-	// the mobile adapter. Held only by the roles that actually put hands on the
-	// app: QA, the mobile developer, and PM for its UAT sign-off. Nothing here
-	// is registered at all unless an operator attached a device, so granting it
-	// to a role on an installation with no phone costs nothing.
+	// Verbatim contract with the mobile adapter; no tool is registered unless a device is attached.
 	roleMobileTools = []string{
 		"mobile_launch_app",
 		"mobile_screenshot",
@@ -48,21 +43,12 @@ var (
 		"mobile_unlock_device",
 		"mobile_release_device",
 	}
-	// The shell and the file writers travel together: an agent that may run
-	// `sed -i` may call edit_file, and one that may not, may not either.
+	// An agent that may run `sed -i` may call edit_file, and one that may not, may not either.
 	roleShellTools = append([]string{
 		"run_terminal",
 	}, domain.WorkspaceWriteTools...)
-	// What a black-box tester may read, and no more: enough to find the start
-	// command, the port and the route it has to open, and nothing that invites
-	// reading the implementation instead of exercising it.
-	//
-	// QA held the full roleCodeTools set and used it exactly as the tools
-	// suggest: a round on a UI task opened with get_repo_tree and four
-	// read_file calls into src/app, and the "test" that came out was a reading
-	// of the diff. codebase_search / get_symbol_skeleton /
-	// expand_symbol_context exist to understand code, which is the reviewer's
-	// job — QA's evidence is a running product.
+	// QA is black-box: read just enough to find the start command, the port and the route.
+	// QA once held the full roleCodeTools set and used it to read the diff instead of exercising the product.
 	roleQALookupTools = []string{
 		"get_repo_tree",
 		"grep_code",
@@ -70,29 +56,18 @@ var (
 	}
 	roleBoardReadTools = []string{
 		"list_board_tasks",
-		// The unblocked queue: which of list_board_tasks' backlog/todo rows is
-		// actually startable right now, so a role choosing its next task does
-		// not have to re-derive that from BlockedBy itself.
+		// Which backlog/todo rows are actually startable, so picking a task does not re-derive BlockedBy.
 		"list_ready_tasks",
 		"move_board_task",
 		"update_board_task",
 		"add_task_comment",
-		// The read half. Without it an agent told to read the reviewer's
-		// feedback reached for the only comment tool it had and posted one.
 		"list_task_comments",
-		// The same argument for documents, and a stronger one: since an
-		// analysis stopped committing its spec to the repository, the spec and
-		// the plan exist only as documents on the analiz task. Every role that
-		// can be handed a task derived from one needs to be able to read them.
+		// Since specs stopped being committed, the spec and plan live only as task documents.
 		"list_task_documents",
 		"list_acceptance_criteria",
 		"set_criterion_completed",
-		// The other half of the same decision: a criterion that is deliberately
-		// not being done leaves the list by saying why, instead of sitting
-		// unticked and parking the task in front of the criteria gate.
+		// A deliberately cancelled criterion leaves the list by saying why instead of parking the task.
 		"cancel_criterion",
-		// Read-only for every role: what QA actually exercised is context for
-		// the developer fixing a rejection and for the PM signing the task off.
 		"list_test_cases",
 		"list_projects",
 		"list_repositories",
@@ -105,17 +80,11 @@ var (
 	roleBoardCreateTools = []string{
 		"create_board_task",
 		"add_task_document",
-		// Paired with add_task_document deliberately: a role allowed to attach a
-		// spec is the role that will later be asked to change it, and without the
-		// update call the only answer it can give is a second document.
+		// Paired with add_task_document: the role allowed to attach a spec is the one asked to change it.
 		"update_task_document",
 		"attach_task_file",
 	}
-	// roleBoardDeleteTools: removing a task from the board for good. The PM owns
-	// the backlog, so the PM owns what should not be in it — a duplicate, a task
-	// opened by mistake, three tasks the user asked to be merged into one. Until
-	// this existed the PM could only ever add: asked to delete, it created a
-	// fourth task and left the three it was told to remove standing.
+	// PM owns the backlog, so PM owns what leaves it.
 	roleBoardDeleteTools = []string{
 		"delete_board_task",
 	}
@@ -133,33 +102,22 @@ var (
 		"load_skill",
 		"create_skill",
 	}
-	// roleProfileTools: the code-facing roles maintain the per-repository
-	// project profile (matches the 082 migration backfill for existing installs).
+	// Per-repository project profile; matches the 082 migration backfill.
 	roleProfileTools = []string{
 		"update_project_profile",
 	}
-	// rolePRReadTools: reading the pull request a task is reviewed in — its
-	// state, changed files, review comments and diff. Read-only, so every role
-	// that reviews or reports on a task holds it.
+	// Read-only, so every role that reviews or reports on a task holds it.
 	rolePRReadTools = []string{
 		"get_task_pull_request",
 	}
-	// rolePRWriteTools: answering a reviewer on the PR, and pushing a change into
-	// it. commit_task_changes goes to implementer roles only — a reviewer that
-	// could commit would put its own name on the branch it is judging, which is
-	// the same reason runner.go skips the post-run commit in review columns.
-	// Matches the 088 migration backfill for existing installs.
+	// commit_task_changes is implementer-only: a reviewer that could commit would judge its own branch.
 	rolePRReplyTools = []string{
 		"comment_on_pull_request",
 	}
 	rolePRCommitTools = []string{
 		"commit_task_changes",
 	}
-	// rolePRMergeTools: landing the change. QA holds it and nobody else — the
-	// developer must not merge its own branch, the architect reviews it, and the
-	// PM signs off on the product rather than on the git history. QA is the last
-	// role that actually ran the built thing, and `done` is the one column where
-	// it may use this. Matches the 104 migration backfill for existing installs.
+	// QA merges, nobody else: the developer must not merge its own branch, QA is the last role to run the build.
 	rolePRMergeTools = []string{
 		domain.MergePullRequestToolName,
 	}
@@ -170,20 +128,13 @@ func developerToolPolicy() domain.ToolPolicy {
 	tools = append(tools, roleShellTools...)
 	tools = append(tools, roleWebTools...)
 	tools = append(tools, roleCodeTools...)
-	// A green build is not the same claim as "the screen works", and until now a
-	// developer could only make the first one: the browser tools were QA's and
-	// the PM's, so a UI change was handed to review having never been rendered.
-	// The developer already holds run_terminal in the same pod, so it can start
-	// its own dev server on loopback — the browser guard allows 127.0.0.1 for
-	// exactly this — open the changed page and look at it before handing it on.
+	// The developer can only claim "green build", not "the screen works": browser access lets it render the change before review, and the browser guard allows its own 127.0.0.1 dev server.
 	tools = append(tools, roleBrowserTools...)
 	tools = append(tools, roleBoardReadTools...)
 	tools = append(tools, roleBoardClaimTools...)
 	tools = append(tools, roleMemoryTools...)
 	tools = append(tools, roleSkillTools...)
 	tools = append(tools, roleProfileTools...)
-	// The developer is who a human talks to about "the PR you opened", and the
-	// only role that may push a change into it.
 	tools = append(tools, rolePRReadTools...)
 	tools = append(tools, rolePRReplyTools...)
 	tools = append(tools, rolePRCommitTools...)
@@ -193,28 +144,20 @@ func developerToolPolicy() domain.ToolPolicy {
 func productManagerToolPolicy() domain.ToolPolicy {
 	tools := make([]string, 0, len(roleWebTools)+len(roleCodeTools)+len(roleBrowserTools)+len(roleBoardReadTools)+len(roleBoardCreateTools)+len(roleBoardDeleteTools)+len(roleWorkspaceManageTools)+len(roleMemoryTools)+len(roleSkillTools)+2)
 	tools = append(tools, roleWebTools...)
-	// Read-only code tools: the PM must verify real file/endpoint names before
-	// filling technical_description on a task — no shell, reading only.
+	// Read-only code tools: the PM verifies real file/endpoint names for technical_description — no shell.
 	tools = append(tools, roleCodeTools...)
-	// pm_uat: the PM walks the critical flows on stage in person instead of
-	// approving from QA's evidence alone; get_deploy_target resolves the stage
-	// base_url (prod is off-limits, the rule layer says so separately).
+	// pm_uat: the PM walks the critical flows on stage; get_deploy_target resolves stage base_url.
 	tools = append(tools, roleBrowserTools...)
-	// The same walk on a phone when the deliverable is an app rather than a page.
 	tools = append(tools, roleMobileTools...)
-	// update_deploy_target only writes base_url/health_url: when UAT finds the
-	// stage address recorded nowhere, the PM records the one it actually
-	// browsed instead of leaving the next role to rediscover it.
+	// update_deploy_target only writes base_url/health_url when UAT finds the stage address unrecorded.
 	tools = append(tools, "get_deploy_target", "update_deploy_target")
 	tools = append(tools, roleBoardReadTools...)
 	tools = append(tools, roleBoardCreateTools...)
 	tools = append(tools, roleBoardDeleteTools...)
 	tools = append(tools, roleWorkspaceManageTools...)
-	// pm_uat: the PM records an own verdict per acceptance criterion instead
-	// of trusting the implementer's checkmarks.
+	// pm_uat: the PM records its own verdict per criterion.
 	tools = append(tools, "review_criterion")
-	// Read-only: the PM answers "what actually shipped in this task?" from the
-	// PR rather than from the implementer's summary of it.
+	// The PM answers "what shipped?" from the PR rather than the implementer's summary.
 	tools = append(tools, rolePRReadTools...)
 	tools = append(tools, roleMemoryTools...)
 	tools = append(tools, roleSkillTools...)
@@ -230,9 +173,7 @@ func architectToolPolicy() domain.ToolPolicy {
 	tools = append(tools, roleBoardCreateTools...)
 	tools = append(tools, roleBoardClaimTools...)
 	tools = append(tools, "get_pipeline_status")
-	// The architect IS the code reviewer: it reads the PR it is judging and
-	// answers threads on it. It does not get commit_task_changes — see
-	// rolePRCommitTools.
+	// The architect reads the PR it is judging and answers threads; no commit_task_changes.
 	tools = append(tools, rolePRReadTools...)
 	tools = append(tools, rolePRReplyTools...)
 	tools = append(tools, roleMemoryTools...)
@@ -245,48 +186,25 @@ func qaToolPolicy() domain.ToolPolicy {
 	tools := make([]string, 0, len(roleShellTools)+len(roleWebTools)+len(roleQALookupTools)+len(roleBrowserTools)+len(roleMobileTools)+len(roleMemoryTools)+len(roleSkillTools)+10)
 	tools = append(tools, roleShellTools...)
 	tools = append(tools, roleWebTools...)
-	// Not roleCodeTools: QA is black box. See roleQALookupTools.
 	tools = append(tools, roleQALookupTools...)
 	tools = append(tools, roleBrowserTools...)
 	tools = append(tools, roleMobileTools...)
 	tools = append(tools, "list_board_tasks", "list_ready_tasks", "move_board_task", "add_task_comment", "list_task_comments", "list_task_documents", "list_acceptance_criteria", "review_criterion", "list_repositories")
-	// The round itself, written on the card: every case QA derived from the
-	// request (not only from the criteria), its verdict and its evidence —
-	// including the cases considered and rejected as invalid. QA is the only
-	// role that WRITES these; everyone else reads them.
+	// QA is the only role that WRITES test cases.
 	tools = append(tools, "list_test_cases", "record_test_cases", "set_test_case_result")
-	// Pipeline sonucu ve stage adresi: otomasyon suite'inin yeşil olduğunu
-	// doğrulamak (get_pipeline_status) ve stage'de test ederken base_url'i
-	// çözmek (get_deploy_target) için. Prod'a istek atmak her koşulda yasak —
-	// kural katmanı bunu ayrıca söylüyor. update_deploy_target yalnızca
-	// base_url/health_url yazar: ilk deploy'dan sonra ortamın gerçekte
-	// cevapladığı adres kayda geçsin diye.
+	// Green CI and stage base_url for the suite; prod requests banned — the rule layer says so separately.
 	tools = append(tools, "get_pipeline_status", "get_deploy_target", "update_deploy_target")
-	// QA tests the change the PR carries, so it reads the PR. Read-only.
 	tools = append(tools, rolePRReadTools...)
-	// …and, once the board has signed the task off, merges it. The one
-	// non-read-only thing QA does to code, available to it only in `done`:
-	// RestrictToolsForStage's strip_writers behaviour takes it away in
-	// in_qa/ready_for_qa, where QA's job is a verdict on the change rather than
-	// the landing of it.
+	// The merge lands only in `done`: RestrictToolsForStage's strip_writers takes it away in in_qa/ready_for_qa.
 	tools = append(tools, rolePRMergeTools...)
-	// …and then watches what the merge shipped, and undoes it when it breaks.
-	// QA and nobody else, for the same reason the merge is QA's: it is the role
-	// that last exercised the built product, it is the role `done` wakes, and
-	// the deploy it watches is the deploy of the merge it just made. A developer
-	// that could roll production back could undo a release it was never asked
-	// about. Two of the three only read; RestrictToolsForStage's strip_writers
-	// behaviour takes the third (the rollback) away everywhere except
-	// `done`/`released`.
+	// QA watches the deploy of the merge it just made and rolls it back if it breaks; rollback is stripped except in `done`/`released`.
 	tools = append(tools, roleReleaseWatchTools...)
 	tools = append(tools, roleMemoryTools...)
 	tools = append(tools, roleSkillTools...)
 	return domain.ToolPolicy{AllowTools: tools}
 }
 
-// roleReleaseWatchTools are the after-the-merge tools: what happened in
-// production to the commit this task merged, the log behind it, and the
-// rollback. Backfilled to existing installs by migration 105.
+// After-the-merge tools; backfilled to existing installs by migration 105.
 var roleReleaseWatchTools = []string{
 	domain.DeployStatusToolName,
 	domain.DeployLogsToolName,
@@ -307,14 +225,7 @@ func sortedCopy(items []string) []string {
 	return out
 }
 
-// mobileDeveloperToolPolicy is the developer policy plus the device tools.
-//
-// It exists because the three developer roles share developerToolPolicy, and
-// the device is one shared phone: handing it to the backend and frontend
-// developers as well would put three roles in a queue for hardware only one of
-// them has any use for. The mobile developer needs it for the same reason QA
-// does — a layout bug reported against a real screen is fixed by looking at
-// that screen, not at a widget test.
+// Developer policy plus the device tools; the device is one shared phone, so only the mobile developer handles it.
 func mobileDeveloperToolPolicy() domain.ToolPolicy {
 	base := developerToolPolicy()
 	tools := make([]string, 0, len(base.AllowTools)+len(roleMobileTools))

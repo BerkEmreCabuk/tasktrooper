@@ -1,19 +1,3 @@
-// Package deploywatch answers one question about one task: what happened to
-// the commit its pull request merge produced.
-//
-// It exists because "did this task reach production" had three different
-// answers depending on the repository, and the release path knew none of them.
-// A backend deploys through a GitHub Actions job; a frontend on a
-// push-to-deploy host runs no workflow at all and reports through a commit
-// status; a repository with neither simply has no deploy signal, which is an
-// answer too. The board needs ONE state to act on, keyed on ONE thing — the
-// merge commit (board_tasks.merge_commit_sha, migration 104) — because that is
-// the only identifier that means "this task's change" rather than "whatever the
-// default branch is carrying today".
-//
-// The package deliberately owns no clock loop of its own. A pending deploy is
-// parked on (domain.ResourceDeployWatch) and re-dispatched by
-// application/board.DeploySweeper; nothing here sleeps, and no tool call waits.
 package deploywatch
 
 import (
@@ -33,58 +17,28 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// DefaultHealthWindow is how long after a successful deploy an incident on that
-// environment is still attributed to the task that just released.
-//
-// Fifteen minutes rather than the remedy engine's generic 45: this window is
-// keyed on a specific commit and is used to BLAME a specific card (and, with
-// auto_rollback on, to roll it back), so it has to be short enough that a
-// coincidence does not get a task reverted. The generic 45-minute correlation
-// in prodops/remedy.go is unchanged and still produces its advisory rollback
-// suggestion — that one only ever writes words.
 const DefaultHealthWindow = 15 * time.Minute
 
-// resolveTimeout bounds the GitHub reads one Resolve makes. The caller is
-// either a tool call inside an agent's turn or a sweeper pass; neither may be
-// held open by a wedged API.
 const resolveTimeout = 30 * time.Second
 
-// logFetchTimeout bounds a logs_url fetch. Same reasoning, tighter number: an
-// application's own log endpoint that cannot answer in ten seconds is not
-// going to answer usefully.
 const logFetchTimeout = 10 * time.Second
 
-// maxLogBytes caps what is read from an application's logs_url. The Actions job
-// log has its own cap in the adapter (1 MiB); both are then tail-truncated to
-// something a model can actually read before they leave this package.
 const maxLogBytes = 1 << 20
 
-// TaskStore is the slice of the board this package reads.
-//
-// The names match port.BoardTaskStore's exactly so the store satisfies this
-// without an adapter — this is a narrowing, not a translation.
 type TaskStore interface {
 	Get(ctx context.Context, repositoryID, taskID uuid.UUID) (domain.BoardTask, error)
-	// FindTaskByMergeCommit resolves the task whose merge produced sha. It is
-	// the reverse of the watch: production is unhappy, which card put this
-	// commit there.
+
 	FindTaskByMergeCommit(ctx context.Context, repositoryID uuid.UUID, sha string) (domain.BoardTask, error)
 }
 
-// Commenter writes the watch's findings onto the card.
 type Commenter interface {
 	AddComment(ctx context.Context, repositoryID, taskID uuid.UUID, req domain.CreateTaskCommentRequest) (domain.TaskComment, error)
 }
 
-// RepositoryResolver reads a repository row.
 type RepositoryResolver interface {
 	Get(ctx context.Context, id uuid.UUID) (domain.Repository, error)
 }
 
-// Deps wires the service's collaborators. Everything is optional except
-// Tasks/Targets/Repos/Actions; a nil collaborator disables the feature that
-// needs it rather than panicking, which is how a build with no GitHub token or
-// no git still starts.
 type Deps struct {
 	Tasks     TaskStore
 	Comments  Commenter
@@ -96,15 +50,12 @@ type Deps struct {
 	Rollbacks Rollbacker
 	Git       GitReverter
 	Incidents IncidentIngester
-	// RepoCoordinates resolves a repository's GitHub owner/name. domain.Repository
-	// carries neither — only a local RootPath — so this is injected, exactly as
-	// deployops.Service.SetRepoResolver does for the same reason.
+
 	RepoCoordinates func(ctx context.Context, repo domain.Repository) (owner, name string, err error)
-	// HealthWindow overrides DefaultHealthWindow.
+
 	HealthWindow time.Duration
 }
 
-// Service is the deploy watch.
 type Service struct {
 	tasks     TaskStore
 	comments  Commenter
@@ -119,10 +70,7 @@ type Service struct {
 	coords    func(ctx context.Context, repo domain.Repository) (string, string, error)
 
 	healthWindow time.Duration
-	// policy vets a logs_url before it is dialled, on EVERY fetch. The field is
-	// swappable for tests the same way prodops.Monitor's is — and, as there,
-	// there is deliberately no way to hand this a bare *http.Client and opt out
-	// of the guard altogether.
+
 	policy urlguard.Policy
 	now    func() time.Time
 }
@@ -150,40 +98,14 @@ func New(deps Deps) *Service {
 	}
 }
 
-// SetClock overrides the service's clock; tests use it to make health windows
-// assertable.
 func (s *Service) SetClock(now func() time.Time) { s.now = now }
 
-// SetURLPolicy overrides what counts as a dialable logs URL.
 func (s *Service) SetURLPolicy(p urlguard.Policy) { s.policy = p }
 
-// HealthWindow is how long a successful deploy owns its environment's
-// incidents. Read by the attribution and by the status the agent sees.
 func (s *Service) HealthWindow() time.Duration { return s.healthWindow }
 
-// ErrNotConfigured is every "this deployment cannot answer that" rolled into
-// one sentinel: no GitHub client, no repository coordinates, no board.
 var ErrNotConfigured = errors.New("the deploy watch is not configured on this deployment (GitHub is not connected)")
 
-// Status resolves the deploy state of a task's merge commit.
-//
-// The three signals are consulted in a fixed order and the first one that has
-// anything to say wins:
-//
-//  1. an Actions run for the commit that contains a DEPLOY job. A repository
-//     whose CI and CD live in the same workflow ("Backend CI/CD" with a
-//     `deploy` job) answers here, and the job — not the run — is what is read,
-//     because the run also carries build and test and folding those in would
-//     report a red unit test as a failed deploy.
-//  2. the commit's combined status. This is the push-to-deploy case: the host's
-//     GitHub App writes `success | Vercel` against the commit and there is no
-//     workflow anywhere. Read over the GitHub API with no provider credentials.
-//  3. a GitHub Deployment opened against the commit (inside the same adapter
-//     call as 2, consulted after it).
-//
-// Nothing found is DeployWatchNoSignal, not a failure and not a wait: a
-// repository that does not deploy on merge has to be able to reach the end of
-// the watch.
 func (s *Service) Status(ctx context.Context, repositoryID, taskID uuid.UUID) (domain.DeployWatchStatus, error) {
 	if s.tasks == nil || s.actions == nil || s.coords == nil {
 		return domain.DeployWatchStatus{}, ErrNotConfigured
@@ -195,8 +117,6 @@ func (s *Service) Status(ctx context.Context, repositoryID, taskID uuid.UUID) (d
 	return s.statusForTask(ctx, task)
 }
 
-// StatusForTask is Status with the task already in hand — the sweeper's entry,
-// which has just read the row it is deciding about.
 func (s *Service) StatusForTask(ctx context.Context, task domain.BoardTask) (domain.DeployWatchStatus, error) {
 	if s.actions == nil || s.coords == nil {
 		return domain.DeployWatchStatus{}, ErrNotConfigured
@@ -216,9 +136,6 @@ func (s *Service) statusForTask(ctx context.Context, task domain.BoardTask) (dom
 		CheckedAt:    s.now(),
 	}
 
-	// The target is read first and its failure is tolerated: the health URL,
-	// the logs URL and the rollback policy are context for the answer, not the
-	// answer. A repository with no prod target still has a deploy to watch.
 	if s.targets != nil {
 		if target, terr := s.targets.Get(ctx, task.RepositoryID, "", out.Env); terr == nil {
 			out.HealthURL = target.HealthURL
@@ -277,13 +194,6 @@ func (s *Service) statusForTask(ctx context.Context, task domain.BoardTask) (dom
 	return s.finish(out), nil
 }
 
-// actionsSignal folds the deploy JOBS across every Actions run for the commit.
-//
-// Returning ok=false is the important case: it means the runs exist but none of
-// them contains anything that looks like a deploy — a repository whose Actions
-// only build and test. The caller then moves on to the commit-status signal
-// instead of reporting the CI result as a deploy result, which is the mistake
-// that would make a green unit test read as "released".
 func (s *Service) actionsSignal(ctx context.Context, repositoryID uuid.UUID, owner, name, sha string) (domain.DeployWatchStatus, bool, error) {
 	runs, err := s.actions.ListRunsForCommit(ctx, owner, name, sha)
 	if err != nil {
@@ -300,10 +210,7 @@ func (s *Service) actionsSignal(ctx context.Context, repositoryID uuid.UUID, own
 	for _, run := range runs {
 		jobs, jerr := s.actions.ListRunJobs(ctx, owner, name, run.ID)
 		if jerr != nil {
-			// One unreadable run must not fail the whole watch — but it must
-			// not silently count as "no deploy job" either, or a transient
-			// error would flip a running deploy to no_signal and end the
-			// watch. Treated as pending: try again next sweep.
+
 			log.Warn().Err(jerr).Int64("run_id", run.ID).Msg("deploy watch: listing run jobs failed")
 			pending = true
 			continue
@@ -319,7 +226,7 @@ func (s *Service) actionsSignal(ctx context.Context, repositoryID uuid.UUID, own
 			case job.Status != "completed":
 				pending = true
 			case job.Conclusion == "success":
-				// Keep looking: a later run of the same commit may have failed.
+
 			default:
 				failed := domain.DeployWatchJob{
 					ID: job.ID, Name: job.Name, Status: job.Status, Conclusion: job.Conclusion, URL: job.HTMLURL,
@@ -347,14 +254,6 @@ func (s *Service) actionsSignal(ctx context.Context, repositoryID uuid.UUID, own
 	return out, true, nil
 }
 
-// deployJobMatcher decides which job in a run is THE deploy.
-//
-// The repository's own pipeline mapping is the authority when it has one: a
-// prod/preprod deploy category mapped to a job name is a human saying "this job
-// is the deploy", and it beats any guess. The name heuristic is the fallback
-// for a repository nobody mapped, and it is deliberately narrow — "deploy",
-// "release", "publish", "ship" — because a matcher that is too eager turns a
-// job called "deployment-docs" into the thing an automatic rollback fires on.
 func (s *Service) deployJobMatcher(ctx context.Context, repositoryID uuid.UUID) func(string) bool {
 	mapped := map[string]bool{}
 	if s.pipeline != nil {
@@ -388,7 +287,6 @@ func (s *Service) deployJobMatcher(ctx context.Context, repositoryID uuid.UUID) 
 	}
 }
 
-// mergeStatus copies the resolved signal onto the context-carrying shell.
 func mergeStatus(base, resolved domain.DeployWatchStatus) domain.DeployWatchStatus {
 	base.State = resolved.State
 	base.Signal = resolved.Signal
@@ -402,12 +300,6 @@ func mergeStatus(base, resolved domain.DeployWatchStatus) domain.DeployWatchStat
 	return base
 }
 
-// finish stamps the post-release health window onto a successful deploy.
-//
-// The window is what makes an incident attributable. Until it closes, an
-// incident opened on this environment belongs to THIS task — not to "some
-// deploy in the last 45 minutes", which is all the existing correlation could
-// say and which is why its rollback suggestion never named a card.
 func (s *Service) finish(status domain.DeployWatchStatus) domain.DeployWatchStatus {
 	if status.State != domain.DeployWatchSuccess {
 		return status
@@ -450,15 +342,11 @@ func describeCommitSignal(signal port.CommitDeploySignal, sha string) string {
 	return out
 }
 
-// ---------------------------------------------------------------------- logs
-
-// LogSource names which log a fetch wants.
 const (
 	LogSourceActionsJob = "actions_job"
 	LogSourceEndpoint   = "logs_url"
 )
 
-// LogResult is one log fetch, already truncated to something a model can read.
 type LogResult struct {
 	Source    string `json:"source"`
 	Reference string `json:"reference,omitempty"`
@@ -467,15 +355,6 @@ type LogResult struct {
 	Note      string `json:"note,omitempty"`
 }
 
-// JobLogs fetches the Actions job log and returns a SUMMARY of it, not the
-// blob.
-//
-// A deploy job's raw log is tens of thousands of lines of setup, cache
-// restores and dependency resolution, and the failure is four of them near the
-// bottom. Handing the whole thing to a model costs the run's entire context
-// budget to deliver information that a tail plus the error lines carries
-// exactly as well — and a truncation from the FRONT would cut off precisely the
-// part that matters, which is why this tails.
 func (s *Service) JobLogs(ctx context.Context, repositoryID uuid.UUID, jobID int64, maxChars int) (LogResult, error) {
 	if s.actions == nil || s.coords == nil {
 		return LogResult{}, ErrNotConfigured
@@ -503,14 +382,6 @@ func (s *Service) JobLogs(ctx context.Context, repositoryID uuid.UUID, jobID int
 	}, nil
 }
 
-// EndpointLogs fetches the environment's own logs_url.
-//
-// The destination is re-validated here, on every fetch, and not only when the
-// URL was written. It is agent-writable, and a name that resolved to a public
-// address at save time is free to answer 127.0.0.1 by the time it is dialled —
-// the same reasoning prodops.Monitor.probe carries, and the same refusal text,
-// which deliberately says nothing about which range was hit: the result is read
-// by a model, and "loopback" versus "private address" is a free network map.
 func (s *Service) EndpointLogs(ctx context.Context, repositoryID uuid.UUID, env string, maxChars int) (LogResult, error) {
 	if s.targets == nil {
 		return LogResult{}, ErrNotConfigured
@@ -558,19 +429,8 @@ func (s *Service) EndpointLogs(ctx context.Context, repositoryID uuid.UUID, env 
 	return out, nil
 }
 
-// defaultLogChars is what a log fetch returns when the caller names no cap. It
-// sits below tools.max_tool_output_chars so the agent loop never cuts the
-// middle out of a report this package already truncated deliberately.
 const defaultLogChars = 6000
 
-// SummarizeLog reduces a raw log to the part that explains a failure: the lines
-// that look like errors, followed by the tail.
-//
-// Not a raw dump and not a blind tail. A raw dump costs the run's context for
-// nothing; a blind tail is usually right but loses the stack trace when the job
-// prints a cleanup summary after it. So the error-looking lines are lifted out
-// first (capped, in order, deduped), and the tail follows them — which means
-// the two things a human would scroll to are the two things the model gets.
 func SummarizeLog(raw string, maxChars int) (string, bool) {
 	if maxChars <= 0 {
 		maxChars = defaultLogChars
@@ -612,8 +472,7 @@ func SummarizeLog(raw string, maxChars int) (string, bool) {
 	tail := raw
 	if len(tail) > budget {
 		tail = tail[len(tail)-budget:]
-		// Never start mid-line: a truncated first line reads as corrupted
-		// output and the model reports the log as unreadable.
+
 		if idx := strings.IndexByte(tail, '\n'); idx >= 0 && idx < len(tail)-1 {
 			tail = tail[idx+1:]
 		}
@@ -621,8 +480,6 @@ func SummarizeLog(raw string, maxChars int) (string, bool) {
 	return strings.TrimSpace(head + "…(earlier output truncated)\n" + tail), true
 }
 
-// errorMarkers are the substrings that make a log line worth lifting out. Case
-// is folded before matching.
 var errorMarkers = []string{
 	"error", "failed", "failure", "fatal", "panic", "exception",
 	"##[error]", "exit code 1", "exit status 1", "cannot ", "not found",

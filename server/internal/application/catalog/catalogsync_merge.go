@@ -8,11 +8,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// mergeSkill asks the LLM to merge a skill that changed both on this agent and
-// in the catalog. The provenance question it answers is skewed deliberately
-// toward the LOCAL copy's intent: the local one is where self-evolution and
-// the user's own edits land, so the merge keeps its tags and tech stack and
-// lets the model reconcile the prose.
+// Asks the LLM to merge a skill changed both locally and upstream; the local copy's tags and tech stack win, and the model reconciles the prose.
 func (s *Service) mergeSkill(ctx context.Context, agent domain.Agent, local domain.Skill, usk domain.UpstreamSkill) error {
 	system := "You merge two versions of the same agent skill into one SKILL.md document. " +
 		"Reply with ONLY the merged document, frontmatter first (name:, description:, category:), " +

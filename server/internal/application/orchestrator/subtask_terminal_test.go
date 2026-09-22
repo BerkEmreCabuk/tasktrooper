@@ -20,8 +20,7 @@ type statusCall struct {
 	errMsg string
 }
 
-// statusCatalog records status writes and, like pgx, refuses one whose context
-// is already done.
+// Refuses a status write whose context is already done, like pgx.
 type statusCatalog struct {
 	port.CatalogStore
 	calls []statusCall
@@ -35,10 +34,7 @@ func (c *statusCatalog) UpdateTaskStatus(ctx context.Context, taskID uuid.UUID, 
 	return nil
 }
 
-// DE-1: the subtask that stopped to ask for file-edit permission kept a
-// spinner on the board forever. Handing the clarification back to the caller
-// wrote no terminal status at all, so the row stayed "running" with nothing
-// left in the process to move it.
+// A clarification handed back to the caller wrote no terminal status, so the row stayed "running" with no process left to move it.
 func TestMarkTaskBlocked_WritesTerminalStatusWithTheQuestion(t *testing.T) {
 	catalog := &statusCatalog{}
 	planTask := domain.PlanTask{ID: uuid.New(), TaskKey: "t2"}
@@ -56,8 +52,7 @@ func TestMarkTaskBlocked_WritesTerminalStatusWithTheQuestion(t *testing.T) {
 	assert.Contains(t, catalog.calls[0].errMsg, "Which directory may I write to?")
 }
 
-// The write lands when the run is already being torn down — pod drain, client
-// gone. On the run's own context it was dropped and the row stayed "running".
+// The status write must survive the run's own context being torn down.
 func TestMarkTaskBlocked_PersistsAfterRunContextCancelled(t *testing.T) {
 	catalog := &statusCatalog{}
 	ctx, cancel := context.WithCancel(context.Background())

@@ -10,9 +10,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// A run's tool counters are what the next run and the tool_error_rate KPI both
-// read. They have to be written on every terminal path, so the stamp has to
-// work off the shared tracker rather than off any one failure's stats.
 func TestStampToolStatsCountsBothOutcomes(t *testing.T) {
 	usage := registry.NewToolUsage()
 	usage.Record("read_file")
@@ -29,8 +26,6 @@ func TestStampToolStatsCountsBothOutcomes(t *testing.T) {
 	assert.Equal(t, "run_terminal failed 2×, edit_file failed 1×", run.ErrorPattern)
 }
 
-// A run nobody measured stores zeros, and the KPI reads that as "no data"
-// rather than as a clean run.
 func TestStampToolStatsIsNilSafe(t *testing.T) {
 	var run domain.TaskAgentRun
 	stampToolStats(&run, nil)
@@ -40,9 +35,6 @@ func TestStampToolStatsIsNilSafe(t *testing.T) {
 	assert.Empty(t, run.ErrorPattern)
 }
 
-// The success counters must stay success-only: every gate built on ToolUsage
-// asks "did the agent actually do X", and a failed call is not evidence that
-// it did.
 func TestFailuresDoNotCountAsUsage(t *testing.T) {
 	usage := registry.NewToolUsage()
 	usage.RecordError("read_file")
@@ -55,8 +47,6 @@ func TestFailuresDoNotCountAsUsage(t *testing.T) {
 	assert.Equal(t, 1, failures)
 }
 
-// The whole point is that the lesson crosses the run boundary the way the task
-// branch already crosses it.
 func TestPreviousRunFailuresMessage(t *testing.T) {
 	current := uuid.New()
 	runs := []domain.TaskAgentRun{
@@ -69,8 +59,6 @@ func TestPreviousRunFailuresMessage(t *testing.T) {
 	assert.Contains(t, msg, "Do not open with the same calls")
 }
 
-// A run that succeeded, or one that failed without its tools failing, has no
-// warning to pass on — and an empty system message is noise in every prompt.
 func TestPreviousRunFailuresMessageStaysQuietWithoutAPattern(t *testing.T) {
 	current := uuid.New()
 
@@ -83,7 +71,6 @@ func TestPreviousRunFailuresMessageStaysQuietWithoutAPattern(t *testing.T) {
 	}, current))
 }
 
-// The current run has no pattern yet and must never read its own row.
 func TestPreviousRunFailuresMessageSkipsTheCurrentRun(t *testing.T) {
 	current := uuid.New()
 	runs := []domain.TaskAgentRun{

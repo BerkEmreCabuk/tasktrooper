@@ -10,20 +10,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// proposesCatalogChange reports whether the reflection wants to touch skills or
-// rules at all. Memory-only output changes nothing the golden suite measures,
-// so the gate stays out of its way (and does not pay for two suite runs).
+// Memory-only output changes nothing the golden suite measures, so the gate stays out of its way.
 func proposesCatalogChange(output domain.ReflectionOutput) bool {
 	return len(output.Skills) > 0 || len(output.Rules) > 0
 }
 
-// enforceGoldenGate grades the applied change set on the before/after golden
-// runs and rolls the whole set back when the verdict is revert. It returns the
-// line appended to the reflection summary.
-//
-// All-or-nothing on purpose: the changes were reasoned about together (a new
-// rule that only makes sense with the skill it points at), so keeping half of
-// a rejected set is the one outcome nobody asked for.
+// All-or-nothing on purpose: the changes were reasoned about together (a new rule that only makes sense with the skill it points at), so keeping half of a rejected set is the one outcome nobody asked for.
 func (s *Service) enforceGoldenGate(
 	ctx context.Context,
 	agentRec domain.Agent,
@@ -59,12 +51,7 @@ func (s *Service) enforceGoldenGate(
 	return line + fmt.Sprintf("\nRolled back %d change(s); the agent is back on its pre-reflection skills and rules.", len(revertedIDs)), result
 }
 
-// markOutcomesRolledBack flips the outcome of every applied change the gate
-// just reverted, matched by the evolution event id the apply step attached to
-// it — the same id revertChangeSet reports as successfully undone. outcomes is
-// mutated in place: it shares a backing array with the slice
-// ReflectionDecision.Changes will be set to, so the caller sees the update
-// without a second pass.
+// outcomes is mutated in place: it shares a backing array with ReflectionDecision.Changes, so the caller sees the update without a second pass.
 func markOutcomesRolledBack(outcomes []domain.ReflectionChangeOutcome, revertedEventIDs []uuid.UUID) {
 	if len(revertedEventIDs) == 0 {
 		return
@@ -87,9 +74,7 @@ func keepWord(keep bool) string {
 	return "REVERT"
 }
 
-// catalogChangeEvents filters out memory writes and reverts — neither is
-// something the gate can or should undo. A revert the reflection itself asked
-// for was a deliberate repair, not part of the change set under test.
+// Reverts are deliberate repairs, not part of the change set under test — neither can the gate undo.
 func catalogChangeEvents(events []domain.AgentEvolutionEvent) []domain.AgentEvolutionEvent {
 	var out []domain.AgentEvolutionEvent
 	for _, e := range events {
@@ -103,8 +88,7 @@ func catalogChangeEvents(events []domain.AgentEvolutionEvent) []domain.AgentEvol
 	return out
 }
 
-// revertChangeSet undoes events newest-first, so a skill created and then
-// updated within the same reflection unwinds in the order it was built.
+// Newest-first so a skill created and then updated within one reflection unwinds in the order it was built.
 func (s *Service) revertChangeSet(
 	ctx context.Context,
 	agentRec domain.Agent,
@@ -124,9 +108,7 @@ func (s *Service) revertChangeSet(
 			log.Warn().Err(err).Str("event", original.ID.String()).Msg("golden gate rollback failed for one change")
 			continue
 		}
-		// The rollback is itself an evolution event: the history has to show
-		// that the change was applied and then taken back, or the next
-		// reflection reads the catalog and cannot tell what was tried.
+		// The rollback is itself an evolution event, or the history would show the change applied but never taken back.
 		if _, err := s.store.CreateEvent(ctx, domain.AgentEvolutionEvent{
 			ReflectionID: &reflection.ID, AgentID: agentRec.ID,
 			ChangeType: domain.EvolutionChangeRevert, TargetKind: original.TargetKind,
@@ -136,8 +118,7 @@ func (s *Service) revertChangeSet(
 		}); err != nil {
 			log.Warn().Err(err).Msg("golden gate revert event persist failed")
 		}
-		// The original is already known to have hurt — the gate measured it —
-		// so it skips the impact window instead of waiting a week to say so.
+		// The original is already known to have hurt — the gate measured it — so it skips the impact window instead of waiting a week.
 		if err := s.store.UpdateEventImpact(ctx, original.ID, domain.EvolutionImpactRegressed); err != nil {
 			log.Warn().Err(err).Msg("golden gate impact update failed")
 		}
@@ -146,8 +127,7 @@ func (s *Service) revertChangeSet(
 	return reverted
 }
 
-// gateSummaryChanges is the change list handed to the judge, trimmed so a long
-// batch cannot dominate its prompt.
+// Trimmed so a long batch cannot dominate the judge's prompt.
 func gateSummaryChanges(applyLog []string) []string {
 	if len(applyLog) <= 20 {
 		return applyLog

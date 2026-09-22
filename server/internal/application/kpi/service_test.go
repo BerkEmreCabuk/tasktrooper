@@ -13,10 +13,10 @@ func TestKPIAttainmentLowerBetter(t *testing.T) {
 		value float64
 		want  float64
 	}{
-		{2, 1.0}, // bugs < 3 → tam puan
-		{4, 0.5}, // <= 5 → yarım puan
-		{5, 0.5}, // user example: 5 bug → yarım
-		{6, 0},   // üstü → sıfır
+		{2, 1.0},
+		{4, 0.5},
+		{5, 0.5},
+		{6, 0},
 		{0, 1.0},
 	}
 	for _, c := range cases {
@@ -47,7 +47,7 @@ func TestKPIAttainmentHigherBetter(t *testing.T) {
 }
 
 func TestPeriodBoundsWeekly(t *testing.T) {
-	// Wednesday 2026-07-08 → ISO week starts Monday 2026-07-06.
+
 	now := time.Date(2026, 7, 8, 15, 30, 0, 0, time.UTC)
 	from, to := PeriodBounds(domain.KPIPeriodWeekly, now)
 	if from != time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC) {
@@ -56,7 +56,7 @@ func TestPeriodBoundsWeekly(t *testing.T) {
 	if to != time.Date(2026, 7, 13, 0, 0, 0, 0, time.UTC) {
 		t.Errorf("weekly to = %v", to)
 	}
-	// Sunday belongs to the week that started the previous Monday.
+
 	sunday := time.Date(2026, 7, 12, 10, 0, 0, 0, time.UTC)
 	from, _ = PeriodBounds(domain.KPIPeriodWeekly, sunday)
 	if from != time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC) {
@@ -83,9 +83,7 @@ func TestMetricByKeyRejectsUnknown(t *testing.T) {
 	if _, err := MetricByKey("tasks_completed"); err != nil {
 		t.Fatalf("expected tasks_completed to be trackable: %v", err)
 	}
-	// ListMetrics drives the metric picker in the UI, so a metric added to the
-	// registry and left out of the ordered list would be untrackable in
-	// practice while looking fine here.
+
 	if len(ListMetrics()) != len(metricRegistry) {
 		t.Errorf("ListMetrics covers %d of %d registry metrics", len(ListMetrics()), len(metricRegistry))
 	}
@@ -101,7 +99,7 @@ func TestCompositeScore(t *testing.T) {
 		{KPIID: disabled.ID, Attainment: 0},
 	}
 	got := CompositeScore([]domain.AgentKPI{k1, k2, disabled}, results)
-	want := (1.0*1 + 3*0.5) / 4 * 100 // 62.5
+	want := (1.0*1 + 3*0.5) / 4 * 100
 	if got != want {
 		t.Errorf("composite = %v want %v", got, want)
 	}

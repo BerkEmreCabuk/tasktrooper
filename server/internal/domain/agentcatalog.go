@@ -6,8 +6,8 @@ import (
 	"github.com/google/uuid"
 )
 
-// UpstreamAgent is one agent definition as the external catalog stores it in
-// agents/<slug>/. The sync reconciles these against live agents by CatalogSlug.
+// UpstreamAgent is one agent definition as the external catalog stores it, in
+// agents/<slug>/.
 type UpstreamAgent struct {
 	Slug          string
 	Name          string
@@ -26,23 +26,13 @@ type UpstreamAgent struct {
 	Subscriptions []TaskColumn
 	Skills        []UpstreamSkill
 	Rules         []UpstreamRule
-	// ColumnInstructions are the agent's per-column defaults from
-	// agents/<slug>/columns/<column_slug>.md: what the agent is told to do when
-	// a task arrives in that column, delivered as a prompt append at dispatch.
-	// They are seeded into agent_column_instructions, never into
-	// subscriptions, so a column that dispatches the agent without being
-	// watched still gets its instruction.
+	// Seeded into agent_column_instructions, never into subscriptions, so a
+	// column that dispatches the agent without being watched still gets its
+	// instruction.
 	ColumnInstructions []UpstreamColumnInstruction
-	// TechStacks are the stacks the agent's skills are filed under, created on
-	// the agent at ingest and resolved by name when a skill's front-matter
-	// tech_stack names one.
-	TechStacks []CreateTechStackRequest
-	// KPIs are the agent's default scoreboard, created at ingest the same way
-	// the built-in templates used to carry them.
-	KPIs []CreateKPIRequest
-	// Etag is a stable hash of this agent's whole definition, so a sync can
-	// tell an unchanged agent apart from a changed one at a glance.
-	Etag string
+	TechStacks         []CreateTechStackRequest
+	KPIs               []CreateKPIRequest
+	Etag               string
 }
 
 type UpstreamSkill struct {
@@ -51,12 +41,10 @@ type UpstreamSkill struct {
 	Category    string
 	TechStack   string
 	Content     string
-	// Enabled mirrors the skill's `enabled:` front-matter; a deferred
-	// capability ships disabled so the row exists while the prompt builder
-	// skips it, and the sync must carry that flag onto the live skill.
+	// Mirrors the skill's `enabled:` front-matter; the sync must carry a
+	// deferred capability's disabled state onto the live skill.
 	Enabled bool
-	// Sha hashes just this skill's content, the revision marker stored back on
-	// the live skill as CatalogSha.
+	// The revision marker stored back on the live skill as CatalogSha.
 	Sha string
 }
 
@@ -67,8 +55,6 @@ type UpstreamRule struct {
 	Enabled  bool
 }
 
-// UpstreamColumnInstruction is one per-column default prompt from the
-// catalog's agents/<slug>/columns/ directory.
 type UpstreamColumnInstruction struct {
 	Column      TaskColumn
 	Instruction string
@@ -76,8 +62,7 @@ type UpstreamColumnInstruction struct {
 
 // CatalogSyncState is the one-row status of the last external-catalog sync.
 type CatalogSyncState struct {
-	// RepoRef names where the last sync read from: the git commit sha, or the
-	// local directory used in place.
+	// The git commit sha, or the local directory used in place.
 	RepoRef      string             `json:"repo_ref"`
 	LastSyncAt   time.Time          `json:"last_sync_at"`
 	LastError    string             `json:"last_error,omitempty"`
@@ -92,14 +77,13 @@ type CatalogSyncResult struct {
 	Updated int    `json:"updated"`
 	Merged  int    `json:"merged"`
 	Skipped int    `json:"skipped"`
-	// Pending is how many upstream changes could not be applied and were
-	// parked for the user (toggle off, budget full, LLM merge failed).
+	// Upstream changes parked for the user instead of applied.
 	Pending int `json:"pending"`
 }
 
 const (
-	CatalogPendingKindAgent  = "agent"
-	CatalogPendingKindSkill  = "skill"
+	CatalogPendingKindAgent    = "agent"
+	CatalogPendingKindSkill    = "skill"
 	CatalogPendingActionCreate = "create"
 	CatalogPendingActionUpdate = "update"
 	CatalogPendingActionDelete = "delete"

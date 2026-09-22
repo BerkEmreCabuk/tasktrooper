@@ -12,10 +12,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeIncidents is an in-memory port.IncidentStore. It keeps only what the
-// triage guard depends on — fingerprint dedupe, status, and the remedy with its
-// author — so the guard can be exercised without an embedded postgres (the SQL
-// side of the same column is covered by the store suite).
 type fakeIncidents struct {
 	incidents map[uuid.UUID]*domain.Incident
 	events    map[uuid.UUID][]domain.IncidentEvent
@@ -137,9 +133,6 @@ func (f *fakeIncidents) ListEvents(_ context.Context, incidentID uuid.UUID) ([]d
 	return f.events[incidentID], nil
 }
 
-// RemedyAuthorshipSuite covers the provenance of the remedy: the automatic
-// first pass must be recognisable as machine triage, and it must never
-// overwrite a diagnosis somebody actually reached.
 type RemedyAuthorshipSuite struct {
 	suite.Suite
 	ctx       context.Context
@@ -157,8 +150,6 @@ func (s *RemedyAuthorshipSuite) SetupTest() {
 	s.repoID = uuid.New()
 }
 
-// Medium keeps the incident below the task floor, so the ingest path under test
-// is just dedupe + triage.
 func (s *RemedyAuthorshipSuite) alert() domain.IncidentInput {
 	return domain.IncidentInput{
 		RepositoryID: s.repoID,
@@ -193,9 +184,6 @@ func (s *RemedyAuthorshipSuite) TestProposalOverwritesMachineTriage() {
 	s.Contains(proposed.Remedy, "raise max_conns to 200")
 }
 
-// The guard has to key off who wrote the remedy, not off the status: a human
-// can write one while the incident is still open/triaging, and the recurrence
-// that follows must leave it alone.
 func (s *RemedyAuthorshipSuite) TestRecurrenceDoesNotOverwriteAHumanRemedy() {
 	incident, err := s.svc.Ingest(s.ctx, s.alert())
 	s.Require().NoError(err)
@@ -206,8 +194,7 @@ func (s *RemedyAuthorshipSuite) TestRecurrenceDoesNotOverwriteAHumanRemedy() {
 		Confidence: 90,
 	}, domain.RemedyAuthorHuman)
 	s.Require().NoError(err)
-	// Back to triaging: under the old status-only guard this alone re-opened the
-	// remedy to being overwritten.
+
 	_, err = s.incidents.UpdateStatus(s.ctx, incident.ID, domain.IncidentStatusTriaging)
 	s.Require().NoError(err)
 
@@ -218,8 +205,6 @@ func (s *RemedyAuthorshipSuite) TestRecurrenceDoesNotOverwriteAHumanRemedy() {
 	s.Equal(proposed.Remedy, recurred.Remedy, "machine triage must not clobber a human's write")
 }
 
-// Its own earlier pass is fair game: nothing is lost by re-deriving it with a
-// fresher picture of the deploy history.
 func (s *RemedyAuthorshipSuite) TestRecurrenceRefreshesItsOwnTriage() {
 	incident, err := s.svc.Ingest(s.ctx, s.alert())
 	s.Require().NoError(err)
@@ -235,9 +220,6 @@ func (s *RemedyAuthorshipSuite) TestRecurrenceRefreshesItsOwnTriage() {
 	s.Equal(domain.RemedyAuthorAutoTriage, recurred.RemedyAuthor)
 }
 
-// Incidents written before remedy_author existed carry no author at all. They
-// keep the old status proxy: overwritable while open/triaging, protected once
-// somebody moved them to proposed/fixing.
 func (s *RemedyAuthorshipSuite) TestUnknownAuthorshipFallsBackToTheStatusProxy() {
 	incident, err := s.svc.Ingest(s.ctx, s.alert())
 	s.Require().NoError(err)

@@ -45,9 +45,6 @@ func TestDetectToolchainReadsTheRunsOwnWorkspace(t *testing.T) {
 	assert.Equal(t, "/data/workspaces/t-1", stub.workspace)
 }
 
-// A detection that could not be made does NOT fail the run: the session starts
-// on the host defaults, while failing would turn a repository that pins nothing
-// into a task that never starts.
 func TestDetectToolchainFailureDoesNotStopTheRun(t *testing.T) {
 	for _, err := range []error{errors.New("boom"), context.DeadlineExceeded} {
 		r := &Runner{toolchains: &stubToolchains{available: true, err: err}}
@@ -55,8 +52,6 @@ func TestDetectToolchainFailureDoesNotStopTheRun(t *testing.T) {
 	}
 }
 
-// Absence stays absence: an empty answer omits the parameter rather than being
-// filled in with a "system" or "latest" default nobody wrote in the repository.
 func TestDetectToolchainReportsNothingRatherThanADefault(t *testing.T) {
 	r := &Runner{toolchains: &stubToolchains{available: true, result: port.Toolchain{Env: map[string]string{}}}}
 	assert.Nil(t, r.detectToolchain(context.Background(), toolchainJob(), "/data/workspaces/t-1"))

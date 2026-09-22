@@ -14,9 +14,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeBlockedTaker models the store's take-once semantics: the parked task is
-// handed back exactly once, mirroring the atomic UPDATE ... RETURNING that
-// clears blocked_session_id in the same statement.
 type fakeBlockedTaker struct {
 	task  domain.BoardTask
 	on    uuid.UUID
@@ -37,7 +34,6 @@ func (f *fakeBlockedTaker) TakeBlockedBySession(_ context.Context, sessionID uui
 	return f.task, true, nil
 }
 
-// fakeTaskCommenter records what the resumer writes onto the task.
 type fakeTaskCommenter struct {
 	comments []domain.CreateTaskCommentRequest
 	err      error
@@ -85,8 +81,6 @@ func (s *ResumeSuite) SetupTest() {
 	s.taskID = uuid.New()
 	s.repoID = uuid.New()
 	s.question = "Which database should the new service use?"
-	// The store restores the origin column before handing the task back, so the
-	// resumed task arrives in the column it was working in — not in 'blocked'.
 	s.taker = &fakeBlockedTaker{
 		on: s.session,
 		task: domain.BoardTask{
@@ -102,8 +96,6 @@ func (s *ResumeSuite) SetupTest() {
 	s.resumer = board.NewAnswerResumer(s.taker, s.disp, s.commenter)
 }
 
-// The whole point of parking a task: answering re-dispatches it, and the agent
-// gets both halves of the exchange so it can continue instead of restarting.
 func (s *ResumeSuite) TestAnswerRedispatchesWithQuestionAndAnswer() {
 	s.True(s.resumer.ResumeOnAnswer(context.Background(), s.session, "Postgres"))
 
@@ -118,9 +110,6 @@ func (s *ResumeSuite) TestAnswerRedispatchesWithQuestionAndAnswer() {
 	s.Equal("Postgres", payload["answer"])
 }
 
-// The answer has to outlive the run it resumes. Without a record on the task,
-// the next run (retry, revision, verification) starts blind and asks the human
-// the question they already answered.
 func (s *ResumeSuite) TestAnswerIsRecordedOnTheTask() {
 	s.resumer.ResumeOnAnswer(context.Background(), s.session, "Postgres")
 
@@ -131,14 +120,11 @@ func (s *ResumeSuite) TestAnswerIsRecordedOnTheTask() {
 	s.Contains(comment.Content, s.question)
 	s.Contains(comment.Content, "Postgres")
 
-	// And a later run reads it back as an answered requirement.
 	replay := prompt.AnsweredClarificationsMessage([]domain.TaskComment{{Content: comment.Content}})
 	s.Contains(replay, s.question)
 	s.Contains(replay, "Postgres")
 }
 
-// Losing the comment must not cost the resume: the run being dispatched still
-// carries both halves in its payload.
 func (s *ResumeSuite) TestCommentFailureStillResumes() {
 	s.commenter.err = errors.New("db down")
 
@@ -146,8 +132,6 @@ func (s *ResumeSuite) TestCommentFailureStillResumes() {
 	s.Len(s.runner.jobs, 1)
 }
 
-// Every human message in every session hits this path, so a session with no
-// task parked on it must cost one lookup and nothing else.
 func (s *ResumeSuite) TestUnrelatedSessionIsANoOp() {
 	s.False(s.resumer.ResumeOnAnswer(context.Background(), uuid.New(), "hello"))
 
@@ -157,8 +141,6 @@ func (s *ResumeSuite) TestUnrelatedSessionIsANoOp() {
 	s.Empty(s.commenter.comments)
 }
 
-// A follow-up message in the same chat must not fire a second run for a task
-// that is already back in flight.
 func (s *ResumeSuite) TestSecondAnswerDoesNotDispatchTwice() {
 	s.resumer.ResumeOnAnswer(context.Background(), s.session, "Postgres")
 	s.resumer.ResumeOnAnswer(context.Background(), s.session, "...and use pgx")
@@ -166,7 +148,6 @@ func (s *ResumeSuite) TestSecondAnswerDoesNotDispatchTwice() {
 	s.Len(s.runner.jobs, 1, "the take clears the block, so only the first answer resumes the task")
 }
 
-// A store error must not take down the chat request that triggered the lookup.
 func (s *ResumeSuite) TestStoreErrorIsSwallowed() {
 	s.taker.err = errors.New("db down")
 
@@ -176,8 +157,6 @@ func (s *ResumeSuite) TestStoreErrorIsSwallowed() {
 	s.Empty(s.runner.jobs)
 }
 
-// Resume is wired in optionally (desktop builds skip the board); the zero value
-// and a nil resumer must both stay inert rather than panic on a chat message.
 func (s *ResumeSuite) TestNilResumerIsInert() {
 	var nilResumer *board.AnswerResumer
 	s.NotPanics(func() {

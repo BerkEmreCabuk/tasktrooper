@@ -112,9 +112,7 @@ func TestShouldOrchestrate_FastPathDisabled(t *testing.T) {
 	assert.True(t, orchestrator.ShouldOrchestrate(false, false))
 }
 
-// The planner prompt lists skills by metadata only; the full body is loaded
-// on-demand by the executor, so content must NOT leak into the planner prompt
-// (that bloat pushed one-line requests past provider token limits).
+// The planner prompt lists skills by metadata only; the executor loads the bodies on demand.
 func TestBuildPlannerSystemPrompt_SkillsMetadataOnly(t *testing.T) {
 	skills := []domain.Skill{
 		{ID: uuid.New(), Name: "go-test", Description: "Testing in Go", Category: "testing", Content: "use testify suites for table tests", Enabled: true},
@@ -136,7 +134,6 @@ func TestIsolatedSubtaskHistory_KeepsConversationDropsToolChatter(t *testing.T) 
 	require.Len(t, isolated, 3)
 	assert.Equal(t, "original", isolated[0].Content)
 	assert.Equal(t, "summary", isolated[1].Content)
-	// Every user turn survives — the follow-up is the instruction being executed.
 	assert.Equal(t, "follow up", isolated[2].Content)
 }
 

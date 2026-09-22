@@ -12,13 +12,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// The failure this file exists for: by the time QA is dispatched the developer
-// has ticked every acceptance criterion, so the "open criteria" list the prompt
-// carried was EMPTY and QA saw no criterion id at all. review_criterion takes a
-// uuid; with none in reach the run passed the criterion text, was told "invalid
-// criterion_id", and moved the task to need_revision to make the ids appear —
-// bouncing finished work back to a developer with nothing to fix, once per
-// review cycle.
 func TestCriteriaForRunListsEveryCriterionForReviewColumns(t *testing.T) {
 	ticked := []domain.AcceptanceCriterion{
 		{ID: uuid.New(), Text: "stage login accepts a valid password", Completed: true},
@@ -47,9 +40,6 @@ func TestCriteriaForRunListsEveryCriterionForReviewColumns(t *testing.T) {
 	}
 }
 
-// The QA and PM headers have to say three things the transcripts show were all
-// missing, the last one loudest: bouncing the task to need_revision is not how
-// you find these ids.
 func TestTriggerMessageTellsReviewersToRecordAVerdictOnEachID(t *testing.T) {
 	criteria := []domain.AcceptanceCriterion{{ID: uuid.New(), Text: "criterion", Completed: true}}
 	for _, col := range []domain.TaskColumn{
@@ -80,8 +70,6 @@ func TestTriggerMessageNamesTheCriteriaAsTheDiffsTargetInCodeReview(t *testing.T
 	require.NotContains(t, msg, "call set_criterion_completed", "the reviewer does not tick the developer's boxes")
 }
 
-// A reviewer that cannot see an existing verdict either repeats work another
-// role recorded or reads the developer's checkmark as an approval.
 func TestTriggerMessageShowsWhoHasSaidWhatAboutEachCriterion(t *testing.T) {
 	c := domain.AcceptanceCriterion{
 		ID: uuid.New(), Text: "the banner appears", Completed: true,
@@ -107,8 +95,6 @@ func TestTriggerMessageShowsARejectionWithItsNote(t *testing.T) {
 	require.Contains(t, msg, "qa: rejected (banner never rendered)")
 }
 
-// The implementer's half is unchanged: it is told what is LEFT to do, not what
-// it has already ticked.
 func TestCriteriaForRunListsOnlyOpenCriteriaForImplementers(t *testing.T) {
 	done := domain.AcceptanceCriterion{ID: uuid.New(), Text: "already implemented", Completed: true}
 	open := domain.AcceptanceCriterion{ID: uuid.New(), Text: "still to do", Completed: false}
@@ -136,13 +122,6 @@ func TestCriteriaForRunListsOnlyOpenCriteriaForImplementers(t *testing.T) {
 	}
 }
 
-// An analysis ticks its own criteria as its documents answer them; nothing about
-// that changes because a review column now lists everything.
-//
-// The column has to be one listsEveryCriterion actually lists — code_review —
-// or the assertion proves nothing: analiz_review is rejected by the column
-// switch before the TaskTypeAnaliz guard is ever consulted, so an analiz task
-// sitting there would keep the open-only list even if the guard were deleted.
 func TestCriteriaForRunKeepsAnalizBehaviourUnchanged(t *testing.T) {
 	done := domain.AcceptanceCriterion{ID: uuid.New(), Text: "answered", Completed: true}
 	open := domain.AcceptanceCriterion{ID: uuid.New(), Text: "unanswered", Completed: false}
@@ -165,9 +144,6 @@ func TestCriteriaForRunKeepsAnalizBehaviourUnchanged(t *testing.T) {
 	require.NotContains(t, msg, "Acceptance criteria the diff must satisfy")
 }
 
-// changedFilesSinceGit answers ChangedFilesSince from a fixed table keyed by
-// sha; every other port.GitClient method is left to panic, so a change that
-// starts calling one here is caught rather than silently passing.
 type changedFilesSinceGit struct {
 	port.GitClient
 	bySHA map[string][]string
@@ -179,11 +155,6 @@ func (g *changedFilesSinceGit) ChangedFilesSince(_ context.Context, _ string, sh
 	return g.bySHA[sha], nil
 }
 
-// A verdict used to be wiped wholesale on every return to ready_for_qa, so QA
-// re-verified every criterion even when the fix was a one-line merge
-// conflict. Verdicts now survive the round; this is what a reviewer is shown
-// in their place, so they can tell a criterion the revision never touched
-// from one it did.
 func TestChangedSinceByVerifiedSHAReportsWhatMovedSinceEachVerdict(t *testing.T) {
 	sha := "1111111111112222222222223333333333334444"
 	criteria := []domain.AcceptanceCriterion{
@@ -192,7 +163,6 @@ func TestChangedSinceByVerifiedSHAReportsWhatMovedSinceEachVerdict(t *testing.T)
 			Checks: []domain.CriterionCheck{{Role: domain.CriterionReviewRoleQA, Approved: true, VerifiedSHA: sha}},
 		},
 		{
-			// Same SHA as the first criterion — one review round, one git call.
 			ID: uuid.New(), Text: "b",
 			Checks: []domain.CriterionCheck{{Role: domain.CriterionReviewRoleQA, Approved: true, VerifiedSHA: sha}},
 		},
@@ -206,9 +176,6 @@ func TestChangedSinceByVerifiedSHAReportsWhatMovedSinceEachVerdict(t *testing.T)
 	require.Len(t, g.calls, 1, "one review round shares one SHA, so this must be one git call, not one per criterion")
 }
 
-// The reviewer's line has to say WHICH criteria are safe to leave alone: an
-// approval next to a note naming files that changed since is not the same
-// as one the revision never went near.
 func TestCriterionStateLineNotesFilesChangedSinceAnApprovedVerdict(t *testing.T) {
 	sha := "1111111111112222222222223333333333334444"
 	touched := domain.AcceptanceCriterion{
@@ -237,9 +204,6 @@ func TestCriterionStateLineNotesFilesChangedSinceAnApprovedVerdict(t *testing.T)
 	require.NotContains(t, plainLine, "as of", "a verdict with no recorded SHA gets no changed-since note")
 }
 
-// get_deploy_target was called with "agent-server" — the repository NAME, the
-// only repository identifier a run could see — and answered "invalid
-// repository_id", with nowhere to look the uuid up.
 func TestTriggerMessageSnapshotCarriesTheRepositoryID(t *testing.T) {
 	repoID := uuid.New()
 	msg := buildTriggerMessage(RunJob{

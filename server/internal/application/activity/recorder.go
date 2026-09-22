@@ -57,7 +57,7 @@ func (r *Recorder) Step(stepType string, payload any) {
 		return
 	}
 	data, err := json.Marshal(payload)
-	// json.Marshal(nil) yields "null", which clients cannot treat as an object.
+
 	if err != nil || len(data) == 0 || string(data) == "null" {
 		data = []byte("{}")
 	}

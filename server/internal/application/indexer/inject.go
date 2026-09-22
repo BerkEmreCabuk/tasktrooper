@@ -22,11 +22,6 @@ type Injector struct {
 	rewriteEnabled bool
 }
 
-// SetQueryRewrite enables multi-query retrieval: the query text may be
-// rewritten into up to two extra code-search queries before searching. Whether
-// a given injection actually rewrites is the caller's call via
-// InjectOptions.RewriteQuery — only raw human prose (chat) is worth the model
-// turn. The rewrite runs on the active provider's default model.
 func (i *Injector) SetQueryRewrite(enabled bool) {
 	i.rewriteEnabled = enabled
 }
@@ -47,9 +42,6 @@ func NewInjector(
 	}
 }
 
-// buildQueries returns the original query plus up to two LLM-rewritten
-// code-search variants (when query rewriting is enabled). Rewrite failures
-// silently degrade to the original query only.
 func (i *Injector) buildQueries(ctx context.Context, query string) []string {
 	queries := []string{query}
 	if !i.rewriteEnabled || i.llm == nil {
@@ -77,8 +69,6 @@ func (i *Injector) buildQueries(ctx context.Context, query string) []string {
 	return queries
 }
 
-// interleaveChunks round-robins the per-query result lists (each already
-// ranked) into one deduplicated list of at most topK chunks.
 func interleaveChunks(lists [][]domain.WorkspaceChunk, topK int, seen map[string]struct{}) []domain.WorkspaceChunk {
 	var out []domain.WorkspaceChunk
 	for pos := 0; len(out) < topK; pos++ {
@@ -111,8 +101,7 @@ func (i *Injector) InjectContext(ctx context.Context, sessionID uuid.UUID, messa
 	var err error
 	projectID := registry.ProjectIDFromContext(ctx)
 	if projectID != uuid.Nil {
-		// Prefer the index of the branch this run is editing; fall back to the
-		// default-branch index while the branch has none yet.
+
 		if branch := registry.BranchFromContext(ctx); branch != "" {
 			idx, err = i.store.GetIndexByProjectBranch(ctx, projectID, branch)
 			if err != nil || idx.Status != domain.IndexStatusCompleted {
@@ -206,8 +195,7 @@ func (i *Injector) InjectContext(ctx context.Context, sessionID uuid.UUID, messa
 			}
 		}
 	}
-	// The skeleton must describe the tree the agent is actually editing (the
-	// task workspace), not the shared repo root the index was built from.
+
 	rootPath := idx.RootPath
 	if ws := registry.EffectiveWorkspaceDir(ctx); ws != "" {
 		rootPath = ws

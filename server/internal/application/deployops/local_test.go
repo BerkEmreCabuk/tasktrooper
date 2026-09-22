@@ -11,9 +11,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// The whole point of the feature: a deploy nobody ran on GitHub still shows
-// up as this environment's last run, so the grid stops claiming the last
-// Actions run is what is live.
 func TestRecordLocalStartThenFinishIsOneRunInTheMatrix(t *testing.T) {
 	repoID := uuid.New()
 	svc := newTestService(t, fixture{
@@ -44,7 +41,6 @@ func TestRecordLocalStartThenFinishIsOneRunInTheMatrix(t *testing.T) {
 		t.Fatalf("start = %+v, want trigger_source local and no html_url", started)
 	}
 
-	// The finish report carries only the outcome; everything else must survive.
 	finished, err := svc.RecordLocal(ctx, deployops.LocalRunInput{
 		RepositoryID: repoID,
 		Env:          "prod",
@@ -91,8 +87,6 @@ func TestRecordLocalStartThenFinishIsOneRunInTheMatrix(t *testing.T) {
 	}
 }
 
-// A finish report addressed at a GitHub run id would rewrite a real Actions
-// run's row — the reason local ids are negative in the first place.
 func TestRecordLocalRefusesAGitHubRunID(t *testing.T) {
 	repoID := uuid.New()
 	svc := newTestService(t, fixture{
@@ -111,8 +105,6 @@ func TestRecordLocalRefusesAGitHubRunID(t *testing.T) {
 	}
 }
 
-// A completed run with no usable conclusion would render as "cancelled" on the
-// grid, which is a different claim from "we do not know".
 func TestRecordLocalRejectsCompletedWithoutConclusion(t *testing.T) {
 	repoID := uuid.New()
 	svc := newTestService(t, fixture{repos: []domain.Repository{{ID: repoID, Name: "web"}}})
@@ -135,8 +127,6 @@ func TestRecordLocalRejectsUnknownEnv(t *testing.T) {
 	}
 }
 
-// A deploy still in flight has no outcome. Keeping a conclusion the caller
-// passed anyway would paint the cell green before the script finished.
 func TestRecordLocalDropsAConclusionOnAnUnfinishedRun(t *testing.T) {
 	repoID := uuid.New()
 	svc := newTestService(t, fixture{repos: []domain.Repository{{ID: repoID, Name: "web"}}})
@@ -152,8 +142,6 @@ func TestRecordLocalDropsAConclusionOnAnUnfinishedRun(t *testing.T) {
 	}
 }
 
-// One deploy is one audit entry, written when the outcome is known — and a
-// failed break-glass deploy is audited as an error, not silently as ok.
 func TestRecordLocalAuditsOnlyTheFinish(t *testing.T) {
 	repoID := uuid.New()
 	svc := newTestService(t, fixture{repos: []domain.Repository{{ID: repoID, Name: "web"}}})

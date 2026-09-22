@@ -13,8 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeAttachmentStore serves canned metadata and bytes; ids listed in failGet
-// answer Get with an error so the tolerance path can be exercised.
 type fakeAttachmentStore struct {
 	metas   map[uuid.UUID][]domain.AttachmentMeta
 	data    map[uuid.UUID][]byte
@@ -46,7 +44,6 @@ func (f *fakeAttachmentStore) Get(_ context.Context, id uuid.UUID) (domain.Attac
 	return domain.Attachment{ID: id, Data: f.data[id]}, nil
 }
 
-// image registers one image attachment on a message and returns its meta.
 func (f *fakeAttachmentStore) image(msgID uuid.UUID, contentType string, size int64, payload string) uuid.UUID {
 	if f.metas == nil {
 		f.metas = map[uuid.UUID][]domain.AttachmentMeta{}
@@ -64,7 +61,6 @@ type ImageAttachmentsSuite struct {
 	suite.Suite
 }
 
-// rows/history pair for a transcript of alternating user/assistant turns.
 func transcript(roles ...domain.Role) ([]domain.SessionMessage, []domain.Message) {
 	rows := make([]domain.SessionMessage, 0, len(roles))
 	history := make([]domain.Message, 0, len(roles))
@@ -87,8 +83,6 @@ func (s *ImageAttachmentsSuite) TestImageRidesAlongAsBase64() {
 	s.Equal(base64.StdEncoding.EncodeToString([]byte("pixels")), history[0].Images[0].Data)
 }
 
-// A PDF is a real attachment on the transcript but nothing these providers can
-// read as an image — it must never enter the prompt.
 func (s *ImageAttachmentsSuite) TestOnlyImageContentTypesAreSent() {
 	rows, history := transcript(domain.RoleUser)
 	store := &fakeAttachmentStore{}
@@ -100,7 +94,7 @@ func (s *ImageAttachmentsSuite) TestOnlyImageContentTypesAreSent() {
 
 	s.Require().Len(history[0].Images, 1)
 	s.Equal("image/webp", history[0].Images[0].MediaType)
-	// The documents were never even fetched.
+
 	s.Equal(1, store.gets)
 }
 
@@ -116,8 +110,6 @@ func (s *ImageAttachmentsSuite) TestImagesOverTheSizeCapAreSkipped() {
 	s.Equal(base64.StdEncoding.EncodeToString([]byte("exactly at the cap")), history[0].Images[0].Data)
 }
 
-// Eight images across four user turns: only the six newest survive, and the
-// oldest turn loses its images entirely.
 func (s *ImageAttachmentsSuite) TestOnlyTheSixNewestImagesSurvive() {
 	rows, history := transcript(
 		domain.RoleUser, domain.RoleAssistant,
@@ -142,7 +134,7 @@ func (s *ImageAttachmentsSuite) TestOnlyTheSixNewestImagesSurvive() {
 	s.Len(history[2].Images, 2)
 	s.Len(history[4].Images, 2)
 	s.Len(history[6].Images, 2)
-	// Within a message the original order is preserved.
+
 	s.Equal(base64.StdEncoding.EncodeToString([]byte("a6")), history[6].Images[0].Data)
 	s.Equal(base64.StdEncoding.EncodeToString([]byte("b6")), history[6].Images[1].Data)
 }
@@ -171,8 +163,6 @@ func (s *ImageAttachmentsSuite) TestMetadataReadFailureLeavesTheHistoryIntact() 
 	s.Equal("m0", history[0].Content)
 }
 
-// An assistant or tool row that somehow carries attachments must not gain
-// images — only what the human sent is user input.
 func (s *ImageAttachmentsSuite) TestNonUserMessagesAreUntouched() {
 	rows, history := transcript(domain.RoleAssistant, domain.RoleTool, domain.RoleSystem)
 	store := &fakeAttachmentStore{}

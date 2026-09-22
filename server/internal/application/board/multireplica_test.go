@@ -262,8 +262,6 @@ func TestTwoReplicasCannotRunTheSameTask(t *testing.T) {
 	}
 }
 
-// Nothing caps how many runs execute at once: every queued run whose task is
-// free is claimed and started, however many there are.
 func TestRunnerStartsEveryRunWithoutACap(t *testing.T) {
 	store := newSharedRunStore()
 	catalog := newCountingCatalog()
@@ -315,12 +313,10 @@ func TestStopOnAnotherReplicaStopsTheRun(t *testing.T) {
 	if executing.IsActive(run.ID) != true {
 		t.Fatal("the run should be executing on the first replica")
 	}
-	// The other replica cannot reach it — which is the bug, stated.
 	if other.Cancel(run.ID) {
 		t.Fatal("the other replica must not claim to hold a run it never started")
 	}
 
-	// What the stop request actually does: one atomic row write.
 	if _, ok, err := store.CancelIfLive(context.Background(), run.ID, "user stopped"); err != nil || !ok {
 		t.Fatalf("CancelIfLive: ok=%v err=%v", ok, err)
 	}

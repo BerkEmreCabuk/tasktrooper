@@ -46,7 +46,6 @@ func TestSkillIndexMessage(t *testing.T) {
 	assert.Contains(t, withCreate, "- a — desc")
 	assert.Contains(t, withCreate, "create_skill")
 
-	// An empty index still invites skill authoring when self-evolution is on.
 	emptyWithCreate := prompt.SkillIndexMessage(nil, nil, true)
 	assert.Contains(t, emptyWithCreate, "create_skill")
 }
@@ -86,7 +85,6 @@ func TestBuildSystemPrompt_CreateSkillHintFollowsFlagAndPolicy(t *testing.T) {
 	static.SelfEvolutionEnabled = false
 	assert.NotContains(t, prompt.BuildSystemPrompt(static, skills, nil, nil, ""), "create_skill")
 
-	// Flag on but the stored policy never got the tool: no promise either.
 	noTool := evolving
 	noTool.ToolPolicy = domain.ToolPolicy{AllowTools: []string{"load_skill"}}
 	assert.NotContains(t, prompt.BuildSystemPrompt(noTool, skills, nil, nil, ""), "create_skill")
@@ -116,8 +114,6 @@ func TestMemoryContextMessage(t *testing.T) {
 	assert.Contains(t, scoped, "- Verify with make check")
 	assert.Contains(t, scoped, "- [team] Stage deploys on merge")
 	assert.Contains(t, scoped, "### Global memory (valid across every repository)")
-	// The global section must not swallow project lines: the split is what
-	// stops one repository's build command being applied in another.
 	globalPart := scoped[strings.Index(scoped, "### Global memory"):]
 	assert.NotContains(t, globalPart, "make check")
 }
@@ -150,9 +146,6 @@ func TestToolSelectionGuidance(t *testing.T) {
 	assert.Contains(t, g, "who is")
 }
 
-// Every agent run carries the no-repeat contract, not just the ones the loop
-// guard has already caught spinning. The guard is the backstop; the rule is
-// what keeps a run from reaching it.
 func TestBuildSystemPromptCarriesRepeatCallRule(t *testing.T) {
 	result := prompt.BuildSystemPrompt(domain.Agent{}, nil, nil, nil, "")
 	assert.Contains(t, result, prompt.RepeatCallGuidance())
@@ -161,17 +154,12 @@ func TestBuildSystemPromptCarriesRepeatCallRule(t *testing.T) {
 func TestRepeatCallGuidance(t *testing.T) {
 	g := prompt.RepeatCallGuidance()
 	assert.Contains(t, g, "same arguments")
-	// The failure this rule exists for: a silent success read as a failure.
 	assert.Contains(t, g, "sed")
 	assert.Contains(t, g, "Empty output")
-	// Re-running a build after an edit is legitimate and must stay allowed.
 	assert.Contains(t, g, "after an edit")
 	assert.Contains(t, g, "never quote")
 }
 
-// A CLI run reaches TaskTrooper's tools over MCP, where ask_user is refused
-// outright. Telling it to call ask_user names a tool it does not hold; telling
-// it to keep questions out of its message body forbids the only channel it has.
 func TestBuildSystemPromptFor_CLIRunGetsNoAskUserProtocol(t *testing.T) {
 	agent := domain.Agent{SystemPrompt: "You are a backend engineer."}
 
@@ -181,7 +169,6 @@ func TestBuildSystemPromptFor_CLIRunGetsNoAskUserProtocol(t *testing.T) {
 	assert.Contains(t, cli, "closing message")
 	assert.Contains(t, cli, "Never assume missing requirements")
 
-	// The loop providers do hold ask_user, and keep the protocol.
 	loop := prompt.BuildSystemPromptFor(agent, nil, nil, nil, "", prompt.SkillsInPrompt)
 	assert.Contains(t, loop, "ask_user")
 }
@@ -206,8 +193,6 @@ func TestKPIContextExplainsCleanOnlyMeasurement(t *testing.T) {
 		Period: domain.KPIPeriodWeekly, TargetFull: 6, TargetHalf: 16, Weight: 1, Enabled: true,
 	}}, nil)
 
-	// Without this an agent reads a lower-better time target as "go faster"
-	// and pays for it out of quality.
 	require.Contains(t, msg, "without a revision")
 	require.Contains(t, msg, "cannot buy speed with quality")
 }

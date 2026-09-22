@@ -16,10 +16,6 @@ func jobFor(taskID uuid.UUID) RunJob {
 	}
 }
 
-// Two runs on one task share a checked-out branch and a task workspace. The
-// architect dispatched into code_review used to start while the developer's run
-// was still in its tail — verification, fix rounds, commit and push — so the
-// reviewer read a tree the developer was still writing.
 func TestSecondRunOnSameTaskWaitsForTheFirst(t *testing.T) {
 	r := NewRunner(RunnerDeps{Runs: &countingRunStore{}})
 	taskID := uuid.New()
@@ -47,8 +43,6 @@ func TestSecondRunOnSameTaskWaitsForTheFirst(t *testing.T) {
 	}
 }
 
-// Serialization is per task: unrelated tasks keep running in parallel across
-// the worker pool.
 func TestRunsOnDifferentTasksDoNotBlockEachOther(t *testing.T) {
 	r := NewRunner(RunnerDeps{Runs: &countingRunStore{}})
 
@@ -60,9 +54,6 @@ func TestRunsOnDifferentTasksDoNotBlockEachOther(t *testing.T) {
 	}
 }
 
-// Parked jobs are released one at a time, oldest first: releasing all of them
-// at once would put the whole pile-up back into the exact concurrency this
-// exists to prevent.
 func TestParkedRunsAreReleasedOneAtATimeInOrder(t *testing.T) {
 	r := NewRunner(RunnerDeps{Runs: &countingRunStore{}})
 	taskID := uuid.New()
@@ -81,7 +72,6 @@ func TestParkedRunsAreReleasedOneAtATimeInOrder(t *testing.T) {
 		t.Fatalf("third job released before the second finished: queue = %d", got)
 	}
 
-	// The released job claims the task, and only its own end releases the next.
 	if !r.beginTask(context.Background(), released) {
 		t.Fatal("released job must be able to claim the idle task")
 	}
@@ -91,8 +81,6 @@ func TestParkedRunsAreReleasedOneAtATimeInOrder(t *testing.T) {
 	}
 }
 
-// endTask on a task with nothing parked must leave the queue alone rather than
-// re-enqueue the run that just finished.
 func TestEndTaskWithoutParkedRunsIsANoOp(t *testing.T) {
 	r := NewRunner(RunnerDeps{Runs: &countingRunStore{}})
 	taskID := uuid.New()

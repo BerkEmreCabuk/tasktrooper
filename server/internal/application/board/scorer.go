@@ -11,26 +11,19 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// ScoreApplier is the slice of AgentPerformanceStore the tracker writes through.
 type ScoreApplier interface {
 	ApplyDelta(ctx context.Context, input domain.ApplyScoreInput) (domain.AgentPerformanceScore, error)
 }
 
-// SpanOwnerLookup resolves which agent worked each column of a task.
 type SpanOwnerLookup interface {
 	OwnersForTask(ctx context.Context, taskID uuid.UUID) (map[string]uuid.UUID, error)
 }
 
-// TestCaseScoreLookup is the slice of TaskTestCaseStore the tracker reads a
-// QA round from and stamps once that round has been turned into score events.
 type TestCaseScoreLookup interface {
 	ListByTask(ctx context.Context, taskID uuid.UUID) ([]domain.TaskTestCase, error)
 	MarkScored(ctx context.Context, ids []uuid.UUID, at time.Time) error
 }
 
-// EventExistenceChecker guards a whole-task completion credit against being
-// applied twice: the score ledger itself is the source of truth for "has this
-// already been credited", so no separate stamped state is needed.
 type EventExistenceChecker interface {
 	HasEventForTask(ctx context.Context, taskID uuid.UUID, eventType string) (bool, error)
 }
@@ -48,36 +41,22 @@ func NewScoreTracker(scores ScoreApplier) *ScoreTracker {
 	return &ScoreTracker{scores: scores}
 }
 
-// SetSpans attaches the span ledger used to decide who a defect belongs to.
-// Without it the tracker falls back to the task's assignee, which is the wrong
-// agent as soon as a task has changed hands.
 func (st *ScoreTracker) SetSpans(spans SpanOwnerLookup) {
 	st.spans = spans
 }
 
-// SetTestCases attaches the QA round store used to score bugs found and
-// scenario verdicts confirmed. Without it QA scoring is a no-op.
 func (st *ScoreTracker) SetTestCases(testCases TestCaseScoreLookup) {
 	st.testCases = testCases
 }
 
-// SetEvents attaches the score-event ledger used to keep the QA/PM whole-task
-// completion credit idempotent. Without it that credit is never applied.
 func (st *ScoreTracker) SetEvents(events EventExistenceChecker) {
 	st.events = events
 }
 
-// SetWorkflows attaches the workflow reader isForwardExit asks whether a
-// column exit is a forward_exit out of a review round. Without it (or on a
-// lookup error) forward-exit credit never fires — see isForwardExit.
 func (st *ScoreTracker) SetWorkflows(w port.WorkflowReader) {
 	st.workflows = w
 }
 
-// blameColumns lists, per rejecting column, the columns whose owners are
-// accountable for the defect. A defect that reached the human escaped every
-// gate before it, so all of them are charged; one the PM caught only reaches
-// the dev and QA.
 var blameColumns = map[domain.TaskColumn][]string{
 	domain.TaskColumnHumanUAT:   {"in_progress", "in_qa", "pm_uat"},
 	domain.TaskColumnPMUAT:      {"in_progress", "in_qa"},
@@ -121,8 +100,6 @@ func (st *ScoreTracker) OnColumnTransition(ctx context.Context, task domain.Boar
 		return
 	}
 
-	// Completion credit follows the assignee: it is the task's outcome, not one
-	// stage's, and every contributor already carries their own penalties.
 	if to == domain.TaskColumnDone || to == domain.TaskColumnReleased {
 		if task.AssigneeAgentID != nil {
 			evType, delta, reason := domain.ScoreEventTaskCompleted, domain.ScoreDeltaTaskCompleted, "Task completed"
@@ -142,11 +119,6 @@ func (st *ScoreTracker) OnColumnTransition(ctx context.Context, task domain.Boar
 	}
 }
 
-// creditRoleCompletion credits the agent that owned the given column span
-// with a one-time, whole-task completion event, mirroring the developer's own
-// task_completed/task_released credit. It is idempotent per (task, event
-// type): a task whose QA or PM UAT phase is re-entered after a need_revision
-// bounce and forward-exits again must not be credited twice.
 func (st *ScoreTracker) creditRoleCompletion(ctx context.Context, task domain.BoardTask, column, evType string, delta float64, reason string) {
 	if st.events == nil {
 		return
@@ -166,13 +138,6 @@ func (st *ScoreTracker) creditRoleCompletion(ctx context.Context, task domain.Bo
 	st.apply(ctx, task, agentID, evType, delta, reason)
 }
 
-// isForwardExit reports whether a task leaving ready_for_qa/in_qa (or
-// pm_uat) for column `to` means the round signed off forward, reading the
-// destination stage's forward_exit behaviour instead of a hardcoded column
-// set — the same behaviour repository.isForwardReviewExit reads via
-// wf.Has(target, domain.BehaviourForwardExit). An unreadable workflow (no
-// reader wired, or Workflow() itself errored) fails closed to false: a round
-// that cannot be classified is not credited.
 func (st *ScoreTracker) isForwardExit(ctx context.Context, taskType domain.TaskType, to domain.TaskColumn) bool {
 	if st.workflows == nil {
 		return false
@@ -186,12 +151,6 @@ func (st *ScoreTracker) isForwardExit(ctx context.Context, taskType domain.TaskT
 	return wf.Has(to, domain.BehaviourForwardExit)
 }
 
-// scoreQARound turns one QA round's unscored test cases into score events for
-// the agent that owned the in_qa column. forward=false is the round ending in
-// need_revision, where only failed cases (bugs QA actually caught) count.
-// forward=true is the round signing off forward, where passed/invalid cases
-// are also confirmed verdicts. Cases already stamped scored_at are skipped so
-// neither path ever counts the same case twice.
 func (st *ScoreTracker) scoreQARound(ctx context.Context, task domain.BoardTask, forward bool) {
 	if st.testCases == nil {
 		return
@@ -253,8 +212,6 @@ func (st *ScoreTracker) scoreQARound(ctx context.Context, task domain.BoardTask,
 	}
 }
 
-// ApplyReviewEscape charges a reviewing agent for approving something a human
-// then rejected at the same gate.
 func (st *ScoreTracker) ApplyReviewEscape(ctx context.Context, task domain.BoardTask, agentID uuid.UUID) {
 	if st == nil || st.scores == nil {
 		return
@@ -263,8 +220,6 @@ func (st *ScoreTracker) ApplyReviewEscape(ctx context.Context, task domain.Board
 		"Human rejected a change the reviewer approved")
 }
 
-// blamed resolves the accountable agents, de-duplicated: one agent that both
-// developed and tested a task is charged once, not twice.
 func (st *ScoreTracker) blamed(ctx context.Context, task domain.BoardTask, columns []string) []uuid.UUID {
 	if st.spans == nil {
 		return assigneeOnly(task)
@@ -287,17 +242,10 @@ func (st *ScoreTracker) blamed(ctx context.Context, task domain.BoardTask, colum
 	return out
 }
 
-// qaOwner resolves the agent that owned the in_qa column for a QA-scoring
-// decision. Unlike blamed, it never falls back to the task's assignee: the
-// assignee is normally the developer, and crediting/charging QA scores to the
-// wrong agent because the span ledger is not wired would be worse than
-// scoring nothing.
 func (st *ScoreTracker) qaOwner(ctx context.Context, task domain.BoardTask) (uuid.UUID, bool) {
 	return st.columnOwner(ctx, task, "in_qa")
 }
 
-// columnOwner resolves the agent that owned the given column span. Like
-// qaOwner, it never falls back to the task's assignee.
 func (st *ScoreTracker) columnOwner(ctx context.Context, task domain.BoardTask, column string) (uuid.UUID, bool) {
 	if st.spans == nil {
 		return uuid.Nil, false

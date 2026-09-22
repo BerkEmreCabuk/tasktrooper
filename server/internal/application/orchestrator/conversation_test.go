@@ -9,8 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// ledgerTaskID stands in for the board task an earlier turn created — the id a
-// "move it" turn has to address instead of opening a second record.
+// The id a "move it" turn addresses instead of opening a second board record.
 var ledgerTaskID = uuid.MustParse("11111111-2222-3333-4444-555555555555")
 
 func TestPipelineConversationHistory_SkipsSystemAndToolCalls(t *testing.T) {
@@ -31,9 +30,7 @@ func TestPipelineConversationHistory_SkipsSystemAndToolCalls(t *testing.T) {
 }
 
 func TestPipelineConversationHistory_KeepsActionLedger(t *testing.T) {
-	// The regression: "taşı" (move it) came back as a second board task because
-	// intake and the planner never saw that DE-1 already existed. The ledger is a
-	// system message, and every system message used to be dropped here.
+	// The ledger is a system message, and every system message used to be dropped here.
 	digest := domain.SessionActionDigest([]domain.SessionAction{{
 		EntityKind: domain.ActionEntityBoardTask,
 		Verb:       domain.ActionVerbCreated,

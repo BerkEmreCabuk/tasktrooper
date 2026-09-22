@@ -13,8 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// ---------------------------------------------------------------- board fakes
-
 type fakeTasks struct {
 	byID       map[uuid.UUID]domain.BoardTask
 	byMergeSHA map[string]domain.BoardTask
@@ -72,8 +70,6 @@ func (f *fakeComments) all() string {
 	}
 	return out
 }
-
-// -------------------------------------------------------------- store fakes
 
 type fakeTargets struct {
 	byEnv map[string]domain.DeployTarget
@@ -154,8 +150,6 @@ func (f *fakePipelineJobs) ReplaceForRepository(context.Context, uuid.UUID, []do
 	return nil, nil
 }
 
-// ------------------------------------------------------------ github fake
-
 type fakeActions struct {
 	runsForCommit  []port.ActionsRun
 	runsErr        error
@@ -189,8 +183,6 @@ func (f *fakeActions) CommitDeployStatus(context.Context, string, string, string
 	f.commitCalls++
 	return f.commitSignal, f.commitErr
 }
-
-// ---------------------------------------------------------- rollback fakes
 
 type fakeRollbacker struct {
 	dispatch domain.DeployDispatch
@@ -233,13 +225,9 @@ func (f *fakeIncidents) Ingest(_ context.Context, in domain.IncidentInput) (doma
 	return domain.Incident{ID: uuid.New()}, nil
 }
 
-// errNoWorkflow is what deployops answers a repository with nothing to
-// dispatch — the signal that selects the revert mechanism.
 var errNoWorkflow = fmt.Errorf("deployops: %w", deployops.ErrNoWorkflowMapping)
 
 var _ = errors.Is
-
-// ------------------------------------------------------------- constructors
 
 func actionRuns(rs ...port.ActionsRun) []port.ActionsRun { return rs }
 

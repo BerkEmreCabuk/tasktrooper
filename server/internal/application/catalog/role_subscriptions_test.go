@@ -10,18 +10,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// QA owns all four of its columns. Subscribed to ready_for_qa alone, in_qa was
-// unowned: a task moved there resolved back to the implementer-assignee, so the
-// developer was dispatched onto the branch QA had just started testing.
-//
-// done and released are the odd ones: QA does no testing there, it merges the
-// task's pull request (done) and migration 105 backfilled released for parity
-// on installs seeded before it. The columns still dispatch nobody for
-// anything else — the dispatcher wakes this subscription only for a move
-// into done on a task whose PR is unmerged (board.doneMergeWake).
-//
-// This exercises the path a user actually takes now: creating the agent from
-// its template (CreateAgentFromTemplate), not a boot-time reconcile.
 func TestCreateAgentFromTemplate_QAOwnsItsFourColumns(t *testing.T) {
 	store := newMemCatalogStore()
 	templates := &memTemplateStore{}
@@ -50,8 +38,6 @@ func TestCreateAgentFromTemplate_QAOwnsItsFourColumns(t *testing.T) {
 		board.subs[agent.ID])
 }
 
-// system-architect and product-manager get their own single column the same
-// way.
 func TestCreateAgentFromTemplate_ArchitectAndPMGetTheirColumn(t *testing.T) {
 	store := newMemCatalogStore()
 	templates := &memTemplateStore{}
@@ -80,13 +66,6 @@ func TestCreateAgentFromTemplate_ArchitectAndPMGetTheirColumn(t *testing.T) {
 	assert.Equal(t, []string{string(domain.TaskColumnPMUAT)}, board.subs[pm.ID])
 }
 
-// Under the vacancy rule a second agent from the same template no longer
-// misses out because of its NAME — it misses out because the columns are
-// already occupied by the first agent. This replaces the old exact-name-match
-// assumption (a renamed agent used to be invisible to routing that looked it
-// up by its seeded name); routing no longer looks anything up by name, so a
-// renamed agent is treated exactly like any other: it would get the columns
-// if they were free.
 func TestCreateAgentFromTemplate_SecondAgentFindsColumnsAlreadyOccupied(t *testing.T) {
 	store := newMemCatalogStore()
 	templates := &memTemplateStore{}
@@ -114,8 +93,6 @@ func TestCreateAgentFromTemplate_SecondAgentFindsColumnsAlreadyOccupied(t *testi
 	assert.Empty(t, board.subs[second.ID], "the columns are already claimed by the first agent")
 }
 
-// An admin who narrowed QA's subscriptions keeps their setup: the helper only
-// sets a subscription when the agent currently has none.
 func TestApplySuggestedSubscriptions_LeavesExistingSubscriptionsAlone(t *testing.T) {
 	store := newMemCatalogStore()
 	qaID := uuid.New()
@@ -131,8 +108,6 @@ func TestApplySuggestedSubscriptions_LeavesExistingSubscriptionsAlone(t *testing
 	assert.Equal(t, []string{string(domain.TaskColumnReadyForQA)}, board.subs[qaID])
 }
 
-// applySuggestedRoles fills a role assignment only when the role exists and
-// no existing assignment already covers the suggested areas.
 func TestApplySuggestedRoles_FillsOnlyVacantAreas(t *testing.T) {
 	developerID := uuid.New()
 	backendAgent := domain.Agent{ID: uuid.New(), Name: "backend-developer"}
@@ -148,21 +123,17 @@ func TestApplySuggestedRoles_FillsOnlyVacantAreas(t *testing.T) {
 	assert.Len(t, roles.roles[developerID].Assignments, 1)
 	assert.Equal(t, backendAgent.ID, roles.roles[developerID].Assignments[0].AgentID)
 
-	// A second backend developer must not double up on the same area.
 	secondBackend := domain.Agent{ID: uuid.New(), Name: "backend-developer-2"}
 	require.NoError(t, svc.applySuggestedRoles(context.Background(), secondBackend,
 		[]domain.TemplateRoleSuggestion{{Key: "developer", Areas: []string{domain.RepoKindBackend}}}))
 	assert.Len(t, roles.roles[developerID].Assignments, 1, "backend is already covered")
 
-	// A frontend developer still finds its own area vacant.
 	frontendAgent := domain.Agent{ID: uuid.New(), Name: "frontend-developer"}
 	require.NoError(t, svc.applySuggestedRoles(context.Background(), frontendAgent,
 		[]domain.TemplateRoleSuggestion{{Key: "developer", Areas: []string{domain.RepoKindFrontend}}}))
 	assert.Len(t, roles.roles[developerID].Assignments, 2)
 }
 
-// A suggested role that no longer exists (deleted or renamed by an admin) is
-// silently skipped rather than erroring.
 func TestApplySuggestedRoles_SkipsUnknownRole(t *testing.T) {
 	roles := &memRoleAdmin{roles: map[uuid.UUID]domain.AgentRole{}}
 	store := newMemCatalogStore()
@@ -175,9 +146,7 @@ func TestApplySuggestedRoles_SkipsUnknownRole(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// memRoleAdmin is an in-memory catalog.RoleAdmin, and also
-// ListAssignmentsByAgent (agentRoleSuggestions' optional read-back
-// interface).
+// Also ListAssignmentsByAgent, agentRoleSuggestions' optional read-back interface.
 type memRoleAdmin struct {
 	roles map[uuid.UUID]domain.AgentRole
 }

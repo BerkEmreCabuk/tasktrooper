@@ -27,12 +27,9 @@ func hasTool(names []string, want string) bool {
 	return false
 }
 
-// TestWebSearchFollowsTheEnabledFlagAlone. web_search carries no credential —
-// it queries DuckDuckGo and falls back to Bing — so the flag is the whole
-// decision. The key gate that used to sit here was the fix for a different
-// problem: a provider with no subscription could only ever answer "not
-// configured", which one production run read as bad luck and retried three
-// times. There is nothing left to be missing.
+// web_search carries no credential (DuckDuckGo, null Bing fallback), so the
+// enabled flag is the whole decision; the key gate that used to sit here fixed
+// a different problem and has nothing left to do.
 func TestWebSearchFollowsTheEnabledFlagAlone(t *testing.T) {
 	for _, tc := range []struct {
 		name string

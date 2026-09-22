@@ -49,7 +49,6 @@ func resumedTask() domain.BoardTask {
 	}
 }
 func TestSweeperResumesNotifyAsResumed(t *testing.T) {
-	// The payloads the four sweepers actually build, key for key.
 	for name, payload := range map[string]map[string]interface{}{
 		"quota":      {"resumed": "quota_reset", "resource": domain.ResourceClaudeCodeQuota},
 		"device":     {"resumed": "device_free", "resource": domain.ResourceMobileDevice},
@@ -115,14 +114,9 @@ func TestOrdinaryMoveStillNotifiesAsMoved(t *testing.T) {
 
 func TestNonParkResumesAreNotReportedAsResumed(t *testing.T) {
 	for name, payload := range map[string]map[string]interface{}{
-		// resume.go — a human answered the clarification. They are holding the
-		// phone they just typed it on.
-		"question answered": {"resumed": "question_answered", "question": "which env?", "answer": "stage"},
-		// runtime.go — the USD budget period rolled over. No resource involved.
+		"question answered":      {"resumed": "question_answered", "question": "which env?", "answer": "stage"},
 		"billing period renewed": {"resumed": "quota_renewed"},
-		// release_rollback.go — carries the resumed-resource marker but is a
-		// rollback dispatch, not a park release.
-		"release rollback": {"release_rollback": true, domain.EventPayloadResumedResource: domain.ResourceDeployWatch},
+		"release rollback":       {"release_rollback": true, domain.EventPayloadResumedResource: domain.ResourceDeployWatch},
 	} {
 		t.Run(name, func(t *testing.T) {
 			notifier := &recordingNotifier{}

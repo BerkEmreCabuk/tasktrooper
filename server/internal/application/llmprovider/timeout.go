@@ -9,9 +9,6 @@ import (
 
 const defaultTimeoutSeconds = 300
 
-// firstNonBlank is resolveTimeoutSeconds' ladder for a text setting: what the
-// request said, else what is stored for this provider, else the definition's
-// default. It trims, so a field the client sent as whitespace counts as absent.
 func firstNonBlank(values ...string) string {
 	for _, v := range values {
 		if trimmed := strings.TrimSpace(v); trimmed != "" {

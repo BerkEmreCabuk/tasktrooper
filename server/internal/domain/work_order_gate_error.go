@@ -1,8 +1,8 @@
 package domain
 
 // WorkOrderGateBlocker is one unfinished task standing in front of a move,
-// carried without the raw relation row so a human-facing rendering never has
-// to reach back into task_relations for a label.
+// carried without the raw relation row so a human-facing rendering never has to
+// reach back into task_relations for a label.
 type WorkOrderGateBlocker struct {
 	Key   string
 	Title string
@@ -11,8 +11,8 @@ type WorkOrderGateBlocker struct {
 // WorkOrderGateError is what validateMoveAllowed returns when a manual move
 // into todo or in_progress is refused because the task still has an open
 // `blocks` relation. Shaped like CriteriaGateError on purpose: same fields
-// broken out for callers that need them (the HTTP layer), same Error()
-// sentence for callers that only read English.
+// broken out for callers that need them (the HTTP layer), same Error() sentence
+// for callers that only read English.
 type WorkOrderGateError struct {
 	Target   TaskColumn
 	Blockers []WorkOrderGateBlocker

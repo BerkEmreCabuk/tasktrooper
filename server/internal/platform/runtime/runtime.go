@@ -22,24 +22,23 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/google/uuid"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/catalogrepo"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/antigravity"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/claudecode"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/cursor"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/opencode"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/appstore"
-	desktopadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/local/desktop"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/deviceagent"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/gcloud"
-	gitadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/git"
-	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/googleplay"
+	vercelapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/vercel"
 	httpadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/http"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/llm"
+	desktopadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/local/desktop"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/local/localdevice"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/local/localtoolchain"
 	mcpadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/mcp"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/mcpserver"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/catalogrepo"
 	pgstore "github.com/makifbaysal/tasktrooper/server/internal/adapter/storage/postgres"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/board"
 	boilerplatetools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/boilerplate"
@@ -54,7 +53,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/shell"
 	skilltools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/skill"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/web"
-	vercelapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/vercel"
+	gitadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/git"
+	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agentcli"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/apikey"
@@ -104,11 +104,10 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// workflowDir is where application/storeops/pipeline renders the mobile
-// release workflow, because GitHub reads workflows nowhere else. The file's
-// NAME carries the sub-project, so one monorepo's two apps do not overwrite
-// each other — which is why nothing here matches on a name prefix: the probe
-// and the dispatch must agree on one exact file.
+// workflowDir is where the mobile release workflow is rendered; GitHub reads
+// workflows nowhere else. The file's NAME carries the sub-project, so the two
+// apps in one monorepo do not overwrite each other — the probes and the
+// dispatch must agree on one exact file.
 const workflowDir = ".github/workflows/"
 
 // workspaceLister adapts the project + repository stores to the board toolkit's
@@ -184,25 +183,22 @@ type Options struct {
 	UIRoot      string
 	UIFS        fs.FS
 	LazyMCP     bool
-	// APIKey is the bearer token every request must carry. It arrives in the
-	// environment rather than config.yml so it can be scrubbed after boot, and
-	// a config reload re-applies it from here for the same reason.
+	// APIKey is the bearer token every request must carry, kept out of
+	// config.yml so it can be scrubbed after boot and re-applied on reload.
 	APIKey string
-	// CORSOrigins are the origins allowed to call this server. The UI is served
-	// from app://tasktrooper in the desktop bundle and from the Vite dev server
-	// in a checkout, so every call it makes is cross-origin.
+	// CORSOrigins are the origins allowed to call this server: the UI is
+	// cross-origin from it in both the desktop bundle (app://tasktrooper) and
+	// a checkout (the Vite dev server).
 	CORSOrigins []string
-	// EmbeddingsBaseURL is an OpenAI-compatible host exposing /v1/embeddings.
-	// Set, it is bootstrapped into an embedding provider at boot so RAG works
-	// without anyone opening the settings page.
+	// EmbeddingsBaseURL, set, bootstraps an embedding provider at boot so RAG
+	// works without anyone opening the settings page.
 	EmbeddingsBaseURL string
-	// PublicBaseURL is the origin a Claude Code session calls TaskTrooper's own
-	// tools back on. Empty until the listener is bound — with PORT=0 nobody
-	// knows the port before then — so Run fills it in, and a reload then
-	// re-applies that value instead of the empty one config.yml expands to.
+	// PublicBaseURL is the origin a Claude Code session calls the server's own
+	// tools back on. Empty until the listener binds (PORT=0), so Run fills it
+	// in and reloads re-apply the value instead of the config's empty one.
 	PublicBaseURL string
-	// AllowedRoots are extra roots a repository or a session may be pointed at.
-	// In desktop/local mode, defaults to "*" to permit opening any local directory.
+	// AllowedRoots are extra roots a repository or session may be pointed at.
+	// Desktop/local defaults to "*" so any local directory can be opened.
 	AllowedRoots []string
 }
 
@@ -218,9 +214,8 @@ type engine struct {
 	mu         sync.RWMutex
 	cfg        *domain.Config
 	configPath string
-	// opts is what the process was started with, kept so a config reload can
-	// re-apply the same overrides and the same validation boot did. Written
-	// once, in load, before anything reads it.
+	// opts is what the process was started with, kept so a reload re-applies
+	// the same overrides and validation boot did.
 	opts            Options
 	reg             port.ToolRegistry
 	mcpManager      *mcpadapter.Manager
@@ -230,13 +225,11 @@ type engine struct {
 	llmClient       port.LLMClient
 	multiLLM        *llm.MultiProviderClient
 	agentLoop       *agent.Loop
-	// agentRouter is what every agentic consumer is handed instead of agentLoop.
-	// It is the loop plus one decision — HTTP loop or host executor — made from
-	// the provider the caller already passes. See agent.Router.
-	//
-	// agentLoop stays beside it because the loop's own setters (history budget,
-	// summarizer, run token cap, screenshot archiver) are the loop's, not the
-	// router's: the router forwards runs, it does not configure them.
+	// agentRouter is what every agentic consumer is handed instead of
+	// agentLoop: the loop plus one decision — HTTP loop or host executor — made
+	// from the provider the caller already passes (see agent.Router). agentLoop
+	// stays beside it because the loop's own setters are the loop's, not the
+	// router's.
 	agentRouter       *agent.Router
 	jobSvc            *job.Service
 	boardRunner       *boardapp.Runner
@@ -256,38 +249,31 @@ type engine struct {
 	deployWatchSvc    *deploywatch.Service
 	deployMonitor     *deployops.Monitor
 	evolutionSvc      *evolution.Service
-	// pgPool is kept beside pgDB for the two jobs that are not row data:
-	// closing the pool, and the pgvector bootstrap (CREATE EXTENSION plus the
-	// index DDL below), which is schema work.
-	// Everything else in the process reaches Postgres through pgDB.
+	// pgPool is kept beside pgDB for the two jobs that are not row data: pool
+	// close and the pgvector bootstrap. Everything else reaches Postgres through
+	// pgDB.
 	pgPool *pgxpool.Pool
 	pgDB   *pgstore.DB
 	// bootSeed seeds the default board once and runs the boot steps.
 	bootSeed   *bootseed.Service
 	pendingMCP []domain.MCPServerConfig
-	// mcpServer and mcpEndpoint are the two halves of the per-run tool endpoint
-	// the Claude Code CLI calls back on. mcpServer is nil unless the executor
-	// was registered (see buildHandler): with no CLI on the host there is no
-	// session to serve. mcpEndpoint is allocated and published by Run BEFORE
-	// buildHandler, because buildHandler starts the board workers and they must
-	// never see an unpublished address; see claudecode_mcp.go.
+	// mcpServer/mcpEndpoint are the two halves of the per-run tool endpoint the
+	// CLI calls back on. mcpServer is nil unless the executor registered;
+	// mcpEndpoint is published by Run BEFORE buildHandler because buildHandler
+	// starts the board workers, which must never see an unpublished address.
 	mcpServer   *mcpserver.Server
 	mcpEndpoint *mcpEndpoint
-	// secretsCipher is derived from MCP_SECRETS_KEY (or SERVER_API_KEY) exactly
-	// once, at boot, because the process environment stops carrying that key
-	// immediately afterwards — see scrubProcessSecrets. Every consumer that used
-	// to call secrets.NewCipherFromEnv for itself now reads these two fields,
-	// including engine.reload, which runs long after boot from a request
-	// goroutine. Written in Run before the listener exists, read-only after, so
-	// the mutex above does not need to cover them.
+	// secretsCipher derives from MCP_SECRETS_KEY (or SERVER_API_KEY) exactly
+	// once at boot, because the environment stops carrying the key immediately
+	// after — see scrubProcessSecrets. engine.reload, which runs long after
+	// from a request goroutine, must not re-derive.
 	secretsCipher    *secrets.Cipher
 	secretsCipherErr error
 }
 
 // initSecretsCipher derives the at-rest encryption key while the environment
-// still holds it. The error is kept rather than returned: a missing key is a
-// degraded mode, not a boot failure — desktop installs run without one, and
-// only the credential-vault paths that actually encrypt or decrypt fail.
+// still holds it. The error is kept: a missing key degrades only the
+// credential-vault paths, it is not a boot failure.
 func (e *engine) initSecretsCipher() {
 	e.secretsCipher, e.secretsCipherErr = secrets.NewCipherFromEnv()
 }
@@ -300,17 +286,14 @@ func ConfigureLogger(debug bool) {
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	}
 	// stderr, not stdout: stdout carries exactly one machine-read line (the
-	// LISTENING address the desktop supervisor parses) and a log line landing
-	// beside it would have to be told apart from it.
+	// LISTENING address the desktop supervisor parses).
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
 }
 
-// flattenLegacyWorkspaces moves an install still on the per-tenant workspace
-// layout to the flat one (see workspace.FlattenLegacyLayout). It opens its own
-// short-lived pool because the long-lived one is created inside buildHandler,
-// which starts workers as soon as it exists. Nothing here is fatal: a path that
-// could not be moved or re-pointed is still re-anchored on read, and the next
-// boot tries again.
+// flattenLegacyWorkspaces moves a per-tenant layout install to the flat one
+// (workspace.FlattenLegacyLayout). It opens a short-lived pool because the
+// long-lived one appears inside buildHandler. Nothing is fatal: un-moved paths
+// re-anchor on read and the next boot retries.
 func flattenLegacyWorkspaces(ctx context.Context, cfg *domain.Config) {
 	root := cfg.Storage.Sessions.WorkspaceRoot
 	if strings.TrimSpace(root) == "" {
@@ -351,10 +334,9 @@ func corsOrigins(opts Options) []string {
 	return DefaultCORSOrigins
 }
 
-// configuredPort is the port the HTTP listener will ask for: the Options
-// override when there is one, the config's otherwise. 0 means "let the kernel
-// pick", which is what desktop installs and every test get — and the reason the
-// MCP endpoint's URL cannot be known before the listener exists.
+// configuredPort is the port the HTTP listener asks for: the Options override
+// when there is one, the config's otherwise. 0 means "let the kernel pick" —
+// what desktop installs and tests get, and why the MCP URL needs the listener.
 func configuredPort(cfg *domain.Config, opts Options) int {
 	if opts.Port > 0 {
 		return opts.Port
@@ -370,44 +352,32 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 		return nil, err
 	}
 
-	// Everything that needs a pod credential from the environment has to read it
-	// before this line, because after it the environment no longer has one. load
-	// has taken the DSN and the internal auth key into cfg; initSecretsCipher
-	// takes MCP_SECRETS_KEY, which is otherwise re-read on every config reload.
-	// Ordering matters more than it looks: buildHandler starts the job worker and
-	// the board dispatcher, so an agent-run child process can exist from that
-	// point on, and it must never exist while the secrets are still reachable.
+	// Everything that needs a pod credential from the environment must read it
+	// before this line. load has the DSN and API key in cfg; initSecretsCipher
+	// takes MCP_SECRETS_KEY, otherwise re-read on every reload. buildHandler
+	// starts the job worker and board dispatcher, so an agent-run child can
+	// exist right after — it must never exist while the secrets are reachable.
 	e.initSecretsCipher()
 	scrubProcessSecrets()
 	if err := denyProcEnvironReads(); err != nil {
-		// Not fatal. The scrubs above still hold; this only means a child that
-		// goes looking in /proc can still find what execve put there, which is
-		// the state every build before this one shipped in.
+		// Not fatal: the scrubs above still hold; a /proc reader only sees what
+		// execve put there, the state every previous build shipped in.
 		log.Warn().Err(err).Msg("could not make the process undumpable; /proc/<pid>/environ stays readable to same-uid processes")
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
 
 	// The listener is opened BEFORE the handler is built, and that order is
-	// load-bearing rather than tidy.
-	//
-	// buildHandler ends by activating the board: the workers start and the
-	// reconciler sweeps immediately, so a claude_code run can be executing
-	// before buildHandler has returned. That run needs the address of the MCP
-	// tool endpoint, and until now the address could only be guessed from the
-	// CONFIGURED port — which is 0 on precisely the hosts that can run a
-	// claude_code agent at all. The cloud image ships no `claude` binary, so the
-	// executor only ever registers on a desktop or runner install, and
-	// applyDesktopOverrides sets Server.Port to 0 there: configuredPort returned
-	// 0, the guard publish never fired, and the endpoint URL did not exist until
-	// after every worker was already running. Binding first replaces the guess
-	// with the port the kernel actually gave us, published before anything can
-	// dispatch.
+	// load-bearing: buildHandler ends by activating the board, so a claude_code
+	// run can be executing before it returns — a run that needs the MCP tool
+	// endpoint's address. Publishing from the CONFIGURED port was wrong because
+	// the host that can run a claude_code agent at all (a desktop/runner
+	// install, applyDesktopOverrides sets Server.Port to 0; the cloud image
+	// ships no `claude`) is exactly where the configured port is 0. Binding
+	// first publishes the kernel-chosen port before anything can dispatch.
 	//
 	// Nothing serves on it yet — app.Listener starts accepting further down —
-	// so a request that arrives in between waits in the accept backlog for the
-	// few milliseconds it takes to register the routes. Waiting is the correct
-	// outcome; being told the wrong port, or none, is not.
+	// so a request that arrives in between waits in the accept backlog.
 	portNum := configuredPort(e.cfg, opts)
 	listener, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", portNum))
 	if err != nil {
@@ -418,11 +388,9 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 	e.mcpEndpoint = &mcpEndpoint{}
 	e.mcpEndpoint.publish(addr)
 
-	// The one line on stdout. The desktop supervisor spawns this process and
-	// reads the port back off it, because PORT=0 is how it avoids colliding
-	// with whatever else the user is running. Printed before the routes are
-	// registered so the supervisor can begin polling /health immediately; a
-	// request that beats the registration waits in the accept backlog.
+	// The one line on stdout, which the desktop supervisor parses for the port
+	// (PORT=0 is how it avoids colliding with the user). Printed before the
+	// routes exist so the supervisor can poll /health immediately.
 	fmt.Fprintf(os.Stdout, "LISTENING http://%s\n", addr)
 	_ = os.Stdout.Sync()
 
@@ -431,14 +399,13 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 		e.opts.PublicBaseURL = e.cfg.Server.PublicBaseURL
 	}
 
-	// Before buildHandler: every store, service and worker it builds reads
-	// workspace paths, and all of them must see the flat layout.
+	// Before buildHandler: everything it builds reads workspace paths, and all
+	// of it must see the flat layout.
 	flattenLegacyWorkspaces(runCtx, e.cfg)
 
 	handler := e.buildHandler(runCtx, opts)
-	// Seed now rather than on the first request, so the board exists and the
-	// role catalog sync is already underway when the desktop's first /health
-	// answers and the window opens.
+	// Seed now rather than on the first request, so the board exists when the
+	// desktop's first /health answers.
 	if e.bootSeed != nil {
 		if err := e.bootSeed.Ensure(context.Background()); err != nil {
 			log.Warn().Err(err).Msg("seeding the board at boot failed; the first request retries it")
@@ -461,26 +428,21 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 	}
 
 	app := fiber.New(fiber.Config{
-		// Off (the default) the router matches a lowercased path while c.Path()
-		// returns the raw one, so `/V1/settings` reached the settings handler
-		// while isPublicPath read a path that matched neither its `/v1` nor its
-		// `/admin` rule — an unauthenticated request onto a configuration
-		// endpoint. On, the router refuses the spelling outright. StrictRouting stays off: a
-		// trailing slash never desynced anything, and turning it on would break
-		// clients that send one.
+		// Off, the router lowercases a path while c.Path() returns the raw one,
+		// so `/V1/settings` reached the settings handler while isPublicPath
+		// matched neither rule — an unauthenticated request onto a configuration
+		// endpoint. On, the router refuses the spelling outright.
 		CaseSensitive: true,
-		// stdout carries one machine-read line and nothing else; Fiber's banner
-		// would land beside the LISTENING address the desktop parses.
+		// Fiber's banner would land beside the LISTENING line the desktop parses.
 		DisableStartupMessage: true,
 		JSONEncoder:           goccyjson.Marshal,
 		JSONDecoder:           goccyjson.Unmarshal,
 		ReadTimeout:           sessionTimeout,
 		WriteTimeout:          sessionTimeout,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
-			// Honour the status a handler asked for. Collapsing everything to 500
-			// turned every fiber.NewError (403 "managed by control plane", 501
-			// "push disabled", …) and every router 404 into an internal error,
-			// which the web client then retries as if the workspace were waking.
+			// Honour the status a handler asked for rather than collapsing every
+			// fiber.NewError and 404 to 500, which the web client retries as if
+			// the workspace were waking.
 			code := fiber.StatusInternalServerError
 			errType := "internal_error"
 			var fiberErr *fiber.Error
@@ -497,15 +459,13 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 		},
 	})
 
-	// A panic in any handler (or in a service it calls) would otherwise take the
-	// whole process down, killing every in-flight SSE stream and board run.
+	// A handler panic would take the whole process down, killing every in-flight
+	// SSE stream and board run.
 	app.Use(recovermw.New(recovermw.Config{EnableStackTrace: true}))
 
-	// The UI is never same-origin with this server: the desktop bundle serves it
-	// from app://tasktrooper and a checkout from the Vite dev server, while the
-	// API answers on 127.0.0.1:<port>. AllowCredentials stays off — the bearer
-	// token is in a header, not a cookie — which is what lets the origin list
-	// be trusted as written.
+	// The UI is never same-origin (app://tasktrooper in the bundle, the Vite dev
+	// server in a checkout). AllowCredentials stays off — the token is in a
+	// header, not a cookie — which is what lets the origin list be trusted.
 	app.Use(corsmw.New(corsmw.Config{
 		AllowOrigins: strings.Join(corsOrigins(opts), ","),
 		AllowHeaders: "Authorization,Content-Type,X-Request-ID",
@@ -541,40 +501,35 @@ func (s *Server) URL() string {
 	return "http://" + s.addr
 }
 
-// bootConvergeTimeout bounds the whole boot-time convergence pass — the webhook
-// reconcile and index-freshness check together. It is a bound rather than a
-// budget nobody may exceed: a pass that runs out is retried on the next start,
-// and nothing waits on it.
+// bootConvergeTimeout bounds the whole boot convergence pass, a bound not a
+// budget: a pass that runs out is retried on the next start, nothing waits.
 const bootConvergeTimeout = 15 * time.Minute
 
-// localPushPollInterval is how often an instance GitHub cannot deliver
-// webhooks to checks its clones for new commits on the default branch.
+// localPushPollInterval is the fallback push check for instances GitHub
+// cannot deliver webhooks to.
 const localPushPollInterval = 5 * time.Minute
 
-// httpDrainTimeout bounds step 1 of Shutdown. HTTP requests are short; the
-// drain budget belongs to the agent runs in step 2.
+// httpDrainTimeout bounds step 1 of Shutdown; the drain budget belongs to
+// the agent runs in step 2.
 const httpDrainTimeout = 15 * time.Second
 
-// Shutdown drains rather than severs. Order matters: a SIGTERM (the desktop
-// quitting, an update) very likely lands on a workspace mid-run.
-// Previously the run context was cancelled and the DB pool closed before HTTP
-// was drained, which failed every in-flight request and abandoned the board
+// Shutdown drains rather than severs. Order matters: a SIGTERM very likely
+// lands on a workspace mid-run. Cancelling the run context and closing the
+// DB pool before draining failed every in-flight request and abandoned the
 // runner's queue outright.
 func (s *Server) Shutdown(ctx context.Context) error {
 	var err error
-	// 1. Stop accepting connections and let in-flight requests finish; they still
-	//    have their context and the DB. Bounded separately from ctx: an open SSE
-	//    stream would otherwise hold the whole drain budget that step 2 needs.
+	// 1. Drain HTTP first: in-flight requests still have their context and
+	//    the DB, and an open SSE stream would hold the whole budget.
 	if s.app != nil {
 		httpCtx, cancelHTTP := context.WithTimeout(ctx, httpDrainTimeout)
 		err = s.app.ShutdownWithContext(httpCtx)
 		cancelHTTP()
 	}
-	// 2. Let background workers finish the job they are on. The board runner owns
-	//    task_agent_runs rows — dropping it mid-run leaves them stuck 'running'
-	//    until the reconciler's stale sweep, minutes later. Drain waits for the
-	//    agent runs themselves (minutes of real work: a branch, edits, a build)
-	//    and only cancels if ctx — the pod's grace period — runs out first.
+	// 2. Let workers finish their job. Dropping the board runner mid-run
+	//    leaves task_agent_runs rows stuck 'running' until the reconciler's
+	//    stale sweep; drain waits for the agent runs, cancel only when the
+	//    pod's grace period runs out.
 	if s.engine.boardRunner != nil {
 		s.engine.boardRunner.Drain(ctx)
 	}
@@ -587,14 +542,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.engine.healthMonitor != nil {
 		s.engine.healthMonitor.Stop()
 	}
-	// The store monitor is mid-sweep more often than not (it renews signing
-	// assets and pushes GitHub secrets); yanking its context at step 3 could
-	// cut a Upsert or a pushSecrets in half.
+	// Mid-sweep monitors get a graceful Stop — yanking their context could cut
+	// a signing-asset Upsert, a secret push, or an Actions list call in half.
 	if s.engine.storeMonitor != nil {
 		s.engine.storeMonitor.Stop()
 	}
-	// Same mid-sweep concern as the store monitor above: a GitHub Actions
-	// list call or a dispatch reconciliation could be in flight.
 	if s.engine.deployMonitor != nil {
 		s.engine.deployMonitor.Stop()
 	}
@@ -610,18 +562,11 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.engine.browserSession != nil {
 		s.engine.browserSession.Close()
 	}
-	// Releases every device lease this process still holds. Appium's own
-	// newCommandTimeout would reap them eventually; doing it here means the next
-	// pod can take the phones immediately rather than after that timeout.
+	// Release every device lease this process holds, so the next pod (or a
+	// cloud member's Mac) can take the phones immediately instead of after
+	// Appium's own newCommandTimeout.
 	if s.engine.mobilePool != nil {
 		s.engine.mobilePool.Close()
-	}
-	// The same obligation on the cloud path, where the device is a simulator on
-	// somebody's laptop: a replica that goes away mid-rollout without deleting
-	// its Appium sessions leaves that person's Mac holding devices nothing is
-	// using until the hub's own timeout.
-	if s.engine.pgPool != nil {
-		s.engine.pgPool.Close()
 	}
 	return err
 }
@@ -677,11 +622,10 @@ func (e *engine) registerBuiltinTools(cfg *domain.Config) error {
 	e.reg.Register(clarification.NewAskUserTool())
 	log.Info().Msg("ask_user clarification tool enabled")
 
-	// Registered here rather than with the other code tools below, which are
-	// gated on a semantic index: working on a file needs no index, and an agent
-	// on an unindexed repository is exactly the one that would otherwise fall
-	// back to `sed -n` for reading and `sed -i` for writing. The tool policy is
-	// what decides who may call the writers — see domain.workspaceWriteTools.
+	// Registered here rather than with the index-gated code tools: working on a
+	// file needs no index, and an agent on an unindexed repository is exactly
+	// the one that would otherwise fall back to `sed`. Tool policy decides who
+	// may call the writers.
 	e.reg.Register(code.NewReadFileTool())
 	e.reg.Register(code.NewWriteFileTool())
 	e.reg.Register(code.NewEditFileTool())
@@ -738,26 +682,16 @@ func (e *engine) bootstrapLLMFromYAML(baseURL, model, apiKey string, timeout tim
 	clientTimeout := llmprovider.ResolveTimeoutDuration(0, domain.LLMProviderLocal, timeout)
 	fallback := llm.NewOpenAICompatClient(baseURL, model, apiKey, clientTimeout)
 	if e.multiLLM == nil {
-		// No resolver yet: it needs the database, which does not exist this
-		// early. Until buildHandler installs one, every call uses the fallback
-		// above — the client built from config.yml.
-		//
-		// The old code also registered that same fallback as the `local`
-		// PROVIDER here. That is gone with the rest of the shared client map:
-		// `local` is a stored provider row like every other, and an install that
-		// has not configured one must not inherit whatever base_url is in the
-		// file.
+		// No resolver until buildHandler installs one (it needs the database);
+		// every call uses the fallback client built from config.yml.
 		e.multiLLM = llm.NewMultiProviderClient(fallback, nil)
 	}
 	e.llmClient = e.multiLLM
 }
 
-// wireRepositoryStore builds the postgres-backed repository store with the
-// boot-time cipher injected, not a lazy one: SetWebhook/WebhookSecret are the
-// only encrypted columns on this store, and their first real use is always a
-// later HTTP request — after scrubProcessSecrets has already wiped
-// MCP_SECRETS_KEY from the process environment. See pgSettings.SetCipher and
-// mobileStore.SetCipher below for the same fix on their stores.
+// wireRepositoryStore builds the repository store with the boot-time cipher,
+// not a lazy one: its encrypted columns' first real use is always a later HTTP
+// request, after scrubProcessSecrets wiped MCP_SECRETS_KEY from the env.
 func wireRepositoryStore(pgDB *pgstore.DB, cfg *domain.Config, cipher *secrets.Cipher, cipherErr error) *pgstore.RepositoryStore {
 	store := pgstore.NewRepositoryStore(pgDB).
 		SetHostRoots(cfg.Storage.Sessions.WorkspaceRoot, cfg.Indexer.AllowedRoots)
@@ -823,14 +757,13 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			e.pgPool = pgPool
 			pgDB := pgstore.NewDB(pgPool)
 			e.pgDB = pgDB
-			// Seeds the default board once per install (install_state) and runs
-			// the boot steps; built here because it needs the database.
+			// Seeds the default board once per install and runs boot steps;
+			// built here because it needs the database.
 			e.bootSeed = bootseed.NewService(pgstore.NewBoardSeedStore(pgDB))
-			// SetHostRoots, same reason as the repository store below:
-			// sessions.workspace_dir and sessions.project_root are absolute
-			// paths belonging to whichever host wrote the row. Resuming a
-			// pod-written chat here without the translation reaches
-			// os.MkdirAll("/data/workspaces/...") and fails the turn.
+			// SetHostRoots: sessions.workspace_dir/project_root are absolute
+			// paths from whichever host wrote the row; re-anchor foreign ones or
+			// resuming a pod-written chat reaches os.MkdirAll("/data/...") and
+			// fails the turn.
 			sessionStore = pgstore.NewSessionStore(pgDB).
 				SetHostRoots(cfg.Storage.Sessions.WorkspaceRoot, cfg.Indexer.AllowedRoots)
 			sessionActionStore = pgstore.NewSessionActionStore(pgDB)
@@ -842,21 +775,15 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			apiKeyStore = pgstore.NewAPIKeyStore(pgDB)
 			catalogStore = pgstore.NewCatalogStore(pgDB)
 			catalogVersionStore = pgstore.NewCatalogVersionStore(pgDB)
-			// And again for workspace_indexes.root_path, whose only use after a
-			// read is the skeleton walk in indexer.Injector: everything else in
-			// an index row is stored relative to that root, so re-anchoring it
-			// points the walk at this host's checkout of the same repository
-			// instead of failing silently on a path that cannot exist here.
+			// Same again for workspace_indexes.root_path: re-anchored so the
+			// skeleton walk lands on this host's checkout of the repo.
 			indexStore = pgstore.NewIndexStore(pgDB).
 				SetHostRoots(cfg.Storage.Sessions.WorkspaceRoot, cfg.Indexer.AllowedRoots)
 			embedMapStore = pgstore.NewEmbeddingMapStore(pgDB)
-			// SetHostRoots: repositories.root_path is an absolute path written
-			// by whichever host imported the repo, and one database is
-			// now served by two (the cloud pod's PVC at /data and the user's
-			// Mac behind a reverse tunnel). The store re-anchors a foreign
-			// path onto this host's workspace root on read; without it a board
-			// run here dies in git clone with "mkdir /data: read-only file
-			// system".
+			// SetHostRoots: repositories.root_path is absolute from whichever host
+			// imported it, and one database is served by two hosts (the pod's PVC
+			// plus the user's Mac behind a reverse tunnel); re-anchored on read,
+			// or a board run dies in git clone at "/data: read-only file system".
 			repositoryStore = wireRepositoryStore(pgDB, cfg, e.secretsCipher, e.secretsCipherErr)
 			boardTaskStore = pgstore.NewBoardTaskStore(pgDB)
 			criterionStore = pgstore.NewAcceptanceCriterionStore(pgDB)
@@ -885,8 +812,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				"en",
 				opts.DataDir != "",
 			)
-			// The boot-time cipher, not a lazy one: by the time this store is
-			// first used the environment no longer carries MCP_SECRETS_KEY.
+			// The boot-time cipher, not a lazy one: by first use the environment
+			// no longer carries MCP_SECRETS_KEY.
 			pgSettings.SetCipher(e.secretsCipher, e.secretsCipherErr)
 			settingsStore = pgSettings
 			githubTokens = pgSettings
@@ -906,19 +833,12 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if e.secretsCipherErr != nil {
 			log.Warn().Err(e.secretsCipherErr).Msg("mcp secrets cipher unavailable, secret storage disabled")
 		}
-		// The reload hook is a SIBLING of the LLM credential leak: mcp.Service
-		// calls it after every create/update/delete — a request path — and it
-		// rebuilds the process-wide manager from the stored servers, registering
-		// their tools into the one process-wide registry with their secrets in the
-		// child environment.
-		//
-		// Wired unconditionally, because the refusal now lives in reloadMCP
-		// itself. It used to live here, and that was the mistake: the other
-		// caller (engine.reload, via POST /admin/reload) walked straight past a
-		// guard that only ever covered this one. One guard, on the resource.
+		// The reload hook, a sibling of the cipher leak: mcp.Service calls it
+		// after each create/update/delete and it rebuilds the process-wide
+		// manager. Wired unconditionally — the refusal to rebuild lives in
+		// reloadMCP itself; an early guard here was walked past by engine.reload.
 		mcpService = mcpsvc.NewService(mcpStore, e.secretsCipher, e.reloadMCP)
-		// The default catalog of stdio/http MCP servers, seeded as a boot step
-		// so it runs after the board seed, once per process.
+		// Default MCP server catalog, seeded as a boot step after the board seed.
 		e.bootSeed.AddStep("mcp_servers", mcpService.SeedDefaultsIfEmpty)
 		resolved, err := mcpService.ResolvedConfigs(ctx)
 		if err != nil {
@@ -937,10 +857,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		e.mcpManager.LoadAndRegister(ctx, mcpConfigs, e.reg)
 	}
 
-	// Embedding model adı config'ten okunmuyor: UI'dan (LLM ayarları) seçilen
-	// model DB'den MultiProviderClient.SetEmbeddingModel ile pinlenir ve boş
-	// parametreyi ezer. Buradaki boş ad yalnız hiç ayar yapılmamış kurulumun
-	// son çare fallback'idir (sağlayıcının yüklü/varsayılan modeli).
+	// The embedding model is chosen from the UI (LLM settings), pinned on the
+	// MultiProviderClient; the empty name here is only the never-configured
+	// fallback.
 	embeddingModel := ""
 
 	mapperSvc := mapper.NewService(cfg.Mapping)
@@ -949,20 +868,15 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	llmClient := e.llmClient
 	if e.multiLLM != nil {
 		llmClient = e.multiLLM
-		// Pacing lives on the shared client so the indexer, RAG uploads and
-		// query rewriting draw on one embedding quota.
+		// Pacing lives on the shared client so indexer, RAG uploads and query
+		// rewriting draw on one embedding quota.
 		e.multiLLM.SetEmbeddingLimits(cfg.Embedding)
 	}
-	// Token kullanım kaydı: tüm chat çağrıları (agent loop, planner, sentez)
-	// bu sarmalayıcıdan geçer.
 	if usageStore != nil {
 		llmClient = usageapp.NewRecordingClient(llmClient, usageStore)
 	}
-	// Embedding query-vektör önbelleği RecordingClient'ın DIŞINA sarılır: bir
-	// önbellek isabetinde alttaki (kaydeden) client hiç çağrılmaz, dolayısıyla
-	// harcanmayan bir çağrı için kullanım da kaydedilmez. codebase_search,
-	// inject.go'nun sorgu-zamanı embed'i, catalog.SearchSkills, memory ve rag
-	// hepsi bu tek sarmalayıcıdan geçer; ayrı ayrı değişiklik gerekmez.
+	// Cache wraps OUTSIDE the recording client: a cache hit never calls the
+	// inner client, so no usage is recorded for an unbilled call.
 	llmClient = usageapp.NewCachingEmbedder(llmClient, cfg.Embedding.QueryCacheEntries)
 
 	if indexStore != nil {
@@ -972,10 +886,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}
 	}
 
-	// Ledger recording wraps the audited registry, so every path that runs a
-	// tool (chat, orchestrated subtask, board run) leaves a durable record of
-	// the board entities it touched — the agent loop's own trace does not
-	// outlive the loop.
+	// Ledger recording wraps the auditing registry so every run leaves a durable
+	// trace of touched board entities (the loop's own trace does not outlive it).
 	toolReg := registry.NewWorkspaceRegistry(
 		registry.NewActionRecordingRegistry(
 			registry.NewAuditingRegistry(e.reg, auditStore),
@@ -988,10 +900,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		maxToolOutput = 16000
 	}
 	e.agentLoop = agent.NewLoop(llmClient, toolReg, cfg.LLM.MaxIterations, cfg.LLM.TaskMaxIterations, maxToolOutput)
-	// Built here, wired with an executor much further down (the CLI's existence
-	// is not known until the board block probes for it) and handed to every
-	// agentic consumer in between. That order is why the executor arrives
-	// through a setter on a live object rather than through the constructor.
+	// The executor is only known to exist once the board block probes for the
+	// CLI, so the router is built here with a live-object setter instead of
+	// constructor wiring.
 	e.agentRouter = agent.NewRouter(e.agentLoop)
 
 	var ragSvc *rag.Service
@@ -999,14 +910,13 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		ragSvc = rag.NewService(fileStore, llmClient, cfg.RAG)
 	}
 
-	// Binary attachments (images/documents) for tasks and chat. Postgres-backed
-	// bytes — the pod disk the RAG file pipeline writes to is ephemeral.
+	// Binary attachments for tasks and chat: Postgres-backed bytes, because the
+	// pod disk the RAG pipeline writes to is ephemeral.
 	var attachmentSvc *attachmentapp.Service
 	if attachmentStore != nil {
 		attachmentSvc = attachmentapp.NewService(attachmentStore, boardTaskStore)
-		// Screenshots a tool took go into the same store the UI already fetches
-		// attachments from, so the activity feed can show the human the picture
-		// the model was handed instead of a sentence describing it.
+		// Tools' screenshots go into the store the UI already fetches from, so
+		// the feed can show the human the picture the model was handed.
 		if e.agentLoop != nil {
 			e.agentLoop.SetScreenshotArchiver(attachmentSvc)
 		}
@@ -1024,28 +934,22 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	if budget.ReserveOutput <= 0 {
 		budget.ReserveOutput = 4096
 	}
-	// Defaulted BEFORE the loop is given the budget, not after. Budget is a
-	// value, so a field filled in later never reached the loop's copy — and the
-	// loop's summarizing trim reads KeepRecentMessages to decide how much of the
-	// recent conversation it must keep verbatim. A zero there means "keep
-	// nothing recent", which is the opposite of what an unset config wants.
+	// Defaulted before the loop gets the budget: it is a value, so a later fill
+	// never reaches the loop's copy, and its trim reads KeepRecentMessages
+	// verbatim — zero there means a running history with nothing kept.
 	if budget.KeepRecentMessages <= 0 {
 		budget.KeepRecentMessages = 10
 	}
 	summarizer := appcontext.NewLLMSummarizer(llmClient)
-	// The agent loop trims with the same budget its callers do. Without this the
-	// budget was applied once to the history handed in and never again, and the
-	// loop's own tool results grew the request back past it many times over.
+	// The loop trims with the same budget its callers do, or tool results grow
+	// the request back past it many times over.
 	e.agentLoop.SetHistoryBudget(budget)
-	// ...and it condenses what it drops into one block at a fixed position
-	// instead of deleting messages out of the middle, so the request's prefix
-	// stays byte-identical between trims and the provider's cache survives a
-	// long run. See Loop.SetSummarizer.
+	// Condenses dropped history into one fixed-position block so the request
+	// prefix stays byte-identical between trims (provider cache survives).
 	e.agentLoop.SetSummarizer(summarizer)
-	// Mid-run token circuit breaker: billing.Service.Allow (below) only gates
-	// BEFORE a run starts, and MaxIterations/TaskMaxIterations count turns, not
-	// tokens — neither catches a run that blows past its token budget DURING
-	// execution. 0 (unset) disables it. See Loop.SetRunTokenCap.
+	// Mid-run token breaker: billing gates runs only before they start and
+	// iteration limits count turns, so this catches a run blowing its budget
+	// during execution. 0 disables.
 	e.agentLoop.SetRunTokenCap(cfg.LLM.RunMaxTotalTokens)
 
 	var indexSvc *indexer.Service
@@ -1106,16 +1010,12 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}) {
 			e.reg.Register(tool)
 		}
-		// Orchestration is always on, but the role agents it dispatches to are
-		// no longer created here: the six built-in agents now arrive through
-		// the external catalog sync (they are files under AGENT_CATALOG_REPO),
-		// and the template gallery is populated from the live agents, not a
-		// boot-time upsert. What boot still does is backfill embeddings for
-		// skills a user-saved template created without a vector.
+		// The role agents are no longer created here: the six built-ins arrive
+		// through the external catalog sync, and the gallery is populated from
+		// the live agents. Boot only backfills embeddings for template agents
+		// saved without a vector.
 		e.bootSeed.AddStep("skill_embeddings", func(stepCtx context.Context) error {
-			// A template-created agent's skills are stored without vectors
-			// (seedSkill), so this backfill is what fills them in. It
-			// outlives the boot step's deadline on purpose: a first launch is
+			// Outlives the boot step's deadline on purpose: a first launch is
 			// still downloading the model.
 			go func() {
 				backfillCtx, cancel := context.WithTimeout(context.WithoutCancel(stepCtx), 30*time.Minute)
@@ -1139,13 +1039,13 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			return nil
 		})
 		orchSvc = orchestrator.NewService(llmClient, catalogStore, nil, e.agentRouter, cfg.Orchestration, contextBuilder)
-		// Intake and the planner run without tools; the snapshot is what keeps
+		// Intake and the planner run without tools; the workspace is what keeps
 		// them from asking the stakeholder about repositories the system knows.
 		if initiativeStore != nil && repositoryStore != nil {
 			orchSvc.SetWorkspace(workspaceLister{projects: initiativeStore, repos: repositoryStore})
 		}
-		// Subtasks in one wave run concurrently; a dependent subtask must read
-		// the ledger fresh to see what its dependency just put on the board.
+		// A dependent subtask must read the ledger fresh to see what its
+		// dependency just put on the board.
 		if sessionActionStore != nil {
 			orchSvc.SetSessionActions(sessionActionStore)
 		}
@@ -1176,27 +1076,18 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	}
 
 	var boardRunner *boardapp.Runner
-	// hostChatExecutor is declared here, beside boardRunner, because it is set
-	// once mux is built, far below, and consumed by the session service
-	// further below still. It is the SAME mux the board's TaskExecutor uses,
-	// not a second instance: the concurrency cap, the slot queue and the
-	// subscription behind each provider's executor are per-executor, so a
-	// second one would let chat and the board each believe they had the whole
-	// budget.
-	//
-	// Nil when no host-executed provider has an executor at all, which every
-	// caller of a provider on this seam treats as "this agent cannot run
-	// here" rather than as a degraded mode.
+	// hostChatExecutor is the SAME mux the board's TaskExecutor uses, not a
+	// second one: the concurrency cap, slot queue and subscriptions are
+	// per-executor, so a duplicate would let chat and the board each believe
+	// they had the whole budget. Nil means "this provider cannot run here".
 	var hostChatExecutor port.ChatExecutor
 	if boardConfigStore != nil {
 		workspaceSvc = workspace.NewService(boardConfigStore)
 	}
 	if workflowSvc != nil {
 		workflowSvc.SetBoardColumnLister(boardConfigStore)
-		// The snapshot has to exist before anything reads it — Workflow/
-		// AgentForRole etc. fail closed on an empty cache (see
-		// workflow.ErrSnapshotEmpty) rather than guessing. Every write this
-		// service makes reloads again; this is only the boot load.
+		// The snapshot must exist before anything reads it — AgentForRole etc.
+		// fail closed on an empty cache. Every write reloads; this is the boot.
 		if err := workflowSvc.Reload(ctx); err != nil {
 			log.Warn().Err(err).Msg("workflow: initial snapshot load failed; roles/workflows unavailable until the next successful write")
 		}
@@ -1218,35 +1109,20 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	// resume tick, the stale-task reconciler — is collected here and run only
 	// once all wiring below is complete.
 	var activateBoard []func()
-	// Left nil on a build with no board runner, so the interface field on the
-	// HTTP config stays nil too and the stop/re-run routes answer 503 instead
-	// of dereferencing a runner that was never built.
 	var boardRunControl httpadapter.BoardRunControl
-	// Left nil the same way when there is no board: the task-chat route then
-	// answers 503 instead of dereferencing an opener that was never built, and a
-	// session with no task resolver keeps its old mirror-clone workspace.
+	// Both left nil (503) when there is no board: the stop/re-run routes and
+	// the task-chat route must not dereference a runner that was never built.
 	var boardTaskChat httpadapter.TaskChatControl
 	var taskChatWorkspaces session.TaskWorkspaceResolver
 	var localPreviewSvc *localpreviewapp.Service
 
-	// The local agent CLI connect flow. Both stores are required and neither is
-	// optional-with-a-fallback: without the catalog there is nothing to write
-	// out, and without the connection row there is nowhere to record what was
-	// verified, so a build missing either answers 503 on the routes instead of
-	// pretending to connect.
-	//
-	// The probe follows the SESSIONS, on the same condition the executor choice
-	// below follows: with a control plane in front of this process the `claude`
-	// binary and the subscription are on the member's Mac, so connect reads the
-	// environment report that Mac pushed (claudecode.Preflight) instead of
-	// running anything here. Running the local probe there asked a Linux pod
-	// whether it had Claude Code, and told every cloud user to install it on a
-	// machine they cannot see.
-	//
-	// Without one, unchanged: the local probe is given the executor's OWN
-	// binary name and setting sources, so what connect verifies is the same
-	// program, configured the same way, that a board run will start. See
-	// agentcli.DefaultProbe.
+	// Both stores are required: without the catalog there is nothing to write
+	// out, and without the connection row nowhere to record verification. The
+	// probe follows the SESSIONS: with a control plane in front, `claude` and
+	// the subscription live on the member's Mac, so connect reads the pushed
+	// environment report (claudecode.Preflight) instead of running anything
+	// here. Without one, unchanged: the probe gets the executor's own binary
+	// and settings, so it verifies the same program a board run will start.
 	var agentCLISvc *agentcli.Service
 	if agentCLIStore != nil && catalogStore != nil {
 		bins := agentcli.ProbeBinaries{
@@ -1266,10 +1142,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		})
 	}
 
-	// Hoisted above the block that creates it: the criteria-loop guard is
-	// wired onto it later, once repositorySvc exists (it is both the task
-	// commenter and the acceptance-criteria reader), and that wiring lives
-	// next to ReviewLoopGuard/PipelineBounceGuard's in a sibling block below.
+	// The criteria-loop guard is wired onto it later, next to the review- and
+	// pipeline-bounce guards, once repositorySvc exists.
 	var reconciler *boardapp.Reconciler
 
 	if boardConfigStore != nil && boardEventStore != nil && taskAgentRunStore != nil && catalogStore != nil {
@@ -1432,7 +1306,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			log.Info().Msg("opencode executor enabled")
 		}
 
-		// Wire the mux executor to the board runner and router
 		mux := &muxExecutor{
 			executors: map[domain.LLMProviderType]port.TaskExecutor{
 				domain.LLMProviderClaudeCode:  claudeExecutor,
@@ -1531,16 +1404,14 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				reconciler.SetWorkflows(workflowSvc)
 				reconciler.SetRoleResolver(workflowSvc)
 			}
-			// No live-run checker any more. It asked THIS process whether a run
-			// was executing, which on a shared deployment reports every other
-			// replica's live run as abandoned; the run row's own heartbeat is
-			// the answer every process can see. See Reconciler.run.
-			//
-			// A killed process leaves its orchestration plan and subtasks at
-			// "running"; recovering the run row alone still left the card live.
+			// No live-run checker: it asked THIS process, which on a shared deployment
+			// reports every other replica's live run as abandoned; the run row's
+			// own heartbeat is the answer every process can see. The plan settler
+			// instead recovers a killed process's plan/subtasks, whose rows stay
+			// "running" after the run row is recovered.
 			reconciler.SetPlanSettler(catalogStore)
-			// Reconciler.Start sweeps immediately, dispatching stale and
-			// never-started tasks — same reason as the runner above.
+			// Sweeps immediately on start — same dispatch-this-second reason as
+			// the runner above.
 			activateBoard = append(activateBoard, func() {
 				reconciler.Start(ctx, cfg.Board.ReconcileInterval)
 			})
@@ -1557,17 +1428,12 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		repositorySvc.SetGit(gitClient, cfg.Storage.Sessions.WorkspaceRoot)
 		repositorySvc.SetPublicBaseURL(cfg.Server.PublicBaseURL)
 		repositorySvc.SetTestCaseStore(testCaseStore)
-		// The index mirror's restorer. Wired here rather than into the indexer's
-		// constructor because the dependency runs backwards — the repository
-		// service already holds the indexer — so a constructor argument would be
-		// a cycle.
-		//
-		// It is what stops an index pass from walking a directory that is not
-		// there. The mirror is a CACHE of the git remote on a pod disk that
-		// several replicas do not share and no restart preserves, so "the
-		// checkout is missing" is an ordinary Tuesday rather than an anomaly,
-		// and a pass that indexed nothing and reported completed would show a
-		// green 100% over an index that answers no query.
+		// The index mirror's restorer, wired here rather than into the indexer's
+		// constructor (a dependency cycle: the repository service already holds
+		// the indexer). It stops a pass from walking a checkout that is not
+		// there — the mirror is a pod-disk cache no restart preserves, and an
+		// index pass that reported completed over nothing would show a green
+		// 100% over an index answering no query.
 		if indexSvc != nil {
 			indexSvc.SetMirrorRestorer(repositorySvc)
 		}
@@ -1585,8 +1451,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}
 		if taskSpanStore != nil {
 			repositorySvc.SetCompletionStamper(boardapp.NewCompletionStamper(boardTaskStore, taskSpanStore))
-			// The span ledger is also where the review-chain gate reads its
-			// evidence: which stages a task actually passed through.
+			// The span ledger is also the review-chain gate's evidence: which stages a
+			// task actually passed through.
 			repositorySvc.SetSpanStore(taskSpanStore)
 			if scoreTracker != nil {
 				reviewGate := boardapp.NewReviewGate(taskSpanStore, scoreTracker)
@@ -1603,17 +1469,13 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}
 		repositorySvc.SetRequireCriteriaComplete(cfg.Board.RequireCriteriaComplete)
 
-		// Work order: the `blocks` relation, enforced. The gate lives in the
-		// dispatcher because that is the only place a run starts, and the
-		// sweeper is what lets a park end without anyone touching the card.
-		// Both are registered on the relation store being present — without it
-		// there is no order to read and the board dispatches exactly as before.
+		// Work order — the `blocks` relation, enforced where a run starts (the
+		// dispatcher) and a park's only exit (the sweeper). Registered on the
+		// relation store being present; without it the board dispatches as before.
 		if relationStore != nil && boardDispatcher != nil {
 			workOrder := boardapp.NewWorkOrder(relationStore, boardTaskStore)
-			// The commenter is the SERVICE, not the comment store: a comment
-			// created through it lands on the card the same way every other
-			// system comment does, including the board event that makes it
-			// visible in task history.
+			// The commenter is the SERVICE, not the store, so the comment lands
+			// with the board event that makes it visible in task history.
 			workOrder.SetCommenter(repositorySvc)
 			boardDispatcher.SetWorkOrder(workOrder)
 			workOrderSweeper := boardapp.NewWorkOrderSweeper(boardTaskStore, relationStore, boardDispatcher)
@@ -1625,31 +1487,24 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			})
 		}
 
-		// Review-cycle cap: a task that keeps arriving in need_revision with no
-		// human weighing in stops being dispatched and waits for a person. It
-		// hangs off the event store because the streak IS board history —
-		// nothing else survives the restarts and the multi-pod delivery the
-		// loop it brakes ran across.
+		// Review-cycle cap: a task stuck bouncing in need_revision with no human
+		// stops being dispatched. The streak IS board history, so the guard
+		// hangs off the event store — nothing else survives restarts and the
+		// multi-pod delivery the loop it brakes ran across.
 		if boardDispatcher != nil && boardEventStore != nil {
 			reviewLoop := boardapp.NewReviewLoopGuard(boardEventStore, boardTaskStore)
-			// The service, not the comment store, for the same reason the work
-			// order's commenter is: a comment made through it lands on the card
-			// with the board event that makes it visible in task history.
 			reviewLoop.SetCommenter(repositorySvc)
-			// The park is a move out of need_revision, and nothing else writes
-			// it: Dispatch's own event was for the move INTO that column. Without
-			// the journal the card jumps to blocked unexplained and the
-			// need_revision column span never closes.
+			// The parking move out of need_revision, written by no one else;
+			// without it the card jumps to blocked unexplained and the
+			// need_revision span never closes.
 			reviewLoop.SetParkJournal(boardapp.NewParkJournal(boardEventStore, taskSpanStore))
 			boardDispatcher.SetReviewLoopGuard(reviewLoop)
 		}
 
-		// Criteria-loop cap: the third machine-talking-to-itself shape,
-		// closed the same way as the two above — a task whose runs keep
-		// exhausting the criteria sweep with the SAME criteria left open,
-		// unattended, stops being retried and waits for a person. Unlike the
-		// other two this is not detected on an incoming board event, so it
-		// hangs off the reconciler rather than the dispatcher.
+		// Criteria-loop cap, the third self-talking shape, closed the same way: a
+		// task whose runs keep exhausting the criteria sweep with the same
+		// criteria open stops being retried. Not detected on an incoming event,
+		// so it hangs off the reconciler rather than the dispatcher.
 		if reconciler != nil && boardEventStore != nil && boardTaskStore != nil {
 			criteriaLoop := boardapp.NewCriteriaLoopGuard(boardEventStore, boardTaskStore, repositorySvc)
 			criteriaLoop.SetCommenter(repositorySvc)
@@ -1657,15 +1512,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			reconciler.SetCriteriaLoopGuard(criteriaLoop)
 		}
 
-		// Project profile: agent-maintained per-repository brief. Built by the
-		// shared agent loop on the system-architect's model; the tool is
-		// registered globally so board-run developers can update the profile
-		// mid-run, and the repository service gets the refresher for its
-		// import/push/manual triggers.
-		// The sectioned profile store is Postgres-only: the derived/agent split,
-		// per-section staleness and the settings proposals all live in the two
-		// tables migration 086 adds. Without a pool the service degrades to the
-		// single rendered blob on the repositories row rather than failing.
+		// Project profile: agent-maintained per-repository brief, built by the
+		// shared loop and refreshed on import/push/manual triggers. The sectioned
+		// store is Postgres-only; without a pool it degrades to the single
+		// rendered blob on the repositories row.
 		var profileSectionStore port.RepositoryProfileStore
 		if e.pgDB != nil {
 			profileSectionStore = pgstore.NewRepositoryProfileStore(e.pgDB)
@@ -1679,8 +1529,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			profileSvc.SetAgentGetter(catalogStore)
 		}
 		if e.pgDB != nil {
-			// Pipeline slots are one of the settings a profiling pass can fill
-			// in from the deploy workflows it just parsed.
+			// Pipeline slots are a setting a profiling pass can fill in from the
+			// deploy workflows it just parsed.
 			profileSvc.SetPipelineJobs(pgstore.NewRepositoryPipelineJobStore(e.pgDB))
 		}
 		for _, tool := range repoprofiletools.NewExecutors(&repoprofiletools.ToolKit{Profiles: profileSvc}) {
@@ -1709,11 +1559,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if attachmentSvc != nil {
 			boardKit.Attachments = attachmentSvc
 		}
-		// The task<->pull-request use case: read the PR a task is reviewed in,
-		// push a change into it, answer a reviewer on it. It needs GitHub for
-		// everything but the commit, so the tools are registered only when a token
-		// store exists — a build without one would otherwise offer three tools
-		// that can only report "GitHub is not connected".
+		// The task<->pull-request use case needs GitHub for everything but the
+		// commit, so these tools are registered only when a token store exists —
+		// otherwise three tools that could only report "GitHub is not connected".
 		var taskPRSvc *boardapp.TaskPRService
 		if githubTokens != nil {
 			taskPRSvc = boardapp.NewTaskPRService(boardapp.TaskPRServiceDeps{
@@ -1724,16 +1572,14 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				Tokens: githubTokens.GitHubToken,
 				Agents: catalogStore,
 				LLM:    llmClient,
-				// The lifecycle gates the merge re-asks before it lands
-				// anything: the repository's require_review_chain check and the
-				// task's last pipeline verdict. Same service that guards the
-				// move into done, so there is one definition of each.
+				// The merge re-asks the same gates that guard the move into done,
+				// so there is one definition of each.
 				Gates:         repositorySvc,
 				WorkspaceRoot: cfg.Storage.Sessions.WorkspaceRoot,
 			})
 			boardKit.PullRequests = taskPRSvc
 			// The same reader the tools use, so a revision run is handed the
-			// reviewer's PR comments without having to call a tool for them.
+			// reviewer's comments without a tool call for them.
 			if boardRunner != nil {
 				boardRunner.SetPullRequestReader(taskPRSvc)
 			}
@@ -1741,9 +1587,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		for _, tool := range board.NewExecutors(boardKit) {
 			e.reg.Register(tool)
 		}
-		// The chat a human opens about one task, and the branch checkout its turns
-		// run in. Both hang off the same three stores; building them here keeps
-		// them beside the tools the chat's agent calls.
+		// The task chat and its branch checkout; built here beside the tools the
+		// chat's agent calls.
 		if sessionStore != nil {
 			boardTaskChat = boardapp.NewTaskChatOpener(boardapp.TaskChatOpenerDeps{
 				Tasks:    boardTaskStore,
@@ -1761,8 +1606,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			git:           gitClient,
 			workspaceRoot: cfg.Storage.Sessions.WorkspaceRoot,
 		}
-		// The human_uat reviewer's own manual pass at a task's branch — same
-		// checkout as the chat above, run instead of talked to.
+		// The human_uat reviewer's manual pass at a task's branch — same checkout
+		// as the chat above, run instead of talked to.
 		localPreviewSvc = localpreviewapp.NewService(localpreviewapp.Deps{
 			Tasks:         boardTaskStore,
 			Repositories:  repositorySvc,
@@ -1781,9 +1626,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			if boardRunner != nil {
 				boardRunner.SetPipelines(pipelineStore)
 			}
-			// QA is left as a nil interface (not a typed-nil *Dispatcher) when
+			// QA stays a nil interface (not a typed-nil *Dispatcher) when
 			// boardDispatcher is nil, so PipelineRunner's `p.qa != nil` check
-			// behaves correctly instead of tripping the typed-nil interface trap.
+			// does not trip the typed-nil interface trap.
 			var qaDispatcher boardapp.QADispatcher
 			if boardDispatcher != nil {
 				qaDispatcher = boardDispatcher
@@ -1792,8 +1637,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			if githubTokens != nil {
 				tokenSource = githubTokens.GitHubToken
 			}
-			// Built here rather than beside deploySvc below: the pipeline
-			// runner needs it to tell a store prod deploy from a server one.
+			// Built here rather than beside deploySvc below: the pipeline runner needs
+			// it to tell a store prod deploy from a server one.
 			deployTargetStore := pgstore.NewDeployTargetStore(e.pgDB)
 			pipelineRunner := boardapp.NewPipelineRunner(boardapp.PipelineRunnerDeps{
 				Store:         pipelineStore,
@@ -1838,31 +1683,22 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			pipelineRunner.SetBounceGuard(bounceGuard)
 			repositorySvc.SetPipelineRunner(pipelineRunner)
 			repositorySvc.SetPipelineStore(pipelineStore)
-			// Delivery dedupe that outlives the process. GitHub retries to
-			// whichever replica the load balancer picks, so an in-memory map
-			// answers only for the pod that happened to get the first attempt.
+			// Delivery dedupe that outlives the process: GitHub retries to whichever
+			// replica the load balancer picks, so an in-memory map only answers
+			// for the pod that got the first attempt.
 			repositorySvc.SetDeliveryLedger(pgstore.NewWebhookDeliveryStore(e.pgDB))
 			repositorySvc.SetDeployPackages(pgstore.NewDeployPackageStore(e.pgDB))
 			repositorySvc.SetPipelineJobStore(pipelineJobStore)
 			if githubTokens != nil {
 				repositorySvc.SetGitHubTokenSource(githubTokens.GitHubToken)
 			}
-			// Two boot-time convergence passes:
-			//
-			//   webhook_reconcile — repos registered before webhook support get
-			//     one installed, and repos whose hook predates the Actions
-			//     events get that hook widened in place. Every existing hook out
-			//     there is push-only, which is why the code-review gate had no
-			//     signal to open on.
-			//   index_freshness — catch-up for pushes that landed while this pod
-			//     was down. GitHub does not redeliver them, so without this the
-			//     clone (and the index built from it) stays at the pre-downtime
-			//     commit until a human opens the repository settings page.
-			//
-			// Backgrounded together, on one goroutine: both are GitHub round
-			// trips per repository and neither is on any request path. The
-			// budget is the whole pass's; one that cannot converge in fifteen
-			// minutes has a GitHub problem, and the next start tries again.
+			// Two boot-time convergence passes, backgrounded on one goroutine —
+			// both are GitHub round trips per repo, neither on any request path.
+			// webhook_reconcile: repos registered before webhook support get a
+			// hook installed (all existing hooks were push-only; that is why the
+			// code-review gate had no signal). index_freshness: catch-up for
+			// pushes that landed while this pod was down, which GitHub does not
+			// redeliver.
 			go func() {
 				bootCtx, cancel := context.WithTimeout(ctx, bootConvergeTimeout)
 				defer cancel()
@@ -1870,11 +1706,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				repositorySvc.SweepIndexFreshness(bootCtx)
 				repositorySvc.ResumeUnfinishedIndexes(bootCtx)
 			}()
-			// GitHub will not deliver webhooks to a loopback or private address,
-			// and a desktop install listens on 127.0.0.1. Poll instead: the
-			// sweep pulls each clone's default branch, reindexes when it moved
-			// and refreshes the profile sections the new commits touched.
-			// freshnessCheckInterval still throttles each repository.
+			// GitHub will not deliver webhooks to loopback, and a desktop install
+			// listens on 127.0.0.1 — poll instead; the sweep reindexes a clone
+			// whose default branch moved, throttled per repo.
 			if !repositorySvc.WebhooksReachable() {
 				go func() {
 					t := time.NewTicker(localPushPollInterval)
@@ -1895,18 +1729,15 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			pipelineRunner.Start(ctx)
 			e.pipelineRunner = pipelineRunner
 
-			// The belt to the in-process poll's braces. The poll dies with its
-			// pod and its queue is in memory; this reads the rows, asks GitHub,
-			// and — when nothing can answer — opens the code-review gate with a
-			// reason rather than leaving the card wedged behind a signal that
-			// is never coming.
+			// The belt to the in-process poll's braces: the poll dies with its pod and
+			// its queue is in memory, so this reads the rows and opens the
+			// code-review gate with a reason instead of leaving a card wedged
+			// behind a signal that never comes.
 			boardapp.NewPipelineGateSweeper(pipelineStore, pipelineRunner, cfg.Board.PipelineGateTimeout).
 				Start(ctx, cfg.Board.PipelineGateInterval)
 
-			// Deploy definitions and production incidents. Both hang off the
-			// board: a deploy target is authored by a task, and an incident
-			// feeds a task back. Wiring them after the pipeline runner means
-			// the runner can report failed deploys as incidents.
+			// Deploy definitions and production incidents, both authored on the board;
+			// wired after the runner so it can report failed deploys as incidents.
 			deploySvc := deploy.NewService(deployTargetStore, repositoryStore)
 			if workflowSvc != nil {
 				deploySvc.SetWorkflows(workflowSvc)
@@ -1916,45 +1747,38 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			repositorySvc.SetDeployTargets(deployTargetStore)
 			e.deploySvc = deploySvc
 
-			// Reference docs (coding standards / test standards /
-			// architecture / local run): the same "a human names where it
-			// lives, an agent can be asked to write it" idea as deploySvc
-			// above, so it shares its TaskCreator/role-resolver wiring.
+			// Reference docs (coding/test standards, architecture): the same "a human
+			// names where it lives, an agent can be asked to write it" idea as
+			// deploySvc, so it shares the TaskCreator/role-resolver wiring.
 			repoDocsSvc := repodocs.NewService(repositorySvc)
 			if workflowSvc != nil {
 				repoDocsSvc.SetWorkflows(workflowSvc)
 				repoDocsSvc.SetRoleResolver(workflowSvc)
 			}
 			repoDocsSvc.SetTaskCreator(repositorySvc)
-			// The docs bundle lands as one pull request, and the screen that
-			// asked for it offers to merge that PR — through the same use case
-			// (and the same refusals) every other task's merge goes through.
-			// nil without GitHub, where the merge could only ever refuse.
+			// The docs bundle lands as one PR, merged through the same use case and
+			// refusals as any other task's. nil without GitHub.
 			if taskPRSvc != nil {
 				repoDocsSvc.SetTaskPRMerger(taskPRSvc)
 			}
 			e.repoDocsSvc = repoDocsSvc
 
-			// Hosting links: where each frontend/backend actually lives, as a
-			// Vercel project. Wired beside the deploy service because a
-			// root-area link fills the prod deploy target (address, health
-			// URL, recipe vars) — the same store the runner and monitor read.
+			// Hosting links (where a frontend/backend lives as a Vercel project), wired
+			// beside deploy because a root-area link fills the prod deploy target
+			// — the same store the runner and monitor read.
 			hostingSvc := hostingapp.NewService(pgstore.NewHostingLinkStore(e.pgDB), repositoryStore, vercelCreds, vercelapi.New())
 			hostingSvc.SetDeployTargets(deployTargetStore)
 			e.hostingSvc = hostingSvc
 
-			// Repo/database dependency edges feed the project overview's
-			// architecture view. SetCipher before MCP_SECRETS_KEY is
-			// scrubbed, same reason as the repository and mobile-device
-			// stores above.
+			// Repo/database dependency edges feed the project overview's architecture
+			// view. SetCipher before the scrubs, same reason as the repository
+			// store above.
 			repoDependencyStore := pgstore.NewRepoDependencyStore(e.pgDB)
 			repoDependencyStore.SetCipher(e.secretsCipher, e.secretsCipherErr)
 			e.repoDependencySvc = repodependency.NewService(repoDependencyStore, repositoryStore)
 
-			// One *vercel.Client for both roles. hostingSvc reads the account to
-			// fill a deploy target; vercelOpsSvc binds one scope of a repository
-			// to one project and reads that project's deployments. Same token,
-			// same rate limit — two clients would only split the budget.
+			// One *vercel.Client for both roles, so one token backs one rate limit —
+			// two clients would only split the budget.
 			vercelClient := vercelapi.New()
 			e.vercelOpsSvc = vercelops.NewService(vercelops.Deps{
 				Links:       pgstore.NewVercelProjectLinkStore(e.pgDB),
@@ -1964,10 +1788,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				Repos:       repositoryStore,
 			})
 
-			// The user's own Google Cloud account, read-only: Cloud Run
-			// services and GKE clusters behind a service account they saved.
-			// Repos is handed over so a bind can check the sub-project path it
-			// is given actually exists; nil would accept any path silently.
+			// The user's own Google Cloud account, read-only. Repos lets a bind verify
+			// the sub-project path exists; nil would accept any path silently.
 			e.gcloudOpsSvc = gcloudops.NewService(gcloudops.Deps{
 				Credentials: pgstore.NewGCloudCredentialStore(e.pgDB),
 				Bindings:    pgstore.NewGCloudResourceStore(e.pgDB),
@@ -1976,15 +1798,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				Repos:       repositoryStore,
 			})
 
-			// Real-device tools. Registered here rather than beside the browser
-			// tools because their guard IS the deploy target store: the only
-			// app mobile_launch_app may open is the package a human recorded on
-			// a target, and that store does not exist until this point.
-			//
-			// No enable flag — an installation with no hub URL and no device
-			// registers no tools at all. Handing agents a mobile_tap that can
-			// only ever answer "no device configured" spends a tool call and a
-			// turn to say what the tool list could have said by being absent.
+			// Real-device tools, registered here because their guard IS the deploy
+			// target store, which does not exist until this point. No enable
+			// flag: an install with no device registers no tools, rather than
+			// handing agents a mobile_tap that answers "no device configured".
 			mobileStore := pgstore.NewMobileDeviceStore(e.pgDB)
 			mobileStore.SetCipher(e.secretsCipher, e.secretsCipherErr)
 			envDevice := domain.MobileDevice{
@@ -1996,27 +1813,21 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			}
 			mobileDeviceSvc := mobiledevice.NewService(
 				mobileStore,
-				// nil when MOBILE_BRIDGE_URL is unset, which is the normal case
-				// on a host running local simulators and emulators: there is no
-				// cluster sidecar to pair a phone through. Its absence must not
-				// disable anything else — the bridge serves remote_adb only,
-				// and tool registration below is driven by the effective
-				// devices whatever kind they are.
+				// nil when MOBILE_BRIDGE_URL is unset (the normal case for simulators):
+				// its absence must not disable anything else — it serves
+				// remote_adb only, and registration is driven by effective devices.
 				deviceagent.New(cfg.Tools.Mobile.BridgeURL, cfg.Tools.Mobile.BridgeToken),
 				envDevice,
 			)
-			// The other half of that: what this machine itself can drive.
-			// Detected rather than configured, because it is a fact about the
-			// host. New() never fails; a host with no Xcode and no Android SDK
-			// simply reports none.
+			// What this machine itself can drive, detected rather than
+			// configured; New() never fails, a host with no Xcode/SDK reports none.
 			mobileDeviceSvc.SetLocalHost(localdevice.New(localdevice.Config{}))
 			e.mobileDeviceSvc = mobileDeviceSvc
 
-			// The pool exists whether or not a phone is attached yet, so a
-			// device registered later in the settings UI can be swapped in
-			// without a restart. What is gated is the TOOLS: an agent shown
-			// mobile_tap on an installation with no phone spends a call and a
-			// turn to learn what an absent tool would have said for free.
+			// The pool exists even with no phone attached, so a device registered
+			// later in the UI swaps in without a restart. What is gated is the
+			// TOOLS — an absent matching tool says for free what a present one
+			// would spend a turn on saying.
 			if e.mobilePool == nil {
 				e.mobilePool = mobiletools.NewPool()
 			}
@@ -2032,13 +1843,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				})
 			}
 
-			// Applying registrations is the whole reason this is a callback and
-			// not a config read: the tools hold the pool for the life of the
-			// process, so attaching or removing a phone has to retarget it in
-			// place. Registration is one-way on purpose — unregistering every
-			// device leaves the tools present and explicitly failing, which is
-			// a truthful "the phone is gone", where silently removing them
-			// would look to the agent like the capability never existed.
+			// A callback rather than a config read so a live phone add/remove is
+			// retargeted in place. Registration is one-way: after the last phone
+			// the tools stay and explicitly fail — truthful "the phone is gone".
 			mobileDeviceSvc.SetReloader(func(_ context.Context, devices []domain.MobileDevice) error {
 				e.mobilePool.Reconfigure(mobileConfigsOf(devices))
 				if len(devices) > 0 {
@@ -2047,9 +1854,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				return nil
 			})
 
-			// Whatever is registered (or, failing that, in the environment)
-			// is what the agents drive from the first run — read as a boot
-			// step, after the board seed.
+			// Whatever is registered, or failing that in the environment, is what agents
+			// drive from the first run — read as a boot step after the board seed.
 			e.bootSeed.AddStep("mobile_devices", func(stepCtx context.Context) error {
 				devices, source, derr := mobileDeviceSvc.Effective(stepCtx)
 				if derr != nil {
@@ -2064,12 +1870,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				return nil
 			})
 
-			// The release half of the device lease: a task parked because the
-			// phone was taken has nothing to wake it — no answer arrives, no
-			// human drags it — so the sweep is the only way back. Started
-			// unconditionally: a device attached later must not also need a
-			// restart to get its sweeper, and a sweep with nothing parked is a
-			// probe against an unconfigured session, which returns immediately.
+			// The release half of the device lease: a task parked on a taken phone has
+			// nothing to wake it, so the sweep is the only way back. Started
+			// unconditionally so a later-attached device needs no restart, and a
+			// sweep over nothing parked is a probe that returns immediately.
 			if boardTaskStore != nil && boardDispatcher != nil {
 				sweeper := boardapp.NewDeviceSweeper(boardTaskStore, e.mobilePool, boardDispatcher)
 				activateBoard = append(activateBoard, func() {
@@ -2077,18 +1881,15 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				})
 			}
 
-			// Task checkouts are a few hundred megabytes each and nothing ever
-			// removed one, so the volume filled and every build on it began
-			// failing with ENOSPC — in tasks unrelated to the ones holding the
-			// space, and now belonging to unrelated customers. Deleting a task
-			// takes its directory with it; this collects the rest, once they
-			// have been finished long enough that nobody is about to drag the
-			// card back.
+			// Task checkouts are hundreds of megabytes each and nothing ever removed
+			// one, so the volume filled and every build on it failed with ENOSPC
+			// — in tasks unrelated to whoever held the space. Deleting a task
+			// takes its directory; this collects the rest once they have been
+			// finished long enough that nobody is about to drag the card back.
 			if boardTaskStore != nil && cfg.Storage.Sessions.WorkspaceRoot != "" {
-				// The run STORE is the "is this checkout in use" probe, not the
-				// local runner: a checkout being written by a run on another
-				// replica looked idle to this one's map, and the reaper would
-				// have deleted the directory mid-commit.
+				// The run STORE is the in-use probe, not the local runner: a
+				// checkout mid-commit on another replica looks idle to this
+				// host's map, and the reaper would delete it.
 				reaper := boardapp.NewWorkspaceReaper(
 					boardTaskStore,
 					taskAgentRunStore,
@@ -2129,20 +1930,16 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				e.healthMonitor = monitor
 			}
 
-			// Store console credential vault + mobile app registry. Onboarding
-			// bridges into deploySvc.SaveTarget (SetStoreOnboarder) and the
-			// registry gates stage/prod deploys (SetMobileStoreApps) — both
-			// wired unconditionally so a store deploy target always reads the
-			// real onboarding state instead of silently no-op'ing.
+			// Store console credential vault + mobile app registry, wired
+			// unconditionally so a store deploy target always reads the real
+			// onboarding state instead of silently no-op'ing.
 			storeCredentialStore := pgstore.NewStoreCredentialStore(e.pgDB)
 			storeAppStore := pgstore.NewMobileStoreAppStore(e.pgDB)
 			storeSigningStore := pgstore.NewSigningAssetStore(e.pgDB)
 
-			// A cipher failure (missing MCP_SECRETS_KEY/SERVER_API_KEY) must not
-			// stop the server from booting — same graceful-degrade idiom as the
-			// mcp/llmprovider secret ciphers above. storeOpsSvc is still built
-			// and wired with a nil cipher; only the credential-vault paths that
-			// actually need to encrypt/decrypt fail until the key is set.
+			// A missing cipher must not stop boot — same graceful-degrade as
+			// the mcp/llmprovider ciphers: only the credential-vault paths that
+			// actually encrypt/decrypt fail until the key is set.
 			if e.secretsCipherErr != nil {
 				log.Warn().Err(e.secretsCipherErr).Msg("storeops secrets cipher unavailable, store credential vault disabled")
 			}
@@ -2158,11 +1955,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				NewPlay: func(cred domain.StoreCredential) (port.GooglePlayClient, error) {
 					return googleplay.New(cred)
 				},
-				// PushSecret resolves the repo's owner/name and GitHub token the
-				// same way the pipeline's DispatchWorkflow callers do (see
-				// application/board/pipeline.go), adapted from a task workspace
-				// to a bare repository ID: the repo's own RootPath stands in for
-				// the task workspace dir when resolving the origin remote.
+				// PushSecret resolves owner/repo/token the way the pipeline's dispatch does,
+				// adapted from a task workspace to a bare repo ID: the repo's own
+				// RootPath stands in for the task workspace dir.
 				PushSecret: func(ctx context.Context, repositoryID uuid.UUID, name, value string) error {
 					if gitClient == nil || githubTokens == nil {
 						return fmt.Errorf("storeops: push secret: git client or github token not configured")
@@ -2186,27 +1981,17 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				Comments: repositorySvc,
 			})
 			e.storeOpsSvc = storeOpsSvc
-			// Task 9: wire the ops_audit_log sink so every store release
-			// action (submit, release, promote, rollout, halt, resume) is
-			// recorded, success or failure. Unconditional, same as the rest
-			// of storeOpsSvc's wiring above — writing an audit row never
-			// depends on the cipher or any store credential being present.
+			// ops_audit_log sink: every store release action is recorded,
+			// success or failure. Unconditional — writing an audit row never
+			// depends on the cipher or a credential being present.
 			storeOpsSvc.SetAuditor(pgstore.NewOpsAuditStore(e.pgDB))
 
-			// Release engine selection (storeops/engine.go). The probes are
-			// closures rather than port interfaces because they only exist to
-			// let the application layer ask an adapter a yes/no question it
-			// must not import to ask.
-			//
-			// The Actions probe reads the repository's own workflow list and
-			// looks for the EXACT file the dispatch will ask for. Prefix
-			// matching was wrong in the case it mattered: a monorepo renders
-			// mobile-release-<sub-project>.yml, and a repository still carrying
-			// an older mobile-release.yml answered "yes" with a file GitHub
-			// then 404s on. GitHub's refusal to answer at all (402 Payment
-			// Required on an unpaid org, a permanent 403) travels up as the API
-			// error whose text storeops classifies. Nothing here decides — it
-			// reports.
+			// Engine probes are closures rather than port interfaces because they exist
+			// only to let the application ask an adapter a yes/no it must not
+			// import to ask. The Actions probe looks for the EXACT file the
+			// dispatch will ask for — prefix matching was wrong: a monorepo
+			// renders mobile-release-<sub>.yml and a stale mobile-release.yml
+			// answered yes before GitHub 404s on the dispatch.
 			storeOpsSvc.SetEngineProbes(
 				func(ctx context.Context, repo domain.Repository, _, workflowFile string) error {
 					if gitClient == nil || githubTokens == nil {
@@ -2232,9 +2017,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					return storeops.ErrActionsNoWorkflow
 				},
 				func(ctx context.Context) (storeops.LocalRunnerHost, error) {
-					// The host IS this machine. SupportsIOSSimulators is the Mac
-					// test: it reads the host's own reported capability, and a
-					// machine that is not a Mac can never report it.
+					// The host IS this machine; the Mac test reads its own
+					// reported capability.
 					return storeops.LocalRunnerHost{
 						Paired: true,
 						MacOS:  localdevice.New(localdevice.Config{}).SupportsIOSSimulators(ctx),
@@ -2257,19 +2041,12 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					return fmt.Errorf("storeops: resolving repository git info: %w", err)
 				}
 
-				// The files land BEFORE anything is started, and for both
-				// engines. They are the release procedure itself: Actions
-				// dispatches the workflow by name out of this branch, and a
-				// local run executes the script out of a checkout of it, so
-				// generating them and not writing them left both engines
-				// running whatever the tree already held — the previous
-				// binding's release, or nothing at all.
-				//
-				// Committed to the repository rather than to the mirror
-				// checkout: git.Client.CommitAndPush stages the whole tree
-				// (`git add -A`), and the mirror is a tree SyncDefaultBranch
-				// treats as disposable, so anything stray sitting in it would
-				// ride along into the user's default branch.
+				// The files land BEFORE anything is started, for both engines — they ARE
+				// the release procedure (Actions dispatches the workflow by name,
+				// a local run executes the script) — and they are COMMITTED to
+				// the repository, not the mirror: CommitAndPush stages the whole
+				// tree, and the mirror is disposable, so strays there would ride
+				// along into the user's default branch.
 				files := make([]githubapi.FileChange, 0, len(artifacts))
 				for _, artifact := range artifacts {
 					files = append(files, githubapi.FileChange{Path: artifact.Path, Body: artifact.Body, Mode: artifact.Mode})
@@ -2281,15 +2058,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				}
 
 				if engine != domain.ReleaseEngineActions {
-					// runner.Mobile.Release is the call this wants, and two
-					// things it needs are not resolvable here: the checkout as
-					// a path relative to the Mac's own workspace root (a
-					// workspace.prepare round-trip), and the member whose
-					// machine runs it. Refusing is the honest answer until the
-					// board drives that — a starter that returned nil would
-					// report a release nobody started. ErrNoReleaseEngine is
-					// what makes StartBuild park the card instead of handing
-					// the operator a 500 they cannot act on.
+					// The local engine is not wired here: it needs a checkout
+					// path (a workspace.prepare round-trip) and a member whose
+					// machine runs it, so there is no honest value to return.
+					// ErrNoReleaseEngine is what makes the board park the card.
 					return fmt.Errorf(
 						"storeops: the local release engine is not wired on this deployment: %w", domain.ErrNoReleaseEngine)
 				}
@@ -2304,42 +2076,35 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				}
 				return githubapi.DispatchWorkflow(ctx, token, info.Owner, info.Repo, workflow, info.Branch)
 			})
-			// Onboard returns the (possibly already test_ready) app row;
-			// SetStoreOnboarder's hook only needs to know whether onboarding
-			// itself succeeded, so the row is dropped here.
+			// Onboard returns the (possibly test_ready) app row; the hook only needs
+			// to know whether onboarding succeeded, so the row is dropped here.
 			deploySvc.SetStoreOnboarder(func(ctx context.Context, repositoryID uuid.UUID, provider, identifier, appName string) error {
 				_, err := storeOpsSvc.Onboard(ctx, repositoryID, provider, identifier, appName)
 				return err
 			})
-			// Runs BEFORE the target is written, unlike the onboarder above
-			// whose failures SaveTarget tolerates: a re-pointed live app must
-			// fail the save outright, not be logged and forgotten.
+			// Runs BEFORE the target is written, unlike the onboarder whose
+			// failures SaveTarget tolerates: a re-pointed live app must fail
+			// the save outright.
 			deploySvc.SetStoreIdentifierGuard(storeOpsSvc.EnsureIdentifierAllowed)
 			repositorySvc.SetMobileStoreApps(storeAppStore)
-			// A successful store prod deploy IS the submit for review — hand
-			// it to storeops so the monitor starts polling the verdict.
+			// A successful store prod deploy IS the submit for review — hand it
+			// to storeops so the monitor polls the verdict.
 			pipelineRunner.SetStoreSubmitter(storeOpsSvc)
 
-			// Gated on the cipher, mirroring how the prodops monitor above is
-			// gated on cfg.ProdOps.MonitorEnabled: without a working cipher the
-			// credential vault can't decrypt anything the sweep would need
-			// (ASC/Play client construction), so starting it would just log a
-			// warning every interval for no benefit.
+			// Gated like the prodops monitor: without a cipher the vault cannot
+			// build an ASC/Play client, so the sweep would only log warnings.
 			if e.secretsCipher != nil {
 				storeMonitor := storeops.NewMonitor(storeOpsSvc, storeAppStore, prodOpsSvc)
 				storeMonitor.Start(ctx, cfg.Storeops.PollInterval)
 				e.storeMonitor = storeMonitor
 			}
 
-			// Deploy operations console: mirrors GitHub Actions deploy runs
-			// locally, attributes console-triggered dispatches back to
-			// whoever triggered them, and turns a failed deploy into an
-			// incident.
-			//
-			// Gated on the token STORE, not on a token: NewActionsAPIFor
-			// resolves the stored token per call, so an unconnected install gets
-			// GitHub's own answer rather than a capability that silently does
-			// not exist.
+			// Deploy operations console: mirrors Actions deploy runs locally,
+			// attributes console-triggered dispatches back to their author, and
+			// turns a failed deploy into an incident. Gated on the token STORE,
+			// not a token: the API resolves the stored token per call, so an
+			// unconnected install gets GitHub's own answer rather than a dead
+			// capability.
 			if githubTokens != nil {
 				deployToken := githubapi.TokenSource(githubTokens.GitHubToken)
 				deploymentRunStore := pgstore.NewDeploymentRunStore(e.pgDB)
@@ -2352,10 +2117,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					pipelineJobStore,
 					githubapi.NewActionsAPIFor(deployToken),
 				)
-				// Carried-over Task 4 defect fix: domain.Repository carries
-				// no GitHub owner/repo — resolve them from the checkout's
-				// git origin, the same source board/pipeline.go and the
-				// PushSecret closure above use, via repo.RootPath.
+				// domain.Repository carries no GitHub owner/repo — resolve them from the
+				// checkout's git origin, same source as pipeline.go and the
+				// PushSecret closure above.
 				resolveRepoCoordinates := func(ctx context.Context, repo domain.Repository) (string, string, error) {
 					if gitClient == nil {
 						return "", "", fmt.Errorf("deployops: git client not configured")
@@ -2369,12 +2133,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				deployOpsSvc.SetRepoResolver(resolveRepoCoordinates)
 				e.deployOpsSvc = deployOpsSvc
 
-				// Break-glass recorder. Registered here rather than with
-				// the rest of the ops tools above because the deploy
-				// console service only exists once a GitHub token
-				// resolved — an agent that deploys from the machine while
-				// Actions is down reports the run through this tool, so
-				// the matrix keeps answering "what is live where".
+				// Break-glass recorder, registered here because the console service only
+				// exists once a GitHub token resolved: an agent that deploys from
+				// the machine while Actions is down reports through this tool so
+				// "what is live where" keeps answering.
 				for _, tool := range opstools.NewLocalDeployExecutors(deployOpsSvc) {
 					e.reg.Register(tool)
 				}
@@ -2385,16 +2147,12 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					e.deployMonitor = deployMonitor
 				}
 
-				// The deploy watch: what happened in production to the
-				// commit a task's merge produced, and the rollback when the
-				// answer is "nothing good".
-				//
-				// Wired here rather than beside the board tools because it
-				// needs the deployment-run store and the resolved GitHub
-				// token, neither of which exists at registration time. The
-				// board ToolKit is a pointer and its DeployWatch field is
-				// read at tool-call time, so assigning it now is what turns
-				// the three already-registered tools on.
+				// The deploy watch: what production did to the commit a task's merge
+				// produced, and the rollback when the answer is bad. Wired here
+				// because it needs the deployment-run store and resolved token,
+				// which do not exist at registration time; the ToolKit is a
+				// pointer read at tool-call time, so this assignment turns the
+				// three already-registered tools on.
 				deployWatchSvc := deploywatch.New(deploywatch.Deps{
 					Tasks:           boardTaskStore,
 					Comments:        repositorySvc,
@@ -2412,21 +2170,18 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				e.deployWatchSvc = deployWatchSvc
 				boardKit.DeployWatch = deployWatchSvc
 
-				// The park's release mechanism. Without it a task that
-				// parked on a running deploy stays in blocked forever: the
-				// tool that parked it is the only thing that could unpark
-				// it, and it is not running.
+				// The park's release mechanism: without it a task parked on a running
+				// deploy stays blocked forever — the tool that parked it is the
+				// only thing that could unpark it, and it is not running.
 				if boardDispatcher != nil {
 					deploySweeper := boardapp.NewDeploySweeper(boardTaskStore, deployWatchSvc, boardDispatcher)
 					activateBoard = append(activateBoard, func() {
 						deploySweeper.Start(ctx, boardapp.DeploySweeperInterval)
 					})
 
-					// auto_rollback stops being decorative here: an
-					// incident inside a release's health window is
-					// attributed to the task that released, and the task's
-					// owner is woken to roll it back (or to write the
-					// proposal up when the flag is off).
+					// auto_rollback is real here: an incident in a release's health window is
+					// attributed to the releasing task and its owner is woken to
+					// roll back (or write the proposal when the flag is off).
 					prodOpsSvc.SetReleaseAttributor(deployWatchSvc)
 					prodOpsSvc.SetReleaseRollbackDispatcher(
 						boardapp.NewReleaseRollbackDispatcher(boardDispatcher, repositorySvc))
@@ -2460,7 +2215,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if repositorySvc != nil {
 			repositorySvc.SetEvolution(e.evolutionSvc)
 		}
-		// save_memory gets first refusal on reusable know-how: the evolution
+		// save_memory gets first refusal on reusable know-how — the evolution
 		// service classifies it and writes a skill instead of a memory.
 		if memoryToolKit != nil {
 			memoryToolKit.SetPromoter(e.evolutionSvc)
@@ -2471,11 +2226,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		initiativeSvc = initiative.NewService(initiativeStore)
 	}
 
-	// External agents & skills catalog: a git repo (or a local directory) the
-	// app pulls agent and skill definitions from. Boot sync runs before the
-	// first tick so a fresh install sees the repo's agents immediately; the
-	// manual button on the UI's Catalog page shares the same SyncFromCatalog
-	// and the same mutex, so the three never interleave.
+	// External agents/skills catalog: a git repo (or local dir) the app pulls
+	// definitions from. Boot sync runs before the first tick; the UI's manual
+	// button shares SyncFromCatalog and its mutex, so the three never interleave.
 	if strings.TrimSpace(cfg.AgentCatalog.Source) != "" && e.pgDB != nil && catalogSvc != nil {
 		catalogSyncStore := pgstore.NewCatalogSyncStore(e.pgDB)
 		reader := &catalogrepo.Reader{Source: cfg.AgentCatalog.Source, CacheDir: cfg.AgentCatalog.CacheDir}
@@ -2531,11 +2284,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if llmTimeout <= 0 {
 			llmTimeout = 300 * time.Second
 		}
-		// The provider cache, and the resolver the LLM client asks on every
-		// call. Constructed before the service so the service can be given its
-		// invalidation hook, and installed on the client immediately after —
-		// from that moment the client stops using the config.yml fallback and
-		// starts answering from the stored settings.
+		// The provider cache and the resolver the LLM client asks every call;
+		// constructed before the service so it gets the invalidation hook, and
+		// installed on the client immediately — from that moment the client
+		// answers from stored settings instead of the config.yml fallback.
 		providers := newProviderCache(func(rctx context.Context) (llmprovider.Resolved, error) {
 			return llmProviderSvc.Resolve(rctx)
 		}, llmTimeout)
@@ -2554,11 +2306,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				}
 			})
 		}
-		// The operator and the user are the same person here, so
-		// config.yml's llm.base_url and ANTHROPIC_API_KEY/OPENAI_API_KEY/
-		// GOOGLE_API_KEY out of the environment are that person's own
-		// credentials and seeding them saves a trip to the settings page. A boot
-		// step, so it runs after the board seed has written the provider list.
+		// The operator and the user are the same person, so config.yml's
+		// llm.base_url and the API key env vars are that person's own
+		// credentials; seeding them saves a trip to the settings page. A boot
+		// step, after the board seed wrote the provider list.
 		e.bootSeed.AddStep("llm_providers", func(stepCtx context.Context) error {
 			if err := llmProviderSvc.BootstrapFromYAML(stepCtx, cfg.LLM); err != nil {
 				return err
@@ -2576,10 +2327,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}
 
 		// What an index pass stamps itself with, and what a search compares
-		// against. One call rather than two: the indexer forwards the resolver
-		// to its store, so wiring the search guard separately is how one half
-		// gets wired and the other does not — which looks exactly like the
-		// guard working, right up to the moment a stale index is searched.
+		// against. One call, not two: the indexer forwards the resolver to its
+		// store, so wiring only the search guard would look exactly like the
+		// guard working until a stale index is searched.
 		if indexSvc != nil {
 			indexSvc.SetEmbeddingResolver(llmProviderSvc)
 		}
@@ -2588,8 +2338,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 
 	var sessionSvc *session.Service
 	if sessionStore != nil {
-		// @-mention resolution needs the workspace roster; both stores present or
-		// mentions fall back to agents only.
+		// @-mention resolution needs the workspace roster; without both stores it
+		// falls back to agents only.
 		var sessionWorkspace session.WorkspaceLister
 		if initiativeStore != nil && repositoryStore != nil {
 			sessionWorkspace = workspaceLister{projects: initiativeStore, repos: repositoryStore}
@@ -2609,44 +2359,35 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			Actions:            sessionActionStore,
 			Workspace:          sessionWorkspace,
 		})
-		// Human-in-the-loop loop closer: an agent that asks a question parks its
-		// task on the clarification chat; answering there re-dispatches the task.
+		// Loop closer for human-in-the-loop: a question parks the task on the
+		// clarification chat and answering re-dispatches it; repositorySvc
+		// records the answer on the task so later runs read what was settled.
 		if boardTaskStore != nil && boardDispatcher != nil {
-			// repositorySvc records the answer on the task itself, so later runs
-			// read what was settled instead of asking the human again.
 			sessionSvc.SetAnswerResumer(boardapp.NewAnswerResumer(boardTaskStore, boardDispatcher, repositorySvc))
 		}
 		if attachmentSvc != nil {
-			// Links attachment ids onto persisted user messages and enriches
-			// history reads; guarded so a nil *Service never lands in the
-			// interface field as a typed non-nil.
+			// Guarded so a nil *Service never lands in the interface as a
+			// typed non-nil.
 			sessionSvc.SetAttachments(attachmentSvc)
 		}
 		if taskChatWorkspaces != nil {
-			// A chat bound to a board task works in that task's own branch
+			// A chat bound to a board task works in that task's branch
 			// checkout instead of the shared mirror clone, so what the agent
-			// changes can actually reach the task's pull request.
+			// changes reaches the task's pull request.
 			sessionSvc.SetTaskWorkspaces(taskChatWorkspaces)
 		}
 		if hostChatExecutor != nil {
-			// Chat with an agent on a host-executed provider goes to the local
-			// CLI, exactly as its board tasks already do. Without this the turn
-			// fell through to the HTTP client, which has no base URL for a
-			// provider that is a binary — the "unsupported protocol scheme"
-			// failure this wiring exists to end.
-			//
-			// Guarded because a nil *claudecode.Executor in a non-nil interface
-			// would report Supports() == false but still be non-nil, and the
-			// session service's own nil check would then be the only thing
-			// standing between a cloud pod and a confusing error.
+			// Chat with a host-executed provider goes to the local CLI, exactly
+			// as its board tasks already do; without this the turn fell to the
+			// HTTP client, which has no base URL for a binary provider. Guarded
+			// because a typed-nil executor in a non-nil interface would be
+			// non-nil and non-Supporting at once.
 			sessionSvc.SetChatExecutor(hostChatExecutor)
 
-			// The chat equivalent of the board's own quota sweeper, started here
-			// rather than earlier so it never ticks before SetChatExecutor has
-			// run — resuming a parked host-executed turn goes through the same
-			// chatExecutor this line just set. Guarded on hostChatExecutor for
-			// the same reason board's sweeper is guarded on claudeExecutor: with
-			// no CLI to run, a chat cannot park on its quota in the first place.
+			// The chat's quota sweeper, started here so it never ticks before
+			// SetChatExecutor ran — resuming a parked turn goes through the
+			// same executor. Guarded as the board's sweeper is: with no CLI, a
+			// chat cannot park on its quota in the first place.
 			session.NewSessionQuotaSweeper(sessionStore, sessionSvc).Start(ctx, session.QuotaSweeperInterval)
 		}
 	}
@@ -2661,18 +2402,16 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		e.jobSvc.Start(ctx)
 	}
 
-	// The embedding map reads the same chunk tables the indexer writes; it needs
-	// no LLM and no indexer config, only Postgres.
+	// The embedding map reads the chunk tables the indexer writes; it needs no
+	// LLM and no indexer config, only Postgres.
 	var embedMapSvc *embedmap.Service
 	if embedMapStore != nil {
 		embedMapSvc = embedmap.New(embedMapStore)
 		// So the map can LABEL a source built with a different embedding model
-		// rather than draw it as though it were comparable. Deliberately a
-		// label and not a refusal, unlike code search: PCA drops rows whose
-		// length does not match the modal one, so a model change would quietly
-		// halve the cloud and re-derive its axes from the survivors — a picture
-		// that looks like a finding. A person reading a map can act on a
-		// warning; a wrong search ranking is indistinguishable from a right one.
+		// rather than draw it as comparable — deliberately a label, not a
+		// refusal: PCA drops rows whose length does not match, so a model
+		// change would quietly re-derive the cloud's axes from the survivors
+		// and a person could not tell.
 		if llmProviderSvc != nil {
 			embedMapSvc.SetEmbeddingResolver(llmProviderSvc)
 		}
@@ -2730,8 +2469,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		BillingSvc:        e.billingSvc,
 		UIRoot:            opts.UIRoot,
 		UIFS:              opts.UIFS,
-		// Nil unless the Claude Code executor registered, in which case no /mcp
-		// route is mounted at all.
+		// MCPToolServer is nil unless the Claude Code executor registered, in which
+		// case no /mcp route is mounted at all.
 		MCPToolServer: e.mcpServer,
 		BootSeed:      e.bootSeed,
 	})
@@ -2768,9 +2507,8 @@ func (e *engine) reload() error {
 	if err != nil {
 		return err
 	}
-	// The same overrides boot applies. Skipping them let a reload overwrite the
-	// values that only exist in the environment — the DSN and the API key —
-	// with whatever the file said.
+	// The same overrides boot applies: skipping them let a reload overwrite the
+	// values that only exist in the environment — the DSN and the API key.
 	applyLocalOverrides(cfg, e.opts)
 	e.mu.Lock()
 	e.cfg = cfg
@@ -2789,10 +2527,9 @@ func (e *engine) reload() error {
 		pgPool, err := pgstore.NewPool(ctx, cfg.Storage.Postgres.DSN, cfg.Storage.Postgres.MaxConns)
 		if err == nil {
 			mcpStore := pgstore.NewMCPStore(pgstore.NewDB(pgPool))
-			// The boot-time cipher, not a fresh NewCipherFromEnv: reload runs from
-			// a request goroutine long after MCP_SECRETS_KEY left the environment,
-			// so re-deriving here would fail and silently drop every stored MCP
-			// secret from the reloaded configs.
+			// The boot-time cipher, not a fresh NewCipherFromEnv: reload runs long
+			// after MCP_SECRETS_KEY left the environment, so re-deriving here
+			// would silently drop every stored MCP secret from the configs.
 			if e.secretsCipherErr != nil {
 				log.Warn().Err(e.secretsCipherErr).Msg("mcp secrets cipher unavailable during reload")
 			}
@@ -2813,23 +2550,18 @@ func (e *engine) loadMCPAsync(configs []domain.MCPServerConfig) {
 	e.mcpManager.LoadAndRegister(ctx, configs, e.reg)
 }
 
-// deployAppResolver is the app guard for the device tools: it answers "which
-// package is this repository's build for this environment, and where is the
-// artifact" from the deploy target a human configured.
+// deployAppResolver: which package a repository's build is for this env,
+// and where the artifact is, from the deploy target a human configured.
+// Read-only by construction — a guard an agent could write to would be a
+// formality.
 //
-// It is read-only by construction. The tools can ask what they are allowed to
-// open; nothing on this path can change the answer, which is the whole point —
-// a guard an agent could write to would be a formality.
 // mobileConfigsOf turns registrations into what the session pool drives.
-//
-// Devices with no UDID are dropped, and that rule holds across all three kinds
-// for the same reason: the UDID is allocated by whoever attaches the device —
-// the bridge's loopback port for a phone, the console port for an emulator —
-// so a registration without one has never been reached. A session pointed at an
-// empty udid is one Appium would satisfy with "whatever adb lists first", which
-// on a host with several devices is a different one than the operator
-// registered. (A simulator is the exception that proves it: its UDID is known
-// at registration, so it is never in this state.)
+// Devices with no UDID are dropped: the UDID is allocated by whoever
+// attaches the device (bridge port or console port), so a registration
+// without one has never been reached, and a session pointed at an empty
+// udid is one Appium would satisfy with "whatever adb lists first" — a
+// different device than the operator registered. A simulator is the
+// exception: its UDID is known at registration.
 func mobileConfigsOf(devices []domain.MobileDevice) []mobiletools.Config {
 	out := make([]mobiletools.Config, 0, len(devices))
 	for _, d := range devices {
@@ -2838,10 +2570,9 @@ func mobileConfigsOf(devices []domain.MobileDevice) []mobiletools.Config {
 		}
 		out = append(out, mobiletools.Config{
 			HubURL: d.HubURL,
-			// The kind rides along because it is what the session's capability
-			// set switches on. Without it a registered simulator would be
-			// driven with UiAutomator2 capabilities and fail at session
-			// creation with a message about a driver nobody chose.
+			// The kind rides along because the session's capability set switches on it —
+			// without it a registered simulator would be driven with UiAutomator2
+			// capabilities and fail at session creation.
 			Kind:            d.DeviceKind(),
 			DeviceUDID:      d.DeviceUDID,
 			PlatformVersion: d.PlatformVersion,
@@ -2890,13 +2621,10 @@ func (m *muxExecutor) Execute(ctx context.Context, req domain.TaskExecution) (do
 }
 
 // ExecuteChat routes a chat turn by provider, the same map Execute reads.
-//
-// A stored executor is a port.TaskExecutor by the map's own type, and not
-// every one of them also answers chat — the local opencode.Executor has no
-// ExecuteChat, only its remote counterpart does. The type assertion is that
-// difference made explicit rather than assumed: a provider with an executor
-// that cannot chat gets the same refusal a provider with none does, instead
-// of a panic.
+// Not every stored executor answers chat — the local opencode.Executor has
+// no ExecuteChat — so the type assertion makes that difference explicit: a
+// provider with an executor that cannot chat gets the same refusal a
+// provider with none does, instead of a panic.
 func (m *muxExecutor) ExecuteChat(ctx context.Context, req domain.ChatExecution, out port.ChatStream) (domain.ChatResult, error) {
 	ex, ok := m.executors[req.Provider]
 	if !ok || ex == nil {

@@ -1,8 +1,3 @@
-// Package toolchain resolves the tool versions a repository declares in its
-// own files (see ReadPins) into an environment overlay for commands executed
-// in that repository's workspace. Two concurrent tasks whose repos pin
-// different versions of the same tool each get their own resolution instead of
-// silently sharing whatever binary the host PATH finds first.
 package toolchain
 
 import (
@@ -17,35 +12,23 @@ import (
 	"time"
 )
 
-// Requirements are the versions a repository declares for itself. Empty fields
-// mean the repo declares nothing for that tool.
 type Requirements struct {
-	Go           string // "1.23.4" (exact) or "1.23" (minimum)
-	GoExact      bool   // true when go.mod carries a toolchain directive or .tool-versions pins golang
+	Go           string
+	GoExact      bool
 	Node         string
 	NodeSource   string
 	Python       string
 	PythonSource string
-	// Flutter is what a mobile repository declares, in .tool-versions or
-	// .flutter-version. It is resolved the same way node
-	// and python are — an install root on disk, not a download — because the
-	// verify gate has to judge a diff with the analyzer the repo expects, and
-	// two Flutter minors disagree about what is a lint and what is an error.
+
 	Flutter       string
 	FlutterSource string
 }
 
-// Overlay is what a command executed in the workspace must add on top of the
-// process environment. Entries appended after os.Environ() win, so PATH and
-// GOTOOLCHAIN here override the inherited values.
 type Overlay struct {
 	Env      []string
 	Warnings []string
 }
 
-// requirementSources is the per-language precedence the PATH resolver reads.
-// It is narrower than ReadPins on purpose: a constraint such as pyproject's
-// ">=3.11" would make hostMismatch warn about a host that satisfies it.
 var requirementSources = map[string][]string{
 	"go":      {"go.mod", ".tool-versions"},
 	"node":    {".nvmrc", ".node-version", ".tool-versions", "package.json"},
@@ -53,8 +36,6 @@ var requirementSources = map[string][]string{
 	"flutter": {".tool-versions", ".flutter-version"},
 }
 
-// Detect reads the repository's own version declarations. It never guesses:
-// no declaration, no requirement.
 func Detect(dir string) Requirements {
 	pins := ReadPins(dir)
 	var req Requirements
@@ -74,9 +55,6 @@ func Detect(dir string) Requirements {
 	return req
 }
 
-// firstPin returns the first pin, by source precedence, for any of languages
-// whose version still holds a comparable number once normalised — an alias
-// such as "lts/iron" does not.
 func firstPin(pins []Pin, sources []string, languages ...string) (Pin, bool) {
 	for _, source := range sources {
 		for _, language := range languages {
@@ -90,14 +68,11 @@ func firstPin(pins []Pin, sources []string, languages ...string) (Pin, bool) {
 	return Pin{}, false
 }
 
-// Resolver turns Requirements into an Overlay using the version-manager
-// installs present on this machine. All lookups are injectable for tests.
 type Resolver struct {
 	Home     string
 	Environ  func() []string
 	LookPath func(string) (string, error)
-	// Version runs a binary with args and returns its trimmed combined output
-	// ("v22.1.0", "Python 3.12.1").
+
 	Version func(bin string, args ...string) string
 
 	mu    sync.Mutex
@@ -109,8 +84,6 @@ type cachedOverlay struct {
 	expires time.Time
 }
 
-// Default is the process-wide resolver used by the shell tool and the board
-// verify gate.
 var Default = New()
 
 func New() *Resolver {
@@ -133,8 +106,6 @@ func homeDir() string {
 
 const cacheTTL = 30 * time.Second
 
-// Overlay resolves the env overlay for commands running in dir. Results are
-// cached briefly because agent loops run many commands in the same workspace.
 func (r *Resolver) Overlay(dir string) Overlay {
 	r.mu.Lock()
 	if c, ok := r.cache[dir]; ok && time.Now().Before(c.expires) {
@@ -160,12 +131,10 @@ func (r *Resolver) resolve(dir string) Overlay {
 
 	if req.Go != "" {
 		if req.GoExact {
-			// Pin the exact toolchain but allow go.mod to upgrade further —
-			// mirrors what `go` does when the directive is honored locally.
+
 			ov.Env = append(ov.Env, "GOTOOLCHAIN=go"+req.Go+"+auto")
 		} else {
-			// A bare `go 1.x` directive: let the go command pick/download a
-			// satisfying toolchain even when the host env pinned GOTOOLCHAIN.
+
 			ov.Env = append(ov.Env, "GOTOOLCHAIN=auto")
 		}
 	}
@@ -200,8 +169,6 @@ func (r *Resolver) resolve(dir string) Overlay {
 	return ov
 }
 
-// hostMismatch compares the requirement against whatever the current PATH
-// resolves; matchSegs says how many leading version segments must agree.
 func (r *Resolver) hostMismatch(bin string, args []string, want, source string, matchSegs int) string {
 	path, err := r.LookPath(bin)
 	if err != nil {
@@ -218,10 +185,6 @@ func (r *Resolver) hostMismatch(bin string, args []string, want, source string, 
 	return ""
 }
 
-// flutterInstallRoots covers the two ways a Flutter SDK lands on a machine that
-// is not a developer laptop: mise (what the tools image uses) and a plain
-// unpacked SDK under the home directory, which is what every CI recipe on the
-// internet tells people to do.
 func flutterInstallRoots(home string) []installRoot {
 	return []installRoot{
 		{dir: filepath.Join(home, ".local/share/mise/installs/flutter"), binSubdir: "bin"},
@@ -250,13 +213,10 @@ func pythonInstallRoots(home string) []installRoot {
 
 type installRoot struct {
 	dir        string
-	namePrefix string // e.g. "node@" for homebrew's /opt/homebrew/opt/node@18
+	namePrefix string
 	binSubdir  string
 }
 
-// findInstall returns the bin directory of the best installed version
-// matching want, or "" when nothing matches. bins are candidate binary names
-// that must exist inside the returned directory.
 func (r *Resolver) findInstall(roots []installRoot, want string, bins ...string) string {
 	for _, root := range roots {
 		entries, err := os.ReadDir(root.dir)
@@ -298,8 +258,6 @@ func verOfName(name, prefix string) string {
 
 var versionRe = regexp.MustCompile(`[0-9]+(\.[0-9]+)*`)
 
-// --- version helpers ---
-
 func normalizeVersion(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "v")
@@ -323,8 +281,6 @@ func versionSegs(v string) []int {
 	return segs
 }
 
-// segsMatch reports whether the first n segments of got equal want's leading
-// segments (bounded by how many segments want actually has).
 func segsMatch(got, want string, n int) bool {
 	g, w := versionSegs(got), versionSegs(want)
 	if len(w) < n {
@@ -341,7 +297,6 @@ func segsMatch(got, want string, n int) bool {
 	return true
 }
 
-// compareVersions returns <0 when a is newer than b (sort-best-first order).
 func compareVersions(a, b string) int {
 	as, bs := versionSegs(a), versionSegs(b)
 	for i := 0; i < len(as) && i < len(bs); i++ {
@@ -351,8 +306,6 @@ func compareVersions(a, b string) int {
 	}
 	return len(bs) - len(as)
 }
-
-// --- env helpers ---
 
 func envValue(env []string, key string) string {
 	prefix := key + "="
@@ -364,9 +317,6 @@ func envValue(env []string, key string) string {
 	return ""
 }
 
-// ensurePathDirs appends dirs missing from path — the bridge may run from a
-// GUI launch context whose PATH lacks the usual install locations (mirrors
-// the git adapter's PATH patch, applied consistently here).
 func ensurePathDirs(path string, dirs ...string) string {
 	existing := strings.Split(path, string(os.PathListSeparator))
 	present := map[string]bool{}

@@ -113,7 +113,7 @@ func TestDeploySweepToleratesLosingTheClaim(t *testing.T) {
 	watch := &stubDeployStatus{byTask: map[uuid.UUID]domain.DeployWatchState{task.ID: domain.DeployWatchSuccess}}
 	s := NewDeploySweeper(store, watch, &Dispatcher{})
 
-	s.sweep(context.Background()) // must not panic or dispatch
+	s.sweep(context.Background())
 }
 
 func TestDeployWatchWakeOnlyFiresForTheSweepersResumePayload(t *testing.T) {

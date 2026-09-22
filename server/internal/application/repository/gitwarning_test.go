@@ -9,10 +9,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// withGitWarning is what puts a sentence on every repository card, so what it
-// copies across matters more than where the sentence is written: the whole
-// point of GitPresence is that "not a git repository yet" stops being the
-// answer to questions that are not about git.
 func TestWithGitWarningCarriesThePresenceReason(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -57,8 +53,6 @@ func TestWithGitWarningCarriesThePresenceReason(t *testing.T) {
 	}
 }
 
-// A setup failure recorded by ensureGitAsync still wins: it is the more
-// specific answer, and it is about this repository rather than about the disk.
 func TestWithGitWarningPrefersTheRecordedSetupFailure(t *testing.T) {
 	id := uuid.New()
 	svc := &Service{

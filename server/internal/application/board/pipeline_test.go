@@ -12,8 +12,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// --- fakes -----------------------------------------------------------------
-
 type fakePipelineStore struct {
 	mu         sync.Mutex
 	pipelines  map[uuid.UUID]domain.TaskPipeline
@@ -34,9 +32,6 @@ func (f *fakePipelineStore) Create(_ context.Context, p domain.TaskPipeline) (do
 	defer f.mu.Unlock()
 	p.ID = uuid.New()
 	if p.Status == "" {
-		// The real column defaults to 'pending', and ClaimTerminal's guard
-		// reads exactly that: a fake that stored an empty status would refuse
-		// every claim and make the guard look broken.
 		p.Status = domain.PipelineStatusPending
 	}
 	f.pipelines[p.ID] = p
@@ -51,8 +46,6 @@ func (f *fakePipelineStore) Update(_ context.Context, p domain.TaskPipeline) (do
 	return p, nil
 }
 
-// ClaimTerminal mirrors the real guard: the transition to a terminal status
-// happens once, and a second caller for the same pipeline is told it lost.
 func (f *fakePipelineStore) ClaimTerminal(_ context.Context, p domain.TaskPipeline) (domain.TaskPipeline, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -74,13 +67,6 @@ func (f *fakePipelineStore) Get(_ context.Context, id uuid.UUID) (domain.TaskPip
 	return p, nil
 }
 
-// ListByTask mirrors the store: every pipeline of one task, NEWEST first —
-// postgres/pipeline.go orders by created_at DESC. It used to return nil, which
-// was harmless while the only reader was finalize's supersede check, and wrong
-// the moment PipelineBounceGuard started asking the same rows whether this
-// commit had already failed once. It then sorted ascending, which is the same
-// class of bug one step down: a fake that disagrees with the store about order
-// cannot catch an order-dependent reader.
 func (f *fakePipelineStore) ListByTask(_ context.Context, taskID uuid.UUID) ([]domain.TaskPipeline, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -150,8 +136,6 @@ func (f *fakePipelineStore) ListUnfinishedByHeadSHA(_ context.Context, repositor
 	return f.unfinishedLocked(0, match), nil
 }
 
-// unfinishedLocked collects pending/running pipelines oldest-first. limit <= 0
-// means "no limit"; keep is an optional extra filter. Caller holds f.mu.
 func (f *fakePipelineStore) unfinishedLocked(limit int, keep func(domain.TaskPipeline) bool) []domain.TaskPipeline {
 	var out []domain.TaskPipeline
 	for _, p := range f.pipelines {
@@ -192,8 +176,6 @@ func newRunnerForTrigger(store *fakePipelineStore) *PipelineRunner {
 	return NewPipelineRunner(PipelineRunnerDeps{Store: store})
 }
 
-// --- Trigger machinery -----------------------------------------------------
-
 func TestTriggerSupersedesPending(t *testing.T) {
 	store := newFakePipelineStore()
 	runner := newRunnerForTrigger(store)
@@ -228,15 +210,13 @@ func TestTriggerManualRejectedWhileRunning(t *testing.T) {
 	}
 }
 
-// --- pure logic ------------------------------------------------------------
-
 func TestFilterMappings(t *testing.T) {
 	repoID := uuid.New()
 	mappings := []domain.RepositoryPipelineJob{
 		{RepositoryID: repoID, Category: domain.PipelineCategoryBuild, TargetKind: domain.PipelineTargetJob, TargetRef: "build"},
 		{RepositoryID: repoID, SubRepoKind: "backend", Category: domain.PipelineCategoryTest, TargetKind: domain.PipelineTargetJob, TargetRef: "backend-test"},
 		{RepositoryID: repoID, Category: domain.PipelineCategoryStageDeploy, TargetKind: domain.PipelineTargetWorkflow, TargetRef: "deploy.yml"},
-		{RepositoryID: repoID, Category: domain.PipelineCategoryTest, TargetKind: domain.PipelineTargetJob, TargetRef: ""}, // dropped (empty ref)
+		{RepositoryID: repoID, Category: domain.PipelineCategoryTest, TargetKind: domain.PipelineTargetJob, TargetRef: ""},
 	}
 	jobTargets := filterMappings(mappings, domain.PipelineTargetJob,
 		domain.PipelineCategoryValidate, domain.PipelineCategoryBuild, domain.PipelineCategoryTest)
@@ -311,8 +291,6 @@ func TestEvaluate(t *testing.T) {
 	}
 }
 
-// --- store submit handoff --------------------------------------------------
-
 type fakeDeployTargets struct {
 	target domain.DeployTarget
 	err    error
@@ -351,8 +329,6 @@ func (f *fakeStoreSubmitter) MarkSubmitted(_ context.Context, repositoryID uuid.
 	return nil
 }
 
-// finalizeProdDeploy runs one successful prod-deploy finalize against the
-// given provider and job set, returning what the store submitter saw.
 func finalizeProdDeploy(t *testing.T, provider string, jobs []domain.TaskPipelineJob) *fakeStoreSubmitter {
 	t.Helper()
 	store := newFakePipelineStore()
@@ -385,9 +361,6 @@ func finalizeProdDeploy(t *testing.T, provider string, jobs []domain.TaskPipelin
 	return submitter
 }
 
-// A store prod workflow IS the submit for review. Recording it is the only
-// thing that puts the row in storeops.Monitor's poll gate, so without this
-// the whole review-tracking path is unreachable in production.
 func TestProdDeploySuccessMarksAStoreTargetSubmitted(t *testing.T) {
 	ran := []domain.TaskPipelineJob{{Name: "prod_deploy", Status: domain.PipelineJobStatusSuccess}}
 
@@ -408,7 +381,6 @@ func TestProdDeploySuccessMarksAStoreTargetSubmitted(t *testing.T) {
 	}
 }
 
-// A server prod deploy has no store review to track.
 func TestProdDeploySuccessIgnoresNonStoreTargets(t *testing.T) {
 	submitter := finalizeProdDeploy(t, domain.DeployProviderGCPCloudRun,
 		[]domain.TaskPipelineJob{{Name: "prod_deploy", Status: domain.PipelineJobStatusSuccess}})
@@ -417,9 +389,6 @@ func TestProdDeploySuccessIgnoresNonStoreTargets(t *testing.T) {
 	}
 }
 
-// "No prod workflow configured" finalizes as success with a single skipped
-// job. Nothing ran, so nothing was submitted — claiming otherwise would have
-// the monitor poll a review that does not exist.
 func TestProdDeploySkipDoesNotMarkSubmitted(t *testing.T) {
 	submitter := finalizeProdDeploy(t, domain.DeployProviderAppStore,
 		[]domain.TaskPipelineJob{{Name: "no prod_deploy workflow configured", Status: domain.PipelineJobStatusSkipped}})
@@ -428,9 +397,6 @@ func TestProdDeploySkipDoesNotMarkSubmitted(t *testing.T) {
 	}
 }
 
-// A skipped prod deploy — no prod_deploy workflow mapped — still releases the
-// task (an unconfigured repo cannot be held hostage), but the card must say
-// plainly that nothing was actually verified, not read like a real deploy.
 func TestProdDeploySkipReleasesWithAWarningComment(t *testing.T) {
 	tasks := &fakeTaskUpdater{}
 	runner := NewPipelineRunner(PipelineRunnerDeps{Store: newFakePipelineStore(), Tasks: tasks})
@@ -469,8 +435,6 @@ func TestProdDeploySkipReleasesWithAWarningComment(t *testing.T) {
 	}
 }
 
-// A successful prod deploy is the existing, unchanged behaviour: it releases
-// the task with its own message and adds no warning comment.
 func TestProdDeploySuccessReleasesWithoutAWarningComment(t *testing.T) {
 	tasks := &fakeTaskUpdater{}
 	runner := NewPipelineRunner(PipelineRunnerDeps{Store: newFakePipelineStore(), Tasks: tasks})
@@ -502,8 +466,6 @@ func TestProdDeploySuccessReleasesWithoutAWarningComment(t *testing.T) {
 	}
 }
 
-// A skipped preprod deploy that falls through to release (prod not mapped
-// either) gets the same warning comment as a skipped prod deploy.
 func TestPreProdDeploySkipFallsThroughToReleaseWithAWarningComment(t *testing.T) {
 	tasks := &fakeTaskUpdater{}
 	runner := NewPipelineRunner(PipelineRunnerDeps{Store: newFakePipelineStore(), Tasks: tasks})
@@ -542,12 +504,8 @@ func TestPreProdDeploySkipFallsThroughToReleaseWithAWarningComment(t *testing.T)
 	}
 }
 
-// --- unconfigured QA gate ---------------------------------------------------
-
 type fakeQADispatcher struct {
-	calls []uuid.UUID // pipeline IDs handed off
-	// gateReasons records, per call, why the gate opened — "" for an ordinary
-	// hand-off behind a green build.
+	calls       []uuid.UUID
 	gateReasons []string
 }
 
@@ -557,11 +515,6 @@ func (f *fakeQADispatcher) DispatchQA(_ context.Context, _ uuid.UUID, _ domain.B
 	return nil
 }
 
-// A repo with no validate/build/test mapping runs nothing. That must still let
-// the task through (an unconfigured repo cannot be held hostage by the gate),
-// but it must NOT be recorded as a success: the UI painted a green "Success"
-// badge next to a provider of "Did not run", which read as a passing build
-// that never happened.
 func TestNoChecksConfiguredFinishesSkippedAndStillOpensTheGate(t *testing.T) {
 	store := newFakePipelineStore()
 	qa := &fakeQADispatcher{}
@@ -610,13 +563,6 @@ func TestPipelineStatusOpensGate(t *testing.T) {
 	}
 }
 
-// --- a deploy that could not run at all -------------------------------------
-
-// A prod deploy whose workflow GitHub refused to dispatch — the account is out
-// of Actions minutes, or Actions is disabled — is not a broken change, so the
-// card must not be sent back to the developer for it. It stays where it is,
-// with the reason on the card, for the run that merged it to deploy locally or
-// to block the task.
 func TestBillingBlockedDeployReportsButDoesNotBounceTheTask(t *testing.T) {
 	tasks := &fakeTaskUpdater{}
 	runner := NewPipelineRunner(PipelineRunnerDeps{Store: newFakePipelineStore(), Tasks: tasks})
@@ -647,7 +593,6 @@ func TestBillingBlockedDeployReportsButDoesNotBounceTheTask(t *testing.T) {
 	}
 }
 
-// An ordinary red deploy still bounces: that one IS the code.
 func TestFailedDeployStillBouncesToNeedRevision(t *testing.T) {
 	tasks := &fakeTaskUpdater{}
 	runner := NewPipelineRunner(PipelineRunnerDeps{Store: newFakePipelineStore(), Tasks: tasks})

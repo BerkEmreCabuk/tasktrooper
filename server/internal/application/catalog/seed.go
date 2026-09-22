@@ -8,10 +8,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// seedSkill stores the skill without a vector. Embedding here made the seed as
-// slow as the embedding provider: the requests-per-minute pacing alone put the
-// role catalog past the boot step's deadline, and a failed catalog deletes its
-// half-built agent. BackfillSkillEmbeddings embeds the skills afterwards.
+// Stored without a vector: embedding here would pace the seed past the boot deadline, so BackfillSkillEmbeddings fills them in afterwards.
 func (s *Service) seedSkill(ctx context.Context, agentID uuid.UUID, req domain.CreateSkillRequest) error {
 	tags := req.Tags
 	if tags == nil {
@@ -25,10 +22,6 @@ func (s *Service) seedSkill(ctx context.Context, agentID uuid.UUID, req domain.C
 	return err
 }
 
-// BackfillSkillEmbeddings embeds every skill stored without a vector, with the
-// client's normal pacing and retries, and returns how many it updated.
-// seedSkill (used by CreateAgentFromTemplate) stores skills without one, so
-// this is what fills them in.
 func (s *Service) BackfillSkillEmbeddings(ctx context.Context) (int, error) {
 	agents, err := s.store.ListAgents(ctx)
 	if err != nil {

@@ -8,22 +8,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrRunCancelled is a chat turn a human stopped from the UI.
-//
-// It travels back up through SendMessage/SendMessageStream so the transport can
-// end cleanly instead of reporting a failure: nothing went wrong, someone
-// changed their mind. The run's row and whatever the agent had already said are
-// persisted by the service before this is returned, so a caller that sees it has
-// nothing left to write.
-//
-// The status written on the row is TaskAgentRunStatusCancelled — one cancelled
-// vocabulary for board runs and chat turns alike.
+// ErrRunCancelled is a chat turn a human stopped from the UI. It travels back
+// up so the transport can end cleanly instead of reporting a failure; the run's
+// row is already persisted by then.
 var ErrRunCancelled = errors.New("agent run cancelled by user")
 
-// The statuses a session_runs row can hold. They were string literals
-// scattered across the store and the service until a cross-replica stop needed
-// to COMPARE one — a read of a status is a different thing from a write of it,
-// and a typo in a comparison is silent where a typo in a write is not.
+// The statuses a session_runs row can hold, as constants rather than literals
+// because reads COMPARE a status while a typo in a write would not be silent.
 const (
 	SessionRunStatusRunning   = "running"
 	SessionRunStatusCompleted = "completed"

@@ -9,8 +9,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeStore keeps memories in a slice and applies the same bucket rules the SQL
-// store applies, so the service's scope decisions are testable without pgx.
 type fakeStore struct {
 	rows []domain.AgentMemory
 	now  time.Time

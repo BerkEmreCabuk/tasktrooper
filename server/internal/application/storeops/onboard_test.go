@@ -21,10 +21,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// OnboardSuite exercises the first-publish onboarding flow: the automatable
-// steps Onboard runs against the store APIs, the guided checklist task it
-// opens for whatever is left, its idempotency across repeated calls, and
-// VerifyOnboarding's re-check + advance-to-test_ready behaviour.
 type OnboardSuite struct {
 	suite.Suite
 
@@ -96,8 +92,6 @@ const (
 	testOnboardIssueID = "69a6de8b-fake-issuer"
 )
 
-// storeASCCredential puts a valid ASC credential in the vault — the
-// precondition for any iOS onboarding work.
 func (s *OnboardSuite) storeASCCredential() {
 	s.Require().NoError(s.svc.SaveCredential(context.Background(), domain.StoreCredentialASC, map[string]string{
 		"key_id":    testOnboardKeyID,
@@ -112,10 +106,6 @@ func (s *OnboardSuite) storePlayCredential() {
 	}))
 }
 
-// ascReadyForSigning scripts the fake App Store Connect to hand back a
-// real, parseable certificate and profile. EnsureIOSSigning parses whatever
-// CreateCertificate returns, so a zero-value port.StoreCert cannot back it
-// — every test exercising iOS onboarding needs this in place first.
 func (s *OnboardSuite) ascReadyForSigning() {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	s.Require().NoError(err)
@@ -132,9 +122,6 @@ func (s *OnboardSuite) ascReadyForSigning() {
 	s.asc.CreateProfileResult = port.StoreProfile{ID: "profile-1", Name: "profile-1", Content: []byte("fake-profile-bytes"), ExpiresAt: expiresAt}
 }
 
-// When App Store Connect already has the app record at the very first
-// Onboard call, there is nothing left for a human to do: the checklist ends
-// up empty, no task is opened, and the app lands straight at test_ready.
 func (s *OnboardSuite) TestOnboardIOSAlreadyRegisteredGoesStraightToTestReadyWithNoTask() {
 	s.storeASCCredential()
 	s.ascReadyForSigning()
@@ -152,8 +139,6 @@ func (s *OnboardSuite) TestOnboardIOSAlreadyRegisteredGoesStraightToTestReadyWit
 	s.Empty(s.tasks.Calls, "no manual steps left: no onboarding task should be opened")
 }
 
-// Without an existing app record, onboarding stops at "onboarding" with a
-// one-item checklist and a guided task carrying the fixed contract fields.
 func (s *OnboardSuite) TestOnboardIOSWithoutRecordOpensChecklistTask() {
 	s.storeASCCredential()
 	s.ascReadyForSigning()
@@ -181,8 +166,6 @@ func (s *OnboardSuite) TestOnboardIOSWithoutRecordOpensChecklistTask() {
 	s.Contains(call.Request.Description, "the system verifies each step automatically — no need to tick anything")
 }
 
-// A fresh Android onboard with neither the app record nor a first upload
-// yet leaves both checklist items open.
 func (s *OnboardSuite) TestOnboardAndroidFreshHasBothChecklistItems() {
 	s.storePlayCredential()
 	s.play.AppExistsResult = false
@@ -203,16 +186,10 @@ func (s *OnboardSuite) TestOnboardAndroidFreshHasBothChecklistItems() {
 	s.Require().NotNil(app.OnboardingTaskID)
 }
 
-// Regression: the real Play Developer API's TrackInfo hard-errors "app not
-// found" for a package with no app record yet (see
-// googleplay.Client.TrackInfo). verifyAndroid must never call TrackInfo
-// before AppExists reports true — otherwise a brand-new Android package can
-// never get past Onboard: the not-found error would propagate and abort
-// before the checklist is built or the guided task is opened.
 func (s *OnboardSuite) TestOnboardAndroidSkipsTrackInfoWhenAppDoesNotExist() {
 	s.storePlayCredential()
 	s.play.AppExistsResult = false
-	// Shaped exactly like the real client's error for this case.
+
 	s.play.TrackInfoErr = errors.New(`googleplay: app "com.example.android" not found`)
 	repoID := uuid.New()
 
@@ -227,8 +204,6 @@ func (s *OnboardSuite) TestOnboardAndroidSkipsTrackInfoWhenAppDoesNotExist() {
 	s.Require().NotNil(app.OnboardingTaskID, "the guided onboarding task must still open")
 }
 
-// Every key of the Ensure* secret map must reach PushSecret under its exact
-// GitHub Actions secret name.
 func (s *OnboardSuite) TestOnboardPushesExactSecretNames() {
 	s.storeASCCredential()
 	s.ascReadyForSigning()
@@ -249,8 +224,6 @@ func (s *OnboardSuite) TestOnboardPushesExactSecretNames() {
 	}, names)
 }
 
-// Calling Onboard again for the same repository/platform must not open a
-// second board task — the row is already in "onboarding" and reuses it.
 func (s *OnboardSuite) TestOnboardCalledTwiceOpensOneTask() {
 	s.storeASCCredential()
 	s.ascReadyForSigning()
@@ -266,8 +239,6 @@ func (s *OnboardSuite) TestOnboardCalledTwiceOpensOneTask() {
 	s.Equal(*first.OnboardingTaskID, *second.OnboardingTaskID)
 }
 
-// When appName is empty, Onboard falls back to the repository's own name to
-// register the bundle ID.
 func (s *OnboardSuite) TestOnboardFallsBackToRepositoryNameWhenAppNameEmpty() {
 	s.storeASCCredential()
 	s.ascReadyForSigning()
@@ -282,9 +253,6 @@ func (s *OnboardSuite) TestOnboardFallsBackToRepositoryNameWhenAppNameEmpty() {
 	s.Equal([2]string{"com.example.app", "Example Repo"}, s.asc.EnsureBundleIDCalls[0])
 }
 
-// Once the store reports the app record, VerifyOnboarding marks the
-// checklist item done, posts a system comment on the onboarding task, and
-// advances the app to test_ready.
 func (s *OnboardSuite) TestVerifyOnboardingMarksItemDoneAndAdvancesToTestReady() {
 	s.storeASCCredential()
 	s.ascReadyForSigning()
@@ -314,9 +282,6 @@ func (s *OnboardSuite) TestVerifyOnboardingMarksItemDoneAndAdvancesToTestReady()
 	s.Equal("system", s.comments.Calls[0].Request.AuthorType)
 }
 
-// The Android counterpart: both the app record and the first upload
-// reported at once mark both items done, post one comment each, and advance
-// straight to test_ready.
 func (s *OnboardSuite) TestVerifyOnboardingAndroidBothItemsDoneAdvancesAndPostsComments() {
 	s.storePlayCredential()
 	s.play.AppExistsResult = false
@@ -342,8 +307,6 @@ func (s *OnboardSuite) TestVerifyOnboardingAndroidBothItemsDoneAdvancesAndPostsC
 	s.Len(s.comments.Calls, 2, "one system comment per newly verified item")
 }
 
-// A comment failure must not swallow the verification result nor stop the
-// state advance from being persisted — it is surfaced to the caller instead.
 func (s *OnboardSuite) TestVerifyOnboardingPersistsStateEvenWhenCommentFails() {
 	s.storeASCCredential()
 	s.ascReadyForSigning()
@@ -368,7 +331,6 @@ func (s *OnboardSuite) TestVerifyOnboardingPersistsStateEvenWhenCommentFails() {
 	s.Equal(domain.MobileStoreStateTestReady, stored.State, "the advanced state must be persisted despite the comment error")
 }
 
-// Nothing new verified means no state change and no comments.
 func (s *OnboardSuite) TestVerifyOnboardingNoChangeWhenNothingNewlyVerified() {
 	s.storeASCCredential()
 	s.ascReadyForSigning()
@@ -386,15 +348,6 @@ func (s *OnboardSuite) TestVerifyOnboardingNoChangeWhenNothingNewlyVerified() {
 	s.Empty(s.comments.Calls)
 }
 
-// --- Identifier changes must not carry the lifecycle forward ---------------
-
-// TestOnboardDemotesToOnboardingWhenTheIdentifierIsRePointed is the gate
-// bypass this covers: re-saving a store deploy target with a different bundle
-// ID rebuilt the checklist against the new, unverified identifier while the
-// row kept its old test_ready state — so mobileStoreGate happily green-lit
-// stage deploys against a bundle ID nobody had confirmed even exists. The
-// lifecycle's backward edge (test_ready -> onboarding) exists for exactly
-// this, and until now nothing in production took it.
 func (s *OnboardSuite) TestOnboardDemotesToOnboardingWhenTheIdentifierIsRePointed() {
 	s.storeASCCredential()
 	s.ascReadyForSigning()
@@ -407,7 +360,6 @@ func (s *OnboardSuite) TestOnboardDemotesToOnboardingWhenTheIdentifierIsRePointe
 	s.Require().Equal(domain.MobileStoreStateTestReady, first.State)
 	s.Require().Nil(first.OnboardingTaskID)
 
-	// Re-pointed at a bundle ID App Store Connect has never seen.
 	s.asc.AppByBundleIDID, s.asc.AppByBundleIDFound = "", false
 
 	second, err := s.svc.Onboard(ctx, repoID, domain.DeployProviderAppStore, "com.example.other", "MyApp")
@@ -420,10 +372,6 @@ func (s *OnboardSuite) TestOnboardDemotesToOnboardingWhenTheIdentifierIsRePointe
 	s.NotNil(second.OnboardingTaskID, "the re-opened checklist gets a task to carry it")
 }
 
-// A live app is published under its identifier; re-pointing it is a different
-// app, and the lifecycle has no backward edge out of live. Silently
-// overwriting would leave the row claiming `live` — and mobileStoreGate
-// green-lighting production releases — for something never published.
 func (s *OnboardSuite) TestOnboardRefusesToRePointALiveApp() {
 	s.storeASCCredential()
 	s.ascReadyForSigning()
@@ -451,9 +399,6 @@ func (s *OnboardSuite) TestOnboardRefusesToRePointALiveApp() {
 	s.Empty(s.asc.EnsureBundleIDCalls, "the save is refused before anything is registered with Apple")
 }
 
-// Re-saving a live target with the SAME identifier is an ordinary refresh and
-// must keep working — the deploy settings page saves the whole target on
-// every edit, not just identifier changes.
 func (s *OnboardSuite) TestOnboardAllowsResavingALiveAppUnchanged() {
 	s.storeASCCredential()
 	s.ascReadyForSigning()
@@ -476,9 +421,6 @@ func (s *OnboardSuite) TestOnboardAllowsResavingALiveAppUnchanged() {
 	s.Equal("com.example.app", got.Identifier)
 }
 
-// The platform comes straight off a URL segment. Validating it only after the
-// row lookup reported a typo as "this repository has no store app", which is
-// both the wrong diagnosis and the wrong HTTP status.
 func (s *OnboardSuite) TestVerifyOnboardingRejectsAnUnknownPlatformBeforeAnyLookup() {
 	ctx := context.Background()
 	_, err := s.svc.VerifyOnboarding(ctx, uuid.New(), "windows-phone")
@@ -489,15 +431,10 @@ func (s *OnboardSuite) TestVerifyOnboardingRejectsAnUnknownPlatformBeforeAnyLook
 	s.Empty(s.play.AppExistsCalls)
 }
 
-// TestEnsureIdentifierAllowedIsTheSeamSaveTargetCanActOn covers the pre-save
-// guard directly. Onboard's own refusal is unreachable through the real
-// operator path (deploy.SaveTarget writes the target first and swallows
-// onboarding errors), so this is the check that has to hold the line.
 func (s *OnboardSuite) TestEnsureIdentifierAllowedIsTheSeamSaveTargetCanActOn() {
 	ctx := context.Background()
 	repoID := uuid.New()
 
-	// No registry row yet: nothing to protect.
 	s.Require().NoError(s.svc.EnsureIdentifierAllowed(ctx, repoID, domain.DeployProviderAppStore, "com.example.app"))
 
 	_, err := s.apps.Upsert(ctx, domain.MobileStoreApp{
@@ -508,19 +445,14 @@ func (s *OnboardSuite) TestEnsureIdentifierAllowedIsTheSeamSaveTargetCanActOn() 
 	})
 	s.Require().NoError(err)
 
-	// Same identifier on a live row is an ordinary re-save.
 	s.Require().NoError(s.svc.EnsureIdentifierAllowed(ctx, repoID, domain.DeployProviderAppStore, "com.example.app"))
 
-	// A different identifier on a live row is refused, with a message naming
-	// both the published identifier and the requested one.
 	err = s.svc.EnsureIdentifierAllowed(ctx, repoID, domain.DeployProviderAppStore, "com.example.other")
 	s.Require().Error(err)
 	s.ErrorIs(err, storeops.ErrIdentifierLocked)
 	s.Contains(err.Error(), "com.example.app")
 	s.Contains(err.Error(), "com.example.other")
 
-	// A row that has not gone live yet may still be re-pointed — Onboard
-	// demotes it to onboarding and the checklist is re-verified.
 	_, err = s.apps.Upsert(ctx, domain.MobileStoreApp{
 		RepositoryID: repoID,
 		Platform:     domain.MobileStorePlatformAndroid,
@@ -530,7 +462,6 @@ func (s *OnboardSuite) TestEnsureIdentifierAllowedIsTheSeamSaveTargetCanActOn() 
 	s.Require().NoError(err)
 	s.Require().NoError(s.svc.EnsureIdentifierAllowed(ctx, repoID, domain.DeployProviderGooglePlay, "com.example.android2"))
 
-	// An unknown provider is the caller's mistake, not a silent pass.
 	err = s.svc.EnsureIdentifierAllowed(ctx, repoID, "not-a-store", "com.example.app")
 	s.Require().Error(err)
 	s.ErrorIs(err, storeops.ErrInvalidPlatform)

@@ -10,9 +10,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// A desktop install serves on 127.0.0.1, and GitHub answers a hook pointed
-// there with 422 Validation Failed. Setup, the import-time install and the boot
-// reconcile all have to recognise such an address up front instead.
 func TestWebhooksReachable(t *testing.T) {
 	cases := map[string]bool{
 		"":                          false,
@@ -37,8 +34,6 @@ func TestWebhooksReachable(t *testing.T) {
 	}
 }
 
-// The manual "set up webhook" call on a loopback instance must say why it
-// cannot work instead of forwarding GitHub's 422.
 func TestSetupWebhookRefusesLoopbackBaseURL(t *testing.T) {
 	repoID := uuid.New()
 	store := &fakeWebhookRepositoryStore{repo: domain.Repository{ID: repoID, RemoteURL: "https://github.com/o/r"}}

@@ -5,15 +5,10 @@ import (
 	"strings"
 )
 
-// appDirs are the container directories a monorepo keeps its deployables in.
-// A repo with two or more classifiable children under one of these is a
-// monorepo regardless of what its language histogram says.
+// The container directories a monorepo keeps its deployables in; a repo with two or more classifiable children under one of these is a monorepo regardless of what its language histogram says.
 var appDirs = []string{"apps", "services", "packages"}
 
-// inferKind classifies the repository the way the pipeline settings need it
-// (domain.RepoKind*), with the evidence that produced the call. It is only a
-// proposal: the settings UI applies it when the field is untouched and offers
-// it when it disagrees with what a human already chose.
+// Classifies the repository the way the pipeline settings need it, with the evidence; only a proposal — the settings UI applies it when the field is untouched and offers it when it disagrees with what a human chose.
 func inferKind(t *treeScan, f *Facts) {
 	children := classifyAppChildren(t, f)
 	if len(children) >= 2 {
@@ -35,9 +30,7 @@ func inferKind(t *treeScan, f *Facts) {
 	}
 }
 
-// classifyAppChildren buckets each apps/* (or services/*, packages/*) child by
-// what it contains. Children that classify as nothing are dropped rather than
-// defaulted — a `packages/tsconfig` shared-config folder is not a sub-project.
+// Buckets each apps/* (or services/*, packages/*) child by what it contains; children that classify as nothing are dropped rather than defaulted — a packages/tsconfig shared-config folder is not a sub-project.
 func classifyAppChildren(t *treeScan, f *Facts) map[string]string {
 	out := map[string]string{}
 	seen := map[string]bool{}
@@ -61,8 +54,6 @@ func classifyAppChildren(t *treeScan, f *Facts) map[string]string {
 	return out
 }
 
-// classifySingle decides one area's kind from the files under it. prefix "" is
-// the whole repository.
 func classifySingle(t *treeScan, f *Facts, prefix string) (kind, evidence string) {
 	var goFiles, webFiles, swiftFiles, dartFiles, kotlinFiles, pyFiles int
 	scope := prefix
@@ -90,9 +81,7 @@ func classifySingle(t *treeScan, f *Facts, prefix string) (kind, evidence string
 		}
 	}
 
-	// Mobile wins over everything else it coexists with: an iOS app with a
-	// handful of TypeScript config files is still an iOS app, and calling it
-	// frontend picks the wrong pipeline keywords (docker instead of xcodebuild).
+	// Mobile wins over everything else it coexists with: an iOS app with a handful of TypeScript config files is still an iOS app, and calling it frontend picks the wrong pipeline keywords (docker instead of xcodebuild).
 	switch {
 	case swiftFiles > 20 || dartFiles > 20:
 		return "mobile", languageEvidence(prefix, "Swift/Dart sources", swiftFiles+dartFiles)
@@ -133,10 +122,7 @@ func hasAndroidMarkers(t *treeScan, prefix string) bool {
 	return false
 }
 
-// isWorker recognises a background processor: an entrypoint under cmd/worker
-// (or similar) with no HTTP server next to it. Getting this wrong is cheap in
-// one direction only — a worker mislabelled backend gets a deploy pipeline it
-// does not need — so the test stays narrow.
+// Recognises a background processor: an entrypoint under cmd/worker (or similar) with no HTTP server next to it. Getting this wrong is cheap in one direction only — a worker mislabelled backend gets a deploy pipeline it does not need — so the test stays narrow.
 func isWorker(t *treeScan, _ *Facts, prefix string) bool {
 	for _, rel := range t.files {
 		if prefix != "" && !strings.HasPrefix(rel, prefix+"/") {

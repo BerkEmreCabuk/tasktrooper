@@ -23,28 +23,21 @@ import (
 
 const maxTaskRetries = 2
 
-// persistTimeout bounds a status write that outlives its run's context.
 const persistTimeout = 10 * time.Second
 
-// persistCtx detaches a terminal status write from the run being cancelled.
-// A subtask's last write happens when the pod is draining or the client hung
-// up; on the run's own context those writes fail and the row stays "running"
-// with nothing left to move it.
+// Detaches a terminal status write from its run, already cancelled on drain.
 func persistCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.WithoutCancel(ctx), persistTimeout)
 }
 
 const dependencyTruncateNote = "\n[truncated — use run_terminal to read full output]"
 
-// SessionActionReader reads the ledger of board records this conversation has
-// already produced.
 type SessionActionReader interface {
 	ListActions(ctx context.Context, sessionID uuid.UUID) ([]domain.SessionAction, error)
 }
 
 type Executor struct {
-	// agentLoop is the router in production, so a subtask assigned to an agent
-	// on a host-executed provider runs on that host's CLI instead of failing.
+	// Router in production: host-executed provider subtasks run on that host's CLI.
 	agentLoop      agent.Runner
 	catalog        port.CatalogStore
 	cfg            domain.OrchestrationConfig
@@ -72,11 +65,7 @@ type taskContext struct {
 }
 
 func (e *Executor) Execute(ctx context.Context, planID uuid.UUID, intake domain.GoalIntake, output domain.PlannerOutput, planTasks []domain.PlanTask, history []domain.Message, defaultModel string, policy domain.ToolPolicy, lang string, sessionID uuid.UUID, seedResults map[string]string) (string, map[string]string, error) {
-	// seedResults is what an earlier round of this run already produced — empty
-	// for a first plan, the original plan's task results for a repair plan. Those
-	// ids are also the dependencies a repair task is allowed to name, so the same
-	// map decides both questions: a depends_on is pre-satisfied exactly when the
-	// result it wants is already here to hand to the dependent subtask.
+	// seedResults are earlier rounds' results; a depends_on naming one is pre-satisfied.
 	completed := make(map[string]bool, len(seedResults))
 	for id := range seedResults {
 		completed[id] = true
@@ -139,20 +128,7 @@ func (e *Executor) Execute(ctx context.Context, planID uuid.UUID, intake domain.
 	return strings.TrimSpace(sb.String()), results, nil
 }
 
-// resolveSubtaskWorkspace decides which directory a subtask works in.
-//
-// Every code tool and every shell command resolves to the subtask workspace
-// when one is set (registry.EffectiveWorkspaceDir), so this choice decides
-// whether the agent can see the project at all. A board run clones the
-// repository into the run's workspace and checks out the task branch BEFORE any
-// agent starts; carving a per-subtask scratch directory inside that checkout
-// handed the agent an empty folder. It grepped nothing, reported "we could not
-// examine the project structure", and spent its whole iteration budget looking
-// for a repository it was standing next to.
-//
-// So: a run that already has a checkout works IN it. Only a run without one —
-// chat orchestration on a bare workspace — gets the per-subtask scratch
-// directory, which is what that isolation was written for.
+// A run with an existing checkout works in it; only a bare workspace gets the per-subtask scratch dir.
 func resolveSubtaskWorkspace(sessionWorkspace, taskKey string) (string, error) {
 	if sessionWorkspace == "" {
 		return "", nil
@@ -170,9 +146,6 @@ func resolveSubtaskWorkspace(sessionWorkspace, taskKey string) (string, error) {
 	return dir, nil
 }
 
-// enabledAgentSkills returns what the agent is configured to know, minus what
-// the operator switched off. A disabled skill never reaches the index and
-// load_skill refuses it too, so "off" means off on both ends.
 func (e *Executor) enabledAgentSkills(ctx context.Context, agentID uuid.UUID) ([]domain.Skill, error) {
 	all, err := e.catalog.ListSkillsByAgent(ctx, agentID)
 	if err != nil {
@@ -200,11 +173,6 @@ func (e *Executor) runTask(ctx context.Context, planID uuid.UUID, tc taskContext
 		return "", err
 	}
 
-	// Every skill the operator enabled on this agent, exactly like a board run.
-	// The plan's skill_ids used to be the whole index, so an agent with 19
-	// configured skills ran a subtask knowing about the 3 the planner happened
-	// to name — the rest were unreachable even though load_skill would have
-	// served them. The picks survive as emphasis in the task prompt.
 	skills, err := e.enabledAgentSkills(ctx, agentRec.ID)
 	if err != nil {
 		return "", err
@@ -220,15 +188,8 @@ func (e *Executor) runTask(ctx context.Context, planID uuid.UUID, tc taskContext
 	if model == "" {
 		model = defaultModel
 	}
-	// lightModel is captured before a possible escalation below, so the
-	// subtask's own utility calls (history summarization, the wrap-up on a
-	// spent budget) stay on the agent's plain model even when the subtask
-	// itself escalates to ModelHeavy — that escalation is for the work, not
-	// for bookkeeping. See agent.WithLightModel.
+	// Utility calls stay on lightModel even when the subtask escalates to ModelHeavy.
 	lightModel := model
-	// Per-subtask model selection: the planner rates each subtask's difficulty;
-	// a "hard" subtask runs on the assigned agent's stronger ModelHeavy when one
-	// is configured. Everything else stays on the agent's default Model.
 	if tc.plannerTask.Difficulty == domain.TaskDifficultyHard && agentRec.ModelHeavy != "" {
 		model = agentRec.ModelHeavy
 	}
@@ -243,26 +204,17 @@ func (e *Executor) runTask(ctx context.Context, planID uuid.UUID, tc taskContext
 	taskCtx := registry.ContextWithSubtaskWorkspace(ctx, subtaskWorkspace)
 
 	if rec := activity.FromContext(ctx); rec != nil {
-		// model/provider are recorded together on purpose: every "invalid model"
-		// failure so far has been a model name that belonged to a provider the
-		// agent is no longer on, and the pair is the only way to see that.
+		// model/provider are recorded together or an invalid-model name reads like a provider switch.
 		rec.Step("subtask_started", map[string]string{
 			"task_key": tc.planTask.TaskKey, "title": tc.planTask.Title, "agent": agentRec.Name, "working_dir": subtaskWorkspace,
 			"model": model, "provider": string(provider),
 		})
 	}
 
-	// The tracker is normally installed by the board runner and shared by every
-	// subtask of a run. Chat orchestration installs none, so its subtasks were
-	// unmeasured and nothing could tell a finished one from a started one.
 	if registry.ToolUsageFromContext(taskCtx) == nil {
 		taskCtx, _ = registry.ContextWithToolUsage(taskCtx)
 	}
 	usage := registry.ToolUsageFromContext(taskCtx)
-	// The plan's declaration, not the resolved policy: it states what this
-	// subtask is FOR. A "move DE-1 onto the board" subtask declares the move and
-	// nothing else, and its run is finished when the move lands — even though
-	// its policy also carries the read tools every agent keeps.
 	effectiveTools := tc.plannerTask.ToolNames
 	if len(effectiveTools) == 0 {
 		effectiveTools = taskPolicy.AllowTools
@@ -276,8 +228,6 @@ func (e *Executor) runTask(ctx context.Context, planID uuid.UUID, tc taskContext
 		prior.Number = attempt
 		messages := e.buildTaskMessages(ctx, sessionID, history, tc, skills, stacks, agentRec, priorResults, mu, prior, subtaskWorkspace, lang)
 		before := usage.Snapshot()
-		// taskCtx carries the subtask's own workspace, which is what a host
-		// executor is started in when this agent's provider is a local CLI.
 		resp, err := e.agentLoop.RunTask(taskCtx, messages, model, provider, taskPolicy,
 			agent.WithLightModel(lightModel),
 			agent.WithSessionLimits(agentRec.MaxTurns, agentRec.Effort),
@@ -287,19 +237,11 @@ func (e *Executor) runTask(ctx context.Context, planID uuid.UUID, tc taskContext
 			prior.Err = err
 			prior.Stats, _ = agent.StatsFromError(err)
 			prior.Used = registry.UsageDelta(before, usage.Snapshot())
-			// A spent iteration budget is not a transient failure: re-running
-			// the same subtask from scratch spends the same budget again and
-			// ends the same way (DE-1 burned 3×30 turns that way). The caller
-			// commits what the agent produced and the next run resumes from
-			// that branch instead.
+			// A spent budget is not transient: re-running spends it again, so break and resume.
 			var budgetErr *agent.BudgetExhaustedError
 			if errors.As(err, &budgetErr) {
 				break
 			}
-			// Only now, on the path that really does run again: the digest costs
-			// a read of the run's trace and nothing else would use it. This
-			// failure carried no answer of its own, so the digest is the whole
-			// account of what the attempt managed.
 			prior.Digest = subtaskFindingsDigest(taskCtx, tc.planTask.TaskKey, "")
 			continue
 		}
@@ -314,9 +256,6 @@ func (e *Executor) runTask(ctx context.Context, planID uuid.UUID, tc taskContext
 			incompleteReason = boardWriteNotLandedReason(delta, effectiveTools)
 		}
 		if incompleteReason != "" && attempt < maxTaskRetries {
-			// Tell it what is missing and let it spend another attempt. The
-			// prompt builder replays this as "Previous attempt failed: …",
-			// together with what that attempt already got done.
 			lastErr = errors.New(incompleteReason)
 			prior.Err = lastErr
 			prior.Stats = agent.RunStats{}
@@ -338,10 +277,7 @@ func (e *Executor) runTask(ctx context.Context, planID uuid.UUID, tc taskContext
 		return "", lastErr
 	}
 
-	// Out of attempts and still only board bookkeeping. Record the honest status
-	// but hand the result back rather than failing the run: the plan's other
-	// subtasks and the verifier still have something to work with, and the user
-	// gets output instead of an error.
+	// Out of attempts: record the honest status but hand the result back rather than failing the run.
 	if incompleteReason != "" {
 		e.finishTask(ctx, tc.planTask.ID, domain.TaskStatusIncomplete, lastResult, incompleteReason)
 		if rec := activity.FromContext(ctx); rec != nil {
@@ -365,25 +301,7 @@ func (e *Executor) runTask(ctx context.Context, planID uuid.UUID, tc taskContext
 	return lastResult, nil
 }
 
-// subtaskFindingsDigest renders what this subtask has already done, for the
-// attempt that is about to repeat it.
-//
-// Every attempt rebuilds its messages from scratch, and only a sentence of text
-// used to survive: an agent that spent thirty turns finding the right files
-// began the next attempt knowing none of it. The run's activity trace outlives
-// the loop that wrote it, so the digest is read back from there — no extra model
-// call, one read per failed attempt.
-//
-// Two things it is honest about rather than precise about:
-//
-//   - The window starts at this subtask's own subtask_started step, so a second
-//     retry sees the first attempt's work as well. That is wanted: the findings
-//     accumulate, and the cap keeps the newest.
-//   - A wave runs up to MaxParallelTasks subtasks against ONE run, and their
-//     steps interleave, so a sibling's calls can land in this digest. The same
-//     is already true of the tool counts this note carries (they come from the
-//     run-wide usage tracker), and a slightly generous "already looked at"
-//     costs the next attempt far less than an empty one.
+// What the failed attempt already did, read from the run's activity trace so a retry continues past it.
 func subtaskFindingsDigest(ctx context.Context, taskKey, summary string) string {
 	rec := activity.FromContext(ctx)
 	if rec == nil {
@@ -392,10 +310,6 @@ func subtaskFindingsDigest(ctx context.Context, taskKey, summary string) string 
 	return agent.DigestFromSteps(stepsSinceSubtaskStart(rec.Steps(ctx), taskKey), summary, 0)
 }
 
-// stepsSinceSubtaskStart trims a run's trace to what happened after this
-// subtask began. A trace that never names the subtask — a store that keeps no
-// steps, a trace trimmed behind us — yields nothing rather than the whole plan's
-// activity attributed to one subtask.
 func stepsSinceSubtaskStart(steps []domain.SessionStep, taskKey string) []domain.SessionStep {
 	if taskKey == "" {
 		return nil
@@ -418,22 +332,13 @@ func stepsSinceSubtaskStart(steps []domain.SessionStep, taskKey string) []domain
 	return steps[start+1:]
 }
 
-// finishTask writes a subtask's terminal status on a context that outlives the
-// run's own cancellation.
 func (e *Executor) finishTask(ctx context.Context, planTaskID uuid.UUID, status, result, errMsg string) {
 	pctx, cancel := persistCtx(ctx)
 	defer cancel()
 	_ = e.catalog.UpdateTaskStatus(pctx, planTaskID, status, result, errMsg)
 }
 
-// markTaskBlocked records the end state of a subtask that stopped to ask the
-// stakeholder a question.
-//
-// Returning the clarification straight to the caller wrote nothing at all: the
-// plan_tasks row stayed "running" and no subtask_completed/subtask_failed step
-// was ever emitted, so the run's card kept a spinner on a subtask that had
-// already stopped and was waiting on a human. Failed is the resumable status —
-// runTask re-runs anything that is not completed once the answer arrives.
+// Failed is the resumable status, so a blocked subtask re-runs once the answer arrives.
 func (e *Executor) markTaskBlocked(ctx context.Context, planTask domain.PlanTask, req domain.ClarificationRequest, partial string) {
 	reason := clarificationBlockedReason(req)
 	e.finishTask(ctx, planTask.ID, domain.TaskStatusFailed, partial, reason)
@@ -444,8 +349,6 @@ func (e *Executor) markTaskBlocked(ctx context.Context, planTask domain.PlanTask
 	}
 }
 
-// clarificationBlockedReason states what the subtask is waiting for, so the
-// card says "waiting for an answer: <question>" instead of going quiet.
 func clarificationBlockedReason(req domain.ClarificationRequest) string {
 	detail := req.Context
 	if len(req.Questions) > 0 && req.Questions[0].Prompt != "" {
@@ -457,25 +360,7 @@ func clarificationBlockedReason(req domain.ClarificationRequest) string {
 	return "waiting for an answer: " + detail
 }
 
-// startedNotFinishedReason reports why a subtask that returned without an error
-// nonetheless did not finish, or "" when it did.
-//
-// The shape it catches: an implementation subtask whose entire successful tool
-// ledger was claim_board_task + move_board_task, i.e. it told the board it had
-// picked the work up and then stopped. The agent's own closing message reads
-// like progress ("I claimed the task and moved it to in_progress; now I will
-// review the project structure"), so nothing in the text distinguishes it from
-// a finished run — only the ledger does.
-//
-// Two cases deliberately pass:
-//   - An empty ledger. A subtask that answers from context (a status question, a
-//     summary) legitimately calls nothing, and failing those would break every
-//     conversational plan.
-//   - A subtask whose plan declares nothing but board bookkeeping. When claim/move
-//     is the whole declaration, bookkeeping IS the deliverable — that is exactly
-//     the "move DE-1 onto the board" request, and it is complete when the move
-//     lands. What the resolved policy also grants is irrelevant here: an agent
-//     keeps its read tools on every subtask, and holding them is not a job.
+// Only empty-ledger and board-only declared subtasks pass; a subtask that claimed and moved stops short.
 func startedNotFinishedReason(delta map[string]int, effectiveTools []string) string {
 	if len(delta) == 0 {
 		return ""
@@ -493,19 +378,7 @@ func startedNotFinishedReason(delta map[string]int, effectiveTools []string) str
 		"Do the work the subtask describes with the tools you have, then report what you changed."
 }
 
-// boardWriteNotLandedReason reports a bookkeeping subtask whose one deliverable
-// — the board write it declares — never actually succeeded.
-//
-// startedNotFinishedReason deliberately passes a subtask whose declaration is
-// nothing but bookkeeping, on the grounds that bookkeeping IS the deliverable
-// there. What it never checked is whether the write landed, and the tracker
-// counts successes only, so a subtask whose every move_board_task call was
-// REJECTED left an empty ledger and read exactly like a subtask that had
-// nothing to call. DE-1's "Move task to code_review" reported completed twice
-// while the task's history recorded no move at all.
-//
-// Only pure-bookkeeping subtasks are judged: an implementing subtask that also
-// happens to list move_board_task is finished by its code, not by its column.
+// A pure-bookkeeping subtask whose declared board write never landed is not finished.
 func boardWriteNotLandedReason(delta map[string]int, effectiveTools []string) string {
 	if hasWorkTool(effectiveTools) {
 		return ""
@@ -529,12 +402,7 @@ func boardWriteNotLandedReason(delta map[string]int, effectiveTools []string) st
 		"Make the call, read what it returns, and if it is rejected say so with the exact error instead of reporting the work as done."
 }
 
-// plannedSkillFocus names the skills the plan singled out for this subtask.
-// They are a hint, not the agent's toolbox: the index carries every enabled
-// skill and load_skill serves any of them, so a planner pick that turns out to
-// be the wrong one no longer hides the right one. Ids that name a disabled or
-// foreign skill are dropped without failing the subtask — the plan is not the
-// authority on what this agent may load.
+// Planner picks are a hint, never a cap on the agent's other skills.
 func plannedSkillFocus(skillIDs []string, skills []domain.Skill) string {
 	if len(skillIDs) == 0 || len(skills) == 0 {
 		return ""
@@ -556,8 +424,6 @@ func plannedSkillFocus(skillIDs []string, skills []domain.Skill) string {
 		". Load them with load_skill before you apply them; your other skills still apply when the work calls for them."
 }
 
-// hasWorkTool reports whether the subtask was equipped to do more than move the
-// board. ask_user is excluded: asking is not producing either.
 func hasWorkTool(effectiveTools []string) bool {
 	for _, name := range effectiveTools {
 		if domain.IsBoardProgressTool(name) || name == domain.AskUserToolName {
@@ -568,25 +434,14 @@ func hasWorkTool(effectiveTools []string) bool {
 	return false
 }
 
-// priorAttempt is what the previous attempt at this subtask left behind.
-//
-// Only the error used to survive. Every attempt rebuilds its messages from
-// scratch, so an agent that spent thirty turns finding the right files started
-// the next attempt knowing none of that and spent thirty more finding them
-// again — three attempts, one subtask's worth of progress. Carrying what the
-// last attempt actually ran, and which tools kept rejecting it, is what turns a
-// retry into a continuation.
+// What the failed attempt left behind, so a retry becomes a continuation.
 type priorAttempt struct {
 	Number int
 	Err    error
 	Stats  agent.RunStats
-	// Used is the per-tool call count for the failed attempt, from the run's
-	// usage tracker. It is populated even when the loop returned no stats.
+	// Per-tool call counts even when the loop returned no stats.
 	Used map[string]int
-	// Digest names what the attempt touched — the files it changed, the files
-	// it read, the commands it ran and how they ended — rendered from the run's
-	// activity trace. The counts above say how much work happened; this says
-	// what the work WAS, which is the part a retry cannot reconstruct.
+	// What the attempt touched, rendered from the run's activity trace.
 	Digest string
 }
 
@@ -615,9 +470,6 @@ func (p priorAttempt) note() string {
 	return b.String()
 }
 
-// workDone renders the tool counts, preferring the loop's own stats and falling
-// back to the run's usage tracker when the failure carried none (a provider
-// that never answered, say).
 func (p priorAttempt) workDone() string {
 	counts := p.Stats.ByTool
 	if len(counts) == 0 {
@@ -696,10 +548,6 @@ func (e *Executor) buildTaskMessages(ctx context.Context, sessionID uuid.UUID, h
 	if e.cfg.SubtaskHistoryMode == domain.SubtaskHistoryModeIsolated {
 		taskHistory = isolatedSubtaskHistory(history)
 	}
-	// The digest carried in history was rendered once, before the run started.
-	// A subtask that waits on another one must see what that dependency just
-	// created, or it reports the record missing and creates it again. Re-read
-	// the ledger per subtask so each one starts from current board state.
 	taskHistory = e.withFreshActionDigest(ctx, sessionID, taskHistory)
 
 	messages := make([]domain.Message, 0, len(taskHistory)+3)
@@ -722,11 +570,7 @@ func (e *Executor) buildTaskMessages(ctx context.Context, sessionID uuid.UUID, h
 	return messages
 }
 
-// withFreshActionDigest replaces any stale ledger digest in the history with one
-// rendered from current board state, so a subtask sees records its dependencies
-// created moments ago in this same run. Without a reader, or when the ledger is
-// empty or unreadable, the history is returned untouched — a stale digest is
-// still better than none.
+// Re-reads the ledger so a subtask sees records its dependencies just created; stale is still kept.
 func (e *Executor) withFreshActionDigest(ctx context.Context, sessionID uuid.UUID, history []domain.Message) []domain.Message {
 	if e.actions == nil || sessionID == uuid.Nil {
 		return history
@@ -749,23 +593,12 @@ func (e *Executor) withFreshActionDigest(ctx context.Context, sessionID uuid.UUI
 	return append(out, domain.Message{Role: domain.RoleSystem, Content: digest})
 }
 
-// isolatedSubtaskHistory strips tool-call chatter from the conversation a
-// subtask agent sees, so it never inherits an orphaned tool_calls message whose
-// results belong to a different loop.
-//
-// It keeps every user turn. Dropping all but the first used to rewrite the
-// conversation so that the agent's most recent visible instruction was the one
-// that opened the session — ask it to create a task, come back later and ask it
-// to move that task, and it read "create a task" again and made a second one.
+// Keeps every user turn and the action ledger; drops tool chatter and rebuilt system prompts.
 func isolatedSubtaskHistory(history []domain.Message) []domain.Message {
 	var out []domain.Message
 	for _, m := range history {
 		switch m.Role {
 		case domain.RoleSystem:
-			// Session-level system prompts are rebuilt per subtask from the
-			// assigned agent, so they are dropped here — except the action
-			// ledger, which is the only record of what this conversation
-			// already created and must reach every subtask.
 			if domain.IsSessionActionDigest(m.Content) {
 				out = append(out, m)
 			}
@@ -784,7 +617,6 @@ func truncateDependencyOutput(content string, maxChars int) string {
 	if maxChars <= 0 || len(content) <= maxChars {
 		return content
 	}
-	// Byte-safe: a dependency result is LLM prose, and in Turkish a raw slice
-	// lands mid-rune often enough that the provider rejected the message.
+	// Byte-safe: a raw slice can land mid-rune in Turkish output.
 	return domain.TruncateHead(content, maxChars) + dependencyTruncateNote
 }

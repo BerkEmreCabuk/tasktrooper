@@ -45,7 +45,7 @@ const (
 )
 
 // PerformanceSnapshot is stored on a completed reflection and serves as the
-// baseline for the next reflection (incremental analysis, no re-review).
+// baseline for the next one (incremental analysis, no re-review).
 type PerformanceSnapshot struct {
 	Score          float64            `json:"score"`
 	KPIComposite   float64            `json:"kpi_composite"`
@@ -134,9 +134,8 @@ type ReflectionRevert struct {
 
 // ReflectionDecision is the structured record of what a reflection proposed and
 // what actually happened to each proposal — the UI's source of truth instead of
-// re-deriving it from the free-text Summary. Legacy rows (completed before this
-// existed) get one synthesized on read in service.go's ListReflections; Legacy
-// is what tells the UI that record was never actually applied.
+// re-deriving it from the free-text Summary. Legacy rows get one synthesized on
+// read; Legacy tells the UI that record was never actually applied.
 type ReflectionDecision struct {
 	Analysis       string                    `json:"analysis,omitempty"`
 	SelfAssessment string                    `json:"self_assessment,omitempty"`
@@ -191,9 +190,9 @@ type MemoryPromotionResult struct {
 
 // MemoryPromotionCandidate is one proposed memory→skill move: everything the
 // operator needs to judge it before anything is written, and everything the
-// apply step needs to carry it out. The plan and the apply speak the same
-// shape on purpose — what the operator approved is exactly what is written,
-// rather than a second LLM call that might decide differently.
+// apply step needs to carry it out. The plan and the apply speak the same shape
+// — what the operator approved is exactly what is written, rather than a second
+// LLM call deciding differently.
 type MemoryPromotionCandidate struct {
 	MemoryID uuid.UUID `json:"memory_id"`
 	// MemoryContent is the memory as it stands today, so the dialog can show

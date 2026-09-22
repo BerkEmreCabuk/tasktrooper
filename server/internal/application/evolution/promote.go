@@ -14,21 +14,10 @@ import (
 
 var ErrPromotionInFlight = fmt.Errorf("a shared-memory promotion is already running")
 
-// promotionInflightKey shares the reflection in-flight map; it can never
-// collide with an agent id key because those are UUID strings.
+// Shares the reflection in-flight map; it can never collide with an agent id key, which are UUID strings.
 const promotionInflightKey = "__shared_memory_promotion__"
 
-// PlanSharedMemoryPromotion reviews every team memory and returns the ones that
-// are really reusable know-how (a method, checklist, convention) as proposed
-// skills. Facts, status and preferences stay memories.
-//
-// It writes NOTHING. The sweep used to create the skills and delete the
-// memories in the same call, so the operator pressing the button found out what
-// it had decided only afterwards — on a page whose whole content it had just
-// rewritten. The decision is an LLM's, and both halves of it (is this really a
-// skill, and who should get it) are worth a look before a memory is deleted, so
-// the plan comes back for approval and ApplySharedMemoryPromotion carries out
-// exactly what was approved.
+// The sweep writes NOTHING: the old code created skills and deleted memories in one call, so the operator found out only afterwards what it decided.
 func (s *Service) PlanSharedMemoryPromotion(ctx context.Context) (domain.MemoryPromotionPlan, error) {
 	plan := domain.MemoryPromotionPlan{Candidates: []domain.MemoryPromotionCandidate{}, Agents: []string{}}
 	if s.llm == nil || s.memories == nil || s.manager == nil || s.board == nil || s.catalog == nil {
@@ -51,8 +40,7 @@ func (s *Service) PlanSharedMemoryPromotion(ctx context.Context) (domain.MemoryP
 		return plan, nil
 	}
 
-	// The manual sweep is an operator action, so it may target agents whose
-	// self_evolution_enabled is off — the operator is the one deciding.
+	// An operator sweep may target agents with self-evolution off — the operator decides.
 	agents, err := s.promotionTargets(ctx, false)
 	if err != nil {
 		return plan, err
@@ -98,8 +86,7 @@ func (s *Service) PlanSharedMemoryPromotion(ctx context.Context) (domain.MemoryP
 				targets = append(targets, a.Name)
 			}
 		}
-		// No recognizable targets means "fits everyone" — spelled out here so
-		// the operator sees the real roster rather than an empty list.
+		// No recognizable targets means "fits everyone"; spelled out so the operator sees the real roster.
 		if len(targets) == 0 {
 			targets = append(targets, plan.Agents...)
 		}
@@ -113,15 +100,7 @@ func (s *Service) PlanSharedMemoryPromotion(ctx context.Context) (domain.MemoryP
 	return plan, nil
 }
 
-// ApplySharedMemoryPromotion writes the approved candidates: one skill per
-// target agent, then the source memory is deleted — it now lives in the
-// catalog. A candidate nobody could take (name collision, skill budget) leaves
-// its memory alone, because deleting it would lose the lesson entirely.
-//
-// Everything is re-resolved against the server's own state: the memory must
-// still be a team memory and each named agent must still be an enabled target.
-// The candidates travel through the browser, so what comes back is a request,
-// not a fact.
+// Everything is re-resolved against server state, because the candidates travelled through the browser — what comes back is a request, not a fact. A candidate nobody could take leaves its memory alone: deleting it would lose the lesson.
 func (s *Service) ApplySharedMemoryPromotion(ctx context.Context, candidates []domain.MemoryPromotionCandidate) (domain.MemoryPromotionResult, error) {
 	result := domain.MemoryPromotionResult{Promoted: []domain.MemoryPromotion{}}
 	if s.memories == nil || s.manager == nil || s.board == nil || s.catalog == nil {
@@ -193,9 +172,7 @@ func (s *Service) ApplySharedMemoryPromotion(ctx context.Context, candidates []d
 	return result, nil
 }
 
-// PromoteSharedMemories is plan-then-apply-everything, kept for callers that
-// want the old one-shot behaviour (and as the fallback the UI uses when it
-// cannot show a dialog).
+// PromoteSharedMemories is one-shot plan-then-apply, for callers that want the old behaviour.
 func (s *Service) PromoteSharedMemories(ctx context.Context) (domain.MemoryPromotionResult, error) {
 	plan, err := s.PlanSharedMemoryPromotion(ctx)
 	if err != nil {
@@ -209,8 +186,7 @@ func (s *Service) PromoteSharedMemories(ctx context.Context) (domain.MemoryPromo
 	return result, nil
 }
 
-// holdPromotion takes the single-flight slot both halves share, so a second
-// browser tab cannot plan against memories another apply is deleting.
+// Single-flight across both halves, so a second browser tab cannot plan against memories another apply is deleting.
 func (s *Service) holdPromotion() (func(), error) {
 	s.mu.Lock()
 	if s.inflight[promotionInflightKey] {
@@ -226,12 +202,7 @@ func (s *Service) holdPromotion() (func(), error) {
 	}, nil
 }
 
-// MaybePromoteMemory is the save_memory hook: it decides whether the content
-// an agent is about to memorize is really reusable know-how and, when it is,
-// writes it into the skill catalog instead. agentID == uuid.Nil means the save
-// was aimed at team memory; the skill then goes to every enabled board agent
-// that has self-evolution on. Best-effort by design: any error means "let the
-// caller save it as a memory".
+// The save_memory hook: reusable know-how is written into the skill catalog instead. agentID == uuid.Nil targets team memory (skill to every enabled self-evolving board agent). Best-effort by design: an error means "let the caller save it as a memory".
 func (s *Service) MaybePromoteMemory(ctx context.Context, agentID uuid.UUID, repositoryID *uuid.UUID, content, category string) (bool, string, error) {
 	if !s.cfg.Enabled || s.llm == nil || s.manager == nil || s.catalog == nil {
 		return false, "", nil
@@ -284,9 +255,7 @@ func (s *Service) MaybePromoteMemory(ctx context.Context, agentID uuid.UUID, rep
 	return true, out.Name, nil
 }
 
-// promotionTargets is the enabled board roster; requireSelfEvolution narrows
-// it to agents that opted into catalog changes (the save_memory path — an
-// agent-initiated write must respect the flag; an operator sweep may not).
+// requireSelfEvolution applies to the save_memory path only; an operator sweep may not inherit it.
 func (s *Service) promotionTargets(ctx context.Context, requireSelfEvolution bool) ([]domain.Agent, error) {
 	members, err := s.board.ListMembers(ctx)
 	if err != nil {
@@ -306,12 +275,7 @@ func (s *Service) promotionTargets(ctx context.Context, requireSelfEvolution boo
 	if len(agents) > 0 {
 		return agents, nil
 	}
-	// `board_members` is an explicit opt-in list nothing populates by default,
-	// and the board itself never reads it — it renders every enabled agent as a
-	// member. So an empty table means "nobody narrowed the roster", not "no
-	// agents", and reading it literally is what made this refuse with "no
-	// enabled board agents to receive skills" on a workspace whose board was
-	// full of working agents.
+	// board_members is an explicit opt-in list nothing populates by default, so an empty table means "nobody narrowed the roster" — reading it literally refused to promote on a workspace full of working agents.
 	all, err := s.catalog.ListAgents(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("listing agents: %w", err)
@@ -328,9 +292,6 @@ func (s *Service) promotionTargets(ctx context.Context, requireSelfEvolution boo
 	return agents, nil
 }
 
-// createSkillForAgents writes one skill into each target agent's catalog,
-// skipping agents that already have a skill with that name or are at their
-// skill budget. Returns the names of the agents that received it.
 func (s *Service) createSkillForAgents(ctx context.Context, targets []domain.Agent, req domain.CreateSkillRequest) []string {
 	ctx = catalog.WithVersionSource(ctx, catalog.VersionSource{Source: domain.CatalogVersionSourceEvolution})
 	var granted []string
@@ -385,19 +346,7 @@ func (s *Service) recordPromotionEvent(ctx context.Context, agentRec domain.Agen
 	}
 }
 
-// promotionModel routes the classification calls: judge model first (this is
-// judging work), then the evolution override, then the configured default.
-//
-// The default is expressed as the ZERO value of both — an empty provider
-// routes at whatever is configured, and an empty model lets that
-// provider use its own configured model. It used to be agents[0]'s model and
-// provider instead, which was provider roulette independent of any one
-// provider's quirks: the classification is the evolution engine's own work, not
-// the work of whichever agent happened to sort first in the list handed in, and
-// borrowing that agent's engine made an unrelated catalog edit change where
-// these calls were billed. It also happened to be the single worst place to
-// pick up a claude_code agent, since these are JSON-schema calls a CLI cannot
-// produce at all.
+// Judge model first, then the evolution override, then the configured default (both empty route at whatever is configured). It used to be agents[0]'s model — provider roulette that also picked up claude_code agents, who cannot produce these JSON-schema calls at all.
 func (s *Service) promotionModel() (string, domain.LLMProviderType) {
 	var model string
 	var provider domain.LLMProviderType
@@ -416,8 +365,6 @@ func (s *Service) promotionModel() (string, domain.LLMProviderType) {
 	return model, provider
 }
 
-// promotionChat is one structured-output call with a single JSON
-// self-correction retry, mirroring runLLM.
 func (s *Service) promotionChat(ctx context.Context, system, user, model string, provider domain.LLMProviderType, schemaName string, schema map[string]interface{}, out any) error {
 	messages := []domain.Message{
 		{Role: domain.RoleSystem, Content: system},
@@ -529,9 +476,7 @@ Set skill=false for everything else: one-off facts, status, events, preferences,
 
 Respond with a single JSON object matching the provided schema.`
 
-// Both schemas require every property and forbid unknown keys — OpenAI's
-// strict json_schema mode rejects optional properties (see
-// reflectionOutputSchema for the long version of this story).
+// OpenAI's strict json_schema mode rejects optional properties (see reflectionOutputSchema for the long version).
 func promotionOutputSchema() map[string]interface{} {
 	promotion := map[string]interface{}{
 		"type":                 "object",

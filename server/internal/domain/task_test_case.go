@@ -8,15 +8,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// TestCaseStatus is the verdict on one derived test case.
-//
-// Five values, and the two unusual ones carry the whole point of keeping this
-// list on the card: `invalid` is a case that was thought of and rejected — it
-// contradicts the spec, it is unreachable by design, it belongs to another
-// task — and `skipped` is a valid case that could NOT be executed in this
-// round (no device, no stage deploy, missing credential). Folding either into
-// "passed" is the lie the list exists to prevent, and dropping them entirely
-// would hide the reasoning that a reviewer most wants to audit.
+// TestCaseStatus is the verdict on one derived test case. Five values, and the
+// two unusual ones carry the whole point of keeping this list on the card:
+// `invalid` is a case that was thought of and rejected (contradicts the spec,
+// unreachable by design, belongs to another task), and `skipped` is a valid case
+// that could NOT be executed this round (no device, no stage deploy, missing
+// credential). Folding either into "passed" is the lie the list exists to
+// prevent, and dropping them would hide the reasoning a reviewer most wants to
+// audit.
 type TestCaseStatus string
 
 const (
@@ -78,9 +77,9 @@ type TaskTestCase struct {
 	Position  int       `json:"position"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
-	// ScoredAt marks the moment this case's verdict was already turned into a
-	// performance score event, so a rework round or a later forward exit
-	// never counts the same case twice.
+	// ScoredAt marks the moment this verdict was already turned into a
+	// performance score event, so a rework round or a later forward exit never
+	// counts the same case twice.
 	ScoredAt *time.Time `json:"scored_at,omitempty"`
 }
 
@@ -97,13 +96,11 @@ type TaskTestCaseInput struct {
 }
 
 // Normalize trims the input, fills the defaults and refuses the combinations
-// that would make the list unreadable.
-//
-// The three refusals are all the same rule from different sides: a verdict has
-// to say what it is based on. A failure with no observed behaviour cannot be
-// reproduced, a case rejected as invalid with no reason cannot be audited (and
-// is indistinguishable from one quietly dropped), and a case that could not be
-// run has to name what blocked it or it reads as untested-and-unexplained.
+// that would make the list unreadable. The three refusals are all the same rule
+// from different sides: a verdict has to say what it is based on — a failure
+// with no observed behaviour cannot be reproduced, an invalid case with no
+// reason cannot be audited, and a skipped case that does not name what blocked
+// it reads as untested-and-unexplained.
 func (i TaskTestCaseInput) Normalize() (TaskTestCaseInput, error) {
 	out := i
 	out.Title = strings.TrimSpace(i.Title)
@@ -161,9 +158,9 @@ func (c TestCaseCategory) Valid() bool {
 	return false
 }
 
-// Executed reports whether this case was actually run in a round. Planned and
-// skipped cases are not: they are the two ways a case ends up on the list
-// without a result behind it.
+// Executed reports whether this case was actually run in a round; planned and
+// skipped are the two ways a case ends up on the list without a result behind
+// it.
 func (s TestCaseStatus) Executed() bool {
 	return s == TestCaseStatusPassed || s == TestCaseStatusFailed
 }

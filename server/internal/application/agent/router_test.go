@@ -178,7 +178,6 @@ func TestRouterGivesAScratchWorkspaceWhenAskedTo(t *testing.T) {
 	require.NotEmpty(t, req.WorkDir)
 	require.True(t, ex.dirIsSet, "the scratch directory must exist while the session runs")
 	require.True(t, ex.dirEmpty, "a scratch workspace is empty by definition")
-	// And it does not survive the run.
 	_, statErr := os.Stat(req.WorkDir)
 	require.True(t, os.IsNotExist(statErr), "the scratch workspace must be removed afterwards")
 }
@@ -206,7 +205,6 @@ func TestRouterResumesTheCLISessionOnAFollowUpStep(t *testing.T) {
 	)
 	policy := domain.ToolPolicy{}
 
-	// The main run: no session yet, so it goes in full.
 	main := []domain.Message{{Role: domain.RoleUser, Content: "implement the gate"}}
 	_, err := router.RunTask(ctx, main, "opus", domain.LLMProviderClaudeCode, policy,
 		agent.WithCLILabel("tt-42", "wire the gate"))
@@ -216,8 +214,7 @@ func TestRouterResumesTheCLISessionOnAFollowUpStep(t *testing.T) {
 	require.Empty(t, firstReq.ResumeSessionID, "the main run has no session to resume")
 	require.Equal(t, main, firstReq.History)
 
-	// A follow-up on the same run: the assistant's close-out plus one new user
-	// prompt, exactly the shape sweepOpenCriteria builds.
+	// A follow-up: the assistant's close-out plus one new user prompt, the shape sweepOpenCriteria builds.
 	followUp := []domain.Message{
 		{Role: domain.RoleUser, Content: "implement the gate"},
 		{Role: domain.RoleAssistant, Content: "done, the gate is wired"},
@@ -246,8 +243,7 @@ func TestRouterFallsBackToFullHistoryWhenThereIsNoTrailingUserInstruction(t *tes
 	session.Set("sess-1")
 	ctx := agent.ContextWithCLISession(registry.ContextWithWorkspaceDir(context.Background(), t.TempDir()), session)
 
-	// A history whose last message is not from the user (e.g. the run ended on
-	// its own assistant turn) has nothing new to resume with.
+	// A history that does not end on a user turn has nothing new to resume with.
 	messages := []domain.Message{
 		{Role: domain.RoleUser, Content: "implement the gate"},
 		{Role: domain.RoleAssistant, Content: "done"},

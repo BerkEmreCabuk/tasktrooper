@@ -21,15 +21,8 @@ func FormatEmbedInput(filePath, symbolName, signature, content string) string {
 	return b.String()
 }
 
-// maxEmbedContentChars caps the chunk content sent for one embedding. The
-// path, symbol and signature prefix always goes in whole; only the body is
-// cut. Four thousand characters is about 900 tokens, which the local embedder
-// answers in about a second under load, where a 10,000-character chunk took
-// ten. The head of a symbol carries what retrieval needs.
 const maxEmbedContentChars = 4000
 
-// capEmbedContent cuts content to maxEmbedContentChars without splitting a
-// UTF-8 sequence.
 func capEmbedContent(content string) string {
 	if len(content) <= maxEmbedContentChars {
 		return content

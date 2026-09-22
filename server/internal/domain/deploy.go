@@ -8,15 +8,13 @@ import (
 	"github.com/google/uuid"
 )
 
-// Deploy environments. They are the "where" side of the pipeline deploy
-// categories: a category says which workflow to dispatch, a target says which
-// provider that workflow ships to and with which variables — so shipping is
-// describable per repo instead of living only inside a hand-written workflow.
+// Deploy environments are the "where" side of the pipeline deploy categories: a
+// category says which workflow to dispatch, a target says which provider that
+// workflow ships to and with which variables.
 const (
-	// DeployEnvLocal has no pipeline category or trigger (DeployEnvCategory/
-	// DeployEnvTrigger return "" for it): nothing in CI ships to a developer's
-	// own machine. It exists purely as a recorded address + health check, the
-	// same as any other environment.
+	// DeployEnvLocal has no pipeline category or trigger: nothing in CI ships to
+	// a developer's own machine. It exists purely as a recorded address + health
+	// check, the same as any other environment.
 	DeployEnvLocal   = "local"
 	DeployEnvStage   = "stage"
 	DeployEnvPreProd = "preprod"
@@ -87,56 +85,46 @@ func ValidDeployProvider(p string) bool {
 	return false
 }
 
-// DeployTarget is one repository's shipping definition for one environment:
-// the provider, the template it was scaffolded from, the substitution vars, and
-// the URL that proves the environment is alive after the deploy.
+// DeployTarget is one repository's shipping definition for one environment: the
+// provider, the template it was scaffolded from, the substitution vars, and the
+// URL that proves the environment is alive after the deploy.
 type DeployTarget struct {
 	ID           uuid.UUID `json:"id"`
 	RepositoryID uuid.UUID `json:"repository_id"`
 	// SubProjectPath scopes this target to one monorepo sub-project ("" = the
-	// repository itself — the only value that existed before sub-projects
-	// could each have their own deploy settings).
+	// repository itself, the only value that existed before sub-projects).
 	SubProjectPath string `json:"sub_project_path,omitempty"`
 	Env            string `json:"env"`
 	Provider       string `json:"provider"`
-	// TemplateID records which recipe produced the workflow, so a later
-	// template revision can be diffed against what the repo actually runs.
+	// TemplateID records which recipe produced the workflow, so a later template
+	// revision can be diffed against what the repo actually runs.
 	TemplateID string            `json:"template_id,omitempty"`
 	Vars       map[string]string `json:"vars,omitempty"`
-	// HealthURL is polled by the production monitor. Empty disables probing
-	// for this environment.
+	// HealthURL is polled by the production monitor; empty disables probing.
 	HealthURL string `json:"health_url,omitempty"`
 	// LogsURL is an endpoint the application itself serves that returns its
-	// recent logs. It is the other half of HealthURL: health answers "is it
-	// up", which is the only thing a probe can act on, while a deploy that came
-	// up and is logging a failed migration on boot is invisible to it.
-	//
-	// Read on demand by the deploy watch (get_deploy_logs), never polled — and
-	// re-validated against the destination guard on EVERY fetch, not only when
-	// it was written, because it is agent-writable and a name that resolved to
-	// a public address at save time is free to answer 127.0.0.1 later.
-	//
-	// It is an HTTP endpoint on purpose and it is the only log source this
-	// repository knows about. No cluster, no cloud log API, no kubectl: an
-	// endpoint the application serves is a fact about the application, not
-	// about where it is hosted (see CLAUDE.md).
+	// recent logs — the other half of HealthURL: health answers "is it up",
+	// while a deploy that came up and is logging a failed migration on boot is
+	// invisible to it. It is read on demand by the deploy watch, never polled,
+	// and re-validated against the destination guard on EVERY fetch because it
+	// is agent-writable. It is an HTTP endpoint on purpose — no cluster, no
+	// cloud log API (see CLAUDE.md).
 	LogsURL string `json:"logs_url,omitempty"`
-	// BaseURL is where this environment actually answers (the DNS entry an
-	// API consumer or a QA agent hits). Health checks live under it, but the
-	// two are separate: one proves liveness, the other is the address.
+	// BaseURL is where this environment actually answers (the DNS entry an API
+	// consumer or a QA agent hits); health checks live under it, but the two are
+	// separate — one proves liveness, the other is the address.
 	BaseURL string `json:"base_url,omitempty"`
 	// AppPackage is the Android package this environment's build installs as
-	// (e.g. ai.tasktrooper.app.stage). It is also the guard for the device
-	// tools: mobile_launch_app can only ever open a package recorded here, so
-	// an agent cannot be talked into opening something else on what is, quite
-	// literally, somebody's phone.
+	// (e.g. ai.tasktrooper.app.stage), and the guard for the device tools:
+	// mobile_launch_app can only open a package recorded here, so an agent
+	// cannot be talked into opening something else on somebody's phone.
 	AppPackage string `json:"app_package,omitempty"`
-	// AppURL is where the installable artifact for this environment lives —
-	// the .apk CI published. Empty means "assume it is already on the device",
-	// which is the normal case once a build has been installed once.
+	// AppURL is where the installable artifact (.apk CI published) lives; empty
+	// means "assume it is already on the device", the normal case once a build
+	// has been installed once.
 	AppURL string `json:"app_url,omitempty"`
-	// AutoRollback lets the incident engine propose a redeploy of the last
-	// good ref as an executable step instead of a suggestion only.
+	// AutoRollback lets the incident engine propose a redeploy of the last good
+	// ref as an executable step instead of a suggestion only.
 	AutoRollback bool      `json:"auto_rollback"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
@@ -167,8 +155,8 @@ type DeployTemplateVar struct {
 	Required bool   `json:"required"`
 }
 
-// DeployTemplate is an embedded, provider-specific deploy recipe. It is the
-// deploy counterpart of a skill: the agent loads it and writes the workflow it
+// DeployTemplate is an embedded, provider-specific deploy recipe — the deploy
+// counterpart of a skill: the agent loads it and writes the workflow it
 // describes, so shipping becomes as repeatable as build and test.
 type DeployTemplate struct {
 	ID       string `json:"id"`
@@ -179,8 +167,8 @@ type DeployTemplate struct {
 	Kinds        []string            `json:"kinds,omitempty"`
 	Envs         []string            `json:"envs,omitempty"`
 	RequiredVars []DeployTemplateVar `json:"required_vars,omitempty"`
-	// WorkflowFile is the suggested .github/workflows file name; it is also the
-	// value the pipeline mapping should point at once the workflow is pushed.
+	// WorkflowFile is the suggested .github/workflows file name, also the value
+	// the pipeline mapping should point at once the workflow is pushed.
 	WorkflowFile string `json:"workflow_file"`
 	RollbackHint string `json:"rollback_hint,omitempty"`
 	// Body is the full markdown instruction set (including the workflow YAML)
@@ -204,7 +192,7 @@ func (t DeployTemplate) MissingVars(vars map[string]string) []string {
 	return missing
 }
 
-// SupportsKind reports whether the template applies to a repo kind. A template
+// SupportsKind reports whether the template applies to a repo kind; a template
 // with no declared kinds fits every repo.
 func (t DeployTemplate) SupportsKind(kind string) bool {
 	if len(t.Kinds) == 0 {

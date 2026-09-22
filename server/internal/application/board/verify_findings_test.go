@@ -17,13 +17,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// VerifyFindingsSuite covers what the fix round is told about the run it is
-// fixing.
-//
-// The gate re-runs the agent on the PRE-RUN history, so everything the finished
-// run learned — the files it changed, the command that failed — used to be
-// dropped on the floor: the agent that had just spent its whole budget in this
-// codebase started the fix knowing nothing about it and explored it again.
 type VerifyFindingsSuite struct {
 	suite.Suite
 }
@@ -32,7 +25,6 @@ func TestVerifyFindingsSuite(t *testing.T) {
 	suite.Run(t, new(VerifyFindingsSuite))
 }
 
-// recordingLLM answers every turn with plain text and keeps what it was asked.
 type recordingLLM struct {
 	requests []domain.AgentRequest
 }
@@ -52,13 +44,10 @@ func (l *recordingLLM) Models(context.Context) ([]string, error) { return nil, n
 
 func (l *recordingLLM) Embed(context.Context, string, string) ([]float32, error) { return nil, nil }
 
-// toollessRegistry hands the loop no tools, so a fix round is one request and
-// one answer.
 type toollessRegistry struct{ port.ToolRegistry }
 
 func (toollessRegistry) DefinitionsForPolicy(domain.ToolPolicy) []domain.ToolDefinition { return nil }
 
-// tracedStore replays a finished run's activity trace.
 type tracedStore struct {
 	port.ActivityStore
 	steps []domain.SessionStep
@@ -74,8 +63,6 @@ func (s *tracedStore) ListStepsByRun(context.Context, uuid.UUID) ([]domain.Sessi
 	return s.steps, nil
 }
 
-// failingRepo is a workspace whose declared verify command never passes, so
-// every round of the gate asks for another fix.
 type failingRepo struct{ repo domain.Repository }
 
 func (f failingRepo) ResolveRootPath(context.Context, uuid.UUID) (string, error) { return "", nil }
@@ -94,8 +81,6 @@ func traceStep(t *testing.T, kind string, payload any) domain.SessionStep {
 	return domain.SessionStep{StepType: kind, Payload: data}
 }
 
-// runTrace is what the finished run recorded: a search, a read, an edit and a
-// build that failed.
 func (s *VerifyFindingsSuite) runTrace() []domain.SessionStep {
 	t := s.T()
 	return []domain.SessionStep{
@@ -126,7 +111,6 @@ func (s *VerifyFindingsSuite) runTrace() []domain.SessionStep {
 	}
 }
 
-// alwaysFailingWorkspace returns a directory whose verify stage exits non-zero.
 func (s *VerifyFindingsSuite) alwaysFailingWorkspace() (string, domain.Repository) {
 	dir := s.T().TempDir()
 	s.Require().NoError(os.WriteFile(filepath.Join(dir, "verify.sh"), []byte("echo boom >&2\nexit 1\n"), 0o700))
@@ -158,24 +142,17 @@ func (s *VerifyFindingsSuite) TestFixRoundIsToldWhatTheRunAlreadyDid() {
 	digest := s.findDigest(llm.requests[0].Messages)
 	s.Require().NotEmpty(digest, "the fix round must carry a findings digest")
 
-	// What the run changed, read and ran — none of which is in the pre-run
-	// history the fix round is otherwise built from.
 	s.Contains(digest, "internal/application/board/verify.go (edit_file)")
 	s.Contains(digest, "Files read: internal/application/board/commands.go")
 	s.Contains(digest, `"ResolveVerifyStages" (grep_code)`)
 	s.Contains(digest, "`go build ./...` → exit status 1")
 
-	// The fix round still gets the original conversation, the run's own closing
-	// message and the build failure it has to fix.
 	contents := messageContents(llm.requests[0].Messages)
 	s.Contains(contents, "fix the board")
 	s.Contains(contents, "I edited verify.go.")
 	s.Contains(contents, "Automated verification failed")
 }
 
-// The verdict the hand-off reads. Red after every fix round means the run is
-// not finished — and advanceToCodeReview, which re-reads the task and finds it
-// in the column the run started in, used to move it to code_review anyway.
 func (s *VerifyFindingsSuite) TestVerdictIsFalseWhenChecksStayRed() {
 	dir, repo := s.alwaysFailingWorkspace()
 	r := NewRunner(RunnerDeps{
@@ -191,9 +168,6 @@ func (s *VerifyFindingsSuite) TestVerdictIsFalseWhenChecksStayRed() {
 	s.False(verified, "a run whose checks never went green must not be handed to review")
 }
 
-// The same verdict the other way: a workspace with nothing to check is not a
-// failure, and treating it as one would park every run in a repository that
-// declares no verify command.
 func (s *VerifyFindingsSuite) TestVerdictIsTrueWhenThereIsNothingToCheck() {
 	r := NewRunner(RunnerDeps{
 		AgentLoop:         agent.NewLoop(&recordingLLM{}, toollessRegistry{}, 3, 3, 16000),
@@ -208,8 +182,6 @@ func (s *VerifyFindingsSuite) TestVerdictIsTrueWhenThereIsNothingToCheck() {
 	s.True(verified)
 }
 
-// The second fix round must not carry two disagreeing digests: the first one
-// describes a workspace the first fix has already changed.
 func (s *VerifyFindingsSuite) TestSecondRoundReplacesTheFirstDigest() {
 	dir, repo := s.alwaysFailingWorkspace()
 	llm := &recordingLLM{}
@@ -238,8 +210,6 @@ func (s *VerifyFindingsSuite) TestSecondRoundReplacesTheFirstDigest() {
 	s.Equal(1, digests, "the stale digest must be replaced, not stacked")
 }
 
-// Without a trace to read there is nothing to add, and the fix round must look
-// exactly as it always did rather than carrying an empty header.
 func (s *VerifyFindingsSuite) TestNoTraceLeavesTheFixRoundUnchanged() {
 	dir, repo := s.alwaysFailingWorkspace()
 	llm := &recordingLLM{}

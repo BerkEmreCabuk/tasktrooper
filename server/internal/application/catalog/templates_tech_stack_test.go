@@ -79,7 +79,6 @@ func TestSaveAgentAsTemplateSnapshotsTechStacksByName(t *testing.T) {
 	assert.Equal(t, "Django", byName["drf-viewsets"].TechStack)
 	assert.Empty(t, byName["code-review"].TechStack, "a general skill names no stack")
 
-	// The new agent gets its own stack rows, and the skills land back on them.
 	copied, err := svc.CreateAgentFromTemplate(ctx, tpl.ID, domain.CreateAgentRequest{Name: "backend-copy"})
 	require.NoError(t, err)
 	stacks, err := svc.ListTechStacksForAgent(ctx, copied.ID)
@@ -104,8 +103,6 @@ func TestSaveAgentAsTemplateSnapshotsTechStacksByName(t *testing.T) {
 	}
 }
 
-// A template stored before tech stacks existed carries neither list; it must
-// still produce an agent, with every skill general.
 func TestCreateAgentFromTemplateWithoutTechStacks(t *testing.T) {
 	store := newMemCatalogStore()
 	svc := NewService(store, stubLLMClient{}, "")

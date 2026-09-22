@@ -7,9 +7,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// TokenTotals is one run's accumulated token spend. PromptTokens keeps the
-// domain.Usage contract: it is the TOTAL prompt size, with the cache columns
-// as subsets of it.
 type TokenTotals struct {
 	LLMCalls         int
 	PromptTokens     int64
@@ -18,11 +15,6 @@ type TokenTotals struct {
 	CacheWriteTokens int64
 }
 
-// TokenUsage accumulates every chat call's Usage under one context, the same
-// way registry.ToolUsage counts tool calls: the board runner plants one in the
-// run's context, RecordingClient adds each response to it, and the runner
-// stamps the totals onto the task_agent_runs row when the run ends. Safe for
-// concurrent use — orchestrator subtasks add from their own goroutines.
 type TokenUsage struct {
 	mu sync.Mutex
 	t  TokenTotals
@@ -41,7 +33,6 @@ func (u *TokenUsage) Add(usage domain.Usage) {
 	u.t.CacheWriteTokens += int64(usage.CacheWriteTokens)
 }
 
-// Totals is nil-safe: an unmeasured run reads as zeros.
 func (u *TokenUsage) Totals() TokenTotals {
 	if u == nil {
 		return TokenTotals{}

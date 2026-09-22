@@ -9,14 +9,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// assertStrictObjectSchema mirrors the orchestrator package's check: OpenAI's
-// strict json_schema mode rejects a schema unless every object sets
-// "additionalProperties": false and lists every one of its own properties in
-// "required" (there is no such thing as an optional field in strict mode).
-// parseReflectionOutput itself never checks for missing keys — domain.
-// ReflectionOutput is unmarshaled directly with no presence validation — so
-// this is purely the API-level constraint, and the one a hand-edited
-// reflectionOutputSchema would otherwise only break in production.
+// Mirrors the orchestrator package's check: strict json_schema mode rejects a schema unless every object sets "additionalProperties": false and lists every one of its own properties in "required". parseReflectionOutput never checks missing keys — domain.ReflectionOutput is unmarshaled directly — so this is purely the API-level constraint, the one a hand-edited schema would otherwise only break in production.
 func assertStrictObjectSchema(t *testing.T, schema map[string]interface{}, path string) {
 	t.Helper()
 	typ, _ := schema["type"].(string)
@@ -77,12 +70,7 @@ func TestReflectionOutputSchema_MarshalsAndSatisfiesStrictMode(t *testing.T) {
 	assertStrictObjectSchema(t, schema, "reflection")
 }
 
-// TestReflectionOutputSchema_ChangesRequireReason locks the contract that made
-// the prompt-only "matching the provided schema" instruction unenforceable: a
-// CLI-path model has no schema at all, so parseReflectionOutput is the only
-// enforcement there is. The HTTP-path schema still requires reason on every
-// change kind so a provider with strict structured-output support enforces it
-// too.
+// Locks the contract that made the prompt-only instruction unenforceable: a CLI-path model has no schema, so parseReflectionOutput is the only enforcement there is; the HTTP-path schema still requires reason on every change kind so strict providers enforce it too.
 func TestReflectionOutputSchema_ChangesRequireReason(t *testing.T) {
 	schema := reflectionOutputSchema()
 	props, _ := schema["properties"].(map[string]interface{})
@@ -114,8 +102,6 @@ func TestReflectionOutputSchema_ChangesRequireReason(t *testing.T) {
 	}
 }
 
-// recordingLLM answers with one canned response and remembers every request it
-// was handed, so a test can inspect what the caller actually asked for.
 type recordingLLM struct {
 	answer   string
 	requests []domain.AgentRequest
@@ -134,10 +120,7 @@ func (r *recordingLLM) Embed(_ context.Context, _ string, _ string) ([]float32, 
 	return nil, nil
 }
 
-// The reflection stage used to send domain.JSONResponseFormat() — bare
-// {"type":"json_object"}, no schema — so a provider with strict structured
-// output support had nothing to constrain decoding against. runLLM must now
-// carry the real schema.
+// runLLM used to send bare {"type":"json_object"} with no schema, so a provider with strict structured-output support had nothing to constrain decoding against; it must now carry the real schema.
 func TestRunLLM_RequestCarriesTheReflectionSchema(t *testing.T) {
 	llm := &recordingLLM{answer: `{"self_assessment":"ok","skills":[],"rules":[],"memories":[],"reverts":[]}`}
 	svc := &Service{

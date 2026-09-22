@@ -129,11 +129,6 @@ func TestCommitTrailersOmitsWhicheverIsMissing(t *testing.T) {
 	assert.Equal(t, "", commitTrailers("", ""))
 }
 
-// A commit-message policy that only recognises standard git trailers (which
-// "Agent: <name>" was not) still has to accept this one, since Co-authored-by
-// is exactly that — and it is not optional: it is the one place per-agent
-// performance tracking can still tell which agent wrote a commit once it has
-// landed.
 func TestCommitTrailersUsesCoAuthoredByNotABespokeAgentLine(t *testing.T) {
 	trailer := commitTrailers("", "QA Reviewer")
 	assert.Contains(t, trailer, "Co-authored-by: QA Reviewer <qa-reviewer@agents.tasktrooper.ai>")

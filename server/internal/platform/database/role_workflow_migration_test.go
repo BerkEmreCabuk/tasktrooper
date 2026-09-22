@@ -22,11 +22,9 @@ import (
 
 const lastMigrationBeforeRoleWorkflows = "142_role_kpis_v2"
 
-// RoleWorkflowMigrationSuite covers migration 143: the roles/task_types/
-// workflow_stages data it seeds must reproduce today's board behaviour (see
-// release-b-plan.md §3), and workflowtest.Default() must build exactly the
-// same shape for a fresh install with every analiz-assignee area left on its
-// default (system-architect).
+// RoleWorkflowMigrationSuite covers migration 143: its seeded roles, task types
+// and workflow stages must reproduce today's board behaviour (release-b-plan.md
+// §3), and workflowtest.Default() must build the same shape for a fresh install.
 type RoleWorkflowMigrationSuite struct {
 	suite.Suite
 	ctx    context.Context
@@ -83,9 +81,8 @@ func (s *RoleWorkflowMigrationSuite) freshDatabase() *pgxpool.Pool {
 	return pool
 }
 
-// builtinAgentNames are the six names migration 143's role assignments key
-// off; seeded minimally (just a name — every other agents column defaults)
-// so the migration's agent lookups have something to match.
+// builtinAgentNames are the six names migration 143's role assignments key off,
+// seeded minimally so the migration's agent lookups have something to match.
 var builtinAgentNames = []string{
 	"backend-developer", "frontend-developer", "mobile-developer",
 	"system-architect", "qa-agent", "product-manager",
@@ -98,10 +95,6 @@ func (s *RoleWorkflowMigrationSuite) seedBuiltinAgents(pool *pgxpool.Pool) {
 	}
 }
 
-// TestAllDefaultAnalizSettings covers the "all default" scenario: no
-// analiz_assignee_* rows at all, so every area falls back to
-// system-architect and the analyst role collapses to one areas=NULL
-// assignment — the exact case workflowtest.Default() models.
 func (s *RoleWorkflowMigrationSuite) TestAllDefaultAnalizSettings() {
 	pool := s.freshDatabase()
 	s.Require().NoError(database.RunMigrationsUpTo(s.ctx, pool, lastMigrationBeforeRoleWorkflows))
@@ -121,9 +114,6 @@ func (s *RoleWorkflowMigrationSuite) TestAllDefaultAnalizSettings() {
 	s.Zero(count, "analiz_assignee_* settings must be deleted")
 }
 
-// TestBackendOverridden covers a backend-only override: the analyst role
-// must end up with TWO assignments — system-architect for frontend+mobile,
-// and the overridden agent for backend alone.
 func (s *RoleWorkflowMigrationSuite) TestBackendOverridden() {
 	pool := s.freshDatabase()
 	s.Require().NoError(database.RunMigrationsUpTo(s.ctx, pool, lastMigrationBeforeRoleWorkflows))
@@ -148,9 +138,6 @@ func (s *RoleWorkflowMigrationSuite) TestBackendOverridden() {
 	s.ElementsMatch([]string{"frontend", "mobile"}, byAgent["system-architect"])
 }
 
-// TestMissingAgentIsSkipped covers analiz_assignee_backend naming an agent
-// this install has no row for (renamed/deleted): the migration must not
-// fail, and simply seeds no assignment for that area.
 func (s *RoleWorkflowMigrationSuite) TestMissingAgentIsSkipped() {
 	pool := s.freshDatabase()
 	s.Require().NoError(database.RunMigrationsUpTo(s.ctx, pool, lastMigrationBeforeRoleWorkflows))
@@ -163,16 +150,11 @@ func (s *RoleWorkflowMigrationSuite) TestMissingAgentIsSkipped() {
 	s.Require().NoError(err)
 	analyst := findRole(roles, "analyst")
 	s.Require().NotNil(analyst)
-	// frontend+mobile still resolve to system-architect; "ghost-agent" (backend)
-	// matches no agents row and is silently dropped rather than failing the
-	// migration.
 	s.Require().Len(analyst.Assignments, 1)
 	s.Equal("system-architect", analyst.Assignments[0].AgentName)
 	s.ElementsMatch([]string{"frontend", "mobile"}, analyst.Assignments[0].Areas)
 }
 
-// TestTaskTypeForeignKey covers the schema change itself: an unknown
-// task_type is now refused by a FK, not a fixed CHECK list.
 func (s *RoleWorkflowMigrationSuite) TestTaskTypeForeignKey() {
 	pool := s.freshDatabase()
 	s.Require().NoError(database.RunMigrationsUpTo(s.ctx, pool, lastMigrationBeforeRoleWorkflows))
@@ -196,12 +178,9 @@ func (s *RoleWorkflowMigrationSuite) TestTaskTypeForeignKey() {
 	s.NoError(err, "a real task_types row must be accepted")
 }
 
-// TestParityWithWorkflowtestDefault is the migration's own promise: for a
-// fresh install with every analiz-assignee area left on its default, the
-// rows this migration writes and the Go fixture workflowtest.Default()
-// builds must describe the identical set of roles, task types and workflow
-// stages — the parity target release-b-plan.md §Goal commits to ("identical
-// except three deliberate fixes for the technical type").
+// TestParityWithWorkflowtestDefault checks migration 143's promise: what it
+// seeds for a fresh install and what workflowtest.Default() builds must be the
+// identical shape (release-b-plan.md §Goal).
 func (s *RoleWorkflowMigrationSuite) TestParityWithWorkflowtestDefault() {
 	pool := s.freshDatabase()
 	s.Require().NoError(database.RunMigrationsUpTo(s.ctx, pool, lastMigrationBeforeRoleWorkflows))
@@ -216,9 +195,8 @@ func (s *RoleWorkflowMigrationSuite) TestParityWithWorkflowtestDefault() {
 
 	want := workflowtest.Default()
 
-	// Roles: compare by key, ignoring generated ids (assignments compared by
-	// agent name, not agent id — the migration's agent ids are real, the
-	// fixture's are deterministic fakes).
+	// Compare by key and by agent name, not by id: the migration's ids are
+	// real, the fixture's are deterministic fakes.
 	s.Require().Len(migratedRoles, len(want.Roles))
 	for _, wantRole := range want.Roles {
 		got := findRole(migratedRoles, wantRole.Key)
@@ -230,7 +208,6 @@ func (s *RoleWorkflowMigrationSuite) TestParityWithWorkflowtestDefault() {
 		s.ElementsMatch(normalizeAssignments(wantRole.Assignments), normalizeAssignments(got.Assignments), "role %q assignments", wantRole.Key)
 	}
 
-	// Purposes: compare by which ROLE KEY each purpose points at.
 	migratedPurposes, err := postgres.NewRoleStore(db).ListPurposes(s.ctx)
 	s.Require().NoError(err)
 	roleKeyByID := map[string]string{}
@@ -255,7 +232,6 @@ func (s *RoleWorkflowMigrationSuite) TestParityWithWorkflowtestDefault() {
 	}
 	s.Equal(wantPurposeRole, gotPurposeRole)
 
-	// Task types + workflow stages.
 	s.Require().Len(migratedWorkflows, len(want.Workflows))
 	roleKeyOf := func(id *uuid.UUID, roles []domain.AgentRole) string {
 		if id == nil {
@@ -319,7 +295,7 @@ func orEmpty(s []string) []string {
 
 type comparableAssignment struct {
 	AgentName string
-	Areas     string // joined, order-independent via sort
+	Areas     string
 	Priority  int
 }
 

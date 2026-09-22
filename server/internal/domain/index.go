@@ -34,36 +34,25 @@ type WorkspaceIndex struct {
 	IndexedAt      *time.Time  `json:"indexed_at,omitempty"`
 	Error          string      `json:"error,omitempty"`
 	// SyncWarning reports why the code this index describes could not be brought
-	// up to date before the last pass — the pull from origin failed, or the
-	// cloud's own mirror clone was gone and could not be restored at all. It is
-	// runtime state, not a stored column: a completed index built on a stale (or
-	// absent) clone is otherwise indistinguishable from one built on current
-	// code.
+	// up to date before the last pass (the pull failed, or the mirror clone was
+	// gone); runtime state, not a stored column — a completed index built on a
+	// stale clone is otherwise indistinguishable from one built on current code.
 	SyncWarning string `json:"sync_warning,omitempty"`
 	// EmbeddingModel and EmbeddingDims are what this index was ACTUALLY built
-	// with (migration 116), written by the pass that embedded it rather than
-	// inferred afterwards. They are the left-hand side of
-	// EmbeddingProvenanceStale; the right-hand side is whatever this install's
-	// embedding provider resolves to now.
-	//
-	// Both are blank/zero on an index built before migration 116, and "unknown"
-	// is never read as "matches" — see EmbeddingProvenanceStale.
+	// with (migration 116), the left-hand side of EmbeddingProvenanceStale; the
+	// right-hand side is whatever this install's embedding provider resolves to
+	// now. Both are blank/zero on an index built before the migration, and
+	// "unknown" is never read as "matches".
 	EmbeddingModel string `json:"embedding_model,omitempty"`
 	EmbeddingDims  int    `json:"embedding_dims,omitempty"`
 	// EmbeddingStale reports that this index's vectors are not comparable with
 	// a query embedded by the CURRENT model, so search against it is refused
-	// until it has been rebuilt.
-	//
-	// Runtime state, like SyncWarning, and for the reason migration 116 stored
-	// no boolean: staleness is a comparison against a setting that moves
+	// until it has been rebuilt. Runtime state, like SyncWarning, computed on
+	// every read: staleness is a comparison against a setting that moves
 	// independently of any index row, so a persisted flag would be wrong from
-	// the moment the setting changed until some sweep caught up. It is computed
-	// on every read instead.
-	//
-	// It is a field at all because of what its absence looks like: a green
-	// "completed 100%" card over an index whose every vector is unusable, and a
-	// code search that answers "no results" for a repository that is fully
-	// indexed.
+	// the moment the setting changed. It exists because of what its absence
+	// looks like: a green "completed 100%" card over an index whose every
+	// vector is unusable, and a search that answers "no results".
 	EmbeddingStale bool `json:"embedding_stale,omitempty"`
 	// EmbeddingWarning is the sentence shown next to that flag: what the index
 	// holds, what is configured now, and that a re-index is the fix. Empty when
@@ -72,26 +61,19 @@ type WorkspaceIndex struct {
 }
 
 // ErrIndexEmbeddingStale marks every refusal caused by searching an index whose
-// vectors came from a different embedding model than the one the query would be
-// embedded with.
-//
-// It is a sentinel because the alternative to refusing is not an empty result,
-// it is a WRONG one: cosine similarity between two models' vectors does not
-// error, it returns a confident ranking of unrelated code. Callers have to tell
-// that apart from "this repository has no index" and from a transient database
-// failure — the first is fixed by re-indexing, the second by indexing, the third
-// by retrying — and only a typed error lets them, so the sentence can say which
-// one it is instead of every caller inventing "no results".
+// vectors came from a different embedding model than the query would be
+// embedded with. It is a sentinel because the alternative to refusing is not an
+// empty result, it is a WRONG one: cosine similarity between two models'
+// vectors does not error, it returns a confident ranking of unrelated code.
+// Callers need a typed error to tell that apart from "no index" and from a
+// transient failure.
 var ErrIndexEmbeddingStale = errors.New("workspace index was built with a different embedding model")
 
 // EmbeddingStaleMessage is the one sentence every layer says about a stale
-// index — the tool result an agent reads, the API error the settings page
-// renders, the warning on the index card — so the same fact cannot acquire
-// three different explanations.
-//
-// It names both models on purpose. "Re-index this repository" on its own reads
-// like a defect report; naming what changed makes it plain that the trigger was
-// a deliberate embedding-provider change and that nothing is broken.
+// index — tool result, API error, card warning — so the same fact cannot
+// acquire three different explanations. It names both models on purpose:
+// "re-index this repository" alone reads like a defect report; naming what
+// changed makes it plain the trigger was a deliberate embedding-provider change.
 func EmbeddingStaleMessage(indexModel string, indexDimensions int, configuredModel string, configuredDimensions int) string {
 	built := indexModel
 	if built == "" {
@@ -102,8 +84,7 @@ func EmbeddingStaleMessage(indexModel string, indexDimensions int, configuredMod
 	// The dimension is appended even when the model cannot be named, because
 	// that is the case where it is the ONLY evidence: a query vector of a
 	// different length is proof of a model change with nothing configured to
-	// compare against, and "a different model" on its own would read as a
-	// guess rather than as the measurement it is.
+	// compare against.
 	now := configuredModel
 	if now == "" {
 		now = "a different model"

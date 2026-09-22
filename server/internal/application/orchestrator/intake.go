@@ -26,13 +26,10 @@ type IntakeOptions struct {
 	SoloAgentDescription string
 	Lang                 string
 	ProviderType         domain.LLMProviderType
-	// Workspace is the rendered projects/repositories snapshot. Intake runs
-	// without tools, so this is the only thing stopping it from asking the
-	// stakeholder whether the team has access to the codebase.
+	// Rendered projects/repositories snapshot; the only thing stopping an untooled
+	// intake from asking whether the team has codebase access.
 	Workspace string
-	// SoloAgentRules and SoloAgentSkills carry the constrained agent's catalog
-	// into the prompt. Intake is the stage that decides ready-vs-ask, so
-	// without them it asks questions the agent's own rules forbid.
+	// Carry the constrained agent's rules and skills into the prompt, or intake asks what the rules forbid.
 	SoloAgentRules  []domain.OrchestratorRule
 	SoloAgentSkills []domain.Skill
 }
@@ -66,8 +63,7 @@ func (e *IntakeExtractor) Extract(ctx context.Context, userMessage string, histo
 		intake, err := parseGoalIntake(resp.Message.Content)
 		if err != nil {
 			lastErr = err
-			// Weak local models often return prose on the first attempt; the
-			// self-correction retry recovers. Only alarm if attempts are exhausted.
+			// Weak local models return prose first; the self-correction retry recovers.
 			if attempt < maxPlannerRetries {
 				log.Debug().Err(err).Int("attempt", attempt+1).Msg("intake parse failed, retrying")
 			} else {
@@ -182,11 +178,7 @@ When the request involves creating tasks, planning features, websites, apps, or 
 			sb.WriteString(opts.SoloAgentDescription)
 			sb.WriteString("\n")
 		}
-		// The catalog used to be referenced ("follow this agent's catalog
-		// skills and rules") without ever being included, so intake — the stage
-		// that actually decides ask-vs-proceed — never saw the agent's
-		// forbidden-question list. Each section now only claims to exist when
-		// it is really there.
+		// Each section claims to exist only when it is really there.
 		if len(opts.SoloAgentRules) > 0 {
 			sb.WriteString("This agent's own rules follow. A question any of them forbids must not be asked — drop it and set ready to true, or route it the way the rule says.\n")
 			for _, r := range opts.SoloAgentRules {
@@ -200,9 +192,7 @@ When the request involves creating tasks, planning features, websites, apps, or 
 			}
 		}
 		if len(enabledSkills) > 0 {
-			// Metadata only — the skill bodies are loaded by the executor when
-			// the task runs. Intake just needs to know the capability exists so
-			// it does not ask the stakeholder to supply it.
+			// Metadata only — the executor loads the skill bodies when the task runs.
 			sb.WriteString("\nSkills this agent already has (never ask the stakeholder for what these cover):\n")
 			for _, sk := range enabledSkills {
 				sb.WriteString(fmt.Sprintf("- %s: %s\n", sk.Name, sk.Description))

@@ -8,35 +8,24 @@ import (
 	"strings"
 )
 
-// Pin is one version declaration a checkout makes, with the file that made it.
 type Pin struct {
-	// Language is normalised and lowercase: go, node, python, ruby, java, rust,
-	// flutter, dart — or whatever a `.tool-versions` line named, unchanged.
 	Language string
-	// Version is what the file says, verbatim. A range stays a range.
+
 	Version string
-	// Exact is false for a constraint: ">=3.11", "^20" and "lts/hydrogen" name
-	// a set of runtimes, and passing a set where a version is expected is a
-	// guess dressed as a fact.
+
 	Exact bool
-	// Source is the file this came from, relative to the checkout.
+
 	Source string
 }
 
-// pinFileLimit bounds one pin file, so a file in the checkout cannot be an
-// allocation primitive. The largest of them is a package.json.
 const pinFileLimit = 1024 * 1024
 
 const pinValueLimit = 128
 
-// maxPins bounds the answer: `.tool-versions` may name any tool, so the count
-// is the repository's to choose.
 const maxPins = 128
 
 var exactVersion = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*([.-][A-Za-z0-9][A-Za-z0-9._+-]*)?$`)
 
-// rustChannel is the other shape of an exact answer: rustup takes a channel
-// name, so `stable` and a dated nightly are pins in rustup's own terms.
 var rustChannel = regexp.MustCompile(`^(stable|beta|nightly)(-[0-9]{4}-[0-9]{2}-[0-9]{2})?$`)
 
 var toolAliases = map[string]string{
@@ -46,17 +35,6 @@ var toolAliases = map[string]string{
 	"jdk":    "java",
 }
 
-// ReadPins reports what the checkout at dir DECLARES, in precedence order per
-// language: a version manager's own file first, then the language's dotfile,
-// then a manifest's constraint. Two files pinning one language both appear, so
-// a disagreement is visible rather than silently resolved.
-//
-// Only files whose purpose is to state a version are read. A directory full of
-// `.py` says somebody wrote Python, not which Python, and a version invented
-// here would be passed on as a pin. Absence is absence: a language with no pin
-// file does not appear at all. Only dir itself is read, never below it — a
-// monorepo pins per package, and walking would mean choosing which answer is
-// the repository's.
 func ReadPins(dir string) []Pin {
 	r := pinReader{dir: dir}
 	var pins []Pin
@@ -71,10 +49,6 @@ func ReadPins(dir string) []Pin {
 
 type pinReader struct{ dir string }
 
-// text reads one pin file. A symlink anywhere on the way is skipped rather than
-// followed: the names are this package's own, so a link at one of them was put
-// there by the checkout, and following it would read a file outside the
-// checkout through a name that looks like it is inside.
 func (r pinReader) text(name string) (string, bool) {
 	path := r.dir
 	parts := strings.Split(filepath.ToSlash(name), "/")
@@ -130,8 +104,6 @@ var pinSources = []func(pinReader) []Pin{
 	gemfilePins,
 }
 
-// toolVersionsPins reads asdf's and mise's shared format. Extra versions on a
-// line are fallbacks, and the first is the one that would be used.
 func toolVersionsPins(r pinReader) []Pin {
 	text, ok := r.text(".tool-versions")
 	if !ok {
@@ -166,9 +138,6 @@ func misePins(r pinReader) []Pin {
 	return nil
 }
 
-// goPins reads go.mod, then `.go-version`. go.mod's `toolchain` line is already
-// a toolchain name (`go1.24.3`) and is the most precise statement a go.mod can
-// make, so it is kept exact even though its shape is not exactVersion's.
 func goPins(r pinReader) []Pin {
 	var out []Pin
 	if text, ok := r.text("go.mod"); ok {
@@ -279,9 +248,6 @@ func flutterPins(r pinReader) []Pin {
 	return out
 }
 
-// pubspecPins reads the `environment` block, where both SDK constraints live.
-// A top-level key ends the block, which is what keeps an `sdk:` under
-// `dependencies:` from being read as the Dart version.
 func pubspecPins(r pinReader) []Pin {
 	text, ok := r.text("pubspec.yaml")
 	if !ok {
@@ -317,8 +283,6 @@ func pubspecPins(r pinReader) []Pin {
 	return out
 }
 
-// packageJSONPins reads `engines.node` only: `npm`, `pnpm` and `yarn` there are
-// package managers, not runtimes.
 func packageJSONPins(r pinReader) []Pin {
 	text, ok := r.text("package.json")
 	if !ok {
@@ -369,12 +333,6 @@ func gemfilePins(r pinReader) []Pin {
 
 type tomlEntry struct{ key, value string }
 
-// tomlTable returns the `key = value` lines inside one table and only that
-// table. Not a TOML parser: it understands headers, `key = value` and comments,
-// which is all these files use for the keys read here. It is table-aware so a
-// `node = "20"` under `[env]` is not read as a tool pin, and anything more
-// structured falls out as a value firstTOMLValue does not recognise — no pin
-// rather than a wrong one.
 func tomlTable(text, want string) []tomlEntry {
 	var out []tomlEntry
 	current := ""
@@ -402,8 +360,6 @@ func tomlTable(text, want string) []tomlEntry {
 	return out
 }
 
-// firstTOMLValue unwraps a quoted string, or the first element of an array of
-// them: mise writes `node = ["20", "18"]` for a version and its fallbacks.
 func firstTOMLValue(value string) string {
 	value = strings.TrimSpace(value)
 	if strings.HasPrefix(value, "[") {
@@ -416,9 +372,6 @@ func firstTOMLValue(value string) string {
 	return strings.Trim(value, `"'`)
 }
 
-// firstLine is a whole-file pin: the first non-blank, non-comment line. An
-// `.nvmrc` is sometimes written `v20.11.0`; the `v` is nvm's prefix and no other
-// tool accepts it.
 func firstLine(text string) string {
 	for _, line := range strings.Split(text, "\n") {
 		trimmed := strings.TrimSpace(line)

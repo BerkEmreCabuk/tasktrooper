@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// fakeSyncGit makes the working-copy pull fail or succeed on demand.
 type fakeSyncGit struct {
 	fakeReleaseGit
 	syncErr error
@@ -25,9 +24,6 @@ func newSyncService(git *fakeSyncGit) *Service {
 	}
 }
 
-// A pull that fails must leave a warning behind: the index pass still completes
-// on the stale checkout, and without this the UI reports a healthy index built
-// from code that is weeks old.
 func TestPullFailureIsRecordedAndCleared(t *testing.T) {
 	git := &fakeSyncGit{syncErr: errors.New("git fetch: authentication failed")}
 	git.hasGit = true
@@ -46,9 +42,6 @@ func TestPullFailureIsRecordedAndCleared(t *testing.T) {
 	}
 }
 
-// The status endpoint is polled every few seconds while the settings page is
-// open; the freshness probe behind it fetches from origin, so it must run at
-// most once per interval.
 func TestFreshnessCheckIsThrottled(t *testing.T) {
 	svc := newSyncService(&fakeSyncGit{})
 	id := uuid.New()
@@ -69,8 +62,6 @@ func TestFreshnessCheckIsThrottled(t *testing.T) {
 	}
 }
 
-// A repository with no working copy has nothing to pull, and must not be
-// reported as out of sync.
 func TestPullSkippedWithoutWorkingCopy(t *testing.T) {
 	git := &fakeSyncGit{syncErr: errors.New("should not be called")}
 	git.hasGit = false

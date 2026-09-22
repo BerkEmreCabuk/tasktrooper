@@ -54,7 +54,7 @@ func TestBackupCopiesAnExistingClusterOnce(t *testing.T) {
 		t.Fatalf("partial copy left behind: %v", err)
 	}
 
-	// The second start must keep the pre-133 copy, not overwrite it with the
+	// A second start must keep the pre-133 copy, not overwrite it with the
 	// migrated cluster.
 	if err := os.WriteFile(filepath.Join(pgData, "base/1/1259"), []byte("migrated"), 0o600); err != nil {
 		t.Fatal(err)

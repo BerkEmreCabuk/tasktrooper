@@ -11,10 +11,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// readyTaskStore is fakePackageTaskStore with ListByRepository actually scoped
-// to the repository — the shared fake always answers nil there, which is fine
-// for the tests it was built for but wrong for ListReadyTasks, which is
-// exercised with more than one repository in play.
 type readyTaskStore struct {
 	*fakePackageTaskStore
 }
@@ -29,10 +25,6 @@ func (r *readyTaskStore) ListByRepository(_ context.Context, repositoryID uuid.U
 	return out, nil
 }
 
-// readyRelationStore answers ListUnfinishedBlockers from a scripted edge list —
-// the edges a real ListUnfinishedBlockers query would already have filtered to
-// unfinished sources, since that filtering is the store's job, not the
-// service's.
 type readyRelationStore struct {
 	*graphRelationStore
 	unfinished []domain.TaskRelation
@@ -80,9 +72,6 @@ func TestListReadyTasksIncludesATaskWhoseBlockerIsDone(t *testing.T) {
 	blocker := domain.BoardTask{ID: uuid.New(), RepositoryID: repoID, Key: "T-1", Column: domain.TaskColumnDone}
 	unblocked := domain.BoardTask{ID: uuid.New(), RepositoryID: repoID, Key: "T-2", Column: domain.TaskColumnTodo}
 	svc, _ := newReadyFixture(blocker, unblocked)
-	// A finished blocker never appears in ListUnfinishedBlockers's result — the
-	// store query itself excludes it. The fake leaves `unfinished` empty to
-	// mirror that.
 
 	ready, err := svc.ListReadyTasks(context.Background(), repoID)
 

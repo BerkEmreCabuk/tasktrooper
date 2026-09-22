@@ -7,18 +7,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// These five strings are byte-for-byte copies of what
-// board.taskTypeInstruction(domain.BoardTask{TaskType: "analiz", ...})
-// returned at each column, and of board.analizProducesDocuments, captured
-// immediately before both were deleted in favour of reading
-// domain.WorkflowStage.Instructions off the workflow. This file is the proof
-// WP-B2b's task required before that deletion: that migration 143 (via
-// workflowtest.Default(), which the migration's own parity test asserts
-// against byte-for-byte) writes the identical prompt text the old
-// column/type-literal switch produced. Nothing here should ever need to
-// change again — a real wording change belongs in migration 143 and
-// workflowtest/stages.go, and this test would then need updating deliberately
-// alongside it, not as a side effect of something else.
 const goldenAnalizProducesDocuments = "Your deliverable is a SPEC and an IMPLEMENTATION PLAN attached to this task with add_task_document, " +
 	"grounded in code you actually read (get_repo_tree, codebase_search, grep_code, get_symbol_skeleton, expand_symbol_context) — " +
 	"a document attached by a run that explored nothing is rejected and the run is failed. " +
@@ -48,13 +36,6 @@ var goldenAnalizStageInstructions = map[domain.TaskColumn]string{
 		"Write no code yourself. List the created tasks in a comment and move this analiz task to `released` as the last action of the step that created them.",
 }
 
-// TestGoldenAnalizStageInstructionsMatchOldTaskTypeInstruction pins
-// workflowtest.Default()'s analiz WorkflowStage.Instructions — and therefore
-// migration 143's seeded rows, which the migration's own parity test asserts
-// equal workflowtest.Default() column for column — against the exact text the
-// deleted board.taskTypeInstruction/analizProducesDocuments produced for the
-// same five columns. A change to either side that is not a deliberate,
-// matching change to the other fails here first.
 func TestGoldenAnalizStageInstructionsMatchOldTaskTypeInstruction(t *testing.T) {
 	wf := workflowtest.Default().Workflows[domain.TaskType("analiz")]
 
@@ -69,9 +50,6 @@ func TestGoldenAnalizStageInstructionsMatchOldTaskTypeInstruction(t *testing.T) 
 		}
 	}
 
-	// Every other column of the analiz workflow carried no type instruction —
-	// taskTypeInstruction's default case returned "" for them, so
-	// stage.Instructions must be "" too.
 	for _, stage := range wf.Stages {
 		if _, isGolden := goldenAnalizStageInstructions[stage.Column]; isGolden {
 			continue
@@ -82,12 +60,6 @@ func TestGoldenAnalizStageInstructionsMatchOldTaskTypeInstruction(t *testing.T) 
 	}
 }
 
-// TestGoldenNonAnalizStageInstructionsAreEmpty pins the other half of
-// taskTypeInstruction's contract: it returned "" for every column of every
-// non-analiz type, so columnInstruction fell through to its own per-column
-// switch. workflowtest.Default() must carry the same emptiness for task, bug
-// and technical, or columnInstruction would start preferring a stage
-// instruction those types never had before.
 func TestGoldenNonAnalizStageInstructionsAreEmpty(t *testing.T) {
 	for _, taskType := range []domain.TaskType{
 		domain.TaskType("task"), domain.TaskType("bug"), domain.TaskType("technical"),

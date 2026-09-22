@@ -10,10 +10,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// TestAddCommentStampsActorUserID covers the human-comment leg of T-24: a
-// comment written on a request that carried a verified X-Internal-Actor
-// header must record whose UID caused it, and a request without one (the
-// self-hosted/desktop case) must not fabricate one.
 func TestAddCommentStampsActorUserID(t *testing.T) {
 	repoID, taskID := uuid.New(), uuid.New()
 	repos := &fakeReleaseRepoStore{repo: domain.Repository{ID: repoID}}

@@ -74,9 +74,7 @@ func (m *memCatalogStore) GetSkillByAgentAndName(ctx context.Context, agentID uu
 	return domain.Skill{}, assert.AnError
 }
 
-// Persisted like UpdateRule below. A no-op here made every seed reconcile look
-// like it had landed while the store still held the old row, so a test could
-// not tell "the reconcile wrote it" from "the reconcile skipped it".
+// Persists like UpdateRule below; a no-op here made every reconcile look landed while the store held the old row.
 func (m *memCatalogStore) UpdateSkill(ctx context.Context, skill domain.Skill) (domain.Skill, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -312,15 +310,11 @@ func (stubLLMClient) Embed(ctx context.Context, input string, model string) ([]f
 	return nil, nil
 }
 
-// claudeCodeAttached is the probe a host with the CLI wired up answers with.
 func claudeCodeAttached(p domain.LLMProviderType) bool {
 	return p == domain.LLMProviderClaudeCode
 }
 
-// seedBuiltinTemplate adds one built-in template for CreateAgentFromTemplate
-// to consume. Templates are no longer boot-time seeded — they are rows the
-// user saved, or freshly upserted from the catalog — so the tests wire them in
-// directly and only exercise what CreateAgentFromTemplate does with them.
+// Templates are no longer boot-time seeded, so tests wire them in directly.
 func seedBuiltinTemplate(t *testing.T, store *memTemplateStore, name string) domain.AgentTemplate {
 	t.Helper()
 	tpl, err := store.UpsertByName(context.Background(), domain.AgentTemplate{
@@ -330,11 +324,6 @@ func seedBuiltinTemplate(t *testing.T, store *memTemplateStore, name string) dom
 	return tpl
 }
 
-// fillTemplateAgentModels derives the default model pair from the provider the
-// new agent is being saved onto: Claude Code leaves both empty (the CLI knows
-// its own defaults), an HTTP provider gets the two names its definition
-// carries, and a template that names no provider at all gets Claude Code only
-// when this host can actually run it.
 func TestCreateAgentFromTemplate_ProviderDefaults(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -384,9 +373,6 @@ func TestCreateAgentFromTemplate_ProviderDefaults(t *testing.T) {
 	}
 }
 
-// A model an operator chose on create — the override, since a built-in
-// template itself never names one — is left alone entirely: the helper fills
-// the pair only when neither half is set.
 func TestCreateAgentFromTemplate_LeavesAnOverriddenModelAlone(t *testing.T) {
 	store := newMemCatalogStore()
 	templates := &memTemplateStore{}
@@ -404,8 +390,6 @@ func TestCreateAgentFromTemplate_LeavesAnOverriddenModelAlone(t *testing.T) {
 	assert.Empty(t, agent.ModelHeavy, "a half-set pair is not topped up")
 }
 
-// Creating from a built-in template copies its KPIs onto the new agent the
-// same way it carries skills and subscriptions.
 func TestCreateAgentFromTemplate_CopiesDefaultKPIs(t *testing.T) {
 	store := newMemCatalogStore()
 	templates := &memTemplateStore{}
@@ -433,9 +417,6 @@ func TestCreateAgentFromTemplate_CopiesDefaultKPIs(t *testing.T) {
 	assert.Equal(t, agent.ID, got[0].AgentID)
 }
 
-// parseSeedDoc is the frontmatter reader shared by catalog files and the
-// merge flow's model responses; the generator's round-trip test covered it
-// against every real agent, this keeps the parser itself honest in CI.
 func TestParseSeedDoc(t *testing.T) {
 	meta, body, err := parseSeedDoc("---\nname: tally\ncategory: check\n---\n\nDo the sums.\n")
 	require.NoError(t, err)

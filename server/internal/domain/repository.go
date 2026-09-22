@@ -14,179 +14,107 @@ type Repository struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	RootPath    string    `json:"root_path"`
-	// RemoteURL is the git origin the working copy came from. Persisted so a
-	// lost or never-cloned RootPath can be restored without the human supplying
-	// the path again — the working copy is a cache, this is the source of truth.
+	// RemoteURL is the git origin the working copy came from, persisted so a
+	// lost RootPath can be restored without the human supplying the path again.
 	RemoteURL     string `json:"remote_url,omitempty"`
 	VerifyCommand string `json:"verify_command"`
 	BuildCommand  string `json:"build_command"`
 	TestCommand   string `json:"test_command"`
-	// CoverageThreshold is the WHOLE-REPO line coverage bar the run's coverage
-	// note is written against. 0 means the default
-	// (board.DefaultCoverageThreshold, 90%).
-	//
-	// It blocks nothing. Coverage is measured, stated in the hand-off and left
-	// there for whoever reads the run — holding a finished task over a
-	// percentage stops the work without raising the number, and on a whole-repo
-	// figure it holds it over code the task never touched. The diff's own
-	// figure is reported alongside it; see board.NewCodeCoverageThreshold.
+	// CoverageThreshold is the whole-repo line-coverage bar; 0 = the board's
+	// 90% default. It blocks nothing — coverage is measured and stated in the
+	// hand-off, never used to hold a task.
 	CoverageThreshold float64 `json:"coverage_threshold,omitempty"`
-	// RequireOverallCoverage decides how a shortfall is phrased, not whether it
-	// stops anything: on, the note says the repository's own bar was missed;
-	// off, it states the figure alone so a run does not go chasing a number
-	// nobody set. It survives from when this pair armed a gate.
+	// RequireOverallCoverage decides how a shortfall is phrased (repo's own bar
+	// vs. bare figure), not whether anything stops.
 	RequireOverallCoverage bool `json:"require_overall_coverage"`
-	// MutationEnabled arms the mutation-score bar the same way
-	// RequireOverallCoverage arms the coverage one: it decides how the run's
-	// mutation note is phrased, not whether anything is held. Off by default —
-	// a repository with no mutation tooling scores nothing to judge.
+	// MutationEnabled arms the mutation-score bar the same way, phrasing only;
+	// off by default because a repo with no mutation tooling scores nothing.
 	MutationEnabled bool `json:"mutation_enabled"`
-	// MutationThreshold is the percentage of mutants a run is expected to kill.
-	// 0 means no number was set, in which case the score is reported bare.
+	// MutationThreshold is the percentage of mutants a run is expected to kill;
+	// 0 reports the score bare.
 	MutationThreshold float64 `json:"mutation_threshold,omitempty"`
-	// Kind classifies the repo so pipeline auto-detect uses the right keyword
-	// set (e.g. mobile never matches a docker build). One of RepoKind*.
+	// Kind feeds pipeline auto-detect's keyword set (e.g. mobile never matches
+	// a docker build). One of RepoKind*.
 	Kind string `json:"kind"`
-	// MobilePlatform is only meaningful when Kind == RepoKindMobile: which
-	// platform the app targets, so a run is not sent looking for an Xcode
-	// project in an Android-only tree. One of MobilePlatform*, "" = unset.
+	// MobilePlatform is only meaningful when Kind == RepoKindMobile; one of
+	// MobilePlatform*, "" = unset.
 	MobilePlatform string `json:"mobile_platform,omitempty"`
-	// ReleaseEngine is where this repository's mobile releases are built and
-	// uploaded: ReleaseEngineAuto (the default), ReleaseEngineActions or
-	// ReleaseEngineLocal. Only meaningful when Kind == RepoKindMobile.
-	//
-	// It is a repository-level answer rather than a per-environment one
-	// because the two engines produce the same artifact from the same script
-	// — the choice is about which machine is available, not about what ships.
+	// ReleaseEngine is where mobile releases are built (auto/actions/local),
+	// only meaningful on a mobile repo; a per-environment answer would be wrong
+	// because both engines produce the same artifact.
 	ReleaseEngine string `json:"release_engine,omitempty"`
 	// DetectedAppIdentity is the store identity read off the working copy at
-	// import, for prefilling a store deploy target. Detection, not a decision:
-	// what actually ships is the target's own bundle_id / package_name vars.
+	// import, prefilling a deploy target a human still confirms.
 	DetectedAppIdentity AppIdentity `json:"detected_app_identity"`
 	// DetectedBuildTargets is the Xcode scheme / Gradle module read off the
-	// working copy at import, and it is the ONLY source the generated release
-	// script gets them from — unlike DetectedAppIdentity, which merely
-	// prefills a form a human still confirms. Either half "" refuses the
-	// release rather than falling back to a convention; see BuildTargets.
+	// working copy, and the ONLY source the generated release script gets them
+	// from; either half "" refuses the release rather than guessing.
 	DetectedBuildTargets BuildTargets `json:"detected_build_targets"`
 	// SubRepoKinds is only meaningful when Kind == RepoKindMonorepo: the set of
 	// sub-repo kinds present, each getting its own category → job mapping.
 	SubRepoKinds []string `json:"sub_repo_kinds,omitempty"`
-	// SubProjects is only meaningful when Kind == RepoKindMonorepo: the
-	// addressable, human-curated list of sub-projects detected at import, each
-	// with its own path and kind. Distinct from SubRepoKinds (a deduplicated
-	// set of kind values used for pipeline job routing) — this is the list a
-	// human can retype or remove a row from; neither is derived from the other.
+	// SubProjects is the human-curated, addressable list of sub-projects
+	// detected at import — distinct from SubRepoKinds, neither derived from the
+	// other.
 	SubProjects []RepoSubProject `json:"sub_projects,omitempty"`
 	// AutoReleaseOnDone, when false, stops the done→prod-deploy auto-trigger so
-	// a repo using batched release trains isn't force-deployed per task.
+	// batched release trains are not force-deployed per task.
 	AutoReleaseOnDone bool `json:"auto_release_on_done"`
-	// RequireHumanReview, when true, makes code_review a human approval gate:
-	// the reviewing agent still reviews and its verdict is still recorded, but
-	// an approval is held instead of advancing the task, so a human moves it
-	// forward. A rejection still goes through — approval is what is gated.
-	//
-	// Only code_review. pm_uat is deliberately not gated: its forward move is
-	// into human_uat, which IS the human gate, and holding both made one person
-	// approve the same task twice.
+	// RequireHumanReview makes code_review a human approval gate: an approval is
+	// held, a rejection still goes through. Only code_review — pm_uat's forward
+	// move is into human_uat, so holding both would make one person approve the
+	// same task twice.
 	RequireHumanReview bool `json:"require_human_review"`
-	// RequireReviewChain, when true, refuses to let a task enter done (or
-	// released) until it has passed every review stage its type requires —
-	// code review, QA and UAT for a task/bug, analiz review for an analiz.
-	// See Workflow.ReviewChain.
-	//
-	// Opt-in, and off by default, because the requirement is only honest on a
-	// board that is actually wired for it: a repo with no QA agent subscribed,
-	// or one whose board_columns were customised to drop in_qa or pm_uat, would
-	// have every task parked in front of a stage nothing can satisfy. Turning
-	// it on is the owner asserting the chain exists.
+	// RequireReviewChain, when true, refuses done/released until every review
+	// stage the type requires has passed. Off by default: on a board not wired
+	// for the chain (no QA agent, custom columns), tasks would park in front of
+	// a stage nothing can satisfy.
 	RequireReviewChain bool `json:"require_review_chain"`
-	// RequireReleaseDeploy, when true, refuses to let a task enter released
-	// until a production deploy has actually succeeded for it (a task_pipelines
-	// row with a prod_deploy trigger and a success status; a preprod_deploy
-	// success counts only on a repo with no prod workflow mapped, which is the
-	// same condition under which the pipeline runner itself treats preprod as
-	// the release).
-	//
-	// Opt-in for a sharper reason than RequireReviewChain: a repo with no
-	// deploy workflow mapped records its prod deploy as SKIPPED — nothing ran —
-	// and a skipped pipeline is not evidence of a deploy. Such a repo must
-	// leave this off, or its tasks would never leave done.
+	// RequireReleaseDeploy, when true, refuses released until a production
+	// deploy actually succeeded. A repo with no deploy workflow records that as
+	// SKIPPED, which is not evidence of a deploy, so this must stay off there.
 	RequireReleaseDeploy bool `json:"require_release_deploy"`
-	// RequirePipelineForReview, when true (the default), holds the reviewing
-	// architect back until the build/test pipeline has reported for the task
-	// sitting in code_review. When false, code_review dispatches its reviewer
-	// immediately and the pipeline — if one runs at all — is informational.
-	//
-	// It defaults TRUE, which is the opposite of RequireReviewChain and
-	// RequireReleaseDeploy, and the asymmetry is the point: those two are new
-	// requirements a repository opts INTO, while this is behaviour that has
-	// always been on for every repository and is now opt-OUT-able. Turning it
-	// off is the owner saying "this repository's CI cannot answer" — an
-	// exhausted Actions quota, a repo whose checks live somewhere the control
-	// plane cannot read, a board that simply does not want review gated on a
-	// build.
-	//
-	// It is not the only thing that can open the gate: PipelineGateSweeper
-	// opens it on a timeout or on a refusal from GitHub even here, because a
-	// gate whose only key is an event nobody guarantees is a deadlock. This
-	// setting is the difference between "wait for CI, but never forever" and
-	// "do not wait for CI at all".
+	// RequirePipelineForReview (default true) holds the reviewer until the
+	// build/test pipeline has reported; false dispatches immediately. It is
+	// opt-OUT-able where the other gates are opt-in: this behaviour has always
+	// been on. The gate still opens on timeout even here.
 	RequirePipelineForReview bool `json:"require_pipeline_for_review"`
-	// IncidentPolicy decides what a production incident on this repo triggers:
-	// nothing, a diagnosis task that stops at a proposal, or a full board fix.
+	// IncidentPolicy decides what a production incident on this repo triggers.
 	IncidentPolicy IncidentPolicy `json:"incident_policy"`
-	// TestStrategy decides how a task is verified before it moves on:
-	// local (workspace tests only), stage (deploy to staging for QA, default)
-	// or per_step (deploy at every reviewed step).
+	// TestStrategy decides how a task is verified: local, stage (default), or
+	// per_step.
 	TestStrategy string `json:"test_strategy"`
-	// WebhookInstalled reports whether a GitHub push webhook is registered for
-	// this repo (derived from the stored hook id — the secret itself never
-	// leaves the store, let alone an API response).
+	// WebhookInstalled reports whether a GitHub push webhook is registered
+	// (from the stored hook id; the secret itself never leaves the store).
 	WebhookInstalled bool `json:"webhook_installed"`
-	// Docs points at the four reference docs agents should read before
-	// touching this repository's code. "" fields are unset — see
-	// RepositoryDocs.
+	// Docs points at the four reference docs agents should read before touching
+	// this repo's code; "" fields are unset.
 	Docs RepositoryDocs `json:"docs"`
-	// DocsTaskID is the board task of the LAST reference-doc bundle asked for
-	// (repodocs.Service.CreateDocsBundleTask): one task, one branch, one pull
-	// request carrying every requested doc. "" = none outstanding. Overwritten
-	// by the next bundle and cleared when its PR is merged.
+	// DocsTaskID is the board task of the last reference-doc bundle asked for;
+	// overwritten by the next and cleared when its PR merges.
 	DocsTaskID string `json:"docs_task_id,omitempty"`
-	// ProfileMD is the agent-maintained project profile: a compact markdown
-	// brief of the codebase (stack, layout, commands, conventions) injected
-	// into every repo-scoped agent run. "" = never profiled.
+	// ProfileMD is the agent-maintained markdown profile of the codebase,
+	// injected into every repo-scoped run; "" = never profiled.
 	ProfileMD string `json:"profile_md,omitempty"`
-	// ProfileUpdatedAt stamps the last profile write; nil = never profiled.
-	// The push-webhook trigger refreshes only when it is nil or stale.
+	// ProfileUpdatedAt stamps the last profile write; the push-webhook trigger
+	// refreshes only when nil or stale.
 	ProfileUpdatedAt *time.Time  `json:"profile_updated_at,omitempty"`
 	ProjectIDs       []uuid.UUID `json:"project_ids,omitempty"`
 	// GitWarning is the finished sentence the repository card shows above its
-	// root path: no working copy at that path, no folder at that path, or a
-	// folder that could not be read (see GitPresence.Warning), plus the async
-	// git/GitHub setup failure the service records itself.
-	//
-	// English, and rendered verbatim by the web app — it is a server-composed
-	// string, not a translation key, so there is nowhere on the client to look
-	// one up. Localising it would mean threading the user's language into
-	// every read path that returns a repository and turning Warning() into
-	// Warning(lang), the way QuotaBlock.UserMessage takes one. That is a
-	// deliberate not-yet, not an oversight.
+	// root path. Rendered verbatim by the web app — server-composed English,
+	// not a translation key, so localising it would mean threading a language
+	// through every read path (a deliberate not-yet).
 	GitWarning string `json:"git_warning,omitempty"`
-	// GitRestorable reports that the folder is genuinely missing here AND a
-	// remote is recorded, i.e. the code can be fetched onto this machine. It is
-	// the server's answer to "should the card offer to restore this", so the
-	// client never has to reconstruct the rule from the warning sentence.
+	// GitRestorable reports that the folder is genuinely missing AND a remote
+	// is recorded, i.e. the code can be fetched onto this machine.
 	GitRestorable bool `json:"git_restorable,omitempty"`
-	// GitRestore is the running or last restore attempt, nil when none was ever
-	// started on this process. It rides along on every repository read so a
-	// reload mid-clone still shows the clone.
+	// GitRestore is the running or last restore attempt, so a reload mid-clone
+	// still shows the clone.
 	GitRestore *RepositoryRestore `json:"git_restore,omitempty"`
 	CreatedAt  time.Time          `json:"created_at"`
 	UpdatedAt  time.Time          `json:"updated_at"`
 }
 
-// Repo kinds. A monorepo carries SubRepoKinds drawn from the single-kind set.
 const (
 	RepoKindBackend  = "backend"
 	RepoKindFrontend = "frontend"
@@ -204,24 +132,18 @@ func ValidRepoKind(k string) bool {
 	return false
 }
 
-// Mobile platforms. Only meaningful on a mobile repo or sub-project; "" is the
-// unset value and is always allowed, because the platform is a guess made from
-// the working copy and a repository registered before this existed has none.
+// Mobile platforms, only meaningful on a mobile repo; "" is always allowed
+// because a repo registered before this existed has no guess.
 const (
 	MobilePlatformIOS     = "ios"
 	MobilePlatformAndroid = "android"
 	MobilePlatformCross   = "cross_platform"
 )
 
-// AppIdentity is a mobile app's store identity as READ OFF THE WORKING COPY:
-// the iOS bundle id and the Android package name. Detected at import
-// (repository.DetectAppIdentity), never typed by a human here — the human's
-// own answer lives in a deploy target's bundle_id / package_name vars, which
-// this only prefills.
-//
-// Both fields are always serialised, empty included: a consumer prefilling a
-// form needs to see "nobody could read one", and an absent key and an empty
-// one would spell that two ways.
+// AppIdentity is a mobile app's store identity READ OFF THE WORKING COPY
+// (repository.DetectAppIdentity), never typed by a human here. Both fields are
+// always serialised so a consumer prefilling a form sees "nobody could read
+// one".
 type AppIdentity struct {
 	BundleID    string `json:"bundle_id"`
 	PackageName string `json:"package_name"`
@@ -231,30 +153,25 @@ type AppIdentity struct {
 func (a AppIdentity) IsZero() bool { return a.BundleID == "" && a.PackageName == "" }
 
 // BuildTargets is what a mobile working copy calls the thing that produces its
-// release artifact, READ OFF THAT WORKING COPY: the Xcode scheme to archive and
-// the Gradle module to bundle. Detected at import
-// (repository.DetectBuildTargets).
-//
-// Unlike AppIdentity these are not a prefill anybody reviews — they are
-// interpolated into the generated release script, so "" has to stay "" all the
-// way to the release, where it refuses the build. The conventions they replace
-// (scheme = the app's display name, module = "app") are true often enough to
-// look right and wrong often enough to archive a target that does not exist.
+// release artifact, READ OFF THAT WORKING COPY (repository.DetectBuildTargets).
+// Unlike AppIdentity these are not a prefill anybody reviews: "" stays ""
+// through to the release, where it refuses the build — the conventions they
+// replace (scheme = display name, module = "app") are true often enough to
+// archive a target that does not exist.
 type BuildTargets struct {
-	// XcodeScheme is the iOS half: the SHARED scheme name, since an
-	// unshared scheme is not in the repository and CI cannot archive it.
+	// XcodeScheme is the iOS half: the SHARED scheme name — an unshared scheme
+	// is not in the repository, so CI cannot archive it.
 	XcodeScheme string `json:"xcode_scheme"`
 	// GradleModule is the Android half, colon-separated without the leading
-	// colon ("app", "apps:android") — the <module> in :<module>:bundleRelease.
+	// colon — the <module> in :<module>:bundleRelease.
 	GradleModule string `json:"gradle_module"`
 }
 
 // IsZero reports whether neither target could be read.
 func (b BuildTargets) IsZero() bool { return b.XcodeScheme == "" && b.GradleModule == "" }
 
-// ValidMobilePlatform reports whether p is a known mobile platform. "" is not
-// one: callers that allow the unset value test for it themselves, so nothing
-// can accidentally treat "no answer" as a platform.
+// ValidMobilePlatform reports whether p is a known mobile platform; "" is not
+// one — callers that allow the unset value test for it themselves.
 func ValidMobilePlatform(p string) bool {
 	switch p {
 	case MobilePlatformIOS, MobilePlatformAndroid, MobilePlatformCross:
@@ -263,8 +180,8 @@ func ValidMobilePlatform(p string) bool {
 	return false
 }
 
-// ValidSubRepoKind reports whether k is a valid monorepo sub-repo kind (any
-// single-kind repo type; monorepo cannot nest).
+// ValidSubRepoKind reports whether k is a valid monorepo sub-repo kind
+// (single-kind only; monorepo cannot nest).
 func ValidSubRepoKind(k string) bool {
 	switch k {
 	case RepoKindBackend, RepoKindFrontend, RepoKindMobile, RepoKindWorker:
@@ -273,62 +190,50 @@ func ValidSubRepoKind(k string) bool {
 	return false
 }
 
-// AllSubRepoKinds returns every valid monorepo sub-repo kind. The pipeline
-// settings UI computes auto-detect suggestions over all of them so a newly
-// ticked sub-project shows its candidate jobs immediately, before the
-// selection is saved.
+// AllSubRepoKinds returns every valid monorepo sub-repo kind, for computing
+// auto-detect suggestions.
 func AllSubRepoKinds() []string {
 	return []string{RepoKindBackend, RepoKindFrontend, RepoKindMobile, RepoKindWorker}
 }
 
-// RepoSubProject is one project inside a monorepo working copy: where it lives
-// and what it is. Detected at import (repository.DetectRepoSubProjects) and
-// then curated by the human in the initial-setup dialog, which can retype or
-// remove a row before it is saved.
+// RepoSubProject is one project inside a monorepo working copy, detected at
+// import and curated by the human before it is saved.
 type RepoSubProject struct {
-	// Path is repo-relative and slash-separated. "." is the repository root,
-	// which a Go-module-at-root + web/ split legitimately produces.
+	// Path is repo-relative, slash-separated; "." is the repository root.
 	Path string `json:"path"`
 	// Kind is one of RepoKind* except RepoKindMonorepo — monorepos do not nest.
 	Kind string `json:"kind"`
-	// MobilePlatform is only meaningful when Kind == RepoKindMobile, same
-	// meaning as Repository.MobilePlatform but scoped to this sub-project.
+	// MobilePlatform has the same meaning as Repository.MobilePlatform, scoped
+	// to this sub-project.
 	MobilePlatform string `json:"mobile_platform,omitempty"`
 	// DetectedAppIdentity is Repository.DetectedAppIdentity scoped to this
-	// sub-project's own directory. It rides inside the sub_projects JSON
-	// column, so it needed no schema change of its own.
+	// sub-project; rides inside the sub_projects JSON column.
 	DetectedAppIdentity AppIdentity `json:"detected_app_identity"`
 	// DetectedBuildTargets is Repository.DetectedBuildTargets scoped to this
-	// sub-project's own directory, and is never inherited from the repository:
-	// a monorepo's mobile app has its own Xcode project and its own Gradle
-	// build, and archiving the wrong one is exactly the failure this field
-	// exists to prevent. Rides inside the sub_projects JSON column.
+	// sub-project, never inherited: a monorepo's mobile app has its own Xcode
+	// project and Gradle build.
 	DetectedBuildTargets BuildTargets `json:"detected_build_targets"`
-	// Docs points at this sub-project's own four reference docs, same meaning
-	// as Repository.Docs but paths are relative to Path, not the repo root.
+	// Docs has the same meaning as Repository.Docs, paths relative to Path.
 	Docs RepositoryDocs `json:"docs,omitempty"`
-	// The four quality-gate overrides. Nil means "inherit the repository's
-	// setting", which is why they are pointers and not plain values: a
-	// sub-project that never states an opinion must keep following the repo
-	// even after the repo's own number changes, and a zero threshold is a
-	// legitimate statement ("no bar") rather than an absent one.
+	// The four quality-gate overrides; nil means "inherit the repository's
+	// setting", so a sub-project with no opinion follows the repo even after
+	// the repo's own number changes.
 	CoverageEnabled   *bool    `json:"coverage_enabled,omitempty"`
 	CoverageThreshold *float64 `json:"coverage_threshold,omitempty"`
 	MutationEnabled   *bool    `json:"mutation_enabled,omitempty"`
 	MutationThreshold *float64 `json:"mutation_threshold,omitempty"`
 }
 
-// QualityGate is one resolved quality bar — whether it is armed and the
-// percentage it is armed at. Threshold 0 means no number was set; the caller
-// supplies its own default (see board.DefaultCoverageThreshold).
+// QualityGate is one resolved quality bar — armed or not and at what
+// percentage; threshold 0 means no number was set.
 type QualityGate struct {
 	Enabled   bool
 	Threshold float64
 }
 
 // EffectiveCoverageGate resolves the whole-repo line-coverage bar for one
-// scope: the sub-project at subProjectPath when it overrides it, otherwise the
-// repository's own setting. "" asks for the repository itself.
+// scope: the sub-project when it overrides it, otherwise the repository's own.
+// "" asks for the repository itself.
 func (r Repository) EffectiveCoverageGate(subProjectPath string) QualityGate {
 	gate := QualityGate{Enabled: r.RequireOverallCoverage, Threshold: r.CoverageThreshold}
 	if sp, ok := r.subProject(subProjectPath); ok {
@@ -369,9 +274,9 @@ func (r Repository) subProject(path string) (RepoSubProject, bool) {
 	return RepoSubProject{}, false
 }
 
-// RepositoryDocs names the reference docs agents should read before touching
-// a repository (or one of its sub-projects): each field is a path relative to
-// wherever this RepositoryDocs is scoped, "" meaning not set.
+// RepositoryDocs names the reference docs agents should read before touching a
+// repository (or one of its sub-projects); each field is a scoped-relative
+// path, "" meaning not set.
 type RepositoryDocs struct {
 	CodingStandards string `json:"coding_standards,omitempty"`
 	TestStandards   string `json:"test_standards,omitempty"`
@@ -379,7 +284,6 @@ type RepositoryDocs struct {
 	LocalRun        string `json:"local_run,omitempty"`
 }
 
-// Reference-doc kinds. One RepositoryDocs field per kind.
 const (
 	RepoDocCodingStandards = "coding_standards"
 	RepoDocTestStandards   = "test_standards"
@@ -397,14 +301,8 @@ func ValidRepoDocKind(k string) bool {
 }
 
 // DefaultRepoDocPath is where a generated doc of this kind lands absent an
-// explicit path — the .ai/ convention every repository in this codebase
-// already follows for its own reference docs (see e.g. agent-server/.ai,
-// web/.ai).
-//
-// local_run is the exception, and deliberately not a document: what a human
-// (or an agent) needs on a fresh machine is a thing they can run, not prose
-// they have to translate into commands. So its default is the bootstrap script
-// itself.
+// explicit path — the .ai/ convention. local_run is deliberately the bootstrap
+// script, not a document: what a fresh machine needs is a thing to run.
 func DefaultRepoDocPath(kind string) string {
 	switch kind {
 	case RepoDocCodingStandards:
@@ -421,15 +319,12 @@ func DefaultRepoDocPath(kind string) string {
 }
 
 // maxSubProjects bounds a PATCH's sub_projects list so a hostile or buggy
-// client cannot grow the column without limit; a real monorepo's own project
-// count never comes close.
+// client cannot grow the column without limit.
 const maxSubProjects = 200
 
-// ValidateSubProjects cleans and validates a client-supplied sub-project list:
-// trims whitespace, rejects an empty or absolute path, a ".." path segment, a
-// duplicate path, a kind that is not a valid single-kind repo type, a mobile
-// platform on something that is not a mobile sub-project, or a quality-gate
-// threshold outside 0-100. Returns the cleaned list, safe to persist as-is.
+// ValidateSubProjects cleans and validates a client-supplied list: trims
+// whitespace, rejects empty/absolute/.. paths, duplicates, invalid kinds, a
+// platform on a non-mobile sub-project, and thresholds outside 0-100.
 func ValidateSubProjects(in []RepoSubProject) ([]RepoSubProject, error) {
 	if len(in) > maxSubProjects {
 		return nil, fmt.Errorf("too many sub-projects: %d (max %d)", len(in), maxSubProjects)
@@ -468,11 +363,9 @@ func ValidateSubProjects(in []RepoSubProject) ([]RepoSubProject, error) {
 				return nil, fmt.Errorf("sub-project %s: %s must be between 0 and 100, got %.1f", path, label, *value)
 			}
 		}
-		// Carried through rather than validated: it is a detection result the
-		// client is echoing back, not a statement it is making, so a PATCH of
-		// some unrelated field must not erase it. Dropped on a sub-project that
-		// is no longer mobile for the same reason — nobody stated it, so
-		// nothing is being overruled.
+		// Detections are carried through, not validated: they are a detection
+		// result the client is echoing, and are dropped only on a sub-project
+		// that is no longer mobile.
 		identity := sp.DetectedAppIdentity
 		targets := sp.DetectedBuildTargets
 		if kind != RepoKindMobile {
@@ -497,8 +390,8 @@ func ValidateSubProjects(in []RepoSubProject) ([]RepoSubProject, error) {
 }
 
 // validateMobilePlatform is the one rule both the repository and its
-// sub-projects are held to: a platform must be a known one, and it must sit on
-// something that is actually mobile. "" always passes — it is the unset value.
+// sub-projects are held to: a platform must be a known one and sit on something
+// mobile. "" always passes — it is the unset value.
 func validateMobilePlatform(platform, kind string) error {
 	if platform == "" {
 		return nil
@@ -512,17 +405,14 @@ func validateMobilePlatform(platform, kind string) error {
 	return nil
 }
 
-// ValidateMobilePlatform is validateMobilePlatform for a repository-level
-// value, where the kind is the repository's own.
+// ValidateMobilePlatform is validateMobilePlatform for a repository-level value.
 func ValidateMobilePlatform(platform, kind string) error {
 	return validateMobilePlatform(strings.TrimSpace(platform), strings.TrimSpace(kind))
 }
 
-// validateReleaseEngine mirrors validateMobilePlatform's shape but not its
-// unset rule: "" is a legal input here, not just a pass-through, because the
-// release_engine column defaults to ReleaseEngineAuto and a client that never
-// mentions the field must be read as choosing that default rather than
-// stating nothing.
+// validateReleaseEngine mirrors validateMobilePlatform's shape but not its unset
+// rule: "" is a legal answer here, reading as ReleaseEngineAuto (the column's
+// default), not as "nothing stated".
 func validateReleaseEngine(engine, kind string) error {
 	if engine == "" {
 		return nil
@@ -536,8 +426,7 @@ func validateReleaseEngine(engine, kind string) error {
 	return nil
 }
 
-// ValidateReleaseEngine is validateReleaseEngine for a repository-level
-// value, where the kind is the repository's own.
+// ValidateReleaseEngine is validateReleaseEngine for a repository-level value.
 func ValidateReleaseEngine(engine, kind string) error {
 	return validateReleaseEngine(strings.TrimSpace(engine), strings.TrimSpace(kind))
 }
@@ -549,32 +438,26 @@ const (
 	PipelineCategoryTest         = "test"
 	PipelineCategoryMutationTest = "mutation_test"
 	// PipelineCategoryPROpen names the workflow that opens a PR once CI is
-	// green. It is listed and selectable but never dispatched and never gated:
-	// agent task branches (tt-123) do not match its feature/** trigger, because
-	// the board opens their PR itself (EnsurePullRequest).
+	// green: never dispatched/gated because agent task branches (tt-123) do not
+	// match its feature/** trigger — the board opens their PR itself.
 	PipelineCategoryPROpen        = "pr_open"
 	PipelineCategoryStageDeploy   = "stage_deploy"
 	PipelineCategoryPreProdDeploy = "preprod_deploy"
 	PipelineCategoryProdDeploy    = "prod_deploy"
 )
 
-// PipelineJobTargetKind distinguishes a status-read job from a dispatchable workflow.
 const (
 	PipelineTargetJob      = "job"      // validate/build/test/mutation_test — a run job whose conclusion is read
 	PipelineTargetWorkflow = "workflow" // pr_open/stage_deploy/prod_deploy — a workflow file
 )
 
 // RepositoryPipelineJob maps one (sub-repo, category) slot to a GitHub Actions
-// job (status-read) or workflow file (dispatch). SubRepoKind is "" for
-// single-kind repos.
+// job (status-read) or workflow file (dispatch).
 type RepositoryPipelineJob struct {
 	ID           uuid.UUID `json:"id"`
 	RepositoryID uuid.UUID `json:"repository_id"`
-	// SubProjectPath identifies which sub-project this slot belongs to ("" =
-	// the repository itself, or a non-monorepo repo). SubRepoKind stays a
-	// descriptive field (which kind that sub-project is, for keyword
-	// suggestion purposes) — SubProjectPath is what disambiguates two
-	// sub-projects that share a kind.
+	// SubProjectPath is what disambiguates two sub-projects that share a kind;
+	// "" = the repository itself or a non-monorepo repo.
 	SubProjectPath string `json:"sub_project_path,omitempty"`
 	SubRepoKind    string `json:"sub_repo_kind"`
 	Category       string `json:"category"`
@@ -589,12 +472,10 @@ type OpenRepositoryRequest struct {
 	ProjectIDs  []uuid.UUID `json:"project_ids,omitempty"`
 	// Owner: klasör git'siz ise GitHub reposunun açılacağı hesap/org ("" = token sahibi).
 	Owner string `json:"owner,omitempty"`
-	// CloneURL, bilinen origin adresidir. Boşsa çalışma kopyasının origin'inden
-	// okunur; kalıcı olarak saklanır ki kopya kaybolursa repo geri çekilebilsin.
+	// CloneURL: bilinen origin adresidir; boşsa çalışma kopyasının origin'inden
+	// okunur ve kalıcı saklanır ki kopya kaybolursa repo geri çekilebilsin.
 	CloneURL string `json:"clone_url,omitempty"`
-	// Kind classifies the repo (one of RepoKind*). Optional: left empty it is
-	// detected from what is on disk, so a repo is never silently registered as
-	// a backend just because nobody said otherwise.
+	// Kind: boşsa disktekinden otomatik tespit edilir.
 	Kind string `json:"kind,omitempty"`
 }
 
@@ -605,7 +486,7 @@ type CreateRepositoryRequest struct {
 	ProjectIDs  []uuid.UUID `json:"project_ids,omitempty"`
 	// Owner: yeni GitHub reposunun açılacağı hesap/org ("" = token sahibi).
 	Owner string `json:"owner,omitempty"`
-	// Kind classifies the repo (one of RepoKind*); empty means auto-detect.
+	// Kind: empty means auto-detect.
 	Kind string `json:"kind,omitempty"`
 }
 
@@ -617,8 +498,7 @@ type ImportGitHubRepositoryRequest struct {
 	CloneURL    string      `json:"clone_url,omitempty"`
 	Description string      `json:"description"`
 	ProjectIDs  []uuid.UUID `json:"project_ids,omitempty"`
-	// Kind classifies the repo (one of RepoKind*); empty means auto-detect
-	// from the cloned working copy.
+	// Kind: empty means auto-detect from the cloned working copy.
 	Kind string `json:"kind,omitempty"`
 }
 
@@ -630,9 +510,8 @@ type UpdateRepositoryRequest struct {
 	TestCommand    *string `json:"test_command,omitempty"`
 	Kind           *string `json:"kind,omitempty"`
 	MobilePlatform *string `json:"mobile_platform,omitempty"`
-	// ReleaseEngine picks where the repository's mobile releases are built:
-	// domain.ReleaseEngine*. A non-nil empty string is a legal statement — it
-	// means ReleaseEngineAuto, the column's default (see validateReleaseEngine).
+	// ReleaseEngine picks where mobile releases are built; a non-nil empty
+	// string legally means ReleaseEngineAuto, the column's default.
 	ReleaseEngine      *string           `json:"release_engine,omitempty"`
 	MutationEnabled    *bool             `json:"mutation_enabled,omitempty"`
 	MutationThreshold  *float64          `json:"mutation_threshold,omitempty"`
@@ -643,7 +522,7 @@ type UpdateRepositoryRequest struct {
 	IncidentPolicy     *IncidentPolicy   `json:"incident_policy,omitempty"`
 	TestStrategy       *string           `json:"test_strategy,omitempty"`
 	// Docs replaces the repository's own reference-doc pointers wholesale when
-	// set. Nil leaves them untouched — see RepositoryStore.UpdateDocs.
+	// set; nil leaves them untouched.
 	Docs *RepositoryDocs `json:"docs,omitempty"`
 }
 

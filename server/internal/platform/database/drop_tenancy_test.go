@@ -28,10 +28,9 @@ const (
 	appRolePassword     = "agent_app_test"
 )
 
-// DropTenancySuite applies migration 133 to databases holding rows, as the
-// embedded superuser and as an unprivileged role that owns the database. The
-// owner is the harder case: it is subject to the FORCE ROW LEVEL SECURITY the
-// migration removes, and it has only the rights its ownership gives it.
+// DropTenancySuite applies migration 133 to databases holding rows, both as the
+// embedded superuser and as an unprivileged role that owns the database — the
+// harder case, subject to the FORCE ROW LEVEL SECURITY 133 removes.
 type DropTenancySuite struct {
 	suite.Suite
 	ctx    context.Context
@@ -205,7 +204,6 @@ func (s *DropTenancySuite) dropTenancyKeepsData(admin, runner *pgxpool.Pool) {
 	s.Equal(1, credentials, "gcloud_credentials must stay one row")
 	s.Equal("p2", project)
 
-	// ON DELETE SET NULL (col) survives the rebuild and still nulls only its column.
 	_, err = runner.Exec(s.ctx, `DELETE FROM agents WHERE id = $1`, seeded.agent)
 	s.Require().NoError(err)
 	var unassigned bool
@@ -221,7 +219,7 @@ func (s *DropTenancySuite) dropTenancyKeepsData(admin, runner *pgxpool.Pool) {
 	s.True(detached)
 }
 
-// seedLocalTenant writes rows the way the pre-133 app did: inside a transaction
+// seedLocalTenant writes rows as the pre-133 app did: inside a transaction
 // scoped to the local tenant, with tenant_id coming off the column default.
 func (s *DropTenancySuite) seedLocalTenant(runner *pgxpool.Pool) seededRows {
 	var out seededRows
@@ -266,9 +264,6 @@ func (s *DropTenancySuite) inTenant(pool *pgxpool.Pool, id string, fn func(pgx.T
 	s.Require().NoError(tx.Commit(s.ctx))
 }
 
-// checksums maps each table to its row count and an order-independent hash of
-// its rows without the columns 133 drops. gcloud_credentials also leaves out
-// the id it gains.
 func (s *DropTenancySuite) checksums(admin *pgxpool.Pool) map[string]string {
 	out := map[string]string{}
 	for _, table := range s.column(admin, `
@@ -325,9 +320,8 @@ func onDroppedTable(qualified string) bool {
 	return table == "tenants" || table == "tenant_members"
 }
 
-// expectedConstraints is every pre-133 constraint under its old name with
-// tenant_id dropped from its columns, minus the UNIQUE (tenant_id, id) keys
-// that only existed as composite FK targets, plus the three 133 adds.
+// expectedConstraints: the pre-133 set with tenant_id dropped from its columns,
+// minus the UNIQUE (tenant_id, id) composite key, plus the three 133 adds.
 func expectedConstraints(before map[string]string) map[string]string {
 	want := map[string]string{}
 	for name, def := range before {
@@ -373,7 +367,7 @@ func expectedIndexes(consBefore, before map[string]string) map[string]string {
 	return want
 }
 
-// database creates an empty database. As the owner variant it belongs to the
+// database creates an empty database; as the owner variant it belongs to the
 // unprivileged role, with the extensions a superuser has to install first.
 func (s *DropTenancySuite) database(name string, asOwner bool) (admin, runner *pgxpool.Pool) {
 	create := `CREATE DATABASE ` + name

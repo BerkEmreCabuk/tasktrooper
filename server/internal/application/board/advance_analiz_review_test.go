@@ -18,14 +18,8 @@ func analizRunner(updater TaskUpdater) *Runner {
 	return &Runner{taskUpdater: updater}
 }
 
-// analizWF is the analiz type's workflow, the wf argument every
-// advanceToAnalizReview call below needs now that advance_on_document is
-// read off it instead of a literal TaskTypeAnaliz check.
 var analizWF = workflowtest.Default().Workflows[domain.TaskType("analiz")]
 
-// taskWF is the default (task) type's workflow — used by the tests below
-// that exercise a non-analiz task type, which carries no advance_on_document
-// behaviour at all.
 var taskWF = workflowtest.Default().Workflows[domain.TaskType("task")]
 
 func documentedUsage() *registry.ToolUsage {

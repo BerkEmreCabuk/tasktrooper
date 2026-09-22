@@ -27,10 +27,7 @@ func TestParseVerificationResult_MissingSummary(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// The other half of the board rule: latency is not a gap, but an acceptance
-// criterion left open on an implementation run is — and it is repairable inside
-// the same run, which is what turns it into a repair subtask instead of a
-// second board record.
+// Open acceptance criteria on an implementation run are a gap, and repairable inside the same run.
 func TestBuildVerifierSystemPrompt_OpenCriteriaOnAnImplementationRunAreIssues(t *testing.T) {
 	p := orchestrator.BuildVerifierSystemPromptForTest()
 
@@ -41,9 +38,6 @@ func TestBuildVerifierSystemPrompt_OpenCriteriaOnAnImplementationRunAreIssues(t 
 }
 
 func TestBuildVerifierSystemPrompt_BoardLatencyIsNotAGap(t *testing.T) {
-	// A run whose deliverable is a backlog task used to fail verification for
-	// the feature not being live yet, and the repair plan that followed opened a
-	// second board task for the same work.
 	p := orchestrator.BuildVerifierSystemPromptForTest()
 
 	assert.Contains(t, p, "A chat run's deliverable is normally a RECORD")

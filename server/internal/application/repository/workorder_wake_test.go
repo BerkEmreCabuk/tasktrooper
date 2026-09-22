@@ -1,9 +1,5 @@
 package repository
 
-// UpdateTask's own trigger for waking a dependent the instant its blocker
-// lands — the half of the mechanism the sweeper's periodic poll used to be
-// alone in providing, up to a full WorkOrderSweeperInterval of lag.
-
 import (
 	"context"
 	"testing"
@@ -17,9 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// wakeTaskStore is fakePackageTaskStore plus a real MarkWorkOrderWaiting /
-// ClearWorkOrderWaiting pair over the same task map, since the packaged fake
-// hardcodes ClearWorkOrderWaiting to "never parked".
 type wakeTaskStore struct {
 	*fakePackageTaskStore
 	blockedResource map[uuid.UUID]string
@@ -45,9 +38,6 @@ func (w *wakeTaskStore) ClearWorkOrderWaiting(_ context.Context, taskID uuid.UUI
 	return w.tasks[taskID], true, nil
 }
 
-// wakeRelationStore is graphRelationStore with a real ListBlockingSources: the
-// UNFINISHED sources of a target's blocks edges, read live off the shared task
-// map so a blocker's column change is visible without re-wiring the fixture.
 type wakeRelationStore struct {
 	*graphRelationStore
 	tasks map[uuid.UUID]domain.BoardTask
@@ -99,9 +89,6 @@ func (f *wakeFixture) addTask(column domain.TaskColumn) domain.BoardTask {
 	return task
 }
 
-// AC1: a dependent parked behind a single blocker resumes in the same
-// UpdateTask call the instant that blocker reaches done — not on the next
-// sweep tick.
 func TestUpdateTaskWakesADependentInTheSameCallWhenItsOnlyBlockerReachesDone(t *testing.T) {
 	f := newWakeFixture(t)
 	blocker := f.addTask(domain.TaskColumnInProgress)
@@ -120,8 +107,6 @@ func TestUpdateTaskWakesADependentInTheSameCallWhenItsOnlyBlockerReachesDone(t *
 	assert.False(t, stillWaiting, "the dependent must be unparked in the same request, not on the next sweep")
 }
 
-// AC2: a dependent with a second, still-open blocker stays parked when only
-// one of its blockers lands.
 func TestUpdateTaskLeavesADependentParkedWhileAnotherBlockerIsStillOpen(t *testing.T) {
 	f := newWakeFixture(t)
 	blockerDone := f.addTask(domain.TaskColumnInProgress)
@@ -143,8 +128,6 @@ func TestUpdateTaskLeavesADependentParkedWhileAnotherBlockerIsStillOpen(t *testi
 	assert.Equal(t, domain.ResourceWorkOrder, resource)
 }
 
-// Moving a task to a column other than done/released must not probe its
-// dependents at all — the wake is tied to the two terminal columns.
 func TestUpdateTaskDoesNotWakeDependentsOnANonTerminalMove(t *testing.T) {
 	f := newWakeFixture(t)
 	blocker := f.addTask(domain.TaskColumnInProgress)

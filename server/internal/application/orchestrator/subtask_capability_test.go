@@ -14,8 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// agentSkillsCatalog answers the one lookup a subtask performs when it builds
-// its skill index; the embedded interface leaves the rest unimplemented.
+// Answers the one lookup a subtask performs when it builds its skill index.
 type agentSkillsCatalog struct {
 	port.CatalogStore
 	skills []domain.Skill
@@ -25,9 +24,7 @@ func (c agentSkillsCatalog) ListSkillsByAgent(_ context.Context, _ uuid.UUID) ([
 	return c.skills, nil
 }
 
-// A subtask used to know only about the skills the planner happened to name, so
-// an agent configured with nineteen of them ran with three. The index is the
-// agent's configuration, not the plan's guess.
+// The index is the agent's configuration, not the plan's guess at which skills to load.
 func TestEnabledAgentSkills_IndexesEverythingTheOperatorEnabled(t *testing.T) {
 	agentID := uuid.New()
 	catalog := agentSkillsCatalog{skills: []domain.Skill{
@@ -44,10 +41,7 @@ func TestEnabledAgentSkills_IndexesEverythingTheOperatorEnabled(t *testing.T) {
 	assert.Equal(t, "routing-state", skills[1].Name)
 }
 
-// The run whose agent reported "we could not examine the project structure"
-// while the repository sat one directory up: every code tool and shell command
-// resolves to the subtask workspace, and that workspace was a freshly created
-// empty folder inside the checkout.
+// An empty scratch folder inside the checkout once hid the whole repository from the tools.
 func TestResolveSubtaskWorkspace_WorksInsideAnExistingCheckout(t *testing.T) {
 	checkout := t.TempDir()
 	require.NoError(t, os.MkdirAll(filepath.Join(checkout, ".git"), 0o755))
@@ -59,8 +53,7 @@ func TestResolveSubtaskWorkspace_WorksInsideAnExistingCheckout(t *testing.T) {
 	assert.Equal(t, checkout, dir, "a prepared checkout is the workspace, not the parent of an empty one")
 }
 
-// Without a checkout the per-subtask scratch directory is still what isolation
-// wants: chat orchestration runs on a bare workspace.
+// Without a checkout, the per-subtask scratch directory is still what isolation wants.
 func TestResolveSubtaskWorkspace_IsolatesOnABareWorkspace(t *testing.T) {
 	bare := t.TempDir()
 
@@ -93,8 +86,7 @@ func TestPlannedSkillFocus_NamesThePicksWithoutHidingTheRest(t *testing.T) {
 	assert.Contains(t, focus, "your other skills still apply")
 }
 
-// The planner may name a skill that was since disabled or belongs to another
-// agent. That is not worth failing a subtask over — it is simply not a pick.
+// An id the agent cannot load — disabled or another agent's — is simply not a pick.
 func TestPlannedSkillFocus_IgnoresIdsTheAgentCannotLoad(t *testing.T) {
 	skills := []domain.Skill{{ID: uuid.New(), Name: "routing-state", Enabled: true}}
 

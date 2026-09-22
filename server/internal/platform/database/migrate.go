@@ -17,84 +17,61 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/migrations"
 )
 
-// migrationAdvisoryLockKey serialises a whole migration run across pods.
-//
-// Arbitrary but fixed, and deliberately the sibling of schemaAdvisoryLockKey in
-// internal/control/store (5212026001): the two guard different databases so
-// they cannot actually collide, but keeping them adjacent and distinct means
-// both are found by one grep and a future shared database cannot deadlock them.
-// Never reuse this value for anything else in this database.
+// migrationAdvisoryLockKey serialises a whole migration run across processes.
+// The sibling of schemaAdvisoryLockKey (5212026001) lives in another database,
+// but keeping them adjacent means one grep finds both; never reuse this value.
 const migrationAdvisoryLockKey int64 = 5212026002
 
 const (
-	// migrationLockTimeout bounds how long one migration waits for a table lock.
-	//
-	// Postgres lock queues are FIFO: a migration that wants ACCESS EXCLUSIVE and
-	// queues behind one long-open transaction also blocks every later query on
-	// that table for as long as it waits. Without a timeout that wait is
-	// unbounded and happens before the HTTP server even starts. Three seconds is
-	// long enough to ride out ordinary short OLTP transactions on the draining
-	// pod, and short enough that the whole retry ladder below still finishes
-	// well inside a pod startup budget.
+	// migrationLockTimeout bounds a table-lock wait: lock queues are FIFO, so a
+	// migration queued behind one long transaction blocks later queries too and
+	// an unbounded wait would delay HTTP server startup. 3s rides out ordinary
+	// short transactions while the whole retry ladder below still fits a boot.
 	migrationLockTimeout = "3s"
 
-	// migrationStatementTimeout bounds how long one migration statement may run
-	// once it *has* its locks. Generous on purpose: a migration legitimately
-	// rewrites or backfills a table, and a btree build measures ~0.3s per
-	// million rows on Postgres 16, so five minutes is roughly a thousandfold
-	// headroom over the largest realistic table. Its job is not to be
-	// tight, it is to make a runaway migration fail with a clear error instead
-	// of pinning locks forever.
+	// migrationStatementTimeout bounds a locked statement; generous for
+	// backfills, tight enough to fail a runaway migration loudly instead of
+	// pinning locks forever.
 	migrationStatementTimeout = "5min"
 
-	// advisoryLockTimeout bounds one attempt at the run-level advisory lock.
-	// lock_timeout applies to pg_advisory_lock waits too (verified on Postgres
-	// 16), so this is what stops a boot from hanging forever behind a peer pod.
-	// Longer than migrationLockTimeout because the holder is another pod working
-	// through the whole pending set, not a single statement.
+	// advisoryLockTimeout bounds one pg_advisory_lock wait (lock_timeout covers
+	// it on Postgres 16); longer than migrationLockTimeout because the holder is
+	// another pod working the whole pending set.
 	advisoryLockTimeout = "30s"
 
-	// migrationLockAttempts is how many times a single migration is retried
-	// after 55P03. With the backoff below the worst case is ~3s+250ms, 3s+500ms,
-	// 3s+1s, 3s+2s, 3s -> about 22s before the pod gives up and restarts.
+	// migrationLockAttempts: with the backoff below the worst case is ~22s
+	// before the pod gives up and restarts.
 	migrationLockAttempts = 5
 
-	// advisoryLockAttempts x advisoryLockTimeout is the total budget for waiting
-	// on a peer pod: ~5 minutes. Past that something is genuinely wrong and
-	// failing loudly beats hanging silently.
+	// advisoryLockAttempts x advisoryLockTimeout is the ~5min budget for waiting
+	// on a peer pod; failing loudly beats hanging silently.
 	advisoryLockAttempts = 10
 )
 
-// retryBaseDelay is the first backoff step; it doubles per attempt, capped at
-// 8s. A var rather than a const purely so tests can collapse the ladder instead
-// of sleeping through it.
+// retryBaseDelay is a var purely so tests can collapse the retry ladder.
 var retryBaseDelay = 250 * time.Millisecond
 
 // pgLockNotAvailable is SQLSTATE 55P03, raised when lock_timeout fires.
 const pgLockNotAvailable = "55P03"
 
-// migrationConn is the subset of *pgxpool.Conn the runner needs. Declaring it
-// keeps the retry and timeout logic exercisable without a live database.
+// migrationConn is the pool subset the runner needs, so retries can be tested
+// without a live database.
 type migrationConn interface {
 	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
-// RunMigrations applies every pending embedded migration, once, under a
-// database-wide advisory lock.
-//
-// Two processes can migrate one database at once — a server starting while the
-// previous one is still shutting down, or cmd/migrate run beside a server.
-// Unserialised, the loser of that race failed the INSERT INTO schema_migrations
-// with 23505, and cmd/agent-server turns any error here into log.Fatal.
+// RunMigrations applies every pending migration once under a database-wide
+// advisory lock: two processes can migrate at once (a server starting while the
+// previous one shuts down), and the loser of that race used to fail on the
+// INSERT with 23505, which cmd/agent-server turns into log.Fatal.
 func RunMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 	return runMigrationsPool(ctx, pool, "")
 }
 
-// RunMigrationsUpTo is RunMigrations stopping after version (a file name
-// without ".up.sql"), so a test can stand a database at an older schema and
-// then apply one migration to populated data.
+// RunMigrationsUpTo is RunMigrations stopping after version, so a test can stand
+// an older schema and then apply one migration to populated data.
 func RunMigrationsUpTo(ctx context.Context, pool *pgxpool.Pool, version string) error {
 	names, err := listMigrationFiles(migrations.Up)
 	if err != nil {
@@ -109,11 +86,9 @@ func RunMigrationsUpTo(ctx context.Context, pool *pgxpool.Pool, version string) 
 }
 
 func runMigrationsPool(ctx context.Context, pool *pgxpool.Pool, upTo string) error {
-	// The lock is session-scoped and pgxpool hands out a different connection
-	// per Exec/Query/Begin, so locking "through the pool" would take the lock on
-	// one session and then run the DDL on another - guarding nothing. Everything
-	// below is therefore pinned to this one acquired connection. That also means
-	// a run needs exactly one connection and cannot deadlock a small pool.
+	// The advisory lock is session-scoped, so locking through the pool would
+	// guard nothing — one session takes the lock, another runs the DDL. Pinning
+	// to one connection also means a run cannot deadlock a small pool.
 	conn, err := pool.Acquire(ctx)
 	if err != nil {
 		return fmt.Errorf("acquire migration connection: %w", err)
@@ -121,40 +96,34 @@ func runMigrationsPool(ctx context.Context, pool *pgxpool.Pool, upTo string) err
 	defer conn.Release()
 
 	return runMigrationsThrough(ctx, conn, func() {
-		// Closing makes Release destroy the connection instead of pooling it.
-		// Postgres frees session advisory locks when the backend goes away, so
-		// this is the guaranteed escape hatch when the unlock itself failed.
+		// Closing destroys the connection instead of pooling it; Postgres frees
+		// session locks when the backend dies — the escape hatch when unlock fails.
 		_ = conn.Conn().Close(context.WithoutCancel(ctx))
 	}, upTo)
 }
 
-// runMigrationsOn is RunMigrations minus the pool bookkeeping: it holds the
-// advisory lock across the whole run on the single pinned connection it is
-// given. discard is invoked only when the unlock fails, to get a connection of
-// unknown lock state out of circulation.
+// runMigrationsOn is RunMigrations minus the pool bookkeeping: the lock is held
+// over the whole run on the single pinned connection. discard retires a
+// connection of unknown lock state when the unlock fails.
 func runMigrationsOn(ctx context.Context, conn migrationConn, discard func()) error {
 	return runMigrationsThrough(ctx, conn, discard, "")
 }
 
-// runMigrationsThrough is runMigrationsOn applying nothing past upTo; empty
-// means every migration.
+// runMigrationsThrough is runMigrationsOn applying nothing past upTo ("" = all).
 func runMigrationsThrough(ctx context.Context, conn migrationConn, discard func(), upTo string) error {
 	if err := acquireMigrationLock(ctx, conn); err != nil {
 		return err
 	}
-	// The unlock has to run on every path, including the error path: leaving it
-	// held would stall the next pod for as long as this process lives.
+	// Unlock must run on every path: leaving it held would stall the next pod.
 	defer releaseMigrationLock(ctx, conn, discard)
 
 	return runMigrationsLocked(ctx, conn, upTo)
 }
 
-// runMigrationsLocked is the body of a run; callers must already hold the
-// advisory lock on conn.
+// runMigrationsLocked is the body of a run; callers already hold the lock on conn.
 func runMigrationsLocked(ctx context.Context, conn migrationConn, upTo string) error {
-	// ensureSchemaTable sits inside the lock on purpose: CREATE TABLE IF NOT
-	// EXISTS is not race-safe in Postgres, concurrent identical DDL can raise
-	// 23505 on pg_class_relname_nsp_index.
+	// ensureSchemaTable sits inside the lock: CREATE TABLE IF NOT EXISTS is not
+	// race-safe, concurrent identical DDL raises 23505.
 	if err := ensureSchemaTable(ctx, conn); err != nil {
 		return err
 	}
@@ -185,11 +154,10 @@ func runMigrationsLocked(ctx context.Context, conn migrationConn, upTo string) e
 	return nil
 }
 
-// acquireMigrationLock takes the run-level advisory lock on conn, waiting a
-// bounded number of bounded attempts for any peer pod to finish.
+// acquireMigrationLock takes the run-level advisory lock, a bounded number of
+// bounded attempts while any peer pod finishes.
 func acquireMigrationLock(ctx context.Context, conn migrationConn) error {
-	// Session-scoped (is_local=false) so the timeout also covers the
-	// pg_advisory_lock call itself, which is the point.
+	// Session-scoped so lock_timeout also covers the pg_advisory_lock call.
 	if _, err := conn.Exec(ctx, `SELECT set_config('lock_timeout', $1, false)`, advisoryLockTimeout); err != nil {
 		return fmt.Errorf("set advisory lock_timeout: %w", err)
 	}
@@ -198,8 +166,7 @@ func acquireMigrationLock(ctx context.Context, conn migrationConn) error {
 	for attempt := 1; attempt <= advisoryLockAttempts; attempt++ {
 		_, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1)`, migrationAdvisoryLockKey)
 		if err == nil {
-			// Hand the connection back to the per-migration SET LOCAL regime
-			// with a clean session default.
+			// Hand the connection back to the per-migration SET LOCAL regime.
 			if _, err := conn.Exec(ctx, `RESET lock_timeout`); err != nil {
 				return fmt.Errorf("reset lock_timeout: %w", err)
 			}
@@ -220,12 +187,11 @@ func acquireMigrationLock(ctx context.Context, conn migrationConn) error {
 	return fmt.Errorf("acquire migration advisory lock after %d attempts: %w", advisoryLockAttempts, lastErr)
 }
 
-// releaseMigrationLock is best-effort, but a connection whose lock state is
-// unknown must never go back into the pool still holding it.
+// releaseMigrationLock is best-effort, but a connection of unknown lock state
+// must never return to the pool still holding the lock.
 func releaseMigrationLock(ctx context.Context, conn migrationConn, discard func()) {
-	// WithoutCancel: the unlock still has to run when the caller's context is
-	// already cancelled, otherwise an aborted boot parks the lock on a pooled
-	// session and stalls the next pod for as long as this process lives.
+	// WithoutCancel: the unlock still runs on a cancelled context, or an aborted
+	// boot parks the lock on a pooled session.
 	if _, err := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrationAdvisoryLockKey); err != nil {
 		log.Warn().Err(err).Msg("release migration advisory lock failed")
 		if discard != nil {
@@ -234,9 +200,8 @@ func releaseMigrationLock(ctx context.Context, conn migrationConn, discard func(
 	}
 }
 
-// applyMigration applies one migration, retrying a bounded number of times when
-// lock_timeout fires (55P03). A contended table is a transient condition - the
-// draining pod commits and moves on - so it must not be a fatal boot error.
+// applyMigration retries 55P03 a bounded number of times: a contended table is
+// transient (the draining pod commits), so it must not be a fatal boot error.
 func applyMigration(ctx context.Context, conn migrationConn, name, version, body string) error {
 	var lastErr error
 	for attempt := 1; attempt <= migrationLockAttempts; attempt++ {
@@ -264,20 +229,19 @@ func applyMigration(ctx context.Context, conn migrationConn, name, version, body
 	return fmt.Errorf("apply migration %s after %d attempts: %w", name, migrationLockAttempts, lastErr)
 }
 
-// applyMigrationOnce runs one migration and records its version in the same
-// transaction, so a crash can never leave the schema and the ledger disagreeing.
+// applyMigrationOnce records the version in the same transaction, so a crash
+// cannot leave the schema and the ledger disagreeing.
 func applyMigrationOnce(ctx context.Context, conn migrationConn, name, version, body string) error {
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin migration %s: %w", name, err)
 	}
-	// Rollback is a no-op once Commit succeeded; WithoutCancel so a cancelled
-	// context still unwinds the transaction rather than leaking it.
+	// Rollback is a no-op after Commit; WithoutCancel so a cancelled context
+	// still unwinds the transaction.
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 
-	// is_local=true is SET LOCAL: both settings revert when this transaction
-	// ends, so the pinned connection never carries a timeout into the next
-	// migration or back into the pool.
+	// is_local=true (SET LOCAL) reverts at transaction end, so the pinned
+	// connection carries no timeout into the next migration or the pool.
 	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, migrationLockTimeout); err != nil {
 		return fmt.Errorf("set lock_timeout for %s: %w", name, err)
 	}
@@ -302,7 +266,6 @@ func isLockNotAvailable(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == pgLockNotAvailable
 }
 
-// backoffFor returns the delay before attempt+1, doubling per attempt.
 func backoffFor(attempt int) time.Duration {
 	delay := retryBaseDelay
 	for i := 1; i < attempt; i++ {
@@ -383,11 +346,8 @@ func MigrationVersion(name string) string {
 	return migrationVersion(name)
 }
 
-// DatabaseName parses dsn and returns its database name, for the line
-// cmd/migrate prints when it is done.
-//
-// Any name is accepted: the server applies these same migrations at boot to
-// whatever DATABASE_URL names, so a name check in this binary alone would guard
+// DatabaseName parses dsn's database name for the line cmd/migrate prints when
+// it is done; any name is accepted, a check in this binary alone would guard
 // nothing.
 func DatabaseName(dsn string) (string, error) {
 	if strings.TrimSpace(dsn) == "" {

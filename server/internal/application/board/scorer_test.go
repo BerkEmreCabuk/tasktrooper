@@ -94,7 +94,7 @@ func (s *ScorerSuite) TestHumanUATFailurePenalisesDevQAAndPM() {
 	tracker := board.NewScoreTracker(perf)
 	tracker.SetWorkflows(workflowtest.Default().Reader())
 	tracker.SetSpans(s.owners())
-	assignee := uuid.New() // deliberately nobody's span owner
+	assignee := uuid.New()
 
 	tracker.OnColumnTransition(context.Background(),
 		domain.BoardTask{ID: uuid.New(), AssigneeAgentID: &assignee},

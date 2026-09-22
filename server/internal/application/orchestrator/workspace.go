@@ -9,32 +9,25 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// WorkspaceLister supplies the projects and repositories the system already
-// knows about. Intake and the planner run without tools, so without this they
-// cannot tell whether the team has a repository and fall back to asking the
-// stakeholder — which is what list_repositories exists to answer.
+// Supplies projects and repositories for the toolless intake and planner, so they never ask what the store has.
 type WorkspaceLister interface {
 	ListProjects(ctx context.Context) ([]domain.InitiativeProject, error)
 	ListRepositories(ctx context.Context) ([]domain.Repository, error)
 }
 
-// SetWorkspace attaches the workspace snapshot source. Optional: without it the
-// pipeline keeps working, it just loses the never-ask-about-repos grounding.
+// Optional; the pipeline keeps working, it just loses the never-ask-about-repos grounding.
 func (s *Service) SetWorkspace(w WorkspaceLister) {
 	s.workspace = w
 }
 
-// SetSessionActions lets each subtask re-read the board-action ledger instead of
-// inheriting the snapshot taken when the run started. Optional.
+// Lets each subtask re-read the board-action ledger instead of the run-start snapshot. Optional.
 func (s *Service) SetSessionActions(r SessionActionReader) {
 	if s.executor != nil {
 		s.executor.actions = r
 	}
 }
 
-// workspaceFacts renders the snapshot for the toolless pipeline prompts. A store
-// error degrades to a partial (or empty) snapshot rather than failing the run —
-// the worst case is the old behaviour of asking one question too many.
+// Errors degrade to a partial snapshot rather than failing the run — the old "one question too many" behaviour.
 func (s *Service) workspaceFacts(ctx context.Context) string {
 	if s.workspace == nil {
 		return ""

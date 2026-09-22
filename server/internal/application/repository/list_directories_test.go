@@ -14,7 +14,7 @@ import (
 
 func TestServiceListDirectories(t *testing.T) {
 	root := monorepoLayout(t)
-	// A noise directory alongside the real sub-projects: must never appear.
+
 	require.NoError(t, os.MkdirAll(filepath.Join(root, "node_modules", "left-pad"), 0o755))
 	svc := &Service{repos: &fakeReleaseRepoStore{repo: domain.Repository{RootPath: root}}}
 

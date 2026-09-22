@@ -11,15 +11,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// VerifyEnvScrubSuite covers the verify gate's own exec, which is a separate
-// door into the same secrets as run_terminal.
-//
-// A verify stage is a command the repository under test declares — its
-// verify_command, or its package.json "test" script. It used to run with
-// append(os.Environ(), …), so a repository the agent was asked to work on could
-// exfiltrate the pod's DATABASE_URL, INTERNAL_AUTH_KEY and MCP_SECRETS_KEY from
-// its own test script without ever issuing a tool call. Scrubbing run_terminal
-// routed around that door; these tests assert it is now shut.
 type VerifyEnvScrubSuite struct {
 	suite.Suite
 }
@@ -28,7 +19,6 @@ func TestVerifyEnvScrubSuite(t *testing.T) {
 	suite.Run(t, new(VerifyEnvScrubSuite))
 }
 
-// verifyPlantedSecrets mirrors a parent process's env plus a provider key.
 var verifyPlantedSecrets = map[string]string{
 	"DATABASE_URL":      "postgres://tenant:hunter2@10.0.0.5:5432/tenant_x",
 	"INTERNAL_AUTH_KEY": "gateway-hmac-key-9f21",
@@ -52,10 +42,6 @@ func (s *VerifyEnvScrubSuite) assertNoSecrets(output string) {
 	}
 }
 
-// hostileRepo writes a workspace whose declared verify command dumps its own
-// environment and then fails, so runVerification hands the child's environment
-// back in the failure report — the same channel the agent is fed for its fix
-// round, and therefore the same channel an attacker would read.
 func (s *VerifyEnvScrubSuite) hostileRepo(script string) (string, domain.Repository) {
 	dir := s.T().TempDir()
 	s.Require().NoError(os.WriteFile(filepath.Join(dir, "leak.sh"), []byte(script+"\nexit 1\n"), 0o700))
@@ -72,8 +58,6 @@ func (s *VerifyEnvScrubSuite) TestRepoDeclaredStageGetsNoSecrets() {
 	s.assertNoSecrets(report)
 }
 
-// A repo's script is not limited to `env`, and the defense must not depend on
-// which spelling it picks: none of these has anything to read.
 func (s *VerifyEnvScrubSuite) TestObfuscatedReadsInAStageFindNothing() {
 	s.plantSecrets()
 	for _, script := range []string{
@@ -92,9 +76,6 @@ func (s *VerifyEnvScrubSuite) TestObfuscatedReadsInAStageFindNothing() {
 	}
 }
 
-// The gate exists to judge the agent's diff with the toolchain the repo pins.
-// A scrub that stripped the toolchain would make every verification fail for
-// the wrong reason, and the first person to debug that would delete the scrub.
 func (s *VerifyEnvScrubSuite) TestStageKeepsItsToolchain() {
 	s.T().Setenv("GOFLAGS", "-mod=mod")
 	s.T().Setenv("JAVA_HOME", "/opt/java")
@@ -108,13 +89,8 @@ func (s *VerifyEnvScrubSuite) TestStageKeepsItsToolchain() {
 	s.Contains(report, "java=[/opt/java]")
 }
 
-// The empty-overlay case is the one that regresses silently: cmd.Env used to be
-// left nil when the repo declared no toolchain, and exec reads nil as "inherit
-// the parent's environment" — a full leak that looks like no code at all.
 func (s *VerifyEnvScrubSuite) TestNoToolchainOverlayStillScrubs() {
 	s.plantSecrets()
-	// An empty dir declares no Go/Node/Python version, so the toolchain resolver
-	// produces an overlay with nothing in it.
 	dir, repo := s.hostileRepo("env")
 
 	ok, report := runVerification(context.Background(), dir, repo)

@@ -93,7 +93,6 @@ func (f *fakeRepoStore) updateCount() int {
 	return len(f.updates)
 }
 
-// fakeProfileStore is an in-memory stand-in for the sections/proposals tables.
 type fakeProfileStore struct {
 	mu        sync.Mutex
 	sections  map[string]domain.ProfileSection
@@ -195,8 +194,6 @@ func (f *fakeProfileStore) SetProposalStatus(_ context.Context, id uuid.UUID, st
 	return domain.ProfileProposal{}, errors.New("not found")
 }
 
-// stubLoop routes every Run through fn; calls/messages are recorded so tests
-// can assert the retry appended its reminder.
 type stubLoop struct {
 	mu    sync.Mutex
 	calls [][]domain.Message
@@ -216,8 +213,6 @@ func (s *stubLoop) callCount() int {
 	return len(s.calls)
 }
 
-// newFixture builds a repo whose RootPath is a real temp dir, so evidence
-// validation has something to validate against.
 func newFixture(t *testing.T, profileMD string, updatedAt *time.Time) (*fakeRepoStore, *fakeProfileStore, uuid.UUID) {
 	t.Helper()
 	root := t.TempDir()
@@ -239,9 +234,6 @@ func writeSection(ctx context.Context, svc *Service, id uuid.UUID, body string) 
 	}})
 }
 
-// TestRefreshDedup pins the in-flight ledger: while one refresh runs, a second
-// synchronous Refresh answers ErrRefreshInFlight and RefreshAsync is a no-op;
-// once the run ends the slot is free again.
 func TestRefreshDedup(t *testing.T) {
 	store, profiles, id := newFixture(t, "", nil)
 	started := make(chan struct{}, 4)
@@ -272,14 +264,12 @@ func TestRefreshDedup(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("first refresh failed: %v", err)
 	}
-	// Slot released: a new refresh may start.
+
 	if err := svc.Refresh(context.Background(), id, "manual"); err != nil {
 		t.Fatalf("refresh after completion failed: %v", err)
 	}
 }
 
-// TestRefreshSucceedsWhenSectionLands: one pass, a section stored, no retry,
-// and the run context carries the repo root plus the repository id.
 func TestRefreshSucceedsWhenSectionLands(t *testing.T) {
 	store, profiles, id := newFixture(t, "", nil)
 	var svc *Service
@@ -308,8 +298,6 @@ func TestRefreshSucceedsWhenSectionLands(t *testing.T) {
 	}
 }
 
-// TestRefreshRetriesThenGivesUp: a run that never stores a section gets exactly
-// one retry carrying the reminder, then reports failure.
 func TestRefreshRetriesThenGivesUp(t *testing.T) {
 	store, profiles, id := newFixture(t, "old profile", nil)
 	loop := &stubLoop{fn: func(context.Context, []domain.Message) (domain.AgentResponse, error) {
@@ -330,9 +318,6 @@ func TestRefreshRetriesThenGivesUp(t *testing.T) {
 	}
 }
 
-// TestDerivedSectionsSurviveAModelFailure is the point of collecting facts
-// before the model runs: the stack/commands/git half must be stored even when
-// the LLM pass produces nothing.
 func TestDerivedSectionsSurviveAModelFailure(t *testing.T) {
 	store, profiles, id := newFixture(t, "", nil)
 	if err := os.WriteFile(filepath.Join(store.repo.RootPath, "go.mod"), []byte("module demo\n\ngo 1.26\n"), 0o600); err != nil {
@@ -360,8 +345,6 @@ func TestDerivedSectionsSurviveAModelFailure(t *testing.T) {
 	}
 }
 
-// TestApplySectionsRejectsUnverifiableClaims: no evidence, evidence that does
-// not exist, a derived section and a traversal path are all refused.
 func TestApplySectionsRejectsUnverifiableClaims(t *testing.T) {
 	store, profiles, id := newFixture(t, "", nil)
 	svc := NewService(store, profiles, &stubLoop{fn: func(context.Context, []domain.Message) (domain.AgentResponse, error) {
@@ -400,11 +383,9 @@ func TestApplySectionsRejectsUnverifiableClaims(t *testing.T) {
 	}
 }
 
-// TestProposalsAutoApplyOnlyIntoEmptyFields: an empty setting is filled, a
-// human-set one is offered instead.
 func TestProposalsAutoApplyOnlyIntoEmptyFields(t *testing.T) {
 	store, profiles, id := newFixture(t, "", nil)
-	store.repo.Kind = domain.RepoKindFrontend // already chosen by a human
+	store.repo.Kind = domain.RepoKindFrontend
 	svc := NewService(store, profiles, &stubLoop{fn: func(context.Context, []domain.Message) (domain.AgentResponse, error) {
 		return domain.AgentResponse{}, nil
 	}})
@@ -437,8 +418,6 @@ func TestProposalsAutoApplyOnlyIntoEmptyFields(t *testing.T) {
 	}
 }
 
-// TestScopeInstruction: a push that touched only derived sources gives the
-// model the small job, one that touched an agent section names it.
 func TestScopeInstruction(t *testing.T) {
 	if got := scopeInstruction(nil); got != "" {
 		t.Fatalf("no stale sections must add no instruction, got %q", got)
@@ -453,7 +432,6 @@ func TestScopeInstruction(t *testing.T) {
 	}
 }
 
-// TestProfileStale pins the full-rebuild window.
 func TestProfileStale(t *testing.T) {
 	now := time.Now()
 	if !ProfileStale(nil, now) {
@@ -473,8 +451,6 @@ func TestProfileStale(t *testing.T) {
 	}
 }
 
-// TestBuildRefreshMessages: the facts block and the previous agent sections
-// ride along, and the user message names the reason.
 func TestBuildRefreshMessages(t *testing.T) {
 	repo := domain.Repository{Name: "demo", Kind: domain.RepoKindFrontend}
 	facts := repofacts.Facts{

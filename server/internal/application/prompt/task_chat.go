@@ -1,13 +1,6 @@
 package prompt
 
-// The two renderings a task-scoped chat needs: the greeting the human reads when
-// the thread opens, and the compact context the model gets on every turn.
-//
-// They live here rather than in the board or session package because both of
-// those need one of them (board opens the thread, session runs its turns) and
-// neither may import the other. One file also keeps the two saying the same thing
-// about the same task, which is what stops the chat's first line and the model's
-// context from disagreeing about the column or the PR.
+// Both renderings live here because board and session each need one and neither may import the other; one file keeps the chat's first line and the per-turn context agreeing about the same task.
 
 import (
 	"fmt"
@@ -16,18 +9,10 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// maxTaskChatFieldChars caps each free-text task field. The description and the
-// technical notes are written by a PM and an architect with no length limit; the
-// per-turn context message pays for them on every single turn, and past this size
-// they crowd out the conversation.
+// The description and technical notes have no length limit on write, but the context message pays for them on every turn.
 const maxTaskChatFieldChars = 2000
 
-// TaskChatOpeningMessage is the assistant's first turn in a task's chat: what the
-// task is, where it stands, and the PR if one exists.
-//
-// It is a chat message, not a system prompt — the human reads it, so it names the
-// task the way the board does (key, title, column) and offers the two things they
-// most often want next: an explanation of the change, or a change to it.
+// A chat message, not a system prompt: the human reads it, so it names the task the way the board does and offers the two things they most often want next.
 func TaskChatOpeningMessage(task domain.BoardTask, criteria []domain.AcceptanceCriterion) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("**%s — %s**\n", strings.TrimSpace(task.Key), strings.TrimSpace(task.Title)))
@@ -62,12 +47,7 @@ func TaskChatOpeningMessage(task domain.BoardTask, criteria []domain.AcceptanceC
 	return strings.TrimSpace(sb.String())
 }
 
-// TaskChatContextMessage is the per-turn system context for a task-bound chat.
-//
-// Deliberately cheap: the task's own fields, the branch, and the PR's identity —
-// never the diff or the comments. Those are fetched with get_task_pull_request
-// when the conversation actually needs them, because a diff pasted into every turn
-// is paid for on every turn and is stale by the second one.
+// Deliberately cheap: fields, branch and PR identity only — a diff pasted into every turn is paid for every turn and stale by the second one.
 func TaskChatContextMessage(task domain.BoardTask, criteria []domain.AcceptanceCriterion, branch, workspaceDir string) string {
 	var sb strings.Builder
 	sb.WriteString("## The board task this conversation is about\n")

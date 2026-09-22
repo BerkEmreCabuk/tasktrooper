@@ -12,43 +12,32 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// SpanHoursReader is the slice of TaskColumnSpanStore the time metrics read.
 type SpanHoursReader interface {
 	CleanTaskHours(ctx context.Context, agentID uuid.UUID, columns []string, from, to time.Time) ([]float64, error)
 }
 
-// MetricDeps are the data sources metric resolvers may read from.
 type MetricDeps struct {
 	Perf  port.AgentPerformanceStore
 	Runs  port.TaskAgentRunStore
 	Tasks port.BoardTaskStore
 	Spans SpanHoursReader
-	// Workflows answers "is this task's type a defect type" (resolveBugsAssigned)
-	// without the registry knowing any task type is called "bug". Nil skips
-	// that check, matching every other optional MetricDeps field.
+
 	Workflows port.WorkflowReader
 }
 
-// ErrInsufficientData means the period holds too few measurements to score.
-// The KPI is then left unmeasured rather than scored, because a zero on a
-// lower-better metric reads as a perfect result.
 var ErrInsufficientData = errors.New("insufficient data for metric")
 
 type MetricResolver func(ctx context.Context, deps MetricDeps, agentID uuid.UUID, from, to time.Time) (float64, error)
 
 type MetricDef struct {
 	Info domain.KPIMetricInfo
-	// Columns are the board columns a time metric measures. Empty for
-	// non-time metrics.
+
 	Columns []string
-	// MinSample is the fewest measurements required to publish a result.
+
 	MinSample int
 	Resolve   MetricResolver
 }
 
-// metricRegistry is the single source of truth for trackable KPI metrics.
-// A KPI can only be created for a key present here; adding a new trackable
-// metric means adding one entry.
 var metricRegistry = map[string]MetricDef{
 	"tasks_completed": {
 		Info: domain.KPIMetricInfo{
@@ -187,12 +176,6 @@ func MetricByKey(key string) (MetricDef, error) {
 	return def, nil
 }
 
-// countDistinctTaskEvents counts DISTINCT tasks among matching events rather
-// than the events themselves: a task that is completed and then released
-// (or completed twice by a flaky reconciler) writes several events for one
-// piece of work, and this must not be scored as several. An event with no
-// TaskID (older data, or an event type that never carried one) has nothing to
-// dedupe against, so it counts on its own.
 func countDistinctTaskEvents(eventTypes ...string) MetricResolver {
 	return func(ctx context.Context, deps MetricDeps, agentID uuid.UUID, from, to time.Time) (float64, error) {
 		events, err := deps.Perf.EventsInWindow(ctx, agentID, from, to)
@@ -245,41 +228,20 @@ func countScoreEvents(eventTypes ...string) MetricResolver {
 	}
 }
 
-// Column sets and the sample floor live outside the registry so a resolver can
-// close over them: reading them back out of metricRegistry would make the map's
-// initialisation depend on itself.
 var (
 	columnsInProgress = []string{"in_progress"}
 	columnsCodeReview = []string{"code_review"}
-	// The wait before QA picks the task up is QA's time too, not nobody's.
+
 	columnsQA    = []string{"ready_for_qa", "in_qa"}
 	columnsPMUAT = []string{"pm_uat"}
 )
 
-// minCleanSample is the fewest clean tasks a time metric will score on. One
-// quick task must not buy a full mark, and a period with nothing in it must
-// stay unmeasured rather than measure zero.
 const minCleanSample = 3
 
-// minToolCallSample is the fewest tool calls tool_error_rate will score on. A
-// period holding one run that made two calls and failed one of them is not a
-// 50% error rate, it is no measurement.
 const minToolCallSample = 20
 
-// minFirstPassSample is the fewest distinct completed tasks first_pass_rate
-// will score on. One completed task scores 0% or 100%, and an idle period
-// with nothing completed must stay unmeasured rather than read as a 0%
-// first-pass rate.
 const minFirstPassSample = 3
 
-// resolveToolErrorRate is the share of the agent's tool calls that came back as
-// errors over the period.
-//
-// It reads the per-run counters rather than the audit log, because the audit
-// entries carry no agent id — a tool call knows what it did, not who asked for
-// it. Runs that recorded no tool calls are skipped entirely: they are runs from
-// before this was measured, or runs that never got to call anything, and
-// counting them as clean would dilute a real problem into nothing.
 func resolveToolErrorRate(ctx context.Context, deps MetricDeps, agentID uuid.UUID, from, to time.Time) (float64, error) {
 	if deps.Runs == nil {
 		return 0, fmt.Errorf("task run store unavailable")
@@ -305,9 +267,6 @@ func resolveToolErrorRate(ctx context.Context, deps MetricDeps, agentID uuid.UUI
 	return float64(errorCalls) / float64(calls) * 100.0, nil
 }
 
-// resolveCleanTime measures only tasks that finished without rework. A rushed
-// task that bounced is absent from this sample, so speed cannot be bought with
-// quality: hurrying removes the reward instead of increasing it.
 func resolveCleanTime(columns []string, minSample int) MetricResolver {
 	return func(ctx context.Context, deps MetricDeps, agentID uuid.UUID, from, to time.Time) (float64, error) {
 		if deps.Spans == nil {
@@ -376,11 +335,6 @@ func resolveBugsAssigned(ctx context.Context, deps MetricDeps, agentID uuid.UUID
 	return float64(count), nil
 }
 
-// isDefectType asks the workflow snapshot whether t's task type carries
-// is_defect — bugs_assigned no longer knows any task type is literally
-// called "bug" (see release-b-plan.md §1 "Type flags"). Deps.Workflows unset
-// or an unresolvable type reads as "not a defect", matching the metric's
-// pre-B2c behaviour when the type in question could not be found either.
 func isDefectType(ctx context.Context, deps MetricDeps, t domain.TaskType) bool {
 	if deps.Workflows == nil {
 		return false
@@ -420,10 +374,6 @@ func resolveFirstPassRate(ctx context.Context, deps MetricDeps, agentID uuid.UUI
 	return float64(clean) / float64(len(completed)) * 100.0, nil
 }
 
-// resolveGateRejectedRuns counts runs a grounding gate failed for skipping
-// required verification, as distinct from failed_runs: that metric also
-// counts infra failures (session limits, a restart landing mid-run) which are
-// not the agent's doing and must not be scored against it.
 func resolveGateRejectedRuns(ctx context.Context, deps MetricDeps, agentID uuid.UUID, from, to time.Time) (float64, error) {
 	if deps.Runs == nil {
 		return 0, fmt.Errorf("task run store unavailable")

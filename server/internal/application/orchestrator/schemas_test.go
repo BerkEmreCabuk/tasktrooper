@@ -9,15 +9,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// assertStrictObjectSchema walks a JSON Schema built for
-// domain.JSONSchemaResponseFormat and checks the two invariants OpenAI's
-// strict json_schema mode enforces at the API boundary, not just at parse
-// time: every object sets "additionalProperties": false, and every property
-// it declares also appears in "required" (strict mode has no such thing as an
-// optional property — see schemas.go's package doc). A schema that violates
-// either is rejected by the provider before the model ever runs, so this is
-// the regression a hand-edited schema.go would otherwise only surface in
-// production.
+// Checks what strict json_schema mode enforces at the provider boundary: every object
+// sets additionalProperties=false and every declared property is required.
 func assertStrictObjectSchema(t *testing.T, schema map[string]interface{}, path string) {
 	t.Helper()
 	typ, _ := schema["type"].(string)
@@ -71,8 +64,6 @@ func TestPipelineSchemas_MarshalAndSatisfyStrictMode(t *testing.T) {
 			require.NoError(t, err, "schema must marshal to valid JSON")
 			assert.NotEmpty(t, raw)
 
-			// Round-trips through the wire shape a provider actually receives —
-			// map[string]interface{} nesting survives Marshal/Unmarshal cleanly.
 			var roundTrip map[string]interface{}
 			require.NoError(t, json.Unmarshal(raw, &roundTrip))
 			assert.Equal(t, "object", roundTrip["type"])
@@ -82,9 +73,7 @@ func TestPipelineSchemas_MarshalAndSatisfyStrictMode(t *testing.T) {
 	}
 }
 
-// The planner's own advertised shape includes "difficulty"; the replanner's
-// prompt (buildReplannerSystemPrompt) never mentions it, and the two schemas
-// must keep matching what each prompt actually promises the model.
+// The planner's shape promises difficulty; the replanner's prompt never mentions it.
 func TestPlannerTaskSchema_HasDifficultyReplannerTaskSchemaDoesNot(t *testing.T) {
 	plannerProps := plannerOutputSchema()["properties"].(map[string]interface{})
 	plannerTask := plannerProps["tasks"].(map[string]interface{})["items"].(map[string]interface{})
@@ -97,8 +86,7 @@ func TestPlannerTaskSchema_HasDifficultyReplannerTaskSchemaDoesNot(t *testing.T)
 	assert.NotContains(t, repairTaskProps, "difficulty")
 }
 
-// The planner and intake schemas both embed the ask_user question shape;
-// mismatched copies would silently diverge from prompt.AskUserQuestionJSONShape.
+// Both schemas embed the ask_user question shape; keep them on prompt.AskUserQuestionJSONShape.
 func TestClarificationQuestionSchema_SharedByPlannerAndIntake(t *testing.T) {
 	plannerProps := plannerOutputSchema()["properties"].(map[string]interface{})
 	plannerQ := plannerProps["questions"].(map[string]interface{})["items"].(map[string]interface{})

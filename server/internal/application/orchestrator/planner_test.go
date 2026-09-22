@@ -25,12 +25,7 @@ func repairPlanFixture(agentID uuid.UUID, taskID string, dependsOn []string) dom
 	}
 }
 
-// The replanner's own prompt tells the model "depends_on may reference existing
-// task ids from the prior plan". Validation built its known-id set from the
-// planning turn it was checking and nothing else, so a repair plan that obeyed
-// that instruction was rejected as depending on an unknown task, re-sent against
-// the same contradiction maxPlannerRetries+1 times, and finally abandoned — with
-// the run still reporting itself completed.
+// A repair plan is allowed to depend on a prior plan's task: validation must know those ids.
 func TestValidateRepairPlan_AcceptsDependencyOnAPriorPlanTask(t *testing.T) {
 	agentID := uuid.New()
 	agents := []domain.Agent{{ID: agentID, Name: "backend-developer", Enabled: true}}
@@ -45,8 +40,6 @@ func TestValidateRepairPlan_AcceptsDependencyOnAPriorPlanTask(t *testing.T) {
 	assert.NoError(t, err, "the prior plan's tasks are known ids for a repair plan")
 }
 
-// The same plan judged as a first plan: without a prior round t1 is genuinely
-// unknown, which is the check this fix must not weaken.
 func TestValidatePlannerOutput_FirstPlanStillRejectsForwardReferences(t *testing.T) {
 	agentID := uuid.New()
 	agents := []domain.Agent{{ID: agentID, Name: "backend-developer", Enabled: true}}
@@ -57,8 +50,6 @@ func TestValidatePlannerOutput_FirstPlanStillRejectsForwardReferences(t *testing
 	assert.Contains(t, err.Error(), "depends on unknown task t1")
 }
 
-// A repair plan may still not invent dependencies: only ids the run actually has
-// are known.
 func TestValidateRepairPlan_StillRejectsHallucinatedDependencies(t *testing.T) {
 	agentID := uuid.New()
 	agents := []domain.Agent{{ID: agentID, Name: "backend-developer", Enabled: true}}
@@ -73,8 +64,7 @@ func TestValidateRepairPlan_StillRejectsHallucinatedDependencies(t *testing.T) {
 	assert.Contains(t, err.Error(), "depends on unknown task t9")
 }
 
-// Prior ids are dependency targets, not free ids: reusing one would collide with
-// the plan_tasks row it names.
+// Prior ids are dependency targets: reusing one would collide with the plan_tasks row it names.
 func TestValidateRepairPlan_RejectsReusingAPriorTaskID(t *testing.T) {
 	agentID := uuid.New()
 	agents := []domain.Agent{{ID: agentID, Name: "backend-developer", Enabled: true}}
@@ -89,7 +79,6 @@ func TestValidateRepairPlan_RejectsReusingAPriorTaskID(t *testing.T) {
 	assert.Contains(t, err.Error(), "reuses an id from the prior plan")
 }
 
-// flakyLLM fails the first n calls with a given error, then answers.
 type flakyLLM struct {
 	failures int
 	err      error
@@ -113,11 +102,7 @@ func (f *flakyLLM) Embed(_ context.Context, _ string, _ string) ([]float32, erro
 	return nil, nil
 }
 
-// The pipeline stages used to re-send a failed request with no pause at all, so
-// a rate limit was burned through in milliseconds. A transient failure now waits
-// before the next attempt, on the same curve the agent loop uses — llmretry owns
-// both. llmretry_test pins the classifier itself; these four check that each
-// stage is actually wired to it, which is the part that was duplicated.
+// Transient failures wait on the same curve the agent loop uses (llmretry); these check each stage is wired to it.
 func TestPipelineStage_WaitsBeforeRetryingATransientFailure(t *testing.T) {
 	llm := &flakyLLM{
 		failures: 1,
@@ -137,8 +122,7 @@ func TestPipelineStage_WaitsBeforeRetryingATransientFailure(t *testing.T) {
 		"the second request must not leave in the same millisecond as the rejected one")
 }
 
-// A rejection the provider will repeat — a bad model name, a malformed request,
-// a prompt over the context window — is not worth three identical attempts.
+// A rejection the provider will repeat is not worth three identical attempts.
 func TestPipelineStage_StopsImmediatelyOnANonRetryableRejection(t *testing.T) {
 	llm := &flakyLLM{
 		failures: 99,
@@ -158,12 +142,7 @@ func TestPipelineStage_StopsImmediatelyOnANonRetryableRejection(t *testing.T) {
 	assert.Less(t, elapsed, 250*time.Millisecond, "a stop must not sleep on the way out")
 }
 
-// A context-overflow rejection is the one failure a plain retry can never fix.
-// The agent loop answers it by shrinking the conversation and sending it again;
-// this package assembles its prompt fresh from run facts and has nothing to cut,
-// so llmretry.Await makes the same verdict terminal here rather than re-sending
-// exactly what was just refused. This is the only point where the two callers of
-// the shared classifier act differently on the same answer.
+// Only the agent loop fixes an overflow by shrinking the conversation; this package's prompt is rebuilt fresh, so it is terminal.
 func TestPipelineStage_StopsOnAContextOverflowRejection(t *testing.T) {
 	llm := &flakyLLM{
 		failures: 99,
@@ -179,8 +158,7 @@ func TestPipelineStage_StopsOnAContextOverflowRejection(t *testing.T) {
 	assert.Equal(t, 1, llm.calls)
 }
 
-// A cancelled run never sleeps: retrying inside a dead context only collects
-// more context errors.
+// A cancelled run never sleeps; retrying in a dead context only collects errors.
 func TestPipelineStage_DoesNotWaitOnACancelledRun(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

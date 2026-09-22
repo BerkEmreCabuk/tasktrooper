@@ -7,8 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// In solo mode the planner is constrained to the single agent, so it can only
-// plan that agent's own tasks and never wakes other team agents.
+// Solo mode plans only the single agent's own tasks and never wakes other team agents.
 func TestBuildPlannerPMSoloPrompt_ConstrainedToSingleAgent(t *testing.T) {
 	prompt := orchestrator.BuildPlannerPMSoloPromptForTest("tr")
 	assert.Contains(t, prompt, "Solo mode: all tasks must use agent_id=")

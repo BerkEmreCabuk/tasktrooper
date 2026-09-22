@@ -14,41 +14,23 @@ import (
 )
 
 const (
-	// defaultMonitorInterval is Start's fallback when the caller passes a
-	// non-positive interval — same guard storeops.Monitor.Start applies.
 	defaultMonitorInterval = 2 * time.Minute
-	// dispatchMatchWindow is how long a pending dispatch waits for its run
-	// before it is abandoned. A run that has not appeared in GitHub within
-	// this window is not going to.
+
 	dispatchMatchWindow = 15 * time.Minute
-	// existingRunLookupLimit bounds the read of already-stored runs used to
-	// tell "newly failed" from "already known failed" apart — generous
-	// relative to a single GitHub page (30 runs) so the run this sweep just
-	// fetched is never truncated out of the comparison set.
+
 	existingRunLookupLimit = 100
 )
 
-// IncidentIngester is the Ingest side of the incident service, narrowed
-// locally so this package does not import application/prodops — same shape
-// storeops.Monitor uses.
 type IncidentIngester interface {
 	Ingest(ctx context.Context, in domain.IncidentInput) (domain.Incident, error)
 }
 
-// dispatchableTarget is one repository × environment pair that has BOTH a
-// deploy target AND a workflow mapping for that env's deploy category — the
-// bounded polling scope the Global Constraint requires: every sweep is at
-// most one GitHub API call per dispatchable target, never per repository.
 type dispatchableTarget struct {
 	Repo         domain.Repository
 	Env          string
 	WorkflowFile string
 }
 
-// dispatchableTargets returns every (repository, env) pair worth polling —
-// the same axis Matrix's Dispatchable flag reports (Configured AND a
-// workflow mapping), resolved here as a concrete list rather than a per-cell
-// bool. It makes exactly three store calls, never one per repository.
 func (s *Service) dispatchableTargets(ctx context.Context) ([]dispatchableTarget, error) {
 	repos, err := s.repos.List(ctx)
 	if err != nil {
@@ -94,10 +76,6 @@ func (s *Service) dispatchableTargets(ctx context.Context) ([]dispatchableTarget
 	return out, nil
 }
 
-// Monitor polls every dispatchable (repository, env) pair's GitHub Actions
-// runs, mirrors them into deployment_runs, reconciles pending console
-// dispatches against the runs it just saw, and turns a newly failed run into
-// a "deploy" incident. It is deployops' counterpart to storeops.Monitor.
 type Monitor struct {
 	svc      *Service
 	ingester IncidentIngester
@@ -111,8 +89,6 @@ func NewMonitor(svc *Service, ingester IncidentIngester) *Monitor {
 	return &Monitor{svc: svc, ingester: ingester}
 }
 
-// Start runs a sweep every interval until the context is cancelled. Calling
-// Start on a running monitor is a no-op. Mirrors storeops.Monitor.Start.
 func (m *Monitor) Start(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = defaultMonitorInterval
@@ -127,8 +103,7 @@ func (m *Monitor) Start(ctx context.Context, interval time.Duration) {
 	m.wg.Add(1)
 	go func() {
 		defer m.wg.Done()
-		// Sweep immediately — waiting a full interval before the first pass
-		// leaves a fresh dispatch or a failed deploy unwatched for no reason.
+
 		m.Sweep(ctx)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -151,20 +126,11 @@ func (m *Monitor) Stop() {
 	m.wg.Wait()
 }
 
-// seenKey identifies the set of GitHub Actions runs a sweep fetched for one
-// (repository, workflow file) pair — reconciliation only ever matches a
-// pending dispatch against runs THIS sweep saw, never a stale set left over
-// from an earlier pass.
 type seenKey struct {
 	repositoryID uuid.UUID
 	workflowFile string
 }
 
-// Sweep runs one pass: list every dispatchable target's recent runs, mirror
-// them locally, reconcile pending dispatches against what was just seen, and
-// ingest an incident for any run newly observed as failed. It is
-// best-effort: one target's failure is logged and the sweep moves on rather
-// than aborting the rest, matching storeops.Monitor.Sweep's contract.
 func (m *Monitor) Sweep(ctx context.Context) {
 	targets, err := m.svc.dispatchableTargets(ctx)
 	if err != nil {
@@ -185,12 +151,6 @@ func (m *Monitor) Sweep(ctx context.Context) {
 	m.reconcileDispatches(ctx, seen)
 }
 
-// sweepTarget lists target's recent Actions runs, mirrors each into
-// deployment_runs as externally triggered, and ingests an incident for any
-// run this call newly observes as completed+failure. A run's prior state is
-// read BEFORE the upsert so "newly failed" can be told apart from "already
-// known failed" — Upsert itself only ever returns the just-written row, not
-// what preceded it.
 func (m *Monitor) sweepTarget(ctx context.Context, target dispatchableTarget, seen map[seenKey][]port.ActionsRun) {
 	owner, name, err := m.svc.resolveRepoCoordinates(ctx, target.Repo)
 	if err != nil {
@@ -262,8 +222,6 @@ func (m *Monitor) sweepTarget(ctx context.Context, target dispatchableTarget, se
 	}
 }
 
-// ingestFailure records a "deploy" incident for a newly failed run. A nil
-// ingester (no incident wiring) is tolerated, not an error.
 func (m *Monitor) ingestFailure(ctx context.Context, target dispatchableTarget, r port.ActionsRun) {
 	if m.ingester == nil {
 		return
@@ -288,9 +246,6 @@ func (m *Monitor) ingestFailure(ctx context.Context, target dispatchableTarget, 
 	}
 }
 
-// reconcileDispatches attributes each pending dispatch to the run this sweep
-// saw for it, or abandons it once dispatchMatchWindow has passed with no
-// match.
 func (m *Monitor) reconcileDispatches(ctx context.Context, seen map[seenKey][]port.ActionsRun) {
 	pending, err := m.svc.dispatches.ListPending(ctx)
 	if err != nil {
@@ -327,9 +282,6 @@ func (m *Monitor) reconcileDispatches(ctx context.Context, seen map[seenKey][]po
 	}
 }
 
-// matchDispatch finds the run in runs that dispatch d most plausibly caused:
-// same head branch as the ref d dispatched, started at or after d was
-// created. A run that started before the dispatch existed cannot be its run.
 func matchDispatch(d domain.DeployDispatch, runs []port.ActionsRun) (port.ActionsRun, bool) {
 	for _, r := range runs {
 		if r.HeadBranch == d.Ref && !r.RunStartedAt.Before(d.CreatedAt) {

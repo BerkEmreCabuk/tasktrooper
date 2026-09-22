@@ -36,8 +36,6 @@ func runtimeFixture() (*memCatalogStore, *Service, string) {
 	return store, NewService(store, stubLLMClient{}, ""), role
 }
 
-// Connecting only Cursor must give every agent that could not run a runtime that
-// can: the catalog agent with no provider, and the agent stranded on Claude Code.
 func TestReconcileAgentRuntimes_MovesAgentsThatCannotRunOntoTheConnectedCLI(t *testing.T) {
 	store, svc, role := runtimeFixture()
 
@@ -62,7 +60,6 @@ func TestReconcileAgentRuntimes_MovesAgentsThatCannotRunOntoTheConnectedCLI(t *t
 	}
 }
 
-// Claude Code wins a tie; an agent already on a connected CLI keeps it.
 func TestReconcileAgentRuntimes_PrefersClaudeCodeAndLeavesConnectedAgentsAlone(t *testing.T) {
 	store, svc, role := runtimeFixture()
 
@@ -81,8 +78,6 @@ func TestReconcileAgentRuntimes_PrefersClaudeCodeAndLeavesConnectedAgentsAlone(t
 	}
 }
 
-// With no CLI connected but an active, configured HTTP provider, stranded and
-// providerless agents move onto it with ITS model pair, not a Claude-alias pair.
 func TestReconcileAgentRuntimes_FallsBackToActiveHTTPProviderWithItsModels(t *testing.T) {
 	store, svc, role := runtimeFixture()
 	svc.SetLLMProviders(stubProviderStore{
@@ -107,8 +102,6 @@ func TestReconcileAgentRuntimes_FallsBackToActiveHTTPProviderWithItsModels(t *te
 	}
 }
 
-// The active HTTP provider only counts when it is actually configured: a bare
-// default active provider is nowhere to send anyone.
 func TestReconcileAgentRuntimes_IgnoresUnconfiguredActiveHTTPProvider(t *testing.T) {
 	store, svc, _ := runtimeFixture()
 	svc.SetLLMProviders(stubProviderStore{
@@ -125,7 +118,6 @@ func TestReconcileAgentRuntimes_IgnoresUnconfiguredActiveHTTPProvider(t *testing
 	}
 }
 
-// With nothing usable available there is nowhere better to send anyone.
 func TestReconcileAgentRuntimes_MovesNothingWithNoUsableProvider(t *testing.T) {
 	store, svc, _ := runtimeFixture()
 

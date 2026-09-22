@@ -14,14 +14,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// Fakes for the storeops package's collaborators. These are infrastructure
-// for Task 6 and every task after it (signing, onboarding, the monitor) —
-// keep them complete and reusable rather than growing a second set later.
-
-// fakeCredentialStore is an in-memory port.StoreCredentialStore. It only
-// ever sees the bytes the service hands it — the fake has no idea whether
-// they are encrypted, and asserting that they are not plaintext is the
-// caller's job.
 type fakeCredentialStore struct {
 	mu   sync.Mutex
 	rows map[string]credentialRow
@@ -72,16 +64,12 @@ func (f *fakeCredentialStore) List(_ context.Context) (map[string]time.Time, err
 	return out, nil
 }
 
-// count is a test convenience for asserting "nothing was persisted".
 func (f *fakeCredentialStore) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.rows)
 }
 
-// fakeMobileStoreAppStore is an in-memory port.MobileStoreAppStore, keyed on
-// (repository_id, platform) exactly like the postgres store's unique
-// constraint — Upsert overwrites in place instead of appending.
 type fakeMobileStoreAppStore struct {
 	mu   sync.Mutex
 	rows map[mobileAppKey]domain.MobileStoreApp
@@ -115,9 +103,6 @@ func (f *fakeMobileStoreAppStore) Upsert(_ context.Context, app domain.MobileSto
 	return app, nil
 }
 
-// SetTracks mirrors the postgres UPDATE exactly: it re-reads the stored row
-// and writes only the two cache columns onto it, so a test that hands it a
-// stale copy of the row proves the same thing the real column list does.
 func (f *fakeMobileStoreAppStore) SetTracks(_ context.Context, repositoryID uuid.UUID, platform string, tracks domain.StoreTracks, syncedAt time.Time) (domain.MobileStoreApp, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -172,9 +157,6 @@ func (f *fakeMobileStoreAppStore) ListAll(_ context.Context) ([]domain.MobileSto
 	return out, nil
 }
 
-// fakeSigningAssetStore is an in-memory port.SigningAssetStore, keyed on
-// (kind, identifier) like the postgres store's unique constraint. Task 6
-// does not exercise signing, but Task 7 needs this fake ready to go.
 type fakeSigningAssetStore struct {
 	mu   sync.Mutex
 	rows map[signingAssetKey]domain.SigningAsset
@@ -231,10 +213,6 @@ func (f *fakeSigningAssetStore) ListExpiring(_ context.Context, before time.Time
 	return out, nil
 }
 
-// fakeASC is a settable, call-recording port.AppStoreClient. Every method
-// returns its canned "…Result"/"…Err" field (zero value by default) and
-// appends its arguments to the matching "…Calls" slice, so a test can both
-// script a scenario and assert exactly what the service asked for.
 type fakeASC struct {
 	mu sync.Mutex
 
@@ -268,20 +246,16 @@ type fakeASC struct {
 
 	ValidateAuthCalls      int
 	AppByBundleIDCalls     []string
-	EnsureBundleIDCalls    [][2]string // [bundleID, name]
+	EnsureBundleIDCalls    [][2]string
 	CreateCertificateCalls [][]byte
-	CreateProfileCalls     [][3]string // [bundleID, certID, name]
+	CreateProfileCalls     [][3]string
 	LatestVersionCalls     []string
-	SubmitForReviewCalls   [][2]string // [appID, version]
+	SubmitForReviewCalls   [][2]string
 	ReleaseVersionCalls    []string
 	ListAppsCalls          int
 	TracksCalls            []string
-	PromoteChannelCalls    [][3]string // [appID, from, to]
+	PromoteChannelCalls    [][3]string
 
-	// submits/releases are Task 9's plain call counters — release_test.go
-	// asserts against these directly ("submitted to Apple despite a failed
-	// confirmation") rather than the fuller …Calls slices above, which stay
-	// around for the signing/onboarding tests that already use them.
 	submits  int
 	releases int
 }
@@ -367,10 +341,6 @@ func (f *fakeASC) PromoteChannel(_ context.Context, appID, from, to string) erro
 	return f.PromoteChannelErr
 }
 
-// newFakeASCFactory returns a Deps.NewASC-shaped factory that always hands
-// back client, regardless of the credential it's called with — or err, when
-// set, to simulate a credential that fails to even build a client (e.g. a
-// malformed p8 key), as distinct from one that builds but fails ValidateAuth.
 func newFakeASCFactory(client *fakeASC, err error) func(domain.StoreCredential) (port.AppStoreClient, error) {
 	return func(domain.StoreCredential) (port.AppStoreClient, error) {
 		if err != nil {
@@ -380,8 +350,6 @@ func newFakeASCFactory(client *fakeASC, err error) func(domain.StoreCredential) 
 	}
 }
 
-// fakePlay is a settable, call-recording port.GooglePlayClient — the Play
-// counterpart of fakeASC.
 type fakePlay struct {
 	mu sync.Mutex
 
@@ -398,8 +366,7 @@ type fakePlay struct {
 
 	TracksResult domain.StoreTracks
 	TracksErr    error
-	// TracksHook runs inside Tracks, standing in for whatever else wrote the
-	// row while this store call was in flight.
+
 	TracksHook func()
 
 	PromoteTrackErr       error
@@ -409,14 +376,14 @@ type fakePlay struct {
 
 	ValidateAuthCalls int
 	AppExistsCalls    []string
-	TrackInfoCalls    [][2]string // [packageName, track]
+	TrackInfoCalls    [][2]string
 	ListAppsCalls     int
 	TracksCalls       []string
 
 	PromoteTrackCalls       []promoteTrackCall
 	SetRolloutFractionCalls []setRolloutFractionCall
-	HaltRolloutCalls        [][2]string // [packageName, track]
-	ResumeRolloutCalls      [][2]string // [packageName, track]
+	HaltRolloutCalls        [][2]string
+	ResumeRolloutCalls      [][2]string
 }
 
 type promoteTrackCall struct {
@@ -495,9 +462,7 @@ func (f *fakePlay) ListApps(context.Context) ([]port.StoreAppRef, error) {
 }
 
 func (f *fakePlay) Tracks(_ context.Context, packageName string) (domain.StoreTracks, error) {
-	// Run before the lock and before the answer: it stands in for whatever
-	// else touched the row while this (real, slow) store call was in flight,
-	// which is the collision the narrow SetTracks writer exists for.
+
 	if f.TracksHook != nil {
 		f.TracksHook()
 	}
@@ -507,7 +472,6 @@ func (f *fakePlay) Tracks(_ context.Context, packageName string) (domain.StoreTr
 	return f.TracksResult, f.TracksErr
 }
 
-// newFakePlayFactory is the fakePlay counterpart of newFakeASCFactory.
 func newFakePlayFactory(client *fakePlay, err error) func(domain.StoreCredential) (port.GooglePlayClient, error) {
 	return func(domain.StoreCredential) (port.GooglePlayClient, error) {
 		if err != nil {
@@ -517,15 +481,10 @@ func newFakePlayFactory(client *fakePlay, err error) func(domain.StoreCredential
 	}
 }
 
-// fakePushSecret is a recording Deps.PushSecret: it never talks to GitHub,
-// just remembers every call so a test can assert what would have been
-// pushed.
 type fakePushSecret struct {
 	mu  sync.Mutex
 	Err error
-	// ErrFor fails the push for specific repositories only, leaving the
-	// others working — how a test proves one repo's failure cannot abort a
-	// sweep over many.
+
 	ErrFor map[uuid.UUID]error
 	Calls  []pushSecretCall
 }
@@ -546,11 +505,6 @@ func (f *fakePushSecret) Push(_ context.Context, repositoryID uuid.UUID, name, v
 	return f.Err
 }
 
-// fakeTaskCreator is a recording storeops.TaskCreator: it never talks to the
-// board, just remembers every CreateTask call and hands back a task carrying
-// a fresh ID and the request's title/description/column/priority — enough
-// for a test to both script a failure and assert exactly what onboarding
-// asked the board to open.
 type fakeTaskCreator struct {
 	mu    sync.Mutex
 	Err   error
@@ -587,17 +541,12 @@ func (f *fakeTaskCreator) CreateTask(_ context.Context, repositoryID uuid.UUID, 
 	}, nil
 }
 
-// count is a test convenience for asserting "exactly one task was opened",
-// the idempotency contract Onboard must uphold across repeated calls.
 func (f *fakeTaskCreator) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.Calls)
 }
 
-// fakeRepositoryResolver is a settable storeops.RepositoryResolver keyed by
-// repository ID — the fallback path Onboard uses to name a store app record
-// when the caller supplies no explicit name.
 type fakeRepositoryResolver struct {
 	mu   sync.Mutex
 	rows map[uuid.UUID]domain.Repository
@@ -625,9 +574,6 @@ func (f *fakeRepositoryResolver) Get(_ context.Context, id uuid.UUID) (domain.Re
 	return repo, nil
 }
 
-// List returns every repository set on the fixture, sorted by ID for a
-// deterministic AllApps join in tests — Task 9's addition to
-// storeops.RepositoryResolver.
 func (f *fakeRepositoryResolver) List(_ context.Context) ([]domain.Repository, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -639,9 +585,6 @@ func (f *fakeRepositoryResolver) List(_ context.Context) ([]domain.Repository, e
 	return out, nil
 }
 
-// fakeCommenter is a recording storeops.Commenter — the Task 8 counterpart
-// of fakePushSecret, so a test can assert exactly which system comments
-// verification posted (or script a failure without touching the board).
 type fakeCommenter struct {
 	mu    sync.Mutex
 	Err   error
@@ -676,19 +619,11 @@ func (f *fakeCommenter) AddComment(_ context.Context, repositoryID, taskID uuid.
 	}, nil
 }
 
-// fakeIncidentIngester is a recording storeops.IncidentIngester — the Task 9
-// counterpart of fakeCommenter, so a test can assert exactly which incidents
-// the monitor ingested (or script a failure without touching the database).
 type fakeIncidentIngester struct {
 	mu    sync.Mutex
 	Err   error
 	Calls []domain.IncidentInput
 
-	// arrived/gate let a test hold an in-flight ingest open so a second,
-	// concurrent Sweep is guaranteed to overlap with it — the only way to
-	// exercise the monitor's fingerprint claim deterministically. arrived is
-	// buffered so an unexpected extra arrival (i.e. the bug) never deadlocks
-	// the test, it just shows up as a second recorded call.
 	arrived chan struct{}
 	gate    chan struct{}
 }
@@ -699,8 +634,6 @@ func newFakeIncidentIngester() *fakeIncidentIngester {
 	return &fakeIncidentIngester{}
 }
 
-// block installs the arrived/gate pair and returns them. Callers must close
-// the gate to let every blocked ingest through.
 func (f *fakeIncidentIngester) block() (arrived <-chan struct{}, release func()) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -728,9 +661,6 @@ func (f *fakeIncidentIngester) Ingest(_ context.Context, in domain.IncidentInput
 	return domain.Incident{ID: uuid.New(), Fingerprint: in.Fingerprint}, nil
 }
 
-// fakeOpsAuditStore is a recording port.OpsAuditStore — Task 9's fixture for
-// asserting that every store release action attempt, refused or not, writes
-// exactly one ops_audit_log row.
 type fakeOpsAuditStore struct {
 	mu      sync.Mutex
 	Err     error
@@ -771,9 +701,6 @@ func (f *fakeOpsAuditStore) List(_ context.Context, repositoryID *uuid.UUID, lim
 	return out, nil
 }
 
-// fakeReleaseParker is a recording storeops.ReleaseParker — the fixture that
-// proves a release with no available engine actually parks the card instead of
-// only failing an API call.
 type fakeReleaseParker struct {
 	mu    sync.Mutex
 	Err   error

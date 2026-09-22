@@ -6,16 +6,6 @@ import (
 	"time"
 )
 
-// provisioningProfileName is unexported, so this white-box test lives in
-// package storeops rather than storeops_test alongside SigningSuite.
-
-// Two profile names minted a second apart for the same bundle ID must
-// differ — ASC rejects re-registering a name still occupied by the profile
-// it replaced (this service never deletes the ASC-side profile it
-// supersedes), so every mint needs an unpredictable-enough, always-moving
-// name. now is threaded in explicitly so the "differs across calls"
-// contract is verifiable without depending on a real clock or racing the
-// second boundary.
 func TestProvisioningProfileNameDiffersAcrossCalls(t *testing.T) {
 	bundleID := "com.example.app"
 	t1 := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
@@ -32,10 +22,6 @@ func TestProvisioningProfileNameDiffersAcrossCalls(t *testing.T) {
 	}
 }
 
-// Two calls at the exact same instant intentionally collide — the
-// uniqueness comes from the timestamp advancing, not from any other
-// entropy source, so this documents that boundary rather than asserting
-// around it.
 func TestProvisioningProfileNameStableForSameInstant(t *testing.T) {
 	bundleID := "com.example.app"
 	now := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)

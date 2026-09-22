@@ -24,28 +24,21 @@ var (
 	// ErrReleaseTargetUnverified covers "there is nothing to compare against":
 	// no commit was ever stamped for this task, or the branch cannot be
 	// resolved right now. It fails closed on purpose — a release target that
-	// cannot be proven is exactly the case this gate exists for, and a check
-	// that passes when its input is missing is not a check.
+	// cannot be proven is exactly the case this gate exists for.
 	ErrReleaseTargetUnverified = errors.New("release blocked: the commit this task was verified at is unknown, so the code a production deploy would ship cannot be proven to be the code that was reviewed")
 )
 
 // VerifiedCommitMatches decides the release-identity question — "is the commit
-// about to be acted on the commit that was signed off?" — and nothing else.
-//
-// It returns a BARE sentinel so each caller can wrap it in wording that fits
-// what it is about to do: the release gate says "a production deploy would
-// ship…", the merge gate says "merging would land…". The DECISION is here so
-// the two can never drift apart, which is the whole risk with a check that is
-// written twice: an irreversible action guarded by a second, subtly different
-// copy of the rule is guarded by nothing.
+// about to be acted on the commit that was signed off?" — and nothing else. It
+// returns a BARE sentinel so each caller can wrap it in wording that fits what
+// it is about to do ("a production deploy would ship…" vs "merging would
+// land…"), while the DECISION stays here so the two can never drift apart — a
+// check written twice is the whole risk: an irreversible action guarded by a
+// second, subtly different copy of the rule is guarded by nothing.
 //
 // Case-insensitive on purpose (see releaseTargetGate): a SHA can arrive from
-// git, from GitHub's API or from a stamp written by an older path, and hex
-// casing must never be what allows or blocks an irreversible action.
-//
-// Both empty inputs fail closed. "There is nothing to compare" is exactly the
-// case these gates exist for — a check that passes when its input is missing is
-// not a check.
+// git, from GitHub's API or from an older path, and hex casing must never be
+// what allows or blocks an irreversible action. Both empty inputs fail closed.
 func VerifiedCommitMatches(verified, current string) error {
 	verified = strings.TrimSpace(verified)
 	current = strings.TrimSpace(current)

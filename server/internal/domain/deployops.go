@@ -17,15 +17,14 @@ const (
 	RunConclusionCancelled = "cancelled"
 )
 
-// Who caused a run. External is the default: a push, a schedule, or a
-// dispatch this system did not make.
+// Who caused a run. External is the default: a push, a schedule, or a dispatch
+// this system did not make.
 //
 // Local is the odd one: the run never existed on GitHub at all. It is a
-// break-glass deploy driven from somebody's machine (the repos' own
-// scripts/release-local.sh) while Actions cannot run, reported back so the
-// console still answers "what is live where". Its RunID is negative — see
-// LocalRunID — because GitHub's run ids are positive, so the two can share the
-// (repository_id, run_id) key without ever colliding.
+// break-glass deploy driven from somebody's machine while Actions cannot run.
+// Its RunID is negative — see LocalRunID — because GitHub's run ids are
+// positive, so the two can share the (repository_id, run_id) key without ever
+// colliding.
 const (
 	TriggerSourceUI       = "ui"
 	TriggerSourceRollback = "rollback"
@@ -34,18 +33,16 @@ const (
 )
 
 // LocalRunID mints the synthetic run id of a locally-driven deploy: the
-// negation of the millisecond it started. Negative keeps it out of GitHub's
-// id space, and monotonic keeps two local runs of the same repository apart.
+// negation of the millisecond it started. Negative keeps it out of GitHub's id
+// space, and monotonic keeps two local runs apart.
 func LocalRunID(t time.Time) int64 { return -t.UnixMilli() }
 
-// IsLocalRun reports whether a run id belongs to a locally-driven deploy
-// rather than a GitHub Actions run. The finish half of a local report refuses
-// anything else, so a caller cannot rewrite a real Actions run by passing its
-// id.
+// IsLocalRun reports whether a run id belongs to a locally-driven deploy. The
+// finish half of a local report refuses anything else, so a caller cannot
+// rewrite a real Actions run by passing its id.
 func IsLocalRun(runID int64) bool { return runID < 0 }
 
-// DeployDispatch lifecycle. A dispatch starts pending, becomes matched when
-// the monitor finds its run, and is abandoned if no run shows up in time.
+// DeployDispatch lifecycle: pending → matched (found its run) or abandoned.
 const (
 	DispatchStatePending   = "pending"
 	DispatchStateMatched   = "matched"
@@ -72,8 +69,8 @@ const (
 )
 
 // DeploymentRun is one GitHub Actions deploy run, mirrored locally so the
-// console can answer "what is live where" and "what was the last good ref"
-// without hitting the GitHub API on every page load.
+// console can answer "what is live where" without hitting the GitHub API on
+// every page load.
 type DeploymentRun struct {
 	ID            uuid.UUID  `json:"id"`
 	RepositoryID  uuid.UUID  `json:"repository_id"`
@@ -96,8 +93,8 @@ type DeploymentRun struct {
 }
 
 // DeployDispatch records the intent behind a dispatch this system made.
-// GitHub's dispatch endpoint returns 204 with no run id, so the run can only
-// be attributed after the fact — the monitor reconciles these.
+// GitHub's endpoint returns 204 with no run id, so the monitor reconciles
+// these after the fact.
 type DeployDispatch struct {
 	ID            uuid.UUID `json:"id"`
 	RepositoryID  uuid.UUID `json:"repository_id"`

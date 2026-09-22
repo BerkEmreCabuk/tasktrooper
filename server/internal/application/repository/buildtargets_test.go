@@ -9,14 +9,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// xcscheme is the fragment of an .xcscheme that matters here: nothing. The
-// scheme's NAME is its file name, which is the whole reason shared schemes are
-// readable without parsing Xcode's XML.
 const xcscheme = `<?xml version="1.0" encoding="UTF-8"?><Scheme LastUpgradeVersion="1500" version="1.7"></Scheme>`
 
-// appGradle is a module build file that declares itself the Android
-// application; libGradle is its library sibling, which must never be answered
-// with.
 const (
 	appGradle = "plugins {\n    id 'com.android.application'\n}\n\nandroid {\n    namespace 'com.acme.app'\n}\n"
 	libGradle = "plugins {\n    id 'com.android.library'\n}\n"
@@ -41,8 +35,7 @@ func TestDetectBuildTargets(t *testing.T) {
 			want: domain.BuildTargets{XcodeScheme: "MyApp"},
 		},
 		{
-			// The scheme is NOT named after the project here, which is the
-			// case the old convention got wrong every time.
+
 			name: "a shared scheme unrelated to the project name still wins",
 			layout: tree{
 				"MyApp.xcodeproj/xcshareddata/xcschemes/Production.xcscheme": xcscheme,
@@ -67,8 +60,7 @@ func TestDetectBuildTargets(t *testing.T) {
 			want: domain.BuildTargets{XcodeScheme: "MyApp"},
 		},
 		{
-			// Two schemes that both look like apps is a coin flip, and the
-			// losing side is a build that archives somebody else's target.
+
 			name: "two unrelated shared schemes leave it unanswered",
 			layout: tree{
 				"MyApp.xcodeproj/xcshareddata/xcschemes/Staging.xcscheme":    xcscheme,
@@ -77,8 +69,7 @@ func TestDetectBuildTargets(t *testing.T) {
 			want: domain.BuildTargets{},
 		},
 		{
-			// The project's own name is the fallback and only the fallback:
-			// with schemes shared, the answer comes from that list alone.
+
 			name: "the project name answers only when nothing is shared",
 			layout: tree{
 				"MyApp.xcodeproj/project.pbxproj": "// !$*UTF8*$!\n{}\n",
@@ -121,8 +112,7 @@ func TestDetectBuildTargets(t *testing.T) {
 			want: domain.BuildTargets{GradleModule: "app"},
 		},
 		{
-			// Two modules that both apply com.android.application both produce
-			// an AAB, and the script can only upload one of them.
+
 			name: "two application modules leave it unanswered",
 			layout: tree{
 				"settings.gradle":   "include ':app'\ninclude ':wear'\n",
@@ -160,8 +150,7 @@ func TestDetectBuildTargets(t *testing.T) {
 			want: domain.BuildTargets{GradleModule: "androidApp"},
 		},
 		{
-			// :apps:android is the <module> in :<module>:bundleRelease, colons
-			// and all.
+
 			name: "a nested module keeps its colons",
 			layout: tree{
 				"settings.gradle":           "include ':apps:android'\ninclude ':libs:core'\n",
@@ -180,8 +169,7 @@ func TestDetectBuildTargets(t *testing.T) {
 			want: domain.BuildTargets{GradleModule: "app"},
 		},
 		{
-			// The standard cross-platform layout: both halves live one level
-			// down, and both are read.
+
 			name: "the Flutter layout answers both halves",
 			layout: tree{
 				"pubspec.yaml": "name: acme\nflutter:\n  sdk: flutter\n",
@@ -193,9 +181,7 @@ func TestDetectBuildTargets(t *testing.T) {
 			want: domain.BuildTargets{XcodeScheme: "Runner", GradleModule: "app"},
 		},
 		{
-			// React Native's android/ has no settings-level surprise but its
-			// iOS project is unshared as often as not — one half answering and
-			// the other staying "" is a normal, expected result.
+
 			name: "one half can answer while the other stays empty",
 			layout: tree{
 				"android/settings.gradle":  "include ':app'\n",
@@ -204,8 +190,7 @@ func TestDetectBuildTargets(t *testing.T) {
 			want: domain.BuildTargets{GradleModule: "app"},
 		},
 		{
-			// No settings file at all: `app` is the only directory that is then
-			// looked at, and it still has to apply the application plugin.
+
 			name: "the conventional app module answers without a settings file",
 			layout: tree{
 				"android/app/build.gradle": appGradle,
@@ -242,9 +227,6 @@ func TestDetectBuildTargetsHandlesUnreadableRoots(t *testing.T) {
 	require.Equal(t, domain.BuildTargets{}, repository.DetectBuildTargets("/nonexistent/path/that/is/not/there"))
 }
 
-// A monorepo's mobile sub-project carries its own build targets, read from its
-// own directory — the repository root holds neither an Xcode project nor a
-// Gradle build here, so an inherited answer would be somebody else's.
 func TestDetectRepoSubProjectsCarriesTheBuildTargets(t *testing.T) {
 	root := materialise(t, tree{
 		"apps/api/go.mod":          "module example.com/api\n",

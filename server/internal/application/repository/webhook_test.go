@@ -18,9 +18,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// TestSeenDelivery covers the GitHub-retry replay cache: first sighting is
-// fresh, a repeat inside the TTL is a duplicate, and an entry older than the
-// TTL is forgotten so the id can legitimately come around again.
 func TestSeenDelivery(t *testing.T) {
 	s := &Service{}
 	now := time.Now()
@@ -34,7 +31,7 @@ func TestSeenDelivery(t *testing.T) {
 	if s.seenDelivery(context.Background(), "d2", now) {
 		t.Fatal("d2 is unrelated to d1")
 	}
-	// Past the TTL the cache prunes d1, so it reads as fresh again.
+
 	if s.seenDelivery(context.Background(), "d1", now.Add(pushDeliveryTTL+2*time.Minute)) {
 		t.Fatal("d1 after the TTL must be forgotten")
 	}
@@ -43,9 +40,6 @@ func TestSeenDelivery(t *testing.T) {
 	}
 }
 
-// TestSchedulePushReindexDebounce walks the debounce ledger through its three
-// promises: one pass in flight at a time, pushes during a pass collapse into a
-// single rerun, and triggers inside the interval collapse into one timer.
 func TestSchedulePushReindexDebounce(t *testing.T) {
 	var runs atomic.Int32
 	runCh := make(chan uuid.UUID, 16)
@@ -61,7 +55,6 @@ func TestSchedulePushReindexDebounce(t *testing.T) {
 	}
 	waitRun(t, runCh)
 
-	// Pass still running (done not called yet): triggers only queue.
 	if got := s.schedulePushReindex(repoID); got != "queued behind the running reindex" {
 		t.Fatalf("trigger during run: %q", got)
 	}
@@ -69,7 +62,6 @@ func TestSchedulePushReindexDebounce(t *testing.T) {
 		t.Fatalf("second trigger during run: %q", got)
 	}
 
-	// Pass ends; the queued pushes must produce exactly one rerun.
 	s.pushReindexDone(repoID)
 	waitRun(t, runCh)
 	s.pushReindexDone(repoID)
@@ -77,7 +69,6 @@ func TestSchedulePushReindexDebounce(t *testing.T) {
 		t.Fatalf("queued pushes must collapse into one rerun, got %d runs", got)
 	}
 
-	// Inside the interval after the rerun: trigger schedules, repeat is a no-op.
 	got := s.schedulePushReindex(repoID)
 	if got == "reindex started" {
 		t.Fatalf("trigger inside the interval must debounce, got %q", got)
@@ -92,8 +83,6 @@ func TestSchedulePushReindexDebounce(t *testing.T) {
 	}
 }
 
-// TestWebhookTargetURL pins the delivery URL shape: the public base with its
-// trailing slash trimmed, plus the webhook path, and no query string.
 func TestWebhookTargetURL(t *testing.T) {
 	s := &Service{}
 	s.SetPublicBaseURL("https://tasktrooper.ai/")
@@ -111,9 +100,6 @@ func waitRun(t *testing.T, ch <-chan uuid.UUID) {
 	}
 }
 
-// fakeWebhookRepositoryStore is the in-memory double the happy-path test needs:
-// Get reflects whatever SetWebhook last stored, exactly like the real store's
-// webhook_hook_id column does.
 type fakeWebhookRepositoryStore struct {
 	port.RepositoryStore
 	repo   domain.Repository
@@ -133,10 +119,6 @@ func (s *fakeWebhookRepositoryStore) SetWebhook(_ context.Context, _ uuid.UUID, 
 	return nil
 }
 
-// TestSetupWebhookHappyPathInstallsAndPersists is the full round trip QA could
-// not reach live (no GitHub-connected sandbox): a repository with no hook yet,
-// SetupWebhook installs one on a fake GitHub server and the store ends up with
-// webhook_installed=true and the exact secret GitHub was given.
 func TestSetupWebhookHappyPathInstallsAndPersists(t *testing.T) {
 	var created map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -182,9 +164,6 @@ func TestSetupWebhookHappyPathInstallsAndPersists(t *testing.T) {
 	}
 }
 
-// TestSetupWebhookFailsWithoutGitHubConnected is the other half of the same
-// bug: no token configured must fail with the specific, actionable message —
-// not the cipher error the original bug produced.
 func TestSetupWebhookFailsWithoutGitHubConnected(t *testing.T) {
 	repoID := uuid.New()
 	store := &fakeWebhookRepositoryStore{repo: domain.Repository{ID: repoID, RemoteURL: "https://github.com/o/r"}}
@@ -197,10 +176,6 @@ func TestSetupWebhookFailsWithoutGitHubConnected(t *testing.T) {
 	}
 }
 
-// sharedDeliveryLedger is one github_webhook_deliveries table, seen by however
-// many Services are pointed at it. MarkSeen is the whole mechanism and is
-// modelled the way the real statement behaves: the INSERT decides, so exactly
-// one caller is told it was first, however many arrive at once.
 type sharedDeliveryLedger struct {
 	mu   sync.Mutex
 	seen map[string]bool
@@ -224,14 +199,6 @@ func (l *sharedDeliveryLedger) MarkSeen(_ context.Context, id string, _ time.Dur
 	return true, nil
 }
 
-// GitHub retries a delivery it did not get a 2xx for, and it retries to
-// whichever pod the load balancer picks. The dedupe was a map on this Service,
-// so the retry found an empty map on the second replica and the whole pass ran
-// again: a second reindex over the same push, a second resolve of the same
-// workflow run.
-//
-// Two Services, one ledger, both handed the same delivery at once: exactly one
-// of them may treat it as new.
 func TestDeliveryDedupeHoldsAcrossReplicas(t *testing.T) {
 	ledger := newSharedDeliveryLedger()
 	a := &Service{}
@@ -261,10 +228,6 @@ func TestDeliveryDedupeHoldsAcrossReplicas(t *testing.T) {
 	}
 }
 
-// The ledger is the authority, but it must not be a single point of failure.
-// A dropped delivery is a card that never moves; a duplicated one costs a
-// reindex. So an unreachable database falls back to this process's own memory
-// rather than refusing to handle the delivery at all.
 func TestDeliveryDedupeFallsBackWhenTheLedgerIsDown(t *testing.T) {
 	ledger := newSharedDeliveryLedger()
 	ledger.fail = errors.New("connection refused")

@@ -16,10 +16,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 )
 
-// ─── test doubles ─────────────────────────────────────────────────────────────
-
-// fakeResolver answers from a table and can give a different answer to each
-// successive lookup of the same name — which is the whole of DNS rebinding.
 type fakeResolver struct {
 	mu    sync.Mutex
 	names map[string][][]string
@@ -30,8 +26,6 @@ func newResolver() *fakeResolver {
 	return &fakeResolver{names: map[string][][]string{}, calls: map[string]int{}}
 }
 
-// sequence makes host answer answers[0] to the first lookup, answers[1] to the
-// second, and the last entry to every lookup after that.
 func (f *fakeResolver) sequence(host string, answers ...[]string) *fakeResolver {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -69,12 +63,9 @@ func (f *fakeResolver) lookups(host string) int {
 	return f.calls[strings.ToLower(host)]
 }
 
-// recordingDialer records every address the guard decided to connect to, and
-// routes approved connections to a real listener. Recording the decision — not
-// the URL — is what lets a test assert which address was actually dialled.
 type recordingDialer struct {
 	mu     sync.Mutex
-	routes map[string]string // vetted IP -> real listener address
+	routes map[string]string
 	seen   []string
 }
 
@@ -97,10 +88,6 @@ func (d *recordingDialer) addresses() []string {
 	return append([]string(nil), d.seen...)
 }
 
-// harness wires a PublicOnly policy to a scripted resolver and a dialer that
-// lands approved connections on httptest servers. Everything stays hermetic
-// while the real transport, redirect and Host-header handling still run: from
-// net/http's point of view it is talking to public.test over the network.
 type harness struct {
 	policy   urlguard.Policy
 	resolver *fakeResolver
@@ -115,8 +102,6 @@ func newHarness() *harness {
 	return h
 }
 
-// host makes name resolve to ip; when srv is non-nil, connections to ip land on
-// it. A nil srv models a name that resolves but has no listener.
 func (h *harness) host(name, ip string, srv *httptest.Server) *harness {
 	h.resolver.sequence(name, []string{ip})
 	if srv != nil {
@@ -125,18 +110,12 @@ func (h *harness) host(name, ip string, srv *httptest.Server) *harness {
 	return h
 }
 
-// ─── address classes ──────────────────────────────────────────────────────────
-
-// TestValidateRejectsInternalAddressClasses walks every range this guard exists
-// to keep an LLM-chosen URL out of. Cases with no DNS answer are written as
-// literals and short-circuit before the resolver; cases with one go through the
-// resolver and are judged on what it returns.
 func TestValidateRejectsInternalAddressClasses(t *testing.T) {
 	cases := []struct {
 		name    string
-		host    string // as it appears in the URL
+		host    string
 		answers []string
-		want    string // substring of the rejection reason
+		want    string
 	}{
 		{"loopback v4 literal", "127.0.0.1", nil, "loopback"},
 		{"loopback v4 whole /8", "127.99.12.3", nil, "loopback"},
@@ -189,10 +168,6 @@ func TestValidateRejectsInternalAddressClasses(t *testing.T) {
 	}
 }
 
-// TestPrecheckRejectsLiteralsWithoutDNS proves the write-time half stops the
-// obvious cases with no resolver in play: Policy.Resolver is nil here, so any
-// lookup would have gone to the real one, and a name is deliberately let
-// through to be judged at dial time instead.
 func TestPrecheckRejectsLiteralsWithoutDNS(t *testing.T) {
 	p := urlguard.PublicOnly()
 	for _, raw := range []string{
@@ -214,17 +189,13 @@ func TestPrecheckRejectsLiteralsWithoutDNS(t *testing.T) {
 	}
 }
 
-// TestValidateHostEncodings covers the spellings a probe reaches for. The point
-// is that this package never decodes them itself: net.ParseIP rejects octal,
-// decimal, hex and short forms, so they go to the resolver and the verdict is
-// made on the answer — which is what a platform resolver returns for them.
 func TestValidateHostEncodings(t *testing.T) {
 	cases := []struct {
 		name       string
 		host       string
 		parseIPOK  bool
-		answers    []string // nil means the resolver has no entry for it
-		wantReason string   // "" means the destination is allowed
+		answers    []string
+		wantReason string
 	}{
 		{"dotted quad", "127.0.0.1", true, nil, "loopback"},
 		{"bracketed v6", "[::1]", true, nil, "loopback"},
@@ -265,9 +236,6 @@ func TestValidateHostEncodings(t *testing.T) {
 	}
 }
 
-// TestValidateRejectsWholeAnswerWhenOneAddressIsInternal: the transport may pick
-// any address a name returns, so a mixed answer is refused outright instead of
-// being filtered down to the public one.
 func TestValidateRejectsWholeAnswerWhenOneAddressIsInternal(t *testing.T) {
 	p := urlguard.PublicOnly()
 	p.Resolver = newResolver().sequence("split.test", []string{"93.184.216.34", "127.0.0.1"})
@@ -297,15 +265,12 @@ func TestValidateSchemeAllowlist(t *testing.T) {
 	}
 }
 
-// ─── loopback is opt-in ───────────────────────────────────────────────────────
-
 func TestAllowLoopbackIsExplicit(t *testing.T) {
 	blocked := urlguard.PublicOnly()
 	if _, err := blocked.Validate(context.Background(), "http://127.0.0.1:8080/"); err == nil {
 		t.Fatal("loopback must be off in PublicOnly")
 	}
 
-	// Self-hosted: the operator flips the switch and local services work again.
 	allowed := urlguard.PublicOnly()
 	allowed.AllowLoopback = true
 	for _, raw := range []string{"http://127.0.0.1:8080/", "http://[::1]:8080/", "http://0.0.0.0:8080/"} {
@@ -313,8 +278,6 @@ func TestAllowLoopbackIsExplicit(t *testing.T) {
 			t.Fatalf("AllowLoopback must permit %q: %v", raw, err)
 		}
 	}
-	// It opens loopback and nothing else: the metadata service and the cluster
-	// stay shut even for a self-hosted install, because nothing local is there.
 	for _, raw := range []string{"http://169.254.169.254/", "http://10.0.0.1/", "http://100.64.0.1/"} {
 		if _, err := allowed.Validate(context.Background(), raw); !errors.Is(err, urlguard.ErrBlocked) {
 			t.Fatalf("AllowLoopback must not open %q: %v", raw, err)
@@ -329,11 +292,6 @@ func TestZeroPolicyFailsClosed(t *testing.T) {
 	}
 }
 
-// ─── redirects ────────────────────────────────────────────────────────────────
-
-// TestRedirectToInternalIsRefused is the second-hop version of the attack: the
-// first host is genuinely public and answers 302 to somewhere it must not be
-// able to send us.
 func TestRedirectToInternalIsRefused(t *testing.T) {
 	for _, target := range []string{
 		"http://127.0.0.1:8080/metrics",
@@ -403,16 +361,11 @@ func TestSameHostRedirectRefusesToLeaveTheConfiguredHost(t *testing.T) {
 	}
 }
 
-// ─── DNS rebinding ────────────────────────────────────────────────────────────
-
-// TestDNSRebindingBetweenValidateAndDial is the reason the dial lives in this
-// package. The name answers public to the first lookup — the one Validate makes
-// — and loopback to every one after it.
 func TestDNSRebindingBetweenValidateAndDial(t *testing.T) {
 	h := newHarness()
 	h.resolver.sequence("rebind.test",
-		[]string{"93.184.216.34"}, // what Validate sees
-		[]string{"127.0.0.1"},     // what an unguarded transport would then dial
+		[]string{"93.184.216.34"},
+		[]string{"127.0.0.1"},
 	)
 
 	target, err := h.policy.Validate(context.Background(), "http://rebind.test/")
@@ -423,8 +376,6 @@ func TestDNSRebindingBetweenValidateAndDial(t *testing.T) {
 		t.Fatalf("vetted IP = %s", got)
 	}
 
-	// An unpinned client re-resolves at dial time and catches the flip there —
-	// the case a validate-only guard misses completely.
 	if _, err := h.policy.Client(5 * time.Second).Get("http://rebind.test/"); !errors.Is(err, urlguard.ErrBlocked) {
 		t.Fatalf("the rebound address must be refused at dial time, got %v", err)
 	}
@@ -434,7 +385,6 @@ func TestDNSRebindingBetweenValidateAndDial(t *testing.T) {
 		}
 	}
 
-	// A pinned client never asks again, so there is no second answer to poison.
 	before := h.resolver.lookups("rebind.test")
 	_, _ = h.policy.ClientFor(target, 5*time.Second).Get("http://rebind.test/")
 	if after := h.resolver.lookups("rebind.test"); after != before {
@@ -446,8 +396,6 @@ func TestDNSRebindingBetweenValidateAndDial(t *testing.T) {
 	}
 }
 
-// TestPinnedTargetCannotSmuggleABlockedAddress: a Target caches a decision this
-// policy made; it is not a way around it.
 func TestPinnedTargetCannotSmuggleABlockedAddress(t *testing.T) {
 	h := newHarness()
 	forged := &urlguard.Target{
@@ -462,8 +410,6 @@ func TestPinnedTargetCannotSmuggleABlockedAddress(t *testing.T) {
 		t.Fatalf("nothing should have been dialled, got %v", got)
 	}
 }
-
-// ─── the product still works ──────────────────────────────────────────────────
 
 func TestOrdinaryPublicFetchStillWorks(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -510,8 +456,6 @@ func TestFollowsARedirectToAnotherPublicHost(t *testing.T) {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
 }
-
-// ─── logging ──────────────────────────────────────────────────────────────────
 
 func TestLogValueDropsSecrets(t *testing.T) {
 	cases := []struct{ in, want string }{

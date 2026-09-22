@@ -11,8 +11,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// A run the console dispatched must end up attributed to the person who
-// pushed the button, not to "external".
 func TestSweepReconcilesPendingDispatchIntoTheRun(t *testing.T) {
 	repoID := uuid.New()
 	dispatchedAt := time.Now().Add(-time.Minute)
@@ -47,7 +45,6 @@ func TestSweepReconcilesPendingDispatchIntoTheRun(t *testing.T) {
 	}
 }
 
-// A run that started BEFORE the dispatch cannot be that dispatch's run.
 func TestSweepDoesNotMatchARunOlderThanTheDispatch(t *testing.T) {
 	repoID := uuid.New()
 	dispatchedAt := time.Now().Add(-time.Minute)
@@ -71,7 +68,6 @@ func TestSweepDoesNotMatchARunOlderThanTheDispatch(t *testing.T) {
 	}
 }
 
-// A dispatch nothing ever matched must not stay pending forever.
 func TestSweepAbandonsStaleDispatch(t *testing.T) {
 	repoID := uuid.New()
 	m, f := newTestMonitor(t, fixture{
@@ -91,8 +87,6 @@ func TestSweepAbandonsStaleDispatch(t *testing.T) {
 	}
 }
 
-// A newly failed prod deploy becomes an incident exactly once, no matter how
-// many times the sweep sees the same completed run.
 func TestSweepIngestsIncidentOnceForAFailedRun(t *testing.T) {
 	repoID := uuid.New()
 	m, f := newTestMonitor(t, fixture{

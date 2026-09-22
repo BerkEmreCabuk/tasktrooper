@@ -9,9 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// deployActionMarkers are `uses:` prefixes that mean a step ships something.
-// Matching the action is stronger evidence than matching a job name: a job
-// called "release" may only tag, while amondnet/vercel-action always deploys.
+// `uses:` prefixes that mean a step ships something. Matching the action is stronger evidence than matching a job name: a job called "release" may only tag, while amondnet/vercel-action always deploys.
 var deployActionMarkers = []string{
 	"amondnet/vercel-action", "vercel/action", "superfly/flyctl-actions",
 	"google-github-actions/deploy-cloudrun", "google-github-actions/deploy-appengine",
@@ -22,8 +20,7 @@ var deployActionMarkers = []string{
 	"appleboy/ssh-action", "docker/build-push-action",
 }
 
-// deployRunMarkers are shell fragments inside `run:` steps that ship. kubectl
-// apply and helm upgrade are the two that matter for this repo's own shape.
+// Shell fragments inside `run:` steps that ship; kubectl apply and helm upgrade are the two that matter for this repo's own shape.
 var deployRunMarkers = []string{
 	"kubectl apply", "kubectl set image", "kubectl rollout", "helm upgrade",
 	"terraform apply", "vercel deploy", "vercel --prod", "flyctl deploy",
@@ -32,10 +29,7 @@ var deployRunMarkers = []string{
 	"wrangler deploy", "wrangler publish",
 }
 
-// workflowFile is the subset of a GitHub Actions workflow this package reads.
-// `on` is deliberately typed as a raw node: it is legally a string, a list or
-// a map, and pinning it to one shape is how trigger parsing silently loses the
-// branch filter that makes "push" mean "push to main".
+// The subset of a GitHub Actions workflow this package reads; `on` is a raw node because it is legally a string, a list or a map, and pinning it to one shape is how trigger parsing silently loses the branch filter that makes "push" mean "push to main".
 type workflowFile struct {
 	Name string    `yaml:"name"`
 	On   yaml.Node `yaml:"on"`
@@ -100,9 +94,7 @@ func collectWorkflows(root string, t *treeScan, f *Facts) {
 	}
 }
 
-// parseTriggers renders the `on:` node into event strings, keeping the branch
-// filter attached ("push:main") because "runs on push" and "runs on push to
-// main" are different facts for anyone deciding whether a commit ships.
+// Renders the `on:` node into event strings, keeping the branch filter attached ("push:main") because "runs on push" and "runs on push to main" are different facts for anyone deciding whether a commit ships.
 func parseTriggers(node *yaml.Node) []string {
 	if node == nil || node.Kind == 0 {
 		return nil
@@ -182,11 +174,7 @@ func stepDeploys(uses, run string) bool {
 	return false
 }
 
-// deriveDeploys turns workflows and platform markers into the concrete answer
-// to "what makes this repository ship". Workflow-driven deploys rank above
-// provider git-integrations: when both exist, the workflow is what runs, and a
-// profile that named the integration instead would send agents to the wrong
-// dashboard.
+// Turns workflows and platform markers into the concrete answer to "what makes this repository ship". Workflow-driven deploys rank above provider git-integrations: when both exist, the workflow is what runs, and a profile naming the integration instead would send agents to the wrong dashboard.
 func deriveDeploys(f *Facts) {
 	workflowDeploy := false
 	for _, w := range f.Workflows {
@@ -205,10 +193,7 @@ func deriveDeploys(f *Facts) {
 		}
 	}
 
-	// A hosting integration with no deploy workflow means the provider's own
-	// git hook ships the repo: landing a commit on the default branch IS the
-	// deploy. That is the single most consequential fact a profile can carry
-	// and the one the free-text profile never stated.
+	// A hosting integration with no deploy workflow means the provider's own git hook ships the repo: landing a commit on the default branch IS the deploy — the single most consequential fact a profile can carry, and the one the free-text profile never stated.
 	if !workflowDeploy {
 		for _, in := range f.Integrations {
 			if in.Category != "hosting" {
@@ -251,9 +236,7 @@ func deployTriggersOf(w Workflow) []string {
 	return w.Triggers
 }
 
-// environmentOf guesses prod vs preview from the workflow's own naming and its
-// trigger. It stays "" rather than guessing when neither says anything —
-// a wrong environment label is worse than no label.
+// Guesses prod vs preview from the workflow's own naming and its trigger; stays "" rather than guessing when neither says anything — a wrong environment label is worse than no label.
 func environmentOf(w Workflow, trigger string) string {
 	hay := strings.ToLower(w.Name + " " + w.File + " " + strings.Join(w.Jobs, " "))
 	switch {
@@ -267,7 +250,6 @@ func environmentOf(w Workflow, trigger string) string {
 	return ""
 }
 
-// summarizeWorkflows renders the CI facts as one compact line per workflow.
 func summarizeWorkflows(f Facts) []string {
 	out := make([]string, 0, len(f.Workflows))
 	for _, w := range f.Workflows {

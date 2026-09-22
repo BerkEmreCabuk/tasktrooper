@@ -41,8 +41,7 @@ func skillDoc(name, desc, category, body string) string {
 	return "---\nname: " + name + "\ndescription: " + desc + "\ncategory: " + category + "\n---\n" + body
 }
 
-// fixingLLMClient answers every merge chat with a plausible merged SKILL.md, so
-// the merge path below is exercised end to end without a real provider.
+// Answers every merge chat with a plausible merged SKILL.md so the merge path runs end to end without a real provider.
 type fixingLLMClient struct{}
 
 func (fixingLLMClient) Chat(ctx context.Context, req domain.AgentRequest) (domain.AgentResponse, error) {

@@ -27,10 +27,6 @@ func NewService(store port.AgentMemoryStore, llm port.LLMClient, embeddingModel 
 	return &Service{store: store, llm: llm, embeddingModel: embeddingModel, maxCount: maxCount}
 }
 
-// Save stores a memory in one of the four buckets: agentID uuid.Nil makes it a
-// team memory, a nil repositoryID makes it global instead of project-scoped.
-// Embedding failures are non-fatal: the memory is stored without an embedding
-// and remains recallable by recency.
 func (s *Service) Save(ctx context.Context, agentID uuid.UUID, repositoryID *uuid.UUID, content, category, source string) (domain.AgentMemory, error) {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -55,9 +51,7 @@ func (s *Service) Save(ctx context.Context, agentID uuid.UUID, repositoryID *uui
 	if err != nil {
 		return domain.AgentMemory{}, err
 	}
-	// Team memories (agentID == uuid.Nil) are exempt from eviction, and each
-	// project bucket is capped on its own so a busy repository cannot push out
-	// what the agent learned elsewhere.
+
 	if agentID != uuid.Nil {
 		if n, cErr := s.store.CountInScope(ctx, agentID, repositoryID); cErr == nil && n > s.maxCount {
 			if dErr := s.store.DeleteOldestInScope(ctx, agentID, repositoryID, n-s.maxCount); dErr != nil {
@@ -68,14 +62,10 @@ func (s *Service) Save(ctx context.Context, agentID uuid.UUID, repositoryID *uui
 	return mem, nil
 }
 
-// SaveShared stores a team memory every agent can read. A repositoryID keeps it
-// to that project; nil makes it workspace-wide.
 func (s *Service) SaveShared(ctx context.Context, repositoryID *uuid.UUID, content, category, source string) (domain.AgentMemory, error) {
 	return s.Save(ctx, uuid.Nil, repositoryID, content, category, source)
 }
 
-// Search returns semantically ranked memories from the buckets the query
-// selects; an empty query or embedding failure falls back to recency.
 func (s *Service) Search(ctx context.Context, q domain.MemoryQuery, query string, topK int) ([]domain.AgentMemory, error) {
 	if topK <= 0 {
 		topK = 5
@@ -106,15 +96,10 @@ func (s *Service) List(ctx context.Context, q domain.MemoryQuery) ([]domain.Agen
 	return s.store.List(ctx, q)
 }
 
-// Recall reads what an agent should carry into a run: the repository's project
-// memories and the global ones, each bucket bounded on its own so a chatty
-// project cannot crowd out durable workspace knowledge.
 func (s *Service) Recall(ctx context.Context, agentID uuid.UUID, repositoryID *uuid.UUID, perScope int) []domain.AgentMemory {
 	return Recall(ctx, s.store, agentID, repositoryID, perScope)
 }
 
-// Recall is the store-level form used by callers that hold the port rather than
-// the service (the board runner and the chat session loop).
 func Recall(ctx context.Context, store port.AgentMemoryStore, agentID uuid.UUID, repositoryID *uuid.UUID, perScope int) []domain.AgentMemory {
 	if store == nil {
 		return nil
@@ -178,8 +163,6 @@ func (s *Service) UpdateShared(ctx context.Context, memoryID uuid.UUID, content,
 	return s.Update(ctx, uuid.Nil, memoryID, content, category)
 }
 
-// Delete removes a memory after verifying it belongs to the agent.
-// Team memories (AgentID == uuid.Nil) may be deleted by any agent.
 func (s *Service) Delete(ctx context.Context, agentID, memoryID uuid.UUID) error {
 	mem, err := s.store.Get(ctx, memoryID)
 	if err != nil {

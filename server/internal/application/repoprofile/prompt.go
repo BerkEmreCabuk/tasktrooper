@@ -8,22 +8,9 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// profileReminderMessage is appended for the single retry when a run ends
-// without having stored a section.
 const profileReminderMessage = "You have not stored a single section. The run only counts once update_project_profile accepts one — " +
 	"call it now with the sections you can back with real file paths. If a section rejected your evidence, fix the path and resend it."
 
-// profileSystemPrompt is the fixed refresh prompt for the judgment half.
-//
-// It is written against the specific failure it replaces: the previous prompt
-// asked for "purpose; tech stack; layout; commands; conventions; deploy shape;
-// gotchas" as free markdown, and a model with a Next.js prior answered with
-// "Use TypeScript for type safety", "Organize components in src/components"
-// and "Deploy using Vercel" for a repository that is none of those things.
-// Every clause below exists to make that answer impossible: the facts are
-// given, the derived sections are off-limits, each section names what only
-// THIS repository could put in it, and nothing lands without a path that
-// resolves in the working copy.
 const profileSystemPrompt = `You are a system architect writing the judgment half of a repository's project profile.
 Every agent that later works on this repository inherits what you write, so a plausible-sounding invention costs every future run.
 
@@ -50,8 +37,6 @@ Repository kind: %s — weight your exploration accordingly (frontend → routes
 
 When done, call update_project_profile with your sections (it replaces each section you send and leaves the others alone). Also call save_memory for at most 3 durable non-obvious facts — facts about the CODEBASE that a future run would otherwise have to rediscover, never a note about a task, a PR or a commit.`
 
-// buildRefreshMessages assembles the refresh conversation: the fixed prompt,
-// the verified facts, whatever judgment sections already exist, and the ask.
 func buildRefreshMessages(repo domain.Repository, reason string, facts repofacts.Facts, existing []domain.ProfileSection, only []string) []domain.Message {
 	kind := repo.Kind
 	if kind == "" {
@@ -80,10 +65,6 @@ func buildRefreshMessages(repo domain.Repository, reason string, facts repofacts
 	return messages
 }
 
-// scopeInstruction narrows a push-triggered refresh to the sections whose
-// source files actually moved. Rewriting the whole profile because one file
-// changed is how a profile drifts: each full rewrite is another chance for the
-// model to replace a specific claim with a general one.
 func scopeInstruction(only []string) string {
 	agentScoped := make([]string, 0, len(only))
 	for _, s := range only {
@@ -93,8 +74,7 @@ func scopeInstruction(only []string) string {
 	}
 	if len(agentScoped) == 0 {
 		if len(only) > 0 {
-			// Only derived sections went stale; those were already rebuilt
-			// without the model. Give it the smallest honest job.
+
 			return "The derived sections were rebuilt from the tree. Only re-check your own sections against those changes and resend the ones that are now wrong."
 		}
 		return ""

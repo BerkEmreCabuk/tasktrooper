@@ -5,6 +5,8 @@ desktop app spawns this binary; `make dev` runs it in a terminal.
 
 Detailed docs:
 
+- [Coding Standards](.ai/coding-standards.md)
+- [Testing Standards](.ai/testing-standards.md)
 - [Architecture Overview](.ai/architecture.md)
 - [API Specification](.ai/api-spec.md)
 - [Tool Reference](.ai/tool-reference.md)

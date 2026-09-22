@@ -11,8 +11,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// fakeIncidentTaskBoard records every CreateTask call, for asserting what a
-// remediation task was assigned to.
 type fakeIncidentTaskBoard struct {
 	created []domain.CreateBoardTaskRequest
 }
@@ -26,7 +24,6 @@ func (f *fakeIncidentTaskBoard) AddComment(context.Context, uuid.UUID, uuid.UUID
 	return domain.TaskComment{}, nil
 }
 
-// fakeIncidentRepos is a fixed-response prodops.RepositoryResolver.
 type fakeIncidentRepos struct {
 	repo domain.Repository
 }
@@ -35,9 +32,6 @@ func (f fakeIncidentRepos) Get(context.Context, uuid.UUID) (domain.Repository, e
 	return f.repo, nil
 }
 
-// fakeIncidentRoleResolver is a fixed-response port.RoleResolver: it answers
-// AgentForPurpose(system_task_assignee) with one agent id and everything else
-// with "nobody".
 type fakeIncidentRoleResolver struct {
 	agentID uuid.UUID
 }
@@ -60,8 +54,6 @@ func (f fakeIncidentRoleResolver) AssigneeForNewTask(_ context.Context, _ domain
 	return requested, nil
 }
 
-// A remediation task's assignee comes from the developer role's
-// system_task_assignee purpose now, not a hardcoded agent-name lookup.
 func TestIngestAssignsRemediationTaskThroughRoleResolver(t *testing.T) {
 	repo := domain.Repository{ID: uuid.New(), Kind: domain.RepoKindBackend}
 	tasks := &fakeIncidentTaskBoard{}
@@ -84,8 +76,6 @@ func TestIngestAssignsRemediationTaskThroughRoleResolver(t *testing.T) {
 	require.Equal(t, resolver.agentID, *tasks.created[0].AssigneeAgentID)
 }
 
-// Without a role resolver wired, the remediation task is simply left
-// unassigned — never a hardcoded fallback name.
 func TestIngestLeavesRemediationTaskUnassignedWithoutRoleResolver(t *testing.T) {
 	repo := domain.Repository{ID: uuid.New(), Kind: domain.RepoKindBackend}
 	tasks := &fakeIncidentTaskBoard{}

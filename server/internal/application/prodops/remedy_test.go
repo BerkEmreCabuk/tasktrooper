@@ -53,8 +53,6 @@ func (s *RemedySuite) TestRecentDeployIsBlamedFirst() {
 	s.Contains(strings.Join(r.Evidence, "\n"), "TT-42")
 }
 
-// A failed deploy leaves the environment in a half-applied state, which is a
-// stronger signal than a successful one.
 func (s *RemedySuite) TestFailedDeployRaisesConfidence() {
 	good := prodops.Suggest(prodops.RemedyContext{
 		Incident: s.incident("prod down", ""),
@@ -81,7 +79,6 @@ func (s *RemedySuite) TestOldOrOtherEnvDeployIsNotBlamed() {
 	s.Equal(domain.RemedyKindCodeFix, r.Kind)
 }
 
-// A deploy that finished after the incident started cannot have caused it.
 func (s *RemedySuite) TestDeployAfterOnsetIsNotBlamed() {
 	r := prodops.Suggest(prodops.RemedyContext{
 		Incident: s.incident("prod alert", "connection refused"),
@@ -130,8 +127,6 @@ func (s *RemedySuite) TestSignatureClassification() {
 	}
 }
 
-// The whole point of the engine is that "I don't know" still produces something
-// a person can act on.
 func (s *RemedySuite) TestUnknownStillReturnsAChecklist() {
 	r := prodops.Suggest(prodops.RemedyContext{
 		Incident: s.incident("something odd happened", "no recognisable signature"),

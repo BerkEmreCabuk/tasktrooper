@@ -9,8 +9,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// pbxproj renders the fragment of a project.pbxproj that matters here: one
-// PRODUCT_BUNDLE_IDENTIFIER per build configuration, in file order.
 func pbxproj(ids ...string) string {
 	body := "// !$*UTF8*$!\n{\n\tobjects = {\n"
 	for _, id := range ids {
@@ -223,8 +221,6 @@ func TestDetectAppIdentityHandlesUnreadableRoots(t *testing.T) {
 	require.Equal(t, domain.AppIdentity{}, repository.DetectAppIdentity("/nonexistent/path/that/is/not/there"))
 }
 
-// A monorepo's mobile sub-project carries its own identifiers, read from its
-// own directory rather than from the repository root.
 func TestDetectRepoSubProjectsCarriesTheAppIdentity(t *testing.T) {
 	root := materialise(t, tree{
 		"apps/api/go.mod":                                  "module example.com/api\n",

@@ -34,9 +34,6 @@ func clearableTranscript() []domain.Message {
 	}
 }
 
-// The pairing is the whole reason this rewrites instead of deletes: both
-// Anthropic and the OpenAI-compatible endpoints reject a tool call whose result
-// is missing, so a "smaller" request built by dropping the message is a 400.
 func TestClearToolResultsKeepsEveryCallPaired(t *testing.T) {
 	in := clearableTranscript()
 
@@ -51,8 +48,6 @@ func TestClearToolResultsKeepsEveryCallPaired(t *testing.T) {
 	}
 }
 
-// The ledger survives and only the payload goes: the run still knows it already
-// grepped, so it does not grep again.
 func TestClearToolResultsDropsPayloadsAndNamesTheTool(t *testing.T) {
 	out, _, freed := appcontext.ClearToolResults(clearableTranscript(), 0)
 
@@ -61,8 +56,7 @@ func TestClearToolResultsDropsPayloadsAndNamesTheTool(t *testing.T) {
 	assert.Greater(t, freed, 2000, "two 200-line payloads must show up as a real saving")
 }
 
-// keepRecent counts tool RESULTS, not messages: the results the model is
-// actively working with are never the ones taken.
+// keepRecent counts tool results, not messages.
 func TestClearToolResultsKeepsTheMostRecentResults(t *testing.T) {
 	in := clearableTranscript()
 
@@ -84,8 +78,6 @@ func TestClearToolResultsLeavesNonToolMessagesAlone(t *testing.T) {
 	assert.Equal(t, in[2], out[2], "assistant tool call")
 }
 
-// A screenshot is worth hundreds of tokens and is the least likely thing in an
-// old transcript to still matter.
 func TestClearToolResultsDropsImages(t *testing.T) {
 	in := []domain.Message{
 		toolCallTurn("c1", "browser_screenshot"),
@@ -103,8 +95,7 @@ func TestClearToolResultsDropsImages(t *testing.T) {
 	assert.Greater(t, freed, 4900, "the image bytes are the saving here")
 }
 
-// This runs on every turn. A second pass over an already-cleared message must
-// report no saving, or the logs claim reclaimed bytes that were never there.
+// A second pass must report no saving, or the logs claim bytes never reclaimed.
 func TestClearToolResultsIsIdempotent(t *testing.T) {
 	once, firstCleared, firstFreed := appcontext.ClearToolResults(clearableTranscript(), 0)
 	twice, secondCleared, secondFreed := appcontext.ClearToolResults(once, 0)
@@ -116,9 +107,6 @@ func TestClearToolResultsIsIdempotent(t *testing.T) {
 	assert.Equal(t, once, twice)
 }
 
-// Apply's contract elsewhere in this package is that the caller's slice is not
-// mutated; a shallow copy written through the shared backing array would clear
-// the run's own history for good.
 func TestClearToolResultsDoesNotMutateTheInput(t *testing.T) {
 	in := clearableTranscript()
 	original := in[3].Content

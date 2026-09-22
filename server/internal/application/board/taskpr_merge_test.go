@@ -1,12 +1,5 @@
 package board
 
-// The merge gate's refusal matrix, and the one path that lands code.
-//
-// These tests are written as a matrix rather than as a happy path with a few
-// error cases because the refusals ARE the feature: merging is irreversible, so
-// every one of them is the difference between an unreviewed commit on the
-// default branch and a card that stays where it is.
-
 import (
 	"context"
 	"errors"
@@ -20,7 +13,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// mergePRs is the GitHub half: one PR, whatever shape the test needs.
 type mergePRs struct {
 	pr  port.PullRequest
 	err error
@@ -54,17 +46,11 @@ func (f *mergePRs) ReplyToReviewComment(context.Context, string, string, string,
 	return port.PullRequestComment{}, nil
 }
 
-// mergeGates is the repository half: the review chain verdict and the task's
-// last pipeline, both of which the merge re-asks rather than assuming.
 type mergeGates struct {
-	chainErr    error
-	pipeline    domain.TaskPipeline
-	pipelineErr error
-	// autoReleased scripts what AutoReleaseIfUndeployable reports, defaulting
-	// to false so every existing fixture keeps merging into `done` unchanged.
-	autoReleased bool
-	// autoReleaseCalls counts every AutoReleaseIfUndeployable call, so a test
-	// can assert it was (or was not) asked at all.
+	chainErr         error
+	pipeline         domain.TaskPipeline
+	pipelineErr      error
+	autoReleased     bool
 	autoReleaseCalls int
 }
 
@@ -87,8 +73,6 @@ const (
 	mergeOtherSHA = "2222222222222222222222222222222222222222"
 )
 
-// mergeTask is a task in the state the merge is meant to succeed for: done,
-// signed off at the commit its PR is at, with the PR recorded and unmerged.
 func mergeTask() domain.BoardTask {
 	return domain.BoardTask{
 		ID:          uuid.New(),
@@ -102,7 +86,6 @@ func mergeTask() domain.BoardTask {
 	}
 }
 
-// openCleanPR is the PR GitHub reports for that task: open, ready, clean.
 func openCleanPR() port.PullRequest {
 	return port.PullRequest{
 		Number:         42,
@@ -130,9 +113,6 @@ func newMergeFixture(task domain.BoardTask, pr port.PullRequest, gates *mergeGat
 	return svc, tasks, git, repositoryID
 }
 
-// The whole point: a signed-off task's change reaches the default branch, as ONE
-// squash commit, on the exact commit the board verified, with the branch cleaned
-// up and the commit recorded so nothing merges it twice.
 func TestMergeTaskPullRequestSquashesDeletesTheBranchAndRecordsTheCommit(t *testing.T) {
 	task := mergeTask()
 	svc, tasks, git, repositoryID := newMergeFixture(task, openCleanPR(), &mergeGates{
@@ -147,29 +127,19 @@ func TestMergeTaskPullRequestSquashesDeletesTheBranchAndRecordsTheCommit(t *test
 	assert.Equal(t, "acme", req.Owner)
 	assert.Equal(t, "widget", req.Repo)
 	assert.Equal(t, 42, req.Number)
-	// The precondition is the safety property: GitHub must merge this commit or
-	// nothing.
 	assert.Equal(t, mergeHeadSHA, req.ExpectedHeadSHA)
 	assert.True(t, req.DeleteBranch)
 	assert.Equal(t, "feature/t-7", req.Branch)
-	// A ready PR is not un-drafted: there is nothing to repair.
 	assert.False(t, req.Undraft)
-	// openCleanPR's fixture carries no PR title, so this falls back to the
-	// task's own title — with no task key glued onto it; see mergeCommitTitle.
 	assert.Equal(t, "Add the store link (#42)", req.CommitTitle)
 
 	assert.True(t, result.Merged)
 	assert.True(t, result.BranchDeleted)
 	assert.Equal(t, "mergecommitsha0000000000000000000000000", result.MergeCommitSHA)
 	assert.Contains(t, result.Message, "squash")
-	// Recorded on the task: this is what stops the done column asking for the
-	// same merge again.
 	assert.Equal(t, "mergecommitsha0000000000000000000000000", tasks.merges[task.ID])
 }
 
-// When the repository has no deploy_target configured anywhere, the merge
-// also auto-releases the task, and the QA agent reading the result must be
-// told not to call trigger_release.
 func TestMergeTaskPullRequestReportsAutoRelease(t *testing.T) {
 	task := mergeTask()
 	gates := &mergeGates{
@@ -186,8 +156,6 @@ func TestMergeTaskPullRequestReportsAutoRelease(t *testing.T) {
 	assert.Contains(t, result.Message, "do not call trigger_release")
 }
 
-// The ordinary case — at least one deploy target configured — must not claim
-// an auto-release that never happened.
 func TestMergeTaskPullRequestWithoutAutoReleaseReportsNone(t *testing.T) {
 	task := mergeTask()
 	gates := &mergeGates{
@@ -204,9 +172,6 @@ func TestMergeTaskPullRequestWithoutAutoReleaseReportsNone(t *testing.T) {
 	assert.NotContains(t, result.Message, "trigger_release")
 }
 
-// A configured-out gates dependency (s.gates == nil) is an existing, already
-// refused path for every other call the merge makes to it — the auto-release
-// check must be guarded the same way and never panic.
 func TestMergeTaskPullRequestWithoutGatesNeverCallsAutoRelease(t *testing.T) {
 	task := mergeTask()
 	repositoryID := uuid.New()
@@ -226,9 +191,6 @@ func TestMergeTaskPullRequestWithoutGatesNeverCallsAutoRelease(t *testing.T) {
 	assert.ErrorIs(t, err, domain.ErrMergeNotConfigured)
 }
 
-// The squash title is the PR's own subject, not the task key glued onto it —
-// gluing a task key onto an otherwise-conventional subject is exactly the
-// commitlint-breaking shape this used to produce on main.
 func TestMergeCommitTitlePrefersThePRTitleOverTheTaskTitle(t *testing.T) {
 	task := domain.BoardTask{Key: "T-7", Title: "Mağaza linkini ekle"}
 	pr := port.PullRequest{Number: 42, Title: "feat(store): add the store link"}
@@ -250,15 +212,10 @@ func TestMergeCommitTitleFallsBackToAGenericTitleWithNeither(t *testing.T) {
 	assert.Equal(t, "Merge pull request #42 (#42)", mergeCommitTitle(task, pr))
 }
 
-// A PR opened before task PRs became ready-for-review PRs is still a draft on
-// GitHub, and GitHub refuses to merge one. The repair path has to run — and it
-// has to run only for those.
 func TestMergeTaskPullRequestUndraftsALegacyDraft(t *testing.T) {
 	task := mergeTask()
 	pr := openCleanPR()
 	pr.Draft = true
-	// A draft reports mergeable_state "draft"; the gate must not read that as a
-	// red check.
 	pr.MergeableState = "draft"
 	svc, _, git, repositoryID := newMergeFixture(task, pr, &mergeGates{
 		pipeline: domain.TaskPipeline{Status: domain.PipelineStatusSuccess},
@@ -273,9 +230,6 @@ func TestMergeTaskPullRequestUndraftsALegacyDraft(t *testing.T) {
 	assert.Contains(t, result.Message, "draft")
 }
 
-// The refusal matrix. Every row is a state in which nothing may be merged, and
-// the assertion is on the sentinel rather than on the wording, so the message
-// can be improved without the guard quietly disappearing.
 func TestMergeTaskPullRequestRefusalMatrix(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -405,15 +359,11 @@ func TestMergeTaskPullRequestRefusalMatrix(t *testing.T) {
 
 			require.Error(t, err)
 			assert.ErrorIs(t, err, tc.want)
-			// The only thing that actually matters: no refusal reaches GitHub.
 			assert.Empty(t, git.mergeReqs, "a refused merge must not call GitHub")
 		})
 	}
 }
 
-// A PR merged outside the board still gets its commit recorded, because the
-// dispatcher decides whether done needs waking from that column alone — leaving
-// it empty would wake QA on this task for good.
 func TestMergeTaskPullRequestRecordsAMergeItDidNotMake(t *testing.T) {
 	task := mergeTask()
 	pr := openCleanPR()
@@ -429,9 +379,6 @@ func TestMergeTaskPullRequestRecordsAMergeItDidNotMake(t *testing.T) {
 	assert.Equal(t, mergeHeadSHA, tasks.merges[task.ID])
 }
 
-// A missing pipeline is a repository with no CI wired up, not a red build:
-// refusing there would make the merge unreachable for every such install.
-// GitHub's own mergeable state is the check that remains.
 func TestMergeTaskPullRequestProceedsWithoutAPipeline(t *testing.T) {
 	task := mergeTask()
 	svc, _, git, repositoryID := newMergeFixture(task, openCleanPR(), &mergeGates{
@@ -444,9 +391,6 @@ func TestMergeTaskPullRequestProceedsWithoutAPipeline(t *testing.T) {
 	assert.Len(t, git.mergeReqs, 1)
 }
 
-// The merge happened; only the bookkeeping failed. Reporting that as an error
-// would tell the agent nothing landed, and the next run would try to merge a
-// merged PR — so it is a warning inside a successful result instead.
 func TestMergeTaskPullRequestReportsAnUnrecordedMerge(t *testing.T) {
 	task := mergeTask()
 	svc, tasks, _, repositoryID := newMergeFixture(task, openCleanPR(), &mergeGates{
@@ -461,8 +405,6 @@ func TestMergeTaskPullRequestReportsAnUnrecordedMerge(t *testing.T) {
 	assert.Contains(t, result.Message, "WARNING")
 }
 
-// A branch that survives the merge is reported, never mistaken for a failed
-// merge: the change is on the default branch either way.
 func TestMergeTaskPullRequestReportsAnUndeletedBranch(t *testing.T) {
 	task := mergeTask()
 	svc, _, git, repositoryID := newMergeFixture(task, openCleanPR(), &mergeGates{

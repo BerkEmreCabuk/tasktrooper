@@ -10,21 +10,12 @@ import (
 	"testing"
 )
 
-// This file exists because the obvious fix for the /proc bypass does not work,
-// and "it looks like it works" is exactly how this class of hole survives a
-// review.
-//
-// os.Unsetenv removes a variable from the Go runtime's view of the environment.
-// /proc/<pid>/environ is not served from that view: it is the
-// [env_start, env_end) region of the process's initial stack, written once by
-// execve. Nothing short of CAP_SYS_RESOURCE (PR_SET_MM_ENV_START) rewrites it.
-// So after the scrub a child can still run `cat /proc/$PPID/environ` and read
-// every secret the pod was started with — unless the parent has made itself
-// undumpable, which is what denyProcEnvironReads does.
-//
-// The probe below runs as a subprocess of the test binary so the secret is
-// present at execve, which is the only way to observe the real behaviour;
-// t.Setenv writes a value that was never in the initial block at all.
+// These tests exist because the obvious fix does not work and "looks like it
+// works" is exactly how this class of hole survives a review. os.Unsetenv only
+// edits the Go runtime's view; /proc/<pid>/environ is the exec-time stack
+// region, so a child can still `cat /proc/$PPID/environ` unless the parent
+// makes itself undumpable. The probe runs as a subprocess so the secret is
+// present at execve — a t.Setenv value was never in the initial block at all.
 
 const (
 	probeSwitch    = "TASKTROOPER_PROC_ENVIRON_PROBE"
@@ -32,8 +23,7 @@ const (
 	probeSecret    = "probe-secret-value-8f21"
 )
 
-// TestProcEnvironProbeHelper is not a test. It is the body of the subprocess
-// the real test launches, selected with -test.run.
+// TestProcEnvironProbeHelper is not a test; it is the subprocess body.
 func TestProcEnvironProbeHelper(t *testing.T) {
 	if os.Getenv(probeSwitch) == "" {
 		t.Skip("subprocess body for TestUnsetenvDoesNotClearProcSelfEnviron")
@@ -55,9 +45,9 @@ func TestProcEnvironProbeHelper(t *testing.T) {
 	report("self_read_after_prctl", selfEnvironState())
 }
 
-// selfEnvironState distinguishes "the file is gone for us too" from "the file
-// is readable but the secret is not in it" — contains() collapses both to
-// "false", and the difference is exactly what the undumpable test pins.
+// selfEnvironState distinguishes "the file is gone for us too" from "readable
+// but secret absent" — contains() collapses both, and the difference is what
+// the undumpable test pins.
 func selfEnvironState() string {
 	data, err := os.ReadFile("/proc/self/environ")
 	if err != nil {
@@ -77,8 +67,7 @@ func readOwnEnviron() string {
 	return string(bytes.ReplaceAll(data, []byte{0}, []byte{'\n'}))
 }
 
-// childReadOfParentEnviron is the attack, verbatim: a child process reading its
-// parent's environment block out of procfs.
+// childReadOfParentEnviron is the attack, verbatim.
 func childReadOfParentEnviron() string {
 	cmd := exec.Command("sh", "-c", "cat /proc/$PPID/environ")
 	cmd.Env = []string{"PATH=/usr/local/bin:/usr/bin:/bin"}
@@ -102,9 +91,8 @@ func boolStr(b bool) string {
 }
 
 // TestUnsetenvDoesNotClearProcSelfEnviron pins the reason denyProcEnvironReads
-// exists. If Go or the kernel ever made os.Unsetenv rewrite the environ block,
-// this test would fail and the prctl call could be deleted — which is the only
-// circumstance under which deleting it would be correct.
+// exists: if Go or the kernel ever made unsetting rewrite the block, this fails
+// and the PR_SET_DUMPABLE call could go.
 func TestUnsetenvDoesNotClearProcSelfEnviron(t *testing.T) {
 	results := runProbe(t)
 
@@ -123,11 +111,9 @@ func TestUnsetenvDoesNotClearProcSelfEnviron(t *testing.T) {
 	}
 }
 
-// TestUndumpableBlocksChildProcEnvironReads is the assertion that the bypass is
-// actually shut: the same `cat /proc/$PPID/environ` that worked a moment
-// earlier must fail once the parent is undumpable. It also pins the cost:
-// clearing the dumpable flag hands the process's own /proc/<pid> files to root,
-// so the process loses procfs self-inspection along with everyone else.
+// TestUndumpableBlocksChildProcEnvironReads asserts the bypass is actually
+// shut, and pins the cost: the undumpable process loses its own /proc self
+// inspection along with the children's cross-process read.
 func TestUndumpableBlocksChildProcEnvironReads(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("running as root: CAP_SYS_PTRACE bypasses the dumpable check, so this proves nothing here")
@@ -148,13 +134,10 @@ func TestUndumpableBlocksChildProcEnvironReads(t *testing.T) {
 	}
 	switch got := results["self_read_after_prctl"]; got {
 	case "unreadable":
-		// Expected. A non-dumpable process's /proc/<pid> entries belong to
-		// root (task_dump_owner), so the unprivileged self read dies at
-		// open(). os.Environ() still works; nothing in the codebase reads
-		// /proc/self/environ.
+		// Expected: a non-dumpable process's /proc/<pid> entries belong to root.
 	case "secret-present":
-		// A kernel or mount configuration that still lets the owner through.
-		// Harmless — the cross-process leak above is the one that matters.
+		// Kernel/mount config that still lets the owner through — harmless, since
+		// the cross-process read is the one that matters.
 	default:
 		t.Errorf("unexpected /proc/self/environ state after PR_SET_DUMPABLE=0: %q "+
 			"(readable but without the exec-time secret should be impossible)", got)

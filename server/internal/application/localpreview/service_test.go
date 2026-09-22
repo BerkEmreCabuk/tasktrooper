@@ -31,9 +31,6 @@ func (s stubRepos) ResolveRootPath(context.Context, uuid.UUID) (string, error) {
 	return s.root, nil
 }
 
-// stubGit skips the real checkout: EnsureTaskWorkspace just points the caller
-// at a directory the test already created, so the process-management half of
-// this package can be tested without a git repository on disk.
 type stubGit struct {
 	has bool
 }
@@ -60,10 +57,7 @@ func TestStartDetectsTheURLTheCommandPrints(t *testing.T) {
 
 	preview, err := svc.Start(context.Background(), repositoryID, taskID, `echo "Local: http://localhost:4321/"; sleep 5`)
 	require.NoError(t, err)
-	// The pump goroutine races the caller for the snapshot: on a loaded runner
-	// it can already have scanned the echoed URL and flipped the status to
-	// running before Start returns, which is a correct read of a command that
-	// prints instantly, not a bug — so both are accepted here.
+
 	assert.Contains(t, []domain.LocalPreviewStatus{domain.LocalPreviewStarting, domain.LocalPreviewRunning}, preview.Status)
 
 	require.Eventually(t, func() bool {
@@ -102,12 +96,6 @@ func TestStartingASecondPreviewReplacesTheFirst(t *testing.T) {
 	assert.False(t, ok)
 }
 
-// TestNewServiceReapsAPreviousProcessesOrphan simulates a server restart: the
-// first Service's process (loaded from Start) is a still-running orphan by
-// the time a second Service, sharing the same workspace root, is constructed
-// with no in-memory knowledge of it — the exact situation a crash or a
-// force-quit leaves behind. The second Service's NewService must find and
-// kill it, or the workspace's fixed dev-server port stays squatted forever.
 func TestNewServiceReapsAPreviousProcessesOrphan(t *testing.T) {
 	workspaceRoot := t.TempDir()
 	deps := func() Deps {
@@ -129,8 +117,6 @@ func TestNewServiceReapsAPreviousProcessesOrphan(t *testing.T) {
 	first.mu.Unlock()
 	require.NoError(t, syscall.Kill(pid, 0), "the preview's process must actually be running before this test means anything")
 
-	// The first Service is simply abandoned here, exactly as a crash would
-	// leave it — never Stop, never told to clean up.
 	NewService(deps())
 
 	require.Eventually(t, func() bool {

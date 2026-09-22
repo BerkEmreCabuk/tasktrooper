@@ -9,16 +9,15 @@ import (
 	"path/filepath"
 )
 
-// preDropTenancyBackup is where the cluster is copied before the first start
-// of the build that ships migration 133, which drops every tenant_id column and
-// cannot be undone. The way back is to put this copy in place of the cluster.
+// preDropTenancyBackup holds a copy of the cluster taken before the build that
+// ships migration 133 drops every tenant_id column (irreversible). The way back
+// is to put this copy in place of the cluster.
 const preDropTenancyBackup = "postgres-backup-pre-133"
 
 const (
 	backupCompleteMarker = ".complete"
-	// backupNotNeededSuffix marks a data directory whose cluster was created by
-	// a build that already had migration 133, so a later start does not copy a
-	// post-133 cluster under a pre-133 name.
+	// backupNotNeededSuffix marks a cluster created with 133 already applied,
+	// so a later start does not copy it under a pre-133 name.
 	backupNotNeededSuffix = ".not-needed"
 )
 
@@ -29,12 +28,9 @@ func backupSettled(pgData, backupDir string) bool {
 }
 
 // backupClusterOnce copies the STOPPED cluster at pgData to backupDir unless a
-// finished copy (or the not-needed marker) is already there, and reports
-// whether it copied. A data directory with no cluster yet is left alone and
-// nothing is written.
-//
-// The copy goes to a sibling that is renamed into place, and the marker is
-// written last, so an interrupted copy is never taken for a good one.
+// finished copy (or the not-needed marker) is already there. The copy goes to a
+// sibling renamed into place, marker written last, so an interrupted copy is
+// never taken for a good one.
 func backupClusterOnce(pgData, backupDir string) (bool, error) {
 	if backupSettled(pgData, backupDir) {
 		return false, nil
@@ -68,8 +64,7 @@ func markBackupNotNeeded(backupDir string) error {
 }
 
 // copyTree copies directories, regular files and symlinks with their
-// permission bits. Anything else (a socket, say) is not cluster data and is
-// skipped.
+// permission bits. Sockets are not cluster data and are skipped.
 func copyTree(src, dst string) error {
 	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

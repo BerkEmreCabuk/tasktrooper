@@ -6,11 +6,10 @@ import (
 	"github.com/google/uuid"
 )
 
-// ErrColumnHasWorkflowStages is UpdateColumns' refusal to remove a column
-// slug a workflow stage with behaviours still references. workflow_stages
-// carries no FK to board_columns on purpose (ReplaceColumns deletes every
-// board_columns row and reinserts on every save), so this is the only thing
-// that stops a rename/delete from silently orphaning a configured stage.
+// ErrColumnHasWorkflowStages is UpdateColumns' refusal to remove a column slug
+// a workflow stage with behaviours still references: workflow_stages carries no
+// FK to board_columns (ReplaceColumns deletes and reinserts every row), so this
+// is the only thing that stops a rename/delete from silently orphaning a stage.
 var ErrColumnHasWorkflowStages = errors.New("column is referenced by a workflow stage with behaviours")
 
 type BoardColumn struct {
@@ -31,23 +30,17 @@ type BoardSubscription struct {
 }
 
 // AgentColumnSubscription is one column an agent subscribes to, with its
-// optional per-column task-type filter — the shape
-// GET/PUT /v1/agents/:agentId/subscriptions reads and writes. TaskTypes nil
-// means "every type" (today's behaviour); a non-nil slice narrows dispatch on
-// that column to only those types, mirroring board_columns' own
-// agent_column_subscriptions.task_type_filter column.
+// optional per-column task-type filter. TaskTypes nil means "every type"; a
+// non-nil slice narrows dispatch on that column to only those types.
 type AgentColumnSubscription struct {
 	ColumnSlug string
 	TaskTypes  []string
 }
 
-// AgentColumnInstruction is text an agent is handed when a run dispatches it
-// for a task that arrived in column_slug — "what to do when a task lands
-// here", a per-agent column default the operator can override. It is a
-// separate store from AgentColumnSubscription: the column that dispatches an
-// agent need not be one it watches (a developer dispatched into need_revision
-// by assignment still wants its instruction), and instructions must never
-// change column-watch dispatch behaviour.
+// AgentColumnInstruction is text handed to an agent when a run dispatches it
+// for a task that arrived in column_slug. A separate store from
+// AgentColumnSubscription: the column that dispatches an agent need not be one
+// it watches, and instructions must never change watch-based dispatch.
 type AgentColumnInstruction struct {
 	AgentID     uuid.UUID `json:"agent_id"`
 	ColumnSlug  string    `json:"column_slug"`

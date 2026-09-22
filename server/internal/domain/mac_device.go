@@ -2,20 +2,18 @@ package domain
 
 import "strings"
 
-// This file is the shape of what a MEMBER'S MAC says about the devices on it.
-//
-// It is the remote twin of LocalDeviceCatalog, and the twin is deliberate: a
-// Linux pod cannot run an iOS simulator, so the machine that can answer "which
-// simulators are here" is the laptop, reached over the control plane's tunnel
-// (adapter/runner, `mobile.devices`). MacDeviceCatalog EMBEDS
-// LocalDeviceCatalog rather than restating it, so `ios` and `android` decode
-// into the same two fields with the same meaning wherever they came from, and
-// the settings page renders one type.
+// This file is the shape of what a MEMBER'S MAC says about the devices on it —
+// the remote twin of LocalDeviceCatalog. A Linux pod cannot run an iOS
+// simulator, so the machine that can answer "which simulators are here" is the
+// laptop, reached over the tunnel (adapter/runner, `mobile.devices`).
+// MacDeviceCatalog EMBEDS LocalDeviceCatalog rather than restating it, so `ios`
+// and `android` decode into the same fields with the same meaning wherever they
+// came from.
 
 // MacRunningEmulator is an AVD that is up right now, and the SERIAL it came up
-// on. It is the only place in a catalog a serial appears, because it is the
-// only fact in one that is allocated rather than declared: the emulator picks a
-// console port at boot, so a caller that remembered `emulator-5554` would drive
+// on — the only place a serial appears in a catalog, because it is the only
+// fact that is allocated rather than declared: the emulator picks a console
+// port at boot, so a caller that remembered `emulator-5554` would drive
 // whichever emulator happens to be on that port now.
 type MacRunningEmulator struct {
 	AVD    string `json:"avd"`
@@ -23,26 +21,21 @@ type MacRunningEmulator struct {
 }
 
 // MacCapability is one thing a Mac can or cannot do, with the sentence to put
-// in front of a person when it cannot.
-//
-// Detail is not decoration. "Unavailable" on its own sends somebody looking in
-// the wrong place; "this Mac has no Android SDK platform-tools (adb)" names the
-// install that fixes it. A false capability always carries one, and this side
-// passes it through rather than paraphrasing it — the Mac is the only party
-// that knows WHICH half is missing.
+// in front of a person when it cannot. Detail is not decoration: "Unavailable"
+// alone sends somebody looking in the wrong place; a false capability always
+// carries one, and this side passes it through rather than paraphrasing it,
+// because the Mac is the only party that knows WHICH half is missing.
 type MacCapability struct {
 	Available bool   `json:"available"`
 	Detail    string `json:"detail,omitempty"`
 }
 
-// MacAppium is the hub's two independent facts.
-//
-// Configured and Reachable are separate because their remedies are separate:
-// not configured means no Appium is installed on that Mac (an install),
-// configured and unreachable means one is installed and not answering (a
-// restart). Collapsing them into one boolean would send half the people to the
-// wrong instruction. DrivePath is reported by the Mac so no caller here holds a
-// copy of the runner's routing table.
+// MacAppium is the hub's two independent facts. Configured and Reachable are
+// separate because their remedies are separate: not configured means no Appium
+// is installed (an install); configured and unreachable means one is not
+// answering (a restart). Collapsing them would send half the people to the
+// wrong instruction. DrivePath is reported by the Mac so no caller holds a copy
+// of the runner's routing table.
 type MacAppium struct {
 	Configured bool   `json:"configured"`
 	Reachable  bool   `json:"reachable"`
@@ -52,7 +45,7 @@ type MacAppium struct {
 }
 
 // Usable reports whether a session can be created against this Mac's hub at
-// all. Both halves, because a hub that is installed and not answering drives
+// all — both halves, because a hub that is installed and not answering drives
 // nothing.
 func (a MacAppium) Usable() bool { return a.Configured && a.Reachable }
 
@@ -63,25 +56,22 @@ type MacCapabilities struct {
 	Appium           MacAppium     `json:"appium"`
 }
 
-// MacDeviceCatalog is one Mac's answer to "what can you drive".
-//
-// Every slice is non-nil after Normalize: `[]` says "this Mac was asked and has
-// none", which is a different statement from a null and is the one a settings
-// page renders. A Mac whose Android SDK is broken still reports its simulators
-// — one half failing never fails the other — so a caller must read the
-// capability block rather than inferring absence from an empty list.
+// MacDeviceCatalog is one Mac's answer to "what can you drive". Every slice is
+// non-nil after Normalize: `[]` says "this Mac was asked and has none", which
+// is a different statement from a null. A Mac whose Android SDK is broken still
+// reports its simulators — one half failing never fails the other — so a caller
+// must read the capability block rather than inferring absence from an empty
+// list.
 type MacDeviceCatalog struct {
 	LocalDeviceCatalog
 	AndroidRunning []MacRunningEmulator `json:"android_running"`
 	Capabilities   MacCapabilities      `json:"capabilities"`
 }
 
-// Normalize fills the nils a decode can leave behind.
-//
-// Called on every answer from a Mac, because a runner that omitted a field, a
-// hop that re-encoded one, or an older desktop build all produce a null where
-// the contract promises an array — and a nil slice ranged over is fine while a
-// nil slice RENDERED is "unknown" where the truth is "none".
+// Normalize fills the nils a decode can leave behind, called on every answer
+// from a Mac: a runner that omitted a field, or an older desktop build, produce
+// a null where the contract promises an array — and a nil slice RENDERED is
+// "unknown" where the truth is "none".
 func (c MacDeviceCatalog) Normalize() MacDeviceCatalog {
 	if c.IOS == nil {
 		c.IOS = []LocalSimulator{}
@@ -124,12 +114,11 @@ func (c MacDeviceCatalog) SimulatorState(udid string) string {
 // SimulatorBootedState is the one value of State that means "drivable now".
 const SimulatorBootedState = "Booted"
 
-// MacBootedDevice is what `mobile.boot` answers.
-//
-// UDID is the field that method exists for and it is NOT the id that was asked
-// for. For a simulator the two collapse — simctl's identity is stable — but for
-// an emulator the AVD is a name and the serial is allocated at boot, so this is
-// the only value that may go into `appium:udid`.
+// MacBootedDevice is what `mobile.boot` answers. UDID is the field that method
+// exists for and it is NOT the id that was asked for: for a simulator the two
+// collapse (simctl's identity is stable), but for an emulator the AVD is a name
+// and the serial is allocated at boot, so this is the only value that may go
+// into `appium:udid`.
 type MacBootedDevice struct {
 	Kind            string `json:"kind"`
 	ID              string `json:"id"`
