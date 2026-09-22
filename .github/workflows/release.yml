@@ -5,6 +5,11 @@ name: release
 # plus the updater feeds (latest-mac.yml, latest.yml, latest-linux.yml) to that
 # tag's GitHub Release. Run it by hand to build all three without publishing:
 # the installers are attached to the run as artifacts.
+#
+# The tag alone drives the version: each platform job writes the tag (minus
+# its `v`) into desktop/package.json before building, so cutting a release is
+# just pushing an annotated tag — no version-bump commit needed first, and
+# nothing here writes that version back to the repo.
 on:
   push:
     tags: ["v*"]
@@ -25,18 +30,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      # The bundled version is what the updater compares against the feed, so a
-      # tag that disagrees with it ships an app that re-offers itself forever or
-      # never sees the release.
-      - name: Check the tag against the packaged version
-        run: |
-          set -euo pipefail
-          version="$(node -p "require('./desktop/package.json').version")"
-          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
-            echo "::error title=Tag and version disagree::$GITHUB_REF_NAME names ${GITHUB_REF_NAME#v}, desktop/package.json says $version."
-            exit 1
-          fi
 
       - name: Create the release
         env:
@@ -76,6 +69,10 @@ jobs:
           cache-dependency-path: |
             desktop/package-lock.json
             desktop/ui/package-lock.json
+
+      - name: Set the version from the tag
+        if: github.ref_type == 'tag'
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
       - name: Install and build
         run: |
@@ -198,6 +195,10 @@ jobs:
         working-directory: .
         run: '"${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append'
 
+      - name: Set the version from the tag
+        if: github.ref_type == 'tag'
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
+
       - name: Install and build
         run: |
           npm ci
@@ -257,6 +258,10 @@ jobs:
           cache-dependency-path: |
             desktop/package-lock.json
             desktop/ui/package-lock.json
+
+      - name: Set the version from the tag
+        if: github.ref_type == 'tag'
+        run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
       - name: Install and build
         run: |
