@@ -81,6 +81,13 @@ func (s *Service) SyncFromCatalog(ctx context.Context, reader port.CatalogRepoRe
 				Action: domain.CatalogPendingActionUpdate,
 				Reason: "auto_pull_agent_updates kapali; prompt/rollar guncellenmedi",
 			})
+			// auto_pull gates prompt and role content, not dispatch wiring: an
+			// agent parked here would otherwise never reach its catalog columns
+			// and would sit on the board never being woken.
+			if err := s.applySuggestedSubscriptions(ctx, existing, def.Subscriptions); err != nil {
+				s.recordSync(ctx, syncStore, ref, res, fmt.Sprintf("agent %s: %v", def.Slug, err))
+				return nil, err
+			}
 			res.Skipped++
 		}
 		stackIDs, err := s.ensureTechStacks(ctx, existing.ID, def)
@@ -577,6 +584,11 @@ func (s *Service) adoptByName(ctx context.Context, existing domain.Agent, def do
 		})
 	}
 	if _, err := s.store.UpdateAgent(ctx, adopted); err != nil {
+		return domain.Agent{}, err
+	}
+	// Adoption stamps identity only; without this the adopted agent keeps the
+	// empty subscription set it had before the catalog knew about it.
+	if err := s.applySuggestedSubscriptions(ctx, adopted, def.Subscriptions); err != nil {
 		return domain.Agent{}, err
 	}
 	stackIDs, err := s.ensureTechStacks(ctx, adopted.ID, def)
