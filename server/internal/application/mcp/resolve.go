@@ -84,6 +84,10 @@ func (s *Service) maskServerView(ctx context.Context, server domain.MCPServer) (
 		secretIndex[rec.Location+":"+rec.Key] = true
 	}
 
+	view.MissingConfig = domain.MissingConfigFields(server, func(location, key string) bool {
+		return secretIndex[location+":"+key]
+	})
+
 	for _, field := range view.ConfigFields {
 		if !field.Secret {
 			continue

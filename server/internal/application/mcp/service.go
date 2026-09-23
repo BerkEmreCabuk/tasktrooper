@@ -128,6 +128,10 @@ func mergeHealth(server domain.MCPServerView, health map[string]interface{}) dom
 		server.Status = "disabled"
 		return server
 	}
+	if len(server.MissingConfig) > 0 {
+		server.Status = "needs_config"
+		return server
+	}
 	if health == nil {
 		server.Status = "error"
 		server.LastError = "not loaded"

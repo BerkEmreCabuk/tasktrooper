@@ -127,26 +127,26 @@ func (s *ServiceSuite) SetupTest() {
 func (s *ServiceSuite) TestResolveRuntimeConfigMergesSecretsAndExpandsEnv() {
 	ctx := context.Background()
 	server := domain.MCPServer{
-		ID:        "github",
+		ID:        "gitlab",
 		Enabled:   true,
 		Transport: "stdio",
 		Command:   "npx",
-		Args:      []string{"-y", "@modelcontextprotocol/server-github"},
+		Args:      []string{"-y", "@zereight/mcp-gitlab"},
 		Env:       map[string]string{"OTHER": "${PATH}"},
 	}
-	s.store.servers["github"] = server
+	s.store.servers["gitlab"] = server
 
-	encrypted, err := s.cipher.Encrypt("ghp_test_token")
+	encrypted, err := s.cipher.Encrypt("glpat_test_token")
 	s.Require().NoError(err)
-	s.store.secrets["github"] = []port.MCPSecretRecord{{
+	s.store.secrets["gitlab"] = []port.MCPSecretRecord{{
 		Location: "env",
-		Key:      "GITHUB_PERSONAL_ACCESS_TOKEN",
+		Key:      "GITLAB_PERSONAL_ACCESS_TOKEN",
 		Value:    encrypted,
 	}}
 
 	cfg, err := s.svc.ResolveRuntimeConfig(ctx, server)
 	s.Require().NoError(err)
-	s.Equal("ghp_test_token", cfg.Env["GITHUB_PERSONAL_ACCESS_TOKEN"])
+	s.Equal("glpat_test_token", cfg.Env["GITLAB_PERSONAL_ACCESS_TOKEN"])
 	s.NotEmpty(cfg.Env["OTHER"])
 	s.NotEqual("${PATH}", cfg.Env["OTHER"])
 }
@@ -174,49 +174,49 @@ func (s *ServiceSuite) TestCreateValidatesTransport() {
 
 func (s *ServiceSuite) TestUpdateKeepsExistingSecretWhenMasked() {
 	ctx := context.Background()
-	s.store.servers["github"] = domain.MCPServer{
-		ID: "github", Transport: "stdio", Command: "npx",
+	s.store.servers["gitlab"] = domain.MCPServer{
+		ID: "gitlab", Transport: "stdio", Command: "npx",
 	}
-	encrypted, err := s.cipher.Encrypt("ghp_keep_me")
+	encrypted, err := s.cipher.Encrypt("glpat_keep_me")
 	s.Require().NoError(err)
-	s.store.secrets["github"] = []port.MCPSecretRecord{{
+	s.store.secrets["gitlab"] = []port.MCPSecretRecord{{
 		Location: "env",
-		Key:      "GITHUB_PERSONAL_ACCESS_TOKEN",
+		Key:      "GITLAB_PERSONAL_ACCESS_TOKEN",
 		Value:    encrypted,
 	}}
 
-	_, err = s.svc.Update(ctx, "github", domain.UpdateMCPServerRequest{
-		ID:        "github",
+	_, err = s.svc.Update(ctx, "gitlab", domain.UpdateMCPServerRequest{
+		ID:        "gitlab",
 		Transport: "stdio",
 		Command:   "npx",
-		Env:       map[string]string{"GITHUB_PERSONAL_ACCESS_TOKEN": secrets.MaskedValue()},
+		Env:       map[string]string{"GITLAB_PERSONAL_ACCESS_TOKEN": secrets.MaskedValue()},
 	})
 	s.Require().NoError(err)
 
-	records := s.store.secrets["github"]
+	records := s.store.secrets["gitlab"]
 	s.Require().Len(records, 1)
 	plain, err := s.cipher.Decrypt(records[0].Value)
 	s.Require().NoError(err)
-	s.Equal("ghp_keep_me", plain)
+	s.Equal("glpat_keep_me", plain)
 }
 
 func (s *ServiceSuite) TestListViewsMasksSecrets() {
 	ctx := context.Background()
-	s.store.servers["github"] = domain.MCPServer{
-		ID: "github", Transport: "stdio", Command: "npx",
+	s.store.servers["gitlab"] = domain.MCPServer{
+		ID: "gitlab", Transport: "stdio", Command: "npx",
 	}
-	encrypted, err := s.cipher.Encrypt("ghp_hidden")
+	encrypted, err := s.cipher.Encrypt("glpat_hidden")
 	s.Require().NoError(err)
-	s.store.secrets["github"] = []port.MCPSecretRecord{{
+	s.store.secrets["gitlab"] = []port.MCPSecretRecord{{
 		Location: "env",
-		Key:      "GITHUB_PERSONAL_ACCESS_TOKEN",
+		Key:      "GITLAB_PERSONAL_ACCESS_TOKEN",
 		Value:    encrypted,
 	}}
 
 	views, err := s.svc.ListViews(ctx, nil)
 	s.Require().NoError(err)
 	s.Require().Len(views, 1)
-	s.Equal(secrets.MaskedValue(), views[0].Env["GITHUB_PERSONAL_ACCESS_TOKEN"])
+	s.Equal(secrets.MaskedValue(), views[0].Env["GITLAB_PERSONAL_ACCESS_TOKEN"])
 	s.NotEmpty(views[0].ConfigFields)
 }
 

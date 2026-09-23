@@ -1,6 +1,6 @@
 import { ChevronRight, Pencil, Trash2 } from "lucide-react";
 import { Fragment } from "react";
-import type { MCPServerView } from "@/api";
+import type { MCPConfigField, MCPServerView } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -16,7 +16,13 @@ function formatToolName(fullName: string, serverId: string): string {
 function statusVariant(status: MCPServerView["status"]) {
   if (status === "connected") return "success" as const;
   if (status === "disabled") return "secondary" as const;
+  if (status === "needs_config") return "warning" as const;
   return "destructive" as const;
+}
+
+function configFieldLabel(field: MCPConfigField): string {
+  if (field.location === "args") return field.description || `args[${field.key}]`;
+  return field.key;
 }
 
 interface MCPServerTableRowProps {
@@ -42,9 +48,12 @@ export function MCPServerTableRow({
   const tools = server.tools ?? [];
   const canExpand = tools.length > 0;
 
+  const missing = server.missing_config ?? [];
+
   const statusLabel = (status: MCPServerView["status"]) => {
     if (status === "connected") return t("frame.admin.mcpRow.connected");
     if (status === "disabled") return t("frame.admin.mcpRow.disabled");
+    if (status === "needs_config") return t("frame.admin.mcpRow.needsConfig");
     return t("frame.admin.mcpRow.error");
   };
 
@@ -71,6 +80,13 @@ export function MCPServerTableRow({
                 title={server.last_error || t("frame.admin.mcpRow.unknownError")}
               >
                 {server.last_error || t("frame.admin.mcpRow.connectFailed")}
+              </p>
+            )}
+            {missing.length > 0 && (
+              <p className="text-xs leading-snug text-muted-foreground">
+                {t("frame.admin.mcpRow.missingConfig", {
+                  fields: missing.map(configFieldLabel).join(", "),
+                })}
               </p>
             )}
           </div>

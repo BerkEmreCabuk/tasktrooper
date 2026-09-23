@@ -28,7 +28,7 @@ Every server needs:
 
 **stdio** servers need a `command` and its `args` — the same shape as a
 `.mcp.json` entry, run as a local child process (`npx -y
-@modelcontextprotocol/server-github`, for example). **http** servers need a
+@zereight/mcp-gitlab`, for example). **http** servers need a
 `url` and, optionally, request `headers`.
 
 An `allowed_tools` list on the server narrows which of its tools are actually
@@ -41,14 +41,15 @@ and security](data-and-security.md) for what that guard covers.
 
 ## Templates
 
-Seven templates ship with the app, each pre-filling the transport, command or
+Eight templates ship with the app, each pre-filling the transport, command or
 URL and naming which fields are secrets:
 
 | Template | Transport | What it needs |
 |---|---|---|
 | Filesystem | stdio | A root directory to expose |
-| Git | stdio | A repository path |
-| GitHub | stdio | `GITHUB_PERSONAL_ACCESS_TOKEN` |
+| Git | stdio | A repository path — runs through `uvx`, so [uv](https://docs.astral.sh/uv/) has to be on your PATH |
+| GitHub | http | A personal access token, sent as the `Authorization` header to GitHub's own hosted server |
+| GitLab | stdio | `GITLAB_PERSONAL_ACCESS_TOKEN`, and `GITLAB_API_URL` if you are on a self-hosted instance |
 | PostgreSQL | stdio | A connection URL |
 | Slack | stdio | `SLACK_BOT_TOKEN`, `SLACK_TEAM_ID` |
 | Hugging Face | http | A bearer token, sent as the `Authorization` header |
@@ -100,9 +101,14 @@ Each row in the MCP Servers table shows:
 | Column | What it means |
 |---|---|
 | Transport | `stdio` or `http` |
-| Status | **Connected**, **Inactive** (disabled), or **Error** |
+| Status | **Connected**, **Inactive** (disabled), **Needs setup**, or **Error** |
 | Tools | How many tools the server is currently serving, expandable to the list of names |
 | Enabled | The toggle that connects or disconnects the server without deleting it |
+
+**Needs setup** means a required field of the template — a token, a path, a
+connection URL — is still empty, so there is nothing to dial yet. The row names
+the fields, and so does the edit form, rather than leaving you to read it out of
+a connection error.
 
 An enabled server that failed to connect — a bad command, an unreachable
 URL, a stdio process that exited — shows **Error** with the failure reason;

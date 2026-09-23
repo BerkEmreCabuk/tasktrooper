@@ -19,25 +19,48 @@ export const MCP_TEMPLATES: MCPTemplate[] = [
     env_schema: [{ key: "path", label: "Accessible directory", placeholder: "/tmp" }],
   },
   {
+    // Upstream never shipped this one to npm; it is a Python package and uvx is
+    // the only first-party way to run it.
     id: "git",
     label: "Git",
     description: "Git repository operations",
     enabled: false,
     transport: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-git", "--repository", "."],
+    command: "uvx",
+    args: ["mcp-server-git", "--repository", "."],
   },
   {
+    // @modelcontextprotocol/server-github was deprecated; GitHub's own server is
+    // remote, so there is nothing to install.
     id: "github",
     label: "GitHub",
     description: "GitHub API integration",
     enabled: false,
+    transport: "http",
+    url: "https://api.githubcopilot.com/mcp/",
+    headers: { Authorization: "Bearer ${GITHUB_TOKEN}" },
+    secret_fields: ["header:Authorization"],
+    env_schema: [
+      { key: "Authorization", label: "GitHub Token", secret: true, placeholder: "Bearer ghp_..." },
+    ],
+  },
+  {
+    id: "gitlab",
+    label: "GitLab",
+    description: "GitLab projects, merge requests, issues and pipelines",
+    enabled: false,
     transport: "stdio",
     command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-github"],
-    env: { GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}" },
-    secret_fields: ["GITHUB_PERSONAL_ACCESS_TOKEN"],
-    env_schema: [{ key: "GITHUB_PERSONAL_ACCESS_TOKEN", label: "GitHub Token", secret: true }],
+    args: ["-y", "@zereight/mcp-gitlab"],
+    env: {
+      GITLAB_PERSONAL_ACCESS_TOKEN: "${GITLAB_TOKEN}",
+      GITLAB_API_URL: "https://gitlab.com/api/v4",
+    },
+    secret_fields: ["GITLAB_PERSONAL_ACCESS_TOKEN"],
+    env_schema: [
+      { key: "GITLAB_PERSONAL_ACCESS_TOKEN", label: "GitLab Token", secret: true },
+      { key: "GITLAB_API_URL", label: "GitLab API URL", placeholder: "https://gitlab.com/api/v4" },
+    ],
   },
   {
     id: "postgres",

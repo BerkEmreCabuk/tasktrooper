@@ -111,6 +111,7 @@ export const frame = {
       envHint: "Fill in the fields from the template",
       httpHeaders: "HTTP Headers",
       allowedTools: "Allowed Tools (one per line, empty = all)",
+      missingRequired: "Required, and still empty: {fields}. The server will not connect until they are filled in.",
     },
     mcpRow: {
       connected: "Connected",
@@ -119,6 +120,8 @@ export const frame = {
       unknownError: "Unknown error",
       connectFailed: "Could not connect to MCP server",
       tools: "Tools ({count})",
+      needsConfig: "Needs setup",
+      missingConfig: "Fill these in before it can connect: {fields}",
     },
     multiSelect: {
       emptyDefault: "No options",

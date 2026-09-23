@@ -27,11 +27,15 @@ type MCPServer struct {
 type MCPServerView struct {
 	MCPServer
 	ConfigFields []MCPConfigField `json:"config_fields,omitempty"`
-	Connected    bool             `json:"connected"`
-	ToolCount    int              `json:"tool_count"`
-	Tools        []string         `json:"tools,omitempty"`
-	Status       string           `json:"status"`
-	LastError    string           `json:"last_error,omitempty"`
+	// The required fields with no value yet; an enabled server with any of
+	// these cannot connect, and the UI names them instead of only reporting
+	// the resulting connection failure.
+	MissingConfig []MCPConfigField `json:"missing_config,omitempty"`
+	Connected     bool             `json:"connected"`
+	ToolCount     int              `json:"tool_count"`
+	Tools         []string         `json:"tools,omitempty"`
+	Status        string           `json:"status"`
+	LastError     string           `json:"last_error,omitempty"`
 }
 
 type MCPServerListResponse struct {

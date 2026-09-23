@@ -2427,14 +2427,24 @@ export interface MCPServer {
   created_at: string;
 }
 
+export interface MCPConfigField {
+  key: string;
+  location: "env" | "headers" | "args";
+  secret?: boolean;
+  required?: boolean;
+  description?: string;
+}
+
 export interface MCPServerView extends MCPServer {
   connected: boolean;
   tool_count: number;
   tools?: string[];
-  status: "disabled" | "connected" | "error";
+  status: "disabled" | "connected" | "error" | "needs_config";
   last_error?: string;
   env_schema?: MCPEnvSchemaField[];
   secret_fields?: string[];
+  config_fields?: MCPConfigField[];
+  missing_config?: MCPConfigField[];
 }
 
 export type MCPServerCreateInput = Omit<MCPServer, "created_at">;

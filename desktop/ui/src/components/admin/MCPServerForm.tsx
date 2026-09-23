@@ -61,6 +61,14 @@ export function MCPServerForm({
     return template?.env_schema ?? [];
   }, [editing, availableTemplates, templateId]);
 
+  const missingRequired = useMemo(
+    () =>
+      (editing?.missing_config ?? []).map((field) =>
+        field.location === "args" ? field.description || `args[${field.key}]` : field.key,
+      ),
+    [editing],
+  );
+
   const update = (patch: Partial<MCPServerFormState>) => {
     onFormChange({ ...form, ...patch });
   };
@@ -171,6 +179,12 @@ export function MCPServerForm({
             placeholder="https://example.com/mcp"
           />
         </div>
+      )}
+
+      {missingRequired.length > 0 && (
+        <p className="rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-xs leading-snug text-warning">
+          {t("frame.admin.mcpForm.missingRequired", { fields: missingRequired.join(", ") })}
+        </p>
       )}
 
       <KeyValueEditor

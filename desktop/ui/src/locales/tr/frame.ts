@@ -112,6 +112,7 @@ export const frame: FrameDict = {
       envHint: "Şablondan gelen alanları doldurun",
       httpHeaders: "HTTP Başlıkları",
       allowedTools: "İzin Verilen Araçlar (satır başına bir, boş = tümü)",
+      missingRequired: "Zorunlu ve hâlâ boş: {fields}. Doldurulmadan sunucu bağlanmaz.",
     },
     mcpRow: {
       connected: "Bağlı",
@@ -120,6 +121,8 @@ export const frame: FrameDict = {
       unknownError: "Bilinmeyen hata",
       connectFailed: "MCP sunucusuna bağlanılamadı",
       tools: "Araçlar ({count})",
+      needsConfig: "Kurulum gerekli",
+      missingConfig: "Bağlanabilmesi için bunları doldurun: {fields}",
     },
     multiSelect: {
       emptyDefault: "Seçenek yok",
