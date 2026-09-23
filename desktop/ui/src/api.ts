@@ -2364,7 +2364,9 @@ export interface ReflectionDecision {
   baseline?: PerformanceSnapshot;
   catalog_before: ReflectionCatalogCounts;
   catalog_after: ReflectionCatalogCounts;
-  changes: ReflectionChange[];
+  /** `null` on the wire, not `[]`: a decision that changed nothing is stored
+   *  with a nil slice, and Go marshals that as null. */
+  changes: ReflectionChange[] | null;
   gate?: { before_rate: number; after_rate: number; keep: boolean; reason?: string; rolled_back: number };
   /** An older analysis parsed after the fact; its proposals were never applied. */
   legacy?: boolean;

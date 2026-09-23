@@ -72,7 +72,7 @@ function ReflectionRow({ reflection, onOpen }: { reflection: AgentReflection; on
           {reflection.status === "failed" && reflection.error ? (
             <p className="text-xs text-destructive">{reflection.error}</p>
           ) : null}
-          {reflection.decision && reflection.decision.changes.length > 0 ? (
+          {(reflection.decision?.changes ?? []).length > 0 ? (
             <div className="flex flex-wrap items-center gap-2 pt-0.5">
               {applied > 0 ? (
                 <Badge variant="success">{t("agentArea.perf.reflections.appliedCount", { count: applied })}</Badge>

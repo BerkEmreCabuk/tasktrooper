@@ -207,6 +207,13 @@ func scanReflection(row pgx.Row) (domain.AgentReflection, error) {
 	if len(decisionJSON) > 0 {
 		var decision domain.ReflectionDecision
 		if json.Unmarshal(decisionJSON, &decision) == nil {
+			// A decision that changed nothing was stored with a nil slice, which
+			// marshals back as `null` — and a console that reads the list's
+			// length off it crashes on that. An empty decision is empty, not
+			// absent.
+			if decision.Changes == nil {
+				decision.Changes = []domain.ReflectionChangeOutcome{}
+			}
 			r.Decision = &decision
 		}
 	}

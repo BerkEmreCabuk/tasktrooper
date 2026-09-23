@@ -169,3 +169,36 @@ describe("AgentPerformancePage reflection history", () => {
     expect(inDialog.getByText("15.0")).toBeInTheDocument();
   });
 });
+
+// A decision that changed nothing is stored with a nil slice on the server, so
+// `changes` arrives as null rather than []. Reading a length off it took the
+// whole page down with "Cannot read properties of null".
+describe("AgentPerformancePage reflection with no changes", () => {
+  const reflectionWithoutChanges: AgentReflection = {
+    ...reflectionWithDecision,
+    id: "r2",
+    decision: {
+      ...reflectionWithDecision.decision!,
+      changes: null,
+    },
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    getAgent.mockReset().mockResolvedValue(agent);
+    getAgentPerformance.mockReset().mockResolvedValue(perf);
+    listAgentEvolutionEvents.mockReset().mockResolvedValue({ events: [] });
+    listAgentReflections.mockReset().mockResolvedValue({ reflections: [reflectionWithoutChanges] });
+    listAgentMemories.mockReset().mockResolvedValue({ memories: [] });
+  });
+
+  it("renders the history and the detail dialog instead of crashing", async () => {
+    renderPerformancePage();
+
+    fireEvent.click(await screen.findByText("Tightened the QA checklist skill after two revisions."));
+
+    const dialog = (await screen.findByRole("dialog")) as HTMLElement;
+    expect(within(dialog).getByText("Performance score")).toBeInTheDocument();
+  });
+});
+

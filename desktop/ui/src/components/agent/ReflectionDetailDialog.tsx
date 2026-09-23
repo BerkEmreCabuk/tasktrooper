@@ -286,11 +286,11 @@ export function ReflectionDetailDialog({ reflection, events, kpis, open, onOpenC
 
                 <section className="space-y-2">
                   <h4 className="text-sm font-semibold">{t("agentArea.perf.detail.decisionsHeading")}</h4>
-                  {decision.changes.length === 0 ? (
+                  {(decision.changes ?? []).length === 0 ? (
                     <p className="text-sm text-muted-foreground">{t("agentArea.perf.detail.decisionsEmpty")}</p>
                   ) : (
                     <div className="space-y-2">
-                      {decision.changes.map((c, i) => (
+                      {(decision.changes ?? []).map((c, i) => (
                         <ChangeRow key={`${c.kind}-${c.name}-${i}`} change={c} event={events.find((e) => e.id === c.event_id)} />
                       ))}
                     </div>
