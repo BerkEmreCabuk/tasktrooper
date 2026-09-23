@@ -809,7 +809,10 @@ export function DeployTargetsSection({
               {t("projectAdmin.prodOps.mobileStoreManagedNote")}
             </Notice>
           )}
-          <div className="grid gap-4 lg:grid-cols-3">
+          {/* items-start: the environments differ wildly in height (local has a
+              notice, an unconfigured one a short form) and a stretched row left
+              a column of empty card under the shortest. */}
+          <div className="grid items-start gap-4 lg:grid-cols-3">
             {envs.map((env) =>
               env === "local" ? (
                 <LocalEnvCard key={env} repositoryId={repositoryId} subProjectPath={subProjectPath} />

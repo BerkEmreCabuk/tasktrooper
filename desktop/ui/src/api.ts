@@ -1559,10 +1559,27 @@ export interface GKEClusterDetail {
   workloads_note?: string;
 }
 
-export interface GCloudResourceDetails {
+/** The discriminated union the bound-resource read returns: exactly one of the
+ * two detail pointers is set, matching `ref.type`. */
+export interface GCloudResourceDetail {
   ref: GCloudResourceRef;
   cloud_run?: CloudRunServiceDetail;
   gke_cluster?: GKEClusterDetail;
+}
+
+/**
+ * The bound-resource read: the binding always, the live detail only when the
+ * credential could read it.
+ *
+ * `detail_available: false` is a 200, not an error — the binding is a fact
+ * about the repository that outlives a disconnected or under-privileged
+ * credential, and hiding it behind a failure would lose real state.
+ */
+export interface BoundGCloudResource {
+  binding: GCloudResourceBinding;
+  detail_available: boolean;
+  reason?: ListingReason;
+  detail?: GCloudResourceDetail;
 }
 
 export interface GCloudResourceBinding {
@@ -2743,8 +2760,14 @@ export const api = {
     }),
 
   gcloudResourceDetails: (id: string, subProjectPath = "") =>
-    request<GCloudResourceDetails>(
+    request<BoundGCloudResource>(
       `/v1/repositories/${id}/gcloud/resource?sub_project_path=${encodeURIComponent(subProjectPath)}`,
+    ),
+
+  unbindGCloudResource: (id: string, subProjectPath = "") =>
+    request<void>(
+      `/v1/repositories/${id}/gcloud/resource?sub_project_path=${encodeURIComponent(subProjectPath)}`,
+      { method: "DELETE" },
     ),
 
   listVercelProjects: () => request<VercelProjectListing>("/v1/vercel/projects"),

@@ -1,13 +1,12 @@
-import { ExternalLink, Link2, RefreshCw, Triangle, Unlink } from "lucide-react";
+import { Link2, RefreshCw, Triangle, Unlink } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ApiError, api, type VercelDeployment, type VercelProjectDetails } from "@/api";
 import { VercelProjectPickerDialog } from "@/components/admin/VercelProjectPickerDialog";
+import { ExternalLinkText, Field } from "@/components/projects/hosting/HostingFields";
 import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { EmptyState } from "@/components/ui/empty-state";
 import { Notice } from "@/components/ui/notice";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -42,43 +41,6 @@ function deploymentState(raw?: string): DeploymentState | undefined {
 
 function shortSha(sha: string): string {
   return sha.length > 7 ? sha.slice(0, 7) : sha;
-}
-
-interface FieldProps {
-  label: string;
-  children: React.ReactNode;
-}
-
-function Field({ label, children }: FieldProps) {
-  return (
-    <div className="min-w-0 space-y-0.5">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <div className="min-w-0 text-sm">{children}</div>
-    </div>
-  );
-}
-
-interface ExternalLinkTextProps {
-  href: string;
-  label: string;
-  mono?: boolean;
-}
-
-/** An outward link that names where it goes and says it opens elsewhere. */
-function ExternalLinkText({ href, label, mono }: ExternalLinkTextProps) {
-  const { t } = useI18n();
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      aria-label={`${label} (${t("projectAdmin.vercelProject.openInNewTab")})`}
-      className={cn("inline-flex min-w-0 items-center gap-1 underline underline-offset-2", mono && "font-mono text-xs")}
-    >
-      <span className="truncate">{label}</span>
-      <ExternalLink className="h-3 w-3 shrink-0" aria-hidden />
-    </a>
-  );
 }
 
 interface DeploymentBlockProps {
@@ -146,24 +108,35 @@ function DeploymentBlock({ title, hint, deployment }: DeploymentBlockProps) {
   );
 }
 
-interface VercelProjectPanelProps {
+interface VercelHostingBodyProps {
   repositoryId: string;
   /** "" (default) is the repository itself; a monorepo passes the sub-repo path. */
   subProjectPath?: string;
-  className?: string;
+  /** Told about a link or unlink so the frame can refresh its own summary. */
+  onLinkChange?: () => void;
+  /** Reports whether this scope is linked, so the frame can badge the provider
+      without repeating the request this body already makes. */
+  onStatusChange?: (linked: boolean) => void;
 }
 
 /**
- * VercelProjectPanel — the hosting half of a frontend scope's settings: which
- * Vercel project it deploys to, where that lands in production, and what the
- * last builds did.
+ * The Vercel half of HostingPanel: which Vercel project this scope deploys to,
+ * where that lands in production, and what the last builds did.
  *
  * The last failure gets a block of its own rather than being folded into the
  * latest deployment, because a build that broke and was then fixed is still
  * something the reader has to know about; the server reports the two apart for
  * exactly that reason (see `VercelProjectDetails`).
+ *
+ * Frameless on purpose: HostingPanel owns the card, the provider name and the
+ * scope, so this renders only what is specific to Vercel.
  */
-export function VercelProjectPanel({ repositoryId, subProjectPath = "", className }: VercelProjectPanelProps) {
+export function VercelHostingBody({
+  repositoryId,
+  subProjectPath = "",
+  onLinkChange,
+  onStatusChange,
+}: VercelHostingBodyProps) {
   const { t } = useI18n();
 
   const [details, setDetails] = useState<VercelProjectDetails | null>(null);
@@ -185,6 +158,7 @@ export function VercelProjectPanel({ repositoryId, subProjectPath = "", classNam
       if (seq !== requestRef.current) return;
       setDetails(data);
       setLoadError(null);
+      onStatusChange?.(true);
     } catch (err) {
       if (seq !== requestRef.current) return;
       // 404 is "nothing linked yet", which is a starting point rather than a
@@ -192,13 +166,14 @@ export function VercelProjectPanel({ repositoryId, subProjectPath = "", classNam
       if (err instanceof ApiError && err.status === 404) {
         setDetails(null);
         setLoadError(null);
+        onStatusChange?.(false);
       } else {
         setLoadError(err instanceof Error ? err.message : null);
       }
     } finally {
       if (seq === requestRef.current) setLoading(false);
     }
-  }, [repositoryId, subProjectPath]);
+  }, [repositoryId, subProjectPath, onStatusChange]);
 
   useEffect(() => {
     void load();
@@ -219,6 +194,8 @@ export function VercelProjectPanel({ repositoryId, subProjectPath = "", classNam
       await api.unlinkVercelProject(repositoryId, subProjectPath);
       setDetails(null);
       setLoadError(null);
+      onStatusChange?.(false);
+      onLinkChange?.();
       toast.success(t("projectAdmin.vercelProject.unlinked"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("common.actionFailed"));
@@ -239,40 +216,31 @@ export function VercelProjectPanel({ repositoryId, subProjectPath = "", classNam
 
   if (loading) {
     return (
-      <Card className={cn("w-full space-y-4 p-6", className)}>
+      <div className="space-y-3">
         <Skeleton className="h-5 w-48" />
         <Skeleton className="h-24 w-full" />
-      </Card>
+      </div>
     );
   }
 
   return (
-    <Card className={cn("w-full space-y-5 p-6", className)}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h3 className="flex items-center gap-2 font-semibold">
-            <Triangle className="h-4 w-4" aria-hidden />
-            {t("projectAdmin.vercelProject.title")}
-          </h3>
-          <p className="text-sm text-muted-foreground">{t("projectAdmin.vercelProject.subtitle")}</p>
+    <div className="space-y-4">
+      {details && (
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>
+            <Link2 className="mr-2 h-4 w-4" aria-hidden />
+            {t("projectAdmin.vercelProject.changeProject")}
+          </Button>
+          <Button size="sm" variant="ghost" disabled={refreshing} onClick={() => void refresh()}>
+            <RefreshCw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} aria-hidden />
+            {t("projectAdmin.vercelProject.refresh")}
+          </Button>
+          <Button size="sm" variant="ghost" disabled={unlinking} onClick={() => setConfirmUnlink(true)}>
+            <Unlink className="mr-2 h-4 w-4" aria-hidden />
+            {t("projectAdmin.vercelProject.unlink")}
+          </Button>
         </div>
-        {details && (
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="outline" onClick={() => setPickerOpen(true)}>
-              <Link2 className="mr-2 h-4 w-4" aria-hidden />
-              {t("projectAdmin.vercelProject.changeProject")}
-            </Button>
-            <Button size="sm" variant="ghost" disabled={refreshing} onClick={() => void refresh()}>
-              <RefreshCw className={cn("mr-2 h-4 w-4", refreshing && "animate-spin")} aria-hidden />
-              {t("projectAdmin.vercelProject.refresh")}
-            </Button>
-            <Button size="sm" variant="ghost" disabled={unlinking} onClick={() => setConfirmUnlink(true)}>
-              <Unlink className="mr-2 h-4 w-4" aria-hidden />
-              {t("projectAdmin.vercelProject.unlink")}
-            </Button>
-          </div>
-        )}
-      </div>
+      )}
 
       {loadError && (
         <Notice variant="error" title={t("projectAdmin.vercelProject.loadFailed")}>
@@ -281,18 +249,19 @@ export function VercelProjectPanel({ repositoryId, subProjectPath = "", classNam
       )}
 
       {!details && !loadError && (
-        <EmptyState
-          icon={Triangle}
-          title={t("projectAdmin.vercelProject.notLinkedTitle")}
-          description={t("projectAdmin.vercelProject.notLinkedDesc")}
-          className="py-8"
-          action={
-            <Button size="sm" onClick={() => setPickerOpen(true)}>
-              <Link2 className="mr-2 h-4 w-4" aria-hidden />
-              {t("projectAdmin.vercelProject.linkProject")}
-            </Button>
-          }
-        />
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-md border border-dashed border-border/60 p-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <Triangle className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden />
+            <div className="min-w-0">
+              <p className="text-sm font-medium">{t("projectAdmin.vercelProject.notLinkedTitle")}</p>
+              <p className="text-caption text-muted-foreground">{t("projectAdmin.vercelProject.notLinkedDesc")}</p>
+            </div>
+          </div>
+          <Button size="sm" onClick={() => setPickerOpen(true)}>
+            <Link2 className="mr-2 h-4 w-4" aria-hidden />
+            {t("projectAdmin.vercelProject.linkProject")}
+          </Button>
+        </div>
       )}
 
       {details && link && (
@@ -362,6 +331,7 @@ export function VercelProjectPanel({ repositoryId, subProjectPath = "", classNam
         onOpenChange={setPickerOpen}
         onLinked={() => {
           setPickerOpen(false);
+          onLinkChange?.();
           void load();
         }}
       />
@@ -377,6 +347,6 @@ export function VercelProjectPanel({ repositoryId, subProjectPath = "", classNam
         loading={unlinking}
         onConfirm={() => void unlink()}
       />
-    </Card>
+    </div>
   );
 }

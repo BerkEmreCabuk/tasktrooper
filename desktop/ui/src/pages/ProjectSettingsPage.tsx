@@ -1,6 +1,6 @@
 import { AlertTriangle, ArrowLeft, FolderTree, Plus, RefreshCw, Save, Square, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import {
   api,
@@ -15,8 +15,7 @@ import {
 } from "@/api";
 import { MultiSelectPicker } from "@/components/admin/MultiSelectPicker";
 import { DependenciesPanel } from "@/components/projects/DependenciesPanel";
-import { MobileStorePanel } from "@/components/projects/MobileStorePanel";
-import { VercelProjectPanel } from "@/components/projects/VercelProjectPanel";
+import { DeploySettingsSection } from "@/components/projects/DeploySettingsSection";
 import { DirectoryPickerDialog } from "@/components/projects/DirectoryPickerDialog";
 import { PIPELINE_CATEGORIES, PipelineSlots } from "@/components/projects/PipelineSlots";
 import { RepoDocsCard } from "@/components/projects/RepoDocsCard";
@@ -55,6 +54,18 @@ const slotKey = (path: string, sub: string, cat: string) => `${path}|${sub}|${ca
 // with one.
 const ROOT_TAB = "";
 
+// The page's own sections. They are tabs rather than one scroll because this
+// screen answers several unrelated questions — what this repository is, how its
+// code is read, how it is built, where it ships — and stacking them made the
+// one being looked for the hardest to find.
+type SettingsSection = "general" | "code" | "pipeline" | "deploy" | "dependencies" | "danger";
+
+const SECTIONS: SettingsSection[] = ["general", "code", "pipeline", "deploy", "dependencies", "danger"];
+
+function sectionFromParam(raw: string | null): SettingsSection {
+  return SECTIONS.find((s) => s === raw) ?? "general";
+}
+
 export function ProjectSettingsPage() {
   const { t } = useI18n();
   const { repositoryId } = useParams();
@@ -74,6 +85,16 @@ export function ProjectSettingsPage() {
   const [subProjectPickerOpen, setSubProjectPickerOpen] = useState(false);
   const [savingSubProjects, setSavingSubProjects] = useState(false);
   const [activeTab, setActiveTab] = useState(ROOT_TAB);
+  // The section lives in the URL so a reload, a back button and a link from
+  // elsewhere all land on the same tab.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const section = sectionFromParam(searchParams.get("tab"));
+  const setSection = (next: SettingsSection) =>
+    setSearchParams((prev) => {
+      const params = new URLSearchParams(prev);
+      params.set("tab", next);
+      return params;
+    }, { replace: true });
   const [autoRelease, setAutoRelease] = useState(true);
   const [slots, setSlots] = useState<Record<string, string>>({});
   const [pipelineSaving, setPipelineSaving] = useState(false);
@@ -425,366 +446,391 @@ export function ProjectSettingsPage() {
           </Button>
         }
       />
-      <PageContent className="grid gap-6 xl:grid-cols-2">
-        <Card className="w-full space-y-4 p-6">
-          <h2 className="font-semibold">{t("projectAdmin.projectSettings.repoInfo")}</h2>
-          <div className="space-y-2">
-            <Label>{t("projectAdmin.projectSettings.name")}</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="space-y-2">
-            <Label>{t("projectAdmin.projectSettings.description")}</Label>
-            <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} />
-          </div>
-          {initiativeProjects.length > 0 && (
-            <MultiSelectPicker
-              label={t("projectAdmin.projectSettings.linkedProjects")}
-              options={initiativeProjects.map((p) => ({ value: p.id, label: p.name }))}
-              selected={projectIds}
-              onChange={setProjectIds}
-            />
-          )}
-          <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="require-human-review">{t("projectAdmin.projectSettings.requireHumanReview")}</Label>
-              <HelpTooltip text={t("projectAdmin.projectSettings.requireHumanReviewHelp")} />
-            </div>
-            <Switch id="require-human-review" checked={requireHumanReview} onCheckedChange={setRequireHumanReview} />
-          </div>
-          <div className="flex justify-end">
-            <Button onClick={handleSave} disabled={saving}>
-              <Save className="mr-2 h-4 w-4" />
-              {t("common.save")}
-            </Button>
-          </div>
-        </Card>
+      <PageContent className="space-y-4">
+        <Tabs value={section} onValueChange={(value) => setSection(value as SettingsSection)}>
+          <TabsList>
+            <TabsTrigger value="general">{t("projectAdmin.projectSettings.tabs.general")}</TabsTrigger>
+            <TabsTrigger value="code">{t("projectAdmin.projectSettings.tabs.code")}</TabsTrigger>
+            <TabsTrigger value="pipeline">{t("projectAdmin.projectSettings.tabs.pipeline")}</TabsTrigger>
+            <TabsTrigger value="deploy">{t("projectAdmin.projectSettings.tabs.deploy")}</TabsTrigger>
+            <TabsTrigger value="dependencies">{t("projectAdmin.projectSettings.tabs.dependencies")}</TabsTrigger>
+            <TabsTrigger value="danger">{t("projectAdmin.projectSettings.tabs.danger")}</TabsTrigger>
+          </TabsList>
 
-        <Card className="w-full space-y-4 p-6">
-          <div className="flex items-center justify-between gap-4">
-            <h2 className="font-semibold">{t("projectAdmin.projectSettings.codeIndexing")}</h2>
-            <div className="flex items-center gap-2">
-              {watchingIndex && (
-                <Button variant="outline" size="sm" onClick={handleStopIndex}>
-                  <Square className="mr-2 h-4 w-4" />
-                  {t("projectAdmin.projectSettings.stopIndex")}
+          <TabsContent value="general" className="grid items-start gap-6 xl:grid-cols-2">
+            <Card className="w-full space-y-4 p-6">
+              <h2 className="font-semibold">{t("projectAdmin.projectSettings.repoInfo")}</h2>
+              <div className="space-y-2">
+                <Label>{t("projectAdmin.projectSettings.name")}</Label>
+                <Input value={name} onChange={(e) => setName(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>{t("projectAdmin.projectSettings.description")}</Label>
+                <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={4} />
+              </div>
+              {initiativeProjects.length > 0 && (
+                <MultiSelectPicker
+                  label={t("projectAdmin.projectSettings.linkedProjects")}
+                  options={initiativeProjects.map((p) => ({ value: p.id, label: p.name }))}
+                  selected={projectIds}
+                  onChange={setProjectIds}
+                />
+              )}
+              <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+                <div className="flex items-center gap-1.5">
+                  <Label htmlFor="require-human-review">{t("projectAdmin.projectSettings.requireHumanReview")}</Label>
+                  <HelpTooltip text={t("projectAdmin.projectSettings.requireHumanReviewHelp")} />
+                </div>
+                <Switch id="require-human-review" checked={requireHumanReview} onCheckedChange={setRequireHumanReview} />
+              </div>
+              <div className="flex justify-end">
+                <Button onClick={handleSave} disabled={saving}>
+                  <Save className="mr-2 h-4 w-4" />
+                  {t("common.save")}
                 </Button>
-              )}
-              <Button variant="outline" size="sm" onClick={handleReindex} disabled={watchingIndex}>
-                <RefreshCw className={watchingIndex ? "mr-2 h-4 w-4 animate-spin" : "mr-2 h-4 w-4"} />
-                {t("projectAdmin.projectSettings.reindex")}
-              </Button>
-            </div>
-          </div>
-          {index ? (
-            <>
-              <div className="space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">{t("projectAdmin.projectSettings.statusLabel", { status: index.status })}</span>
-                  <span className="font-medium">{displayPercent}%</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full bg-primary transition-all duration-300"
-                    style={{ width: `${displayPercent}%` }}
-                  />
-                </div>
               </div>
-              <div className="grid grid-cols-3 gap-3 text-center text-sm">
+            </Card>
+
+
+            <Card className="w-full space-y-4 p-6">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                {/* Only a monorepo has sub-repos to describe; every other kind
+                    was being told about a tab it does not have. */}
                 <div>
-                  <p className="text-muted-foreground">{t("projectAdmin.projectSettings.files")}</p>
-                  <p className="font-semibold">{index.file_count}</p>
+                  <h2 className="font-semibold">
+                    {kind === "monorepo"
+                      ? t("projectAdmin.projectSettings.reposTitle")
+                      : t("projectAdmin.projectSettings.typeTitle")}
+                  </h2>
+                  <p className="text-sm text-muted-foreground">
+                    {kind === "monorepo"
+                      ? t("projectAdmin.projectSettings.reposDesc")
+                      : t("projectAdmin.projectSettings.typeDesc")}
+                  </p>
                 </div>
-                <div>
-                  <p className="text-muted-foreground">{t("projectAdmin.projectSettings.chunks")}</p>
-                  <p className="font-semibold">{index.chunk_count}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">{t("projectAdmin.projectSettings.symbols")}</p>
-                  <p className="font-semibold">{index.symbol_count}</p>
-                </div>
+                <Button variant="outline" size="sm" onClick={loadPipelineConfig}>
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  {t("common.refresh")}
+                </Button>
               </div>
-              {index.commit_sha && (
-                <p className="text-xs text-muted-foreground">
-                  {t("projectAdmin.projectSettings.indexedCommit", { sha: index.commit_sha.slice(0, 7) })}
-                </p>
+
+              {pipelineConfig && !pipelineConfig.has_workflows && (
+                <Notice variant="warning" title={t("projectAdmin.projectSettings.noWorkflowsTitle")}>
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <span>{t("projectAdmin.projectSettings.noWorkflowsWarning")}</span>
+                    <Button size="sm" onClick={handleCreateSetupTask} disabled={creatingSetupTask} className="shrink-0">
+                      {t("projectAdmin.projectSettings.openSetupTask")}
+                    </Button>
+                  </div>
+                </Notice>
               )}
-              {index.sync_warning && (
-                <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                  <span>{t("projectAdmin.projectSettings.syncWarning", { reason: index.sync_warning })}</span>
-                </div>
-              )}
-              {index.status === "failed" && index.error && (
-                <p className="text-sm text-destructive">{index.error}</p>
-              )}
-            </>
-          ) : (
-            <p className="text-sm text-muted-foreground">{t("projectAdmin.projectSettings.noIndexYet")}</p>
-          )}
-        </Card>
 
-        <ProjectProfileCard
-          profile={profile}
-          refreshing={profileRefreshing}
-          onRefresh={handleRefreshProfile}
-          onApplyProposal={handleApplyProposal}
-          onDismissProposal={handleDismissProposal}
-        />
-
-        <div className="space-y-4 xl:col-span-2">
-          <Card className="w-full space-y-4 p-6">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="font-semibold">{t("projectAdmin.projectSettings.reposTitle")}</h2>
-                <p className="text-sm text-muted-foreground">{t("projectAdmin.projectSettings.reposDesc")}</p>
-              </div>
-              <Button variant="outline" size="sm" onClick={loadPipelineConfig}>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                {t("common.refresh")}
-              </Button>
-            </div>
-
-            {pipelineConfig && !pipelineConfig.has_workflows && (
-              <Notice variant="warning" title={t("projectAdmin.projectSettings.noWorkflowsTitle")}>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span>{t("projectAdmin.projectSettings.noWorkflowsWarning")}</span>
-                  <Button size="sm" onClick={handleCreateSetupTask} disabled={creatingSetupTask} className="shrink-0">
-                    {t("projectAdmin.projectSettings.openSetupTask")}
-                  </Button>
-                </div>
-              </Notice>
-            )}
-
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label>{t("projectAdmin.projectSettings.repoType")}</Label>
-                <Select value={kind} onValueChange={(v) => setKind(v as RepoKind)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {REPO_KINDS.map((k) => (
-                      <SelectItem key={k} value={k}>
-                        {t(`projectAdmin.projectSettings.repoKinds.${k}`)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {kind === "mobile" && (
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label>{t("projectAdmin.projectSettings.mobilePlatform")}</Label>
-                  <Select
-                    value={mobilePlatform || "cross_platform"}
-                    onValueChange={(v) => setMobilePlatform(v as MobilePlatform)}
-                  >
+                  <Label>{t("projectAdmin.projectSettings.repoType")}</Label>
+                  <Select value={kind} onValueChange={(v) => setKind(v as RepoKind)}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {MOBILE_PLATFORMS.map((p) => (
-                        <SelectItem key={p} value={p}>
-                          {t(`projectAdmin.projectSettings.mobilePlatforms.${p}`)}
+                      {REPO_KINDS.map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {t(`projectAdmin.projectSettings.repoKinds.${k}`)}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              )}
-              <div className="flex items-center gap-3 sm:pt-6">
-                <Switch id="auto-release" checked={autoRelease} onCheckedChange={setAutoRelease} />
-                <Label htmlFor="auto-release" className="cursor-pointer">
-                  {t("projectAdmin.projectSettings.autoReleaseLabel")}
-                </Label>
+                {kind === "mobile" && (
+                  <div className="space-y-2">
+                    <Label>{t("projectAdmin.projectSettings.mobilePlatform")}</Label>
+                    <Select
+                      value={mobilePlatform || "cross_platform"}
+                      onValueChange={(v) => setMobilePlatform(v as MobilePlatform)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {MOBILE_PLATFORMS.map((p) => (
+                          <SelectItem key={p} value={p}>
+                            {t(`projectAdmin.projectSettings.mobilePlatforms.${p}`)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                <div className="flex items-center gap-3 sm:pt-6">
+                  <Switch id="auto-release" checked={autoRelease} onCheckedChange={setAutoRelease} />
+                  <Label htmlFor="auto-release" className="cursor-pointer">
+                    {t("projectAdmin.projectSettings.autoReleaseLabel")}
+                  </Label>
+                </div>
               </div>
-            </div>
 
-            <div className="flex justify-end">
-              <Button size="sm" onClick={handleSavePipeline} disabled={pipelineSaving}>
-                <Save className="mr-2 h-4 w-4" />
-                {t("common.save")}
-              </Button>
-            </div>
-          </Card>
-
-          {kind === "monorepo" ? (
-            <Tabs value={currentTab} onValueChange={setActiveTab}>
-              <div className="flex flex-wrap items-end justify-between gap-2">
-                <TabsList className="flex-1">
-                  <TabsTrigger value={ROOT_TAB}>{t("projectAdmin.projectSettings.rootTab")}</TabsTrigger>
-                  {subProjectsList.map((sp) => (
-                    <TabsTrigger key={sp.path} value={sp.path}>
-                      <span className="max-w-48 truncate font-mono text-xs" title={sp.path}>
-                        {subRepoLabel(sp.path)}
-                      </span>
-                      <Badge variant="outline">{t(`projectAdmin.projectSettings.repoKinds.${sp.kind}`)}</Badge>
-                    </TabsTrigger>
-                  ))}
-                </TabsList>
-                <Button type="button" variant="outline" size="sm" onClick={() => setSubProjectPickerOpen(true)}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  {t("projectAdmin.initialSetup.subProjectAdd")}
+              <div className="flex justify-end">
+                <Button size="sm" onClick={handleSavePipeline} disabled={pipelineSaving}>
+                  <Save className="mr-2 h-4 w-4" />
+                  {t("common.save")}
                 </Button>
               </div>
+            </Card>
+          </TabsContent>
 
-              <TabsContent value={ROOT_TAB} className="grid gap-6 xl:grid-cols-2">
-                {repoId && (
-                  <RepoDocsCard repositoryId={repoId} title={t("projectAdmin.projectSettings.rootDocsTitle")} />
-                )}
-
-                {subProjectsList.length === 0 && (
-                  <Card className="w-full p-6">
-                    <EmptyState
-                      icon={FolderTree}
-                      title={t("projectAdmin.projectSettings.noSubReposTitle")}
-                      description={t("projectAdmin.projectSettings.noSubReposDesc")}
-                      action={
-                        <Button type="button" size="sm" onClick={() => setSubProjectPickerOpen(true)}>
-                          <Plus className="mr-2 h-4 w-4" />
-                          {t("projectAdmin.initialSetup.subProjectAdd")}
-                        </Button>
-                      }
-                    />
-                  </Card>
-                )}
-
-                {/* The kind checkboxes are the pipeline's fallback routing for a
-                    monorepo whose sub-projects were never recorded — the server
-                    falls back the same way. Once real paths exist each one owns
-                    its slots, in its own tab. */}
-                {subProjects.length === 0 && (
-                  <Card className="w-full space-y-4 p-6 xl:col-span-2">
-                    <div>
-                      <h3 className="font-semibold">{t("projectAdmin.projectSettings.pipelineTitle")}</h3>
-                      <p className="text-sm text-muted-foreground">{t("projectAdmin.projectSettings.pipelineDesc")}</p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label>{t("projectAdmin.projectSettings.subProjects")}</Label>
-                      <div className="flex flex-wrap gap-4">
-                        {SUB_REPO_KINDS.map((sk) => (
-                          <label key={sk} className="flex items-center gap-2 text-sm">
-                            <Checkbox
-                              checked={subRepoKinds.includes(sk)}
-                              onCheckedChange={(checked) =>
-                                setSubRepoKinds((prev) => (checked ? [...prev, sk] : prev.filter((k) => k !== sk)))
-                              }
-                            />
-                            {t(`projectAdmin.projectSettings.repoKinds.${sk}`)}
-                          </label>
-                        ))}
-                      </div>
-                    </div>
-                    {activeGroups.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">
-                        {t("projectAdmin.projectSettings.selectSubProjectFirst")}
-                      </p>
-                    ) : (
-                      activeGroups.map((g) => (
-                        <div key={g.kind} className="space-y-3 rounded-md border border-border/60 p-4">
-                          <h4 className="text-sm font-medium">
-                            {t(`projectAdmin.projectSettings.repoKinds.${g.kind}`)}
-                          </h4>
-                          <PipelineSlots
-                            suggestions={suggestionsFor(g)}
-                            values={slotValuesFor(g)}
-                            onChange={changeSlot(g)}
-                          />
-                        </div>
-                      ))
-                    )}
-                    <div className="flex justify-end">
-                      <Button size="sm" onClick={handleSavePipeline} disabled={pipelineSaving}>
-                        <Save className="mr-2 h-4 w-4" />
-                        {t("projectAdmin.projectSettings.savePipeline")}
-                      </Button>
-                    </div>
-                  </Card>
-                )}
-              </TabsContent>
-
-              {repoId &&
-                subProjectsList.map((sp) => (
-                  <TabsContent key={sp.path} value={sp.path}>
-                    <SubRepoSettingsPanel
-                      repositoryId={repoId}
-                      subProject={sp}
-                      label={subRepoLabel(sp.path)}
-                      onChange={(next) =>
-                        setSubProjectsList((prev) => prev.map((row) => (row.path === sp.path ? next : row)))
-                      }
-                      onRemove={() => setSubProjectsList((prev) => prev.filter((row) => row.path !== sp.path))}
-                      onSaveMeta={handleSaveSubProjects}
-                      savingMeta={savingSubProjects}
-                      pipelineSuggestions={suggestionsFor(groupFor(sp))}
-                      pipelineValues={slotValuesFor(groupFor(sp))}
-                      onPipelineChange={changeSlot(groupFor(sp))}
-                      onSavePipeline={handleSavePipeline}
-                      savingPipeline={pipelineSaving}
-                    />
-                  </TabsContent>
-                ))}
-            </Tabs>
-          ) : (
-            <div className="grid gap-6 xl:grid-cols-2">
-              {repoId && <RepoDocsCard repositoryId={repoId} />}
-              <Card className="w-full space-y-4 p-6">
-                <div>
-                  <h3 className="font-semibold">{t("projectAdmin.projectSettings.pipelineTitle")}</h3>
-                  <p className="text-sm text-muted-foreground">{t("projectAdmin.projectSettings.pipelineDesc")}</p>
-                </div>
-                <PipelineSlots
-                  suggestions={suggestionsFor(rootGroup)}
-                  values={slotValuesFor(rootGroup)}
-                  onChange={changeSlot(rootGroup)}
-                  className="lg:grid-cols-2"
-                />
-                <div className="flex justify-end">
-                  <Button size="sm" onClick={handleSavePipeline} disabled={pipelineSaving}>
-                    <Save className="mr-2 h-4 w-4" />
-                    {t("projectAdmin.projectSettings.savePipeline")}
+          <TabsContent value="code" className="space-y-6">
+            <Card className="w-full space-y-4 p-6">
+              <div className="flex items-center justify-between gap-4">
+                <h2 className="font-semibold">{t("projectAdmin.projectSettings.codeIndexing")}</h2>
+                <div className="flex items-center gap-2">
+                  {watchingIndex && (
+                    <Button variant="outline" size="sm" onClick={handleStopIndex}>
+                      <Square className="mr-2 h-4 w-4" />
+                      {t("projectAdmin.projectSettings.stopIndex")}
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" onClick={handleReindex} disabled={watchingIndex}>
+                    <RefreshCw className={watchingIndex ? "mr-2 h-4 w-4 animate-spin" : "mr-2 h-4 w-4"} />
+                    {t("projectAdmin.projectSettings.reindex")}
                   </Button>
                 </div>
-              </Card>
-              {repoId && kind === "mobile" && (
-                <MobileStorePanel
-                  repositoryId={repoId}
-                  mobilePlatform={mobilePlatform}
-                  className="xl:col-span-2"
-                />
+              </div>
+              {index ? (
+                <>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-muted-foreground">{t("projectAdmin.projectSettings.statusLabel", { status: index.status })}</span>
+                      <span className="font-medium">{displayPercent}%</span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full bg-primary transition-all duration-300"
+                        style={{ width: `${displayPercent}%` }}
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-center text-sm">
+                    <div>
+                      <p className="text-muted-foreground">{t("projectAdmin.projectSettings.files")}</p>
+                      <p className="font-semibold">{index.file_count}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">{t("projectAdmin.projectSettings.chunks")}</p>
+                      <p className="font-semibold">{index.chunk_count}</p>
+                    </div>
+                    <div>
+                      <p className="text-muted-foreground">{t("projectAdmin.projectSettings.symbols")}</p>
+                      <p className="font-semibold">{index.symbol_count}</p>
+                    </div>
+                  </div>
+                  {index.commit_sha && (
+                    <p className="text-xs text-muted-foreground">
+                      {t("projectAdmin.projectSettings.indexedCommit", { sha: index.commit_sha.slice(0, 7) })}
+                    </p>
+                  )}
+                  {index.sync_warning && (
+                    <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>{t("projectAdmin.projectSettings.syncWarning", { reason: index.sync_warning })}</span>
+                    </div>
+                  )}
+                  {index.status === "failed" && index.error && (
+                    <p className="text-sm text-destructive">{index.error}</p>
+                  )}
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">{t("projectAdmin.projectSettings.noIndexYet")}</p>
               )}
-              {repoId && kind === "frontend" && (
-                <VercelProjectPanel repositoryId={repoId} className="xl:col-span-2" />
-              )}
-            </div>
-          )}
+            </Card>
 
-          {repoId && <DependenciesPanel repositoryId={repoId} />}
 
-          {repoId && (
-            <DirectoryPickerDialog
-              open={subProjectPickerOpen}
-              onOpenChange={setSubProjectPickerOpen}
-              repositoryId={repoId}
-              excludePaths={subProjectsList.map((sp) => sp.path)}
-              onSelect={(path, detectedKind) => {
-                if (subProjectsList.some((sp) => sp.path === path)) return;
-                setSubProjectsList((prev) => [...prev, { path, kind: detectedKind }]);
-                setActiveTab(path);
-              }}
+            <ProjectProfileCard
+              profile={profile}
+              refreshing={profileRefreshing}
+              onRefresh={handleRefreshProfile}
+              onApplyProposal={handleApplyProposal}
+              onDismissProposal={handleDismissProposal}
             />
-          )}
-        </div>
 
-        <Card className="w-full space-y-4 border-destructive/30 p-6 xl:col-span-2">
-          <h2 className="font-semibold text-destructive">{t("projectAdmin.projectSettings.dangerZone")}</h2>
-          <p className="text-sm text-muted-foreground">
-            {t("projectAdmin.projectSettings.deleteRepoWarning")}
-          </p>
-          <Button variant="destructive" onClick={() => setDeleteOpen(true)} className="gap-2">
-            <Trash2 className="h-4 w-4" />
-            {t("projectAdmin.projectSettings.deleteRepo")}
-          </Button>
-        </Card>
+
+            {kind !== "monorepo" && repoId && <RepoDocsCard repositoryId={repoId} />}
+          </TabsContent>
+
+          <TabsContent value="pipeline" className="space-y-4">
+            {kind === "monorepo" ? (
+              <Tabs value={currentTab} onValueChange={setActiveTab}>
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <TabsList className="flex-1">
+                    <TabsTrigger value={ROOT_TAB}>{t("projectAdmin.projectSettings.rootTab")}</TabsTrigger>
+                    {subProjectsList.map((sp) => (
+                      <TabsTrigger key={sp.path} value={sp.path}>
+                        <span className="max-w-48 truncate font-mono text-xs" title={sp.path}>
+                          {subRepoLabel(sp.path)}
+                        </span>
+                        <Badge variant="outline">{t(`projectAdmin.projectSettings.repoKinds.${sp.kind}`)}</Badge>
+                      </TabsTrigger>
+                    ))}
+                  </TabsList>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setSubProjectPickerOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    {t("projectAdmin.initialSetup.subProjectAdd")}
+                  </Button>
+                </div>
+
+                <TabsContent value={ROOT_TAB} className="grid gap-6 xl:grid-cols-2">
+                  {repoId && (
+                    <RepoDocsCard repositoryId={repoId} title={t("projectAdmin.projectSettings.rootDocsTitle")} />
+                  )}
+
+                  {subProjectsList.length === 0 && (
+                    <Card className="w-full p-6">
+                      <EmptyState
+                        icon={FolderTree}
+                        title={t("projectAdmin.projectSettings.noSubReposTitle")}
+                        description={t("projectAdmin.projectSettings.noSubReposDesc")}
+                        action={
+                          <Button type="button" size="sm" onClick={() => setSubProjectPickerOpen(true)}>
+                            <Plus className="mr-2 h-4 w-4" />
+                            {t("projectAdmin.initialSetup.subProjectAdd")}
+                          </Button>
+                        }
+                      />
+                    </Card>
+                  )}
+
+                  {/* The kind checkboxes are the pipeline's fallback routing for a
+                      monorepo whose sub-projects were never recorded — the server
+                      falls back the same way. Once real paths exist each one owns
+                      its slots, in its own tab. */}
+                  {subProjects.length === 0 && (
+                    <Card className="w-full space-y-4 p-6 xl:col-span-2">
+                      <div>
+                        <h3 className="font-semibold">{t("projectAdmin.projectSettings.pipelineTitle")}</h3>
+                        <p className="text-sm text-muted-foreground">{t("projectAdmin.projectSettings.pipelineDesc")}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>{t("projectAdmin.projectSettings.subProjects")}</Label>
+                        <div className="flex flex-wrap gap-4">
+                          {SUB_REPO_KINDS.map((sk) => (
+                            <label key={sk} className="flex items-center gap-2 text-sm">
+                              <Checkbox
+                                checked={subRepoKinds.includes(sk)}
+                                onCheckedChange={(checked) =>
+                                  setSubRepoKinds((prev) => (checked ? [...prev, sk] : prev.filter((k) => k !== sk)))
+                                }
+                              />
+                              {t(`projectAdmin.projectSettings.repoKinds.${sk}`)}
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                      {activeGroups.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          {t("projectAdmin.projectSettings.selectSubProjectFirst")}
+                        </p>
+                      ) : (
+                        activeGroups.map((g) => (
+                          <div key={g.kind} className="space-y-3 rounded-md border border-border/60 p-4">
+                            <h4 className="text-sm font-medium">
+                              {t(`projectAdmin.projectSettings.repoKinds.${g.kind}`)}
+                            </h4>
+                            <PipelineSlots
+                              suggestions={suggestionsFor(g)}
+                              values={slotValuesFor(g)}
+                              onChange={changeSlot(g)}
+                            />
+                          </div>
+                        ))
+                      )}
+                      <div className="flex justify-end">
+                        <Button size="sm" onClick={handleSavePipeline} disabled={pipelineSaving}>
+                          <Save className="mr-2 h-4 w-4" />
+                          {t("projectAdmin.projectSettings.savePipeline")}
+                        </Button>
+                      </div>
+                    </Card>
+                  )}
+                </TabsContent>
+
+                {repoId &&
+                  subProjectsList.map((sp) => (
+                    <TabsContent key={sp.path} value={sp.path}>
+                      <SubRepoSettingsPanel
+                        repositoryId={repoId}
+                        subProject={sp}
+                        label={subRepoLabel(sp.path)}
+                        onChange={(next) =>
+                          setSubProjectsList((prev) => prev.map((row) => (row.path === sp.path ? next : row)))
+                        }
+                        onRemove={() => setSubProjectsList((prev) => prev.filter((row) => row.path !== sp.path))}
+                        onSaveMeta={handleSaveSubProjects}
+                        savingMeta={savingSubProjects}
+                        pipelineSuggestions={suggestionsFor(groupFor(sp))}
+                        pipelineValues={slotValuesFor(groupFor(sp))}
+                        onPipelineChange={changeSlot(groupFor(sp))}
+                        onSavePipeline={handleSavePipeline}
+                        savingPipeline={pipelineSaving}
+                      />
+                    </TabsContent>
+                  ))}
+              </Tabs>
+            ) : (
+                <Card className="w-full space-y-4 p-6">
+                  <div>
+                    <h3 className="font-semibold">{t("projectAdmin.projectSettings.pipelineTitle")}</h3>
+                    <p className="text-sm text-muted-foreground">{t("projectAdmin.projectSettings.pipelineDesc")}</p>
+                  </div>
+                  <PipelineSlots
+                    suggestions={suggestionsFor(rootGroup)}
+                    values={slotValuesFor(rootGroup)}
+                    onChange={changeSlot(rootGroup)}
+                    className="lg:grid-cols-2"
+                  />
+                  <div className="flex justify-end">
+                    <Button size="sm" onClick={handleSavePipeline} disabled={pipelineSaving}>
+                      <Save className="mr-2 h-4 w-4" />
+                      {t("projectAdmin.projectSettings.savePipeline")}
+                    </Button>
+                  </div>
+                </Card>
+            )}
+
+            {repoId && (
+              <DirectoryPickerDialog
+                open={subProjectPickerOpen}
+                onOpenChange={setSubProjectPickerOpen}
+                repositoryId={repoId}
+                excludePaths={subProjectsList.map((sp) => sp.path)}
+                onSelect={(path, detectedKind) => {
+                  if (subProjectsList.some((sp) => sp.path === path)) return;
+                  setSubProjectsList((prev) => [...prev, { path, kind: detectedKind }]);
+                  setActiveTab(path);
+                }}
+              />
+            )}
+          </TabsContent>
+
+          <TabsContent value="deploy" className="space-y-4">
+            {repoId && <DeploySettingsSection repositoryId={repoId} />}
+          </TabsContent>
+
+          <TabsContent value="dependencies">
+            {repoId && <DependenciesPanel repositoryId={repoId} />}
+          </TabsContent>
+
+          <TabsContent value="danger">
+            <Card className="w-full max-w-2xl space-y-4 border-destructive/30 p-6">
+              <h2 className="font-semibold text-destructive">{t("projectAdmin.projectSettings.dangerZone")}</h2>
+              <p className="text-sm text-muted-foreground">
+                {t("projectAdmin.projectSettings.deleteRepoWarning")}
+              </p>
+              <Button variant="destructive" onClick={() => setDeleteOpen(true)} className="gap-2">
+                <Trash2 className="h-4 w-4" />
+                {t("projectAdmin.projectSettings.deleteRepo")}
+              </Button>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </PageContent>
 
       <ConfirmDialog

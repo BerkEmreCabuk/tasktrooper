@@ -69,7 +69,34 @@ cell opens the run's detail — the same GitHub Actions run, commit status or
 GitHub Deployment that `get_task_deploy_status` reads (see below) — with
 rollback where the target allows it.
 
-## Vercel account and hosting links
+## Hosting links
+
+A repository ships to exactly one place, and which place that is lives under
+**Repository settings → Deploy**, next to that repository's addresses — the
+same section the operations matrix opens at `/repositories/{id}/deploy`. One
+scope at a time, with the provider picked rather than stacked.
+
+A monorepo picks the scope once, at the top of the section: the repository
+itself or one of its sub-projects. The hosting link, the per-environment
+addresses and the deploy templates all follow that pick, because the server
+stores each of them per `(repository, sub_project_path)`. A scope whose kind is
+mobile gets the store panel instead of the hosting one — it publishes through a
+store console and has no hosted runtime to point at. Vercel and Google Cloud are wired; a monorepo picks the scope (the
+repository itself or one sub-project) next to the provider, and each provider
+reports whether that scope is linked.
+
+- **Vercel** — the linked project, its production URL, framework, root
+  directory, the latest deployment and, kept apart from it, the last failed one.
+- **Google Cloud** — the bound Cloud Run service or GKE cluster and what it is
+  doing: image, latest ready revision, traffic split, or the cluster's status,
+  control-plane version and node pools. The binding is kept even when the
+  service account is gone or cannot read the resource; the panel says so
+  instead of hiding which resource is bound.
+
+Unlinking is local: `DELETE` on the link or binding only stops TaskTrooper
+reading it, and nothing inside Vercel or Google Cloud is changed.
+
+## Vercel account and detection
 
 Settings → Integrations connects a Vercel account with a personal token,
 verified against `/v2/user` before it is stored; a team can be chosen there

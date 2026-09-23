@@ -3,7 +3,6 @@ import type { MobilePlatform, PipelineCategory, PipelineCategorySuggestion, Repo
 import { MobileStorePanel } from "@/components/projects/MobileStorePanel";
 import { PipelineSlots } from "@/components/projects/PipelineSlots";
 import { RepoDocsCard } from "@/components/projects/RepoDocsCard";
-import { VercelProjectPanel } from "@/components/projects/VercelProjectPanel";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -54,7 +53,6 @@ export function SubRepoSettingsPanel({
 }: SubRepoSettingsPanelProps) {
   const { t } = useI18n();
   const isMobile = subProject.kind === "mobile";
-  const isFrontend = subProject.kind === "frontend";
 
   return (
     <div className="grid gap-6 xl:grid-cols-2">
@@ -133,14 +131,6 @@ export function SubRepoSettingsPanel({
         <MobileStorePanel
           repositoryId={repositoryId}
           mobilePlatform={subProject.mobile_platform ?? ""}
-          className="xl:col-span-2"
-        />
-      )}
-
-      {isFrontend && (
-        <VercelProjectPanel
-          repositoryId={repositoryId}
-          subProjectPath={subProject.path}
           className="xl:col-span-2"
         />
       )}
