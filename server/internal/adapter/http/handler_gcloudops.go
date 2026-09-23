@@ -29,6 +29,7 @@ func (h *Handler) registerGCloudOpsRoutes(app fiber.Router) {
 	app.Get("/v1/gcloud/resources", h.ListGCloudResources)
 	app.Put("/v1/repositories/:id/gcloud/resource", h.BindGCloudResource)
 	app.Get("/v1/repositories/:id/gcloud/resource", h.GetGCloudResource)
+	app.Delete("/v1/repositories/:id/gcloud/resource", h.UnbindGCloudResource)
 }
 
 // saveGCloudCredentialRequest is the SaveGCloudCredential body. project_id is
@@ -276,4 +277,21 @@ func (h *Handler) GetGCloudResource(c *fiber.Ctx) error {
 	default:
 		return gcloudResourceError(c, err)
 	}
+}
+
+// UnbindGCloudResource — DELETE /v1/repositories/:id/gcloud/resource
+// Query: ?sub_project_path=services/worker (absent = the repository itself).
+//
+// Unbinding needs no credential: the binding is this server's own record of
+// which resource a scope ships to, and a scope must stay detachable after the
+// service account is gone.
+func (h *Handler) UnbindGCloudResource(c *fiber.Ctx) error {
+	id, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return badRequest(c, "invalid repository id")
+	}
+	if err := h.gcloudOpsSvc.UnbindResource(h.enrichContext(c), id, c.Query("sub_project_path")); err != nil {
+		return gcloudResourceError(c, err)
+	}
+	return c.SendStatus(fiber.StatusNoContent)
 }

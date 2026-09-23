@@ -587,3 +587,66 @@ func TestGetGCloudResourceReportsAnAbsentBindingAs404(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 }
+
+func TestUnbindGCloudResourceForgetsTheBinding(t *testing.T) {
+	bindings := newFakeGCloudBindingStore()
+	client := &fakeGCloudClient{runDetail: domain.CloudRunServiceDetail{
+		Ref: domain.GCloudResourceRef{
+			Type:        domain.GCloudResourceCloudRun,
+			Name:        "projects/demo-project/locations/europe-west1/services/worker",
+			DisplayName: "worker",
+			ProjectID:   "demo-project",
+			Location:    "europe-west1",
+		},
+	}}
+	app := newGCloudApp(t, &fakeGCloudCredentialStore{}, bindings, client)
+	connectGCloud(t, app)
+
+	repoID := uuid.New()
+	body := `{"resource_type":"cloud_run","resource_name":"projects/demo-project/locations/europe-west1/services/worker"}`
+	req := httptest.NewRequest("PUT", "/v1/repositories/"+repoID.String()+"/gcloud/resource", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if resp, err := app.Test(req); err != nil {
+		t.Fatal(err)
+	} else if resp.StatusCode != fiber.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("bind status = %d: %s", resp.StatusCode, raw)
+	}
+
+	resp, err := app.Test(httptest.NewRequest("DELETE", "/v1/repositories/"+repoID.String()+"/gcloud/resource", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusNoContent {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d: %s", resp.StatusCode, raw)
+	}
+	if len(bindings.rows) != 0 {
+		t.Fatalf("binding survived the delete: %+v", bindings.rows)
+	}
+
+	// The scope now reads as never bound, which is the state the console draws
+	// its "nothing linked yet" empty state from.
+	after, err := app.Test(httptest.NewRequest("GET", "/v1/repositories/"+repoID.String()+"/gcloud/resource", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.StatusCode != fiber.StatusNotFound {
+		t.Fatalf("read after delete = %d, want 404", after.StatusCode)
+	}
+}
+
+// A scope that was never bound ends in the state the caller asked for, so the
+// console's unlink button cannot fail on a double click.
+func TestUnbindGCloudResourceIsFineWhenNothingWasBound(t *testing.T) {
+	app := newGCloudApp(t, &fakeGCloudCredentialStore{}, newFakeGCloudBindingStore(), &fakeGCloudClient{})
+
+	resp, err := app.Test(httptest.NewRequest("DELETE", "/v1/repositories/"+uuid.New().String()+"/gcloud/resource", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != fiber.StatusNoContent {
+		raw, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status = %d: %s", resp.StatusCode, raw)
+	}
+}

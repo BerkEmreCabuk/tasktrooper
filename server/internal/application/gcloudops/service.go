@@ -253,6 +253,19 @@ func (s *Service) Resource(ctx context.Context, repositoryID uuid.UUID, subProje
 	return BoundResource{Binding: binding, Detail: &detail}, nil
 }
 
+// UnbindResource forgets the scope's binding. A scope that was never bound is
+// not an error: the caller asked for "nothing bound here" and that is the
+// state it ends in.
+func (s *Service) UnbindResource(ctx context.Context, repositoryID uuid.UUID, subProjectPath string) error {
+	if err := s.bindings.Delete(ctx, repositoryID, subProjectPath); err != nil {
+		if errors.Is(err, port.ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("gcloudops: deleting resource binding: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) Bindings(ctx context.Context, repositoryID uuid.UUID) ([]domain.GCloudResourceBinding, error) {
 	out, err := s.bindings.ListByRepository(ctx, repositoryID)
 	if err != nil {
