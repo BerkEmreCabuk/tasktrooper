@@ -2,7 +2,9 @@ package localpreview
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -94,6 +97,83 @@ func TestStartingASecondPreviewReplacesTheFirst(t *testing.T) {
 	svc.Stop(repositoryID)
 	_, ok = svc.Status(repositoryID)
 	assert.False(t, ok)
+}
+
+func TestAFailedPreviewStaysVisibleUntilCleared(t *testing.T) {
+	svc := newTestService(t, t.TempDir())
+	repositoryID, taskID := uuid.New(), uuid.New()
+
+	_, err := svc.Start(context.Background(), repositoryID, taskID, `echo "Another dev server is already running"; exit 1`)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		p, ok := svc.Status(repositoryID)
+		return ok && p.Status == domain.LocalPreviewFailed
+	}, 3*time.Second, 20*time.Millisecond, "a preview that died must still be reported, not vanish")
+
+	p, _ := svc.Status(repositoryID)
+	assert.Equal(t, taskID, p.TaskID)
+	assert.NotEmpty(t, p.Detail)
+	assert.Contains(t, p.LogTail, "Another dev server is already running")
+	assert.Empty(t, loadState(svc.workspaceRoot), "an exited process is never persisted for the next boot to signal")
+
+	svc.Stop(repositoryID)
+	_, ok := svc.Status(repositoryID)
+	assert.False(t, ok)
+}
+
+func TestStartStopsAStaleNextDevServerHoldingTheCheckout(t *testing.T) {
+	svc := newTestService(t, t.TempDir())
+	taskID := uuid.New()
+	workspacePath, err := workspace.TaskDir(svc.workspaceRoot, taskID)
+	require.NoError(t, err)
+
+	script := filepath.Join(t.TempDir(), "next-dev.sh")
+	require.NoError(t, os.WriteFile(script, []byte("sleep 30\n"), 0o755))
+	stale := exec.Command("sh", script)
+	stale.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	require.NoError(t, stale.Start())
+	exited := make(chan struct{})
+	go func() { _ = stale.Wait(); close(exited) }()
+	t.Cleanup(func() { _ = syscall.Kill(-stale.Process.Pid, syscall.SIGKILL) })
+
+	require.NoError(t, os.MkdirAll(filepath.Join(workspacePath, ".next", "dev"), 0o755))
+	lock := fmt.Sprintf(`{"pid":%d,"port":3000,"appUrl":"http://localhost:3000"}`, stale.Process.Pid)
+	require.NoError(t, os.WriteFile(filepath.Join(workspacePath, ".next", "dev", "lock"), []byte(lock), 0o644))
+
+	repositoryID := uuid.New()
+	_, err = svc.Start(context.Background(), repositoryID, taskID, "sleep 30")
+	require.NoError(t, err)
+	t.Cleanup(func() { svc.Stop(repositoryID) })
+
+	select {
+	case <-exited:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the next dev server named by the checkout's lock must be stopped before the preview starts")
+	}
+}
+
+func TestStartLeavesALockWhosePidIsNotNextAlone(t *testing.T) {
+	svc := newTestService(t, t.TempDir())
+	taskID := uuid.New()
+	workspacePath, err := workspace.TaskDir(svc.workspaceRoot, taskID)
+	require.NoError(t, err)
+
+	other := exec.Command("sleep", "30")
+	other.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	require.NoError(t, other.Start())
+	t.Cleanup(func() { _ = syscall.Kill(-other.Process.Pid, syscall.SIGKILL); _ = other.Wait() })
+
+	require.NoError(t, os.MkdirAll(filepath.Join(workspacePath, ".next", "dev"), 0o755))
+	lock := fmt.Sprintf(`{"pid":%d}`, other.Process.Pid)
+	require.NoError(t, os.WriteFile(filepath.Join(workspacePath, ".next", "dev", "lock"), []byte(lock), 0o644))
+
+	repositoryID := uuid.New()
+	_, err = svc.Start(context.Background(), repositoryID, taskID, "sleep 30")
+	require.NoError(t, err)
+	t.Cleanup(func() { svc.Stop(repositoryID) })
+
+	assert.NoError(t, syscall.Kill(other.Process.Pid, 0), "a reused pid that is not a Next server must not be touched")
 }
 
 func TestNewServiceReapsAPreviousProcessesOrphan(t *testing.T) {

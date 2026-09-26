@@ -409,8 +409,10 @@ function hardenCloudNavigation(
 }
 
 /**
- * https only. `file:`, `javascript:` and the rest are how "open a link" becomes
- * "run something".
+ * https, plus plain http to this machine's loopback — a task's local preview
+ * (`http://localhost:3000`) is served by a dev server that has no TLS.
+ * `file:`, `javascript:` and the rest are how "open a link" becomes "run
+ * something".
  *
  * There is one place in this app where a URL becomes something the OS acts on,
  * and a second one would be a second thing to keep correct. Returns whether it
@@ -418,9 +420,14 @@ function hardenCloudNavigation(
  * answer — the PR link on a task card, say — can say "that link is not one I
  * can open" instead of doing nothing and looking hung.
  */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
 export function openExternally(url: string): boolean {
   try {
-    if (new URL(url).protocol !== "https:") return false;
+    const parsed = new URL(url);
+    const allowed =
+      parsed.protocol === "https:" || (parsed.protocol === "http:" && LOOPBACK_HOSTS.has(parsed.hostname));
+    if (!allowed) return false;
     void shell.openExternal(url);
     return true;
   } catch {

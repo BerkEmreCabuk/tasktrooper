@@ -106,7 +106,7 @@ export function validateReveal(raw: unknown): RevealRequest {
 /**
  * A PR link, or any other external URL a task card wants opened. Only the
  * shape is checked here — non-empty, no control characters; whether it is
- * actually an `https:` link the OS should open is `openExternally`'s call in
+ * actually a link the OS should open is `openExternally`'s call in
  * `main/window.ts`, the one place that decision is made.
  */
 export function validateOpenExternal(raw: unknown): OpenExternalRequest {

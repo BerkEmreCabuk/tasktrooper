@@ -1,10 +1,14 @@
 import { ExternalLink, Loader2, Play, Square } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { type MouseEvent, type ReactNode, useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { api, type BoardTask, type LocalPreview } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
+import { desktopRunner } from "@/lib/desktop-bridge";
+
+const FAILED_TAIL_LINES = 12;
 
 interface LocalPreviewPanelProps {
   task: BoardTask;
@@ -29,6 +33,9 @@ export function LocalPreviewPanel({ task, repositoryId, actions }: LocalPreviewP
   const [preview, setPreview] = useState<LocalPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Set by a click on "Run locally": the reviewer asked to see the site, so
+  // it opens once the dev server prints its address, not on a later visit.
+  const openWhenReady = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -50,13 +57,50 @@ export function LocalPreviewPanel({ task, repositoryId, actions }: LocalPreviewP
   usePolling(refresh, 3_000, !settled);
 
   const isThisTask = preview !== null && preview.task_id === task.id;
+  const live = isThisTask && !settled;
+  const failed = isThisTask && preview.status === "failed";
+  const otherTaskLive = preview !== null && !isThisTask && !settled;
+
+  const openPreview = useCallback(
+    (url: string) => {
+      const runner = desktopRunner();
+      if (!runner) {
+        window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+      void runner.openExternal(url).then((opened) => {
+        if (!opened) toast.error(t("boardArea.components.taskDetail.pullRequestLinkFailed"));
+      });
+    },
+    [t],
+  );
+
+  useEffect(() => {
+    if (!openWhenReady.current || !isThisTask) return;
+    if (preview.status === "running" && preview.url) {
+      openWhenReady.current = false;
+      openPreview(preview.url);
+    } else if (settled) {
+      openWhenReady.current = false;
+    }
+  }, [isThisTask, preview, settled, openPreview]);
+
+  // Desktop only: handed to the shell before the anchor can navigate, the
+  // same way the task's PR link is (see TaskDetailDrawer).
+  const handleLinkClick = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!desktopRunner()) return;
+    event.preventDefault();
+    openPreview(event.currentTarget.href);
+  };
 
   const start = async () => {
     setBusy(true);
     setError("");
+    openWhenReady.current = true;
     try {
       setPreview(await api.startLocalPreview(repositoryId, task.id));
     } catch (e) {
+      openWhenReady.current = false;
       setError(e instanceof Error ? e.message : t("boardArea.components.taskDetail.previewStartFailed"));
     } finally {
       setBusy(false);
@@ -92,7 +136,7 @@ export function LocalPreviewPanel({ task, repositoryId, actions }: LocalPreviewP
   return (
     <div className="space-y-2 rounded-lg border border-border bg-background/60 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        {isThisTask ? (
+        {live ? (
           <>
             {statusBadge(preview.status)}
             {preview.url && (
@@ -100,6 +144,7 @@ export function LocalPreviewPanel({ task, repositoryId, actions }: LocalPreviewP
                 href={preview.url}
                 target="_blank"
                 rel="noreferrer"
+                onClick={handleLinkClick}
                 className="inline-flex items-center gap-1 text-sm text-primary underline-offset-2 hover:underline"
               >
                 {preview.url}
@@ -121,13 +166,23 @@ export function LocalPreviewPanel({ task, repositoryId, actions }: LocalPreviewP
               )}
               {t("boardArea.components.taskDetail.runLocally")}
             </Button>
-            {preview && <span className="text-xs text-muted-foreground">{t("boardArea.components.taskDetail.previewOtherTask")}</span>}
+            {failed && statusBadge(preview.status)}
+            {otherTaskLive && (
+              <span className="text-xs text-muted-foreground">{t("boardArea.components.taskDetail.previewOtherTask")}</span>
+            )}
           </>
         )}
         {actions}
       </div>
-      {isThisTask && preview.status === "failed" && preview.detail && (
-        <p className="text-xs text-destructive">{preview.detail}</p>
+      {failed && (
+        <div className="space-y-1">
+          {preview.detail && <p className="text-xs text-destructive">{preview.detail}</p>}
+          {preview.log_tail && preview.log_tail.length > 0 && (
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded border border-border bg-muted/40 p-2 font-mono text-[11px] leading-snug text-muted-foreground">
+              {preview.log_tail.slice(-FAILED_TAIL_LINES).join("\n")}
+            </pre>
+          )}
+        </div>
       )}
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>

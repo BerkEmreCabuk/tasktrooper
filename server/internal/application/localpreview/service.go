@@ -123,6 +123,15 @@ func (p *process) appendLine(line string) {
 	}
 }
 
+func (p *process) exited() bool {
+	select {
+	case <-p.done:
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *process) setDone(status domain.LocalPreviewStatus, detail string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -161,6 +170,8 @@ func (s *Service) Start(ctx context.Context, repositoryID, taskID uuid.UUID, com
 	if command == "" {
 		return domain.LocalPreview{}, fmt.Errorf("could not detect a way to run this repository locally (looked for an npm dev/start script, a Makefile dev target, or a Go module)")
 	}
+
+	releaseStaleDevServer(workspacePath)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -235,9 +246,14 @@ func (s *Service) wait(repositoryID uuid.UUID, p *process) {
 	default:
 		p.setDone(domain.LocalPreviewFailed, "the command exited on its own")
 	}
+	// A failed preview stays the repository's active one, so the reviewer
+	// reads why it died instead of the panel quietly falling back to its
+	// start button; the next Start or Stop clears it.
 	s.mu.Lock()
 	if s.active[repositoryID] == p {
-		delete(s.active, repositoryID)
+		if stopped {
+			delete(s.active, repositoryID)
+		}
 		s.persistLocked()
 	}
 	s.mu.Unlock()
@@ -274,7 +290,7 @@ func (s *Service) stopLocked(p *process) {
 func (s *Service) persistLocked() {
 	entries := make([]persistedEntry, 0, len(s.active))
 	for repositoryID, p := range s.active {
-		if p.cmd.Process == nil {
+		if p.cmd.Process == nil || p.exited() {
 			continue
 		}
 		entries = append(entries, persistedEntry{RepositoryID: repositoryID, PID: p.cmd.Process.Pid})
@@ -286,7 +302,8 @@ func (s *Service) stopProcess(p *process) {
 	p.mu.Lock()
 	p.status = domain.LocalPreviewStopped
 	p.mu.Unlock()
-	if p.cmd.Process == nil {
+	// An exited process's group id is free for the OS to hand out again.
+	if p.cmd.Process == nil || p.exited() {
 		return
 	}
 	pgid := p.cmd.Process.Pid

@@ -148,8 +148,9 @@ export interface DesktopRunnerHost {
    * Open an external link (a task's PR, say) in the user's real browser
    * instead of asking the hosted view to navigate there — which is what used
    * to leave the app stuck on its own loading screen with no way back.
-   * Resolves false, rather than rejecting, for a link that is not an
-   * `https:` URL: that is an answer the page can show, not an exception.
+   * Resolves false, rather than rejecting, for a link that is neither an
+   * `https:` URL nor `http:` to loopback (a local preview): that is an answer
+   * the page can show, not an exception.
    */
   openExternal(url: string): Promise<boolean>;
 

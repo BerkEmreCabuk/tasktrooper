@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strconv"
 	"syscall"
+	"time"
 )
 
 func shellCommand(command string) *exec.Cmd {
@@ -21,3 +22,9 @@ func terminateProcessGroup(pid int) {
 func killProcessGroup(pid int) {
 	_ = exec.Command("taskkill", "/T", "/F", "/PID", strconv.Itoa(pid)).Run()
 }
+
+// processCommand is not read on Windows, so no stale server is ever stopped
+// there.
+func processCommand(int) string { return "" }
+
+func stopStale(int, time.Duration) {}

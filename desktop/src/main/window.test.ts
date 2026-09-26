@@ -376,8 +376,17 @@ describe("openExternally", () => {
 
   it("refuses a non-https URL without opening anything", () => {
     expect(openExternally("http://example.com")).toBe(false);
+    expect(openExternally("http://localhost.example.com")).toBe(false);
     expect(openExternally("javascript:alert(1)")).toBe(false);
+    expect(openExternally("file:///etc/passwd")).toBe(false);
     expect(openedExternally).toEqual([]);
+  });
+
+  it("opens a plain-http loopback URL — a task's local preview has no TLS", () => {
+    expect(openExternally("http://localhost:3000/")).toBe(true);
+    expect(openExternally("http://127.0.0.1:5173")).toBe(true);
+    expect(openExternally("http://[::1]:8080")).toBe(true);
+    expect(openedExternally).toEqual(["http://localhost:3000/", "http://127.0.0.1:5173", "http://[::1]:8080"]);
   });
 
   it("refuses a value that is not a URL at all", () => {

@@ -4,7 +4,10 @@ package localpreview
 
 import (
 	"os/exec"
+	"strconv"
+	"strings"
 	"syscall"
+	"time"
 )
 
 func shellCommand(command string) *exec.Cmd {
@@ -19,4 +22,33 @@ func terminateProcessGroup(pid int) {
 
 func killProcessGroup(pid int) {
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
+}
+
+// processCommand is a live process's command line, "" when there is none.
+func processCommand(pid int) string {
+	if syscall.Kill(pid, 0) != nil {
+		return ""
+	}
+	out, err := exec.Command("ps", "-o", "command=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// stopStale stops a process this Service did not start, with the group it
+// runs in (npm, its shell and the server all go together) — unless that group
+// is this server's own, where only the process itself is signalled.
+func stopStale(pid int, grace time.Duration) {
+	target := pid
+	if pgid, err := syscall.Getpgid(pid); err == nil && pgid != syscall.Getpgrp() {
+		target = -pgid
+	}
+	_ = syscall.Kill(target, syscall.SIGTERM)
+	for deadline := time.Now().Add(grace); time.Now().Before(deadline); time.Sleep(100 * time.Millisecond) {
+		if syscall.Kill(pid, 0) != nil {
+			return
+		}
+	}
+	_ = syscall.Kill(target, syscall.SIGKILL)
 }
