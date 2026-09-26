@@ -52,6 +52,12 @@ const PinnedLocalEmbeddingModel = "nomic-embed-text-v1.5"
 // round trip to LM Studio — see EmbeddingProvenanceStale.
 const PinnedLocalEmbeddingDimensions = 768
 
+// IsBundledEmbedder reports the "local" row the desktop registers for its
+// embedder: it answers only /v1/embeddings, so a chat turn sent there 404s.
+func IsBundledEmbedder(cfg LLMProviderConfig) bool {
+	return cfg.ProviderType == LLMProviderLocal && cfg.DefaultModel == PinnedLocalEmbeddingModel
+}
+
 type LLMProviderDefinition struct {
 	Type                  LLMProviderType `json:"type"`
 	Label                 string          `json:"label"`

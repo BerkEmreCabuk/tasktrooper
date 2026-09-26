@@ -81,7 +81,7 @@ func (s *Service) activeHTTPProvider(ctx context.Context) domain.LLMProviderType
 		return ""
 	}
 	cfg, err := s.providers.Get(ctx, active)
-	if err != nil || !cfg.Configured {
+	if err != nil || !cfg.Configured || domain.IsBundledEmbedder(cfg) {
 		return ""
 	}
 	return active

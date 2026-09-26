@@ -118,6 +118,24 @@ func TestReconcileAgentRuntimes_IgnoresUnconfiguredActiveHTTPProvider(t *testing
 	}
 }
 
+func TestReconcileAgentRuntimes_NeverAdoptsTheBundledEmbedder(t *testing.T) {
+	store, svc, role := runtimeFixture()
+	svc.SetLLMProviders(stubProviderStore{
+		active: domain.LLMProviderLocal,
+		cfgs: map[domain.LLMProviderType]domain.LLMProviderConfig{
+			domain.LLMProviderLocal: {ProviderType: domain.LLMProviderLocal, DefaultModel: domain.PinnedLocalEmbeddingModel, Configured: true},
+		},
+	})
+
+	moved, err := svc.ReconcileAgentRuntimes(context.Background(), nil)
+	if err != nil || moved != 0 {
+		t.Fatalf("moved %d (err %v), want 0", moved, err)
+	}
+	if a := agentByName(t, store, role); a.ProviderType != "" {
+		t.Fatalf("catalog agent was put on the embedder: %+v", a)
+	}
+}
+
 func TestReconcileAgentRuntimes_MovesNothingWithNoUsableProvider(t *testing.T) {
 	store, svc, _ := runtimeFixture()
 

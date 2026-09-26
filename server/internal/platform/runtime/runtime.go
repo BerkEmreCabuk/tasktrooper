@@ -2422,6 +2422,21 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				Int("created", res.Created).Int("updated", res.Updated).
 				Int("merged", res.Merged).Int("pending", res.Pending).
 				Msg("agent catalog synced")
+			// A newly ingested catalog agent carries no runtime; without this it
+			// waits for the next CLI or provider change, and until then its chat
+			// turns fall through to the active provider — the embedder.
+			if agentCLISvc != nil {
+				connected, err := agentCLISvc.ConnectedProviders(syncCtx)
+				if err != nil {
+					log.Warn().Err(err).Msg("agent catalog sync: listing connected CLIs failed")
+					return
+				}
+				if moved, err := catalogSvc.ReconcileAgentRuntimes(syncCtx, connected); err != nil {
+					log.Warn().Err(err).Msg("agent catalog sync: reconciling agent runtimes failed")
+				} else if moved > 0 {
+					log.Info().Int("moved", moved).Msg("agent catalog sync: agents given a runtime")
+				}
+			}
 		}
 	}
 
