@@ -59,11 +59,7 @@ func ToolManifest(serverName string, names []string) string {
 	for _, name := range names {
 		prefixed = append(prefixed, prefix+name)
 	}
-	return "TaskTrooper's own tools reach you through the `" + serverName + "` MCP server, so their real names carry the `" +
-		prefix + "` prefix: the tool this system's instructions call `set_criterion_completed` is called as `" +
-		prefix + "set_criterion_completed`. They are already available to you — do NOT search for them and do not report one as missing " +
-		"because an unprefixed name did not resolve. These are the ones this run has, in full:\n" +
-		strings.Join(prefixed, ", ") + "."
+	return toolManifestKey.Render(toolManifestInput{ServerName: serverName, Prefix: prefix, PrefixedNames: prefixed})
 }
 
 func WithToolManifest(systemPrompt, serverName string, names []string) string {

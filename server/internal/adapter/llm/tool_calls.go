@@ -2,7 +2,6 @@ package llm
 
 import (
 	"encoding/hex"
-	"fmt"
 	"hash/fnv"
 	"strconv"
 	"strings"
@@ -96,22 +95,11 @@ func buildChatMessages(messages []domain.Message) []chatMessage {
 }
 
 func carriedImagesNote(n int) string {
-	return fmt.Sprintf("\n[%d screenshot(s) attached — they are in the message right after this tool batch]", n)
+	return carriedImagesNoteKey.Render(screenshotCountInput{N: n})
 }
 
 func toolImagePreamble(n int) string {
-	return fmt.Sprintf("Here %s the %d screenshot(s) your last tool call captured. Look at %s and judge what is actually rendered — "+
-		"broken images, missing assets, overlapping or clipped text, a control that is not where it should be. "+
-		"If you cannot see images at all, say exactly that and do not give a visual verdict: an invented description of a "+
-		"screenshot you never received is worse than no screenshot.",
-		plural(n, "is", "are"), n, plural(n, "it", "them"))
-}
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return one
-	}
-	return many
+	return toolImagePreambleKey.Render(screenshotCountInput{N: n})
 }
 
 func userImageContentParts(text string, images []domain.ToolResultImage) []chatContentPart {

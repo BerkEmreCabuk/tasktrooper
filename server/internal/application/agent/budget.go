@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -315,11 +316,7 @@ func previewArgs(args string) string {
 }
 
 func budgetWarningMessage(remaining int) string {
-	return fmt.Sprintf(
-		"[budget] %d model turns left in this run. Stop exploring and stop re-reading files. "+
-			"Apply the smallest change that completes the task now, then reply with a plain-text summary "+
-			"of what you changed and what is left. Unfinished work is committed to the task branch and "+
-			"picked up by the next run, so a clear summary is more useful than a rushed edit.", remaining)
+	return budgetWarningKey.Render(budgetWarningInput{Remaining: remaining})
 }
 
 func runTokenWarnThreshold(cap int) int {
@@ -327,85 +324,34 @@ func runTokenWarnThreshold(cap int) int {
 }
 
 func tokenBudgetWarningMessage(used, cap int) string {
-	return fmt.Sprintf(
-		"[token budget] This run has used about %d of its %d token budget. Stop exploring and stop "+
-			"re-reading files. Apply the smallest change that completes the task now, then reply with a "+
-			"plain-text summary of what you changed and what is left. Unfinished work is committed to the "+
-			"task branch and picked up by the next run, so a clear summary is more useful than a rushed edit.",
-		used, cap)
+	return tokenBudgetWarningKey.Render(tokenBudgetWarningInput{Used: used, Cap: cap})
 }
 
 func repeatNudgeMessage(name string, repeats int) string {
 	left := max(repeatAbortThreshold-repeats, 1)
-	plural := "s"
-	if left == 1 {
-		plural = ""
-	}
-	return fmt.Sprintf(
-		"[loop guard] You have now made this exact %s call %d times and it returned the same result every time. "+
-			"That result is no longer shown to you, and the call is no longer being run — asking again gains nothing.\n"+
-			"Empty output is not a failure: sed, mv, cp and mkdir print nothing when they succeed.\n"+
-			"Do one of these instead:\n"+
-			"1. Read the file or state this call was meant to change, and continue from what you find.\n"+
-			"2. Change the method — write the whole file instead of editing it in place, or use a different tool.\n"+
-			"3. If neither is possible, stop calling tools and summarise what you changed and what is blocked.\n"+
-			"%d more identical call%s and this run is stopped with the task unfinished.",
-		name, repeats+1, left, plural)
+	return repeatNudgeKey.Render(repeatNudgeInput{Name: name, Count: repeats + 1, Left: left})
 }
 
 func sameCallMessage(name string, execs int) string {
 	left := max(sameCallAbortThreshold-execs, 1)
-	plural := "s"
-	if left == 1 {
-		plural = ""
-	}
-	return fmt.Sprintf(
-		"\n\n[loop guard] You have now run this exact %s call %d times in this run. Its result changes slightly each time "+
-			"(a duration, a timestamp, a counter on the page), but nothing about the task has changed with it.\n"+
-			"If it passed, you already have your evidence — record it and move the task on. If it failed, the next call must be an "+
-			"EDIT that changes the cause; running the same command again cannot change the outcome.\n"+
-			"Only call it again after you have changed something it would actually see. "+
-			"%d more identical call%s and this run is stopped with the task unfinished.", name, execs, left, plural)
+	return sameCallNudgeKey.Render(sameCallNudgeInput{Name: name, Execs: execs, Left: left})
 }
 
 func emptyResultNote(name string) string {
-	return fmt.Sprintf(
-		"[no output] %s ran successfully and returned nothing at all.\n"+
-			"That empty result is the tool's answer, not a failure to run: whatever you asked for is not there, "+
-			"or the arguments pointed at something that holds nothing.\n"+
-			"Repeating this exact call will return the same emptiness. Change the arguments, or use a different tool.", name)
+	return emptyResultNoteKey.Render(emptyResultNoteInput{Name: name})
 }
 
 func errorStreakMessage(streak int) string {
 	left := max(errStreakAbortThreshold-streak, 1)
-	plural := "s"
-	if left == 1 {
-		plural = ""
-	}
-	return fmt.Sprintf(
-		"[loop guard] Your last %d tool calls in a row all failed. Changing only the arguments is not working; "+
-			"the method is what is wrong.\n"+
-			"Before the next call, do one of these:\n"+
-			"1. Read the actual file, directory or command output the failures are about, instead of guessing at paths.\n"+
-			"2. Use a different tool for the same goal — write the whole file rather than patching it, list a directory rather than assuming it.\n"+
-			"3. If the environment is missing something you need, stop and summarise what is blocked instead of retrying.\n"+
-			"%d more consecutive failure%s and this run is stopped with the task unfinished.\n\n"+
-			"The failing call's own output follows:\n", streak, left, plural)
+	return errorStreakNudgeKey.Render(errorStreakNudgeInput{Streak: streak, Left: left})
 }
 
 func toolErrorMessage(name string, count int) string {
-	return fmt.Sprintf(
-		"\n\n[loop guard] %s has now failed %d times in this run. Whatever you are passing it is not the shape it wants — "+
-			"check its description again, or reach the same goal with a different tool.", name, count)
+	return toolErrorNoteKey.Render(toolErrorNoteInput{Name: name, Count: count})
 }
 
-const wrapUpPrompt = "Your tool budget for this run is spent. Do not call any more tools. " +
-	"Reply with a short plain-text summary: what you changed (files), what works, and what is still missing."
+var wrapUpPrompt = prompt.Text(wrapUpKey)
 
-const emptyTurnPrompt = "Your last turn was empty — no text and no tool call. " +
-	"An empty turn is not an answer. Reply now, in plain text, to what was asked: " +
-	"what you did, what it changed, and what is left. If a tool call is still needed to answer, make it."
+var emptyTurnPrompt = prompt.Text(emptyTurnPromptKey)
 
-const emptyTurnFallback = "The model returned an empty answer twice in a row, so this turn produced no reply. " +
-	"Any tool calls made before it did run — check the board records and the actions listed above — but nothing was written back here. " +
-	"Send the request again, ideally in smaller steps."
+var emptyTurnFallback = prompt.Text(emptyTurnFallbackKey)

@@ -7,12 +7,16 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-const (
-	FindingsDigestHeader = "[findings] What the previous attempt already did — continue from it, do not rediscover it."
+// FindingsDigestHeader marks a system message as a synthetic findings digest
+// (see IsFindingsDigest) rather than a real prior turn — computed once from
+// the catalog rather than re-rendered per digest, since it never varies.
+var FindingsDigestHeader = prompt.Text(digestHeaderKey)
 
+const (
 	DefaultFindingsDigestChars = 2500
 
 	maxDigestEvents = 600

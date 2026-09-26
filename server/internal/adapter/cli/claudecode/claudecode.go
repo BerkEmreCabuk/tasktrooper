@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/activity"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/core"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -572,7 +573,7 @@ func (f sessionFinisher) finish(ctx context.Context, label string, s session) (d
 }
 
 func maxTurnsNote(maxTurns int) string {
-	return fmt.Sprintf("[The agent cli session stopped at its %d-turn budget; anything above is what it had finished by then.]", maxTurns)
+	return maxTurnsNoteKey.Render(maxTurnsNoteInput{MaxTurns: maxTurns})
 }
 
 func (e *Executor) buildArgs(inv invocation, systemPromptPath string) []string {
@@ -621,11 +622,11 @@ func continuePrompt(req domain.TaskExecution) string {
 	if task == "" {
 		task = "this task"
 	}
-	return "The usage limit that interrupted you has reset. Continue " + task +
-		" from where you stopped in this same workspace: finish the remaining work, then reply with a short summary of what you changed."
+	return continuePromptKey.Render(continuePromptInput{Task: task})
 }
 
-func flattenHistory(history []domain.Message) (systemPrompt, prompt string) {
+func flattenHistory(history []domain.Message) (systemPrompt, promptText string) {
+	earlierTurnLabel := prompt.Text(earlierTurnLabelKey)
 	var system, user []string
 	for _, msg := range history {
 		content := strings.TrimSpace(msg.Content)
@@ -636,7 +637,7 @@ func flattenHistory(history []domain.Message) (systemPrompt, prompt string) {
 		case domain.RoleSystem:
 			system = append(system, content)
 		case domain.RoleAssistant:
-			user = append(user, "Earlier assistant turn:\n"+content)
+			user = append(user, earlierTurnLabel+"\n"+content)
 		default:
 			user = append(user, content)
 		}

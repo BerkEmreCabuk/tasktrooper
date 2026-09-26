@@ -40,7 +40,7 @@ func cursorAgentRule(b Bundle) string {
 		sections = append(sections, "## Rules\n\n"+rules)
 	}
 	if len(sections) == 0 {
-		sections = append(sections, fmt.Sprintf("You are the %s agent.", strings.TrimSpace(b.Agent.Name)))
+		sections = append(sections, defaultAgentRoleKey.Render(agentNameInput{Name: strings.TrimSpace(b.Agent.Name)}))
 	}
 	return mdc(describe(b.Agent.Description, b.Agent.Name), true, "", strings.Join(sections, "\n\n"))
 }

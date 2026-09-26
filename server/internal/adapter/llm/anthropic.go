@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -328,7 +329,7 @@ func buildAnthropicRequest(model string, msgs []domain.Message, tools []domain.T
 				Format: &anthropicOutputFormat{Type: "json_schema", Schema: respFormat.Schema},
 			}
 		} else {
-			systemParts = append(systemParts, "Respond with a single valid JSON object only. No prose, no markdown code fences.")
+			systemParts = append(systemParts, prompt.Text(jsonOnlyInstructionKey))
 		}
 	}
 

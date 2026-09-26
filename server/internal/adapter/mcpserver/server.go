@@ -311,15 +311,15 @@ func (s *Server) available(name string, run Run) bool {
 func (s *Server) unavailable(name string, run Run) callToolResult {
 	switch {
 	case name == domain.AskUserToolName:
-		return textResult(name+" is not available in a headless agent session: it parks the run waiting for a human answer, which this session cannot wait for. Decide with the information you have, or say what is missing in your final message.", true)
+		return textResult(askUserUnavailableKey.Render(toolNameInput{Name: name}), true)
 	case run.SkillsOnDisk && name == skillLoadTool:
-		return textResult(name+" is not served to this run: its skills are already installed in this workspace and your own skill mechanism lists them, so read the one you want from there. create_skill is still available if you need to write a new skill.", true)
+		return textResult(skillLoadUnavailableKey.Render(toolNameInput{Name: name}), true)
 	case !exposed(name, run.SkillsOnDisk):
-		return textResult(name+" is not served here — use your own built-in tool for that (Bash, Read, Write, Edit, Grep, Glob).", true)
+		return textResult(toolNotExposedKey.Render(toolNameInput{Name: name}), true)
 	case !s.registered(name):
-		return textResult("no tool called "+name+" exists. Call tools/list for the ones this run has.", true)
+		return textResult(toolNotRegisteredKey.Render(toolNameInput{Name: name}), true)
 	default:
-		return textResult(name+" is not available to this run: its tool policy does not allow it.", true)
+		return textResult(toolPolicyDeniedKey.Render(toolNameInput{Name: name}), true)
 	}
 }
 
