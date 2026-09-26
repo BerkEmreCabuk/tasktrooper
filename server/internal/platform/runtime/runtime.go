@@ -390,6 +390,13 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 		return nil, err
 	}
 
+	// Prompts are embedded in the binary and must never depend on the async
+	// catalog DB sync below; a broken one is a build defect, so it fails
+	// boot here rather than surfacing as a broken prompt in a live run.
+	if err := loadDefaultPromptLibrary(); err != nil {
+		return nil, err
+	}
+
 	// Everything that needs a pod credential from the environment must read it
 	// before this line. load has the DSN and API key in cfg; initSecretsCipher
 	// takes MCP_SECRETS_KEY, otherwise re-read on every reload. buildHandler
@@ -2423,6 +2430,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				Int("created", res.Created).Int("updated", res.Updated).
 				Int("merged", res.Merged).Int("pending", res.Pending).
 				Msg("agent catalog synced")
+			reloadPromptOverlay(syncCtx, cfg.AgentCatalog.Source)
 			// A newly ingested catalog agent carries no runtime; without this it
 			// waits for the next CLI or provider change, and until then its chat
 			// turns fall through to the active provider — the embedder.

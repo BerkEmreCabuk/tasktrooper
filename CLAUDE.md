@@ -34,3 +34,5 @@ Three parts, one product: the macOS desktop app. Read the directory's own
 - Nothing multi-tenant, no cloud, no control plane comes back: no Firebase, no
   tunnel, no `X-Internal-*` headers, no team/invite/billing-plan UI.
 - Secrets never go on argv; children are `spawn`ed with `shell: false`.
+- No LLM-facing prose in Go: prompts, guard wording and tool descriptions live
+  in `catalog/system` (see `catalog/system/README.md`); code passes data.

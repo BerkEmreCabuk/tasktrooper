@@ -21,6 +21,7 @@ require (
 	github.com/knadh/koanf/parsers/yaml v1.1.0
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
 	github.com/knadh/koanf/v2 v2.3.6
+	github.com/makifbaysal/tasktrooper/catalog v0.0.0-00010101000000-000000000000
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/prometheus/client_golang v1.24.1
 	github.com/rs/zerolog v1.35.1
@@ -104,3 +105,5 @@ require (
 	google.golang.org/grpc v1.82.1 // indirect
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 )
+
+replace github.com/makifbaysal/tasktrooper/catalog => ../catalog

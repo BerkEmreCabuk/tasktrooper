@@ -36,6 +36,39 @@ internal/
 **Retries.** An LLM error is retried twice (3 attempts total); persistent failure is a
 hard error — no fallback parsing or patching of LLM output.
 
+## Prompt library
+
+LLM-facing prose — system prompts, guard wording, tool descriptions — lives in
+`catalog/system/**` (see `catalog/system/README.md` for the file format), not in Go string
+literals; code passes data in. `catalog/` is its own Go module
+(`github.com/makifbaysal/tasktrooper/catalog`), embedded at build time (`catalog/embed.go`,
+`catalog.SystemFS()`) and pulled into `server/go.mod` with a `replace … => ../catalog`, so
+the prompt catalog ships inside the binary — it must never depend on the async agent
+catalog DB sync (`catalogSyncOnce`, below), which runs long after boot.
+
+`internal/application/prompt` (`library.go`) parses that tree into a `Library`: each file's
+YAML front matter (`key`, `version`, `inputs`, `schema`) plus a `text/template` body,
+`Option("missingkey=error")`, with helpers (`join`, `bullets`, `trunc`, `indent`, `plural`,
+`lower`/`upper`, `partial`). A body is kept byte-exact — the loader strips exactly one
+trailing `"\n"` if present, nothing else — so a migrated prompt reproduces the Go string it
+replaced exactly. `prompt.Define[T](name, sample)` registers a typed `Key[T]`; calling code
+writes `myKey.Render(data)`, which renders against the process default library
+(`prompt.Default()`, loaded once from the embedded `catalog.SystemFS()` and panicking on a
+broken file — a build defect, not a runtime condition) or whatever `SetDefault` last
+installed.
+
+`Run` force-loads `prompt.Default()` before the listener opens, so a broken embedded prompt
+fails boot instead of surfacing mid-request. `AGENT_CATALOG_REPO` pointed at a local
+directory (`internal/adapter/catalogrepo.PromptDir`, `port.PromptSource`) may carry its own
+`system/` tree; after every successful `catalogSyncOnce`, that tree is loaded and every
+`prompt.DefinedKeys()` entry is rendered against its sample before `SetDefault` swaps it in —
+a git-cloned catalog source never reaches this path, and any failure just logs a warning and
+keeps the embedded prompts serving. A completeness test in `internal/platform/runtime` (the
+package that links every prompt-defining package) checks both directions: every `Define`
+renders against `catalog/system`, and every `prompts/`/`guards/`/`tools/` file there has a
+matching `Define` — partials are exempt, since they exist only to be pulled in with
+`partial "name" .`.
+
 ## MCP integration (client side)
 
 `mcp.Manager.LoadAndRegister` iterates `tools.mcp_servers`: `stdio` spawns the server via
