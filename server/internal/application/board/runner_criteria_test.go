@@ -116,9 +116,6 @@ func TestCriteriaForRunListsOnlyOpenCriteriaForImplementers(t *testing.T) {
 		if strings.Contains(msg, done.ID.String()) {
 			t.Errorf("column %s: a ticked criterion is back in the implementer's list:\n%s", col, msg)
 		}
-		if !strings.Contains(msg, "call set_criterion_completed with its id") {
-			t.Errorf("column %s: implementer is not told to tick the criteria:\n%s", col, msg)
-		}
 	}
 }
 

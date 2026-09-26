@@ -2103,34 +2103,13 @@ func listsEveryCriterion(wf domain.Workflow, task domain.BoardTask) bool {
 	return isReviewColumn(wf, task.Column) || wf.Has(task.Column, domain.BehaviourCriterionVerdict)
 }
 
-const analizNoPushMessage = "\nThis analysis ships documents, not code. You may create a local branch in the task workspace and build or run " +
-	"things there to check an idea, but never push it: no `git push`, no commit_task_changes, no pull request. " +
-	"Nothing of this task goes to GitHub.\n"
-
-func standingCriteriaMessage(task domain.BoardTask) string {
-	switch task.Column {
-	case domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision:
-	default:
-		return ""
-	}
-	if !task.TaskType.PublishesBranch() {
-		return analizNoPushMessage
-	}
-	return "\nStanding acceptance criteria — they apply to every code task, they are not written on the card, and they are checked automatically before this task can be handed on:\n" +
-		"1. The project builds. A red build is not a finished task, whatever else is done.\n" +
-		"2. The whole test suite passes — including the tests you did not write. A test your change broke is your change's problem, not a pre-existing failure to report.\n" +
-		"3. New or changed behaviour comes with unit tests. A new function, endpoint, branch or bug fix without a test that would fail without your change is incomplete work; write the test in this run, next to the project's existing tests and in its style. Pure config, copy or asset edits are the exception — say so in your closing comment rather than inventing a test for them.\n" +
-		"Ticking the task's own criteria while any of these three is unmet is a false claim: the build gate re-checks all of it after you stop, and a red result sends the task back with your name on it.\n"
-}
-
 func reviewCriteriaHeader(column domain.TaskColumn) string {
 	const carryOver = " A verdict already on an id survives a revision round — it is not asked again from zero. " +
 		"Where a line below names files changed since that verdict, re-verify and call review_criterion again only if one of those files could plausibly affect that specific criterion; leave the rest as they are. " +
 		"An id with no verdict yet still needs one.\n"
 	switch column {
 	case domain.TaskColumnReadyForQA, domain.TaskColumnInQA:
-		return "\nAcceptance criteria — record YOUR verdict on EACH id below with review_criterion " +
-			"(approve only what you executed and observed; reject with expected-vs-actual). " +
+		return "\nAcceptance criteria — record YOUR verdict on EACH id below with review_criterion. " +
 			"The forward move is refused while any id lacks your verdict on repositories that require criteria. " +
 			"Never move the task to need_revision just to look for these ids: they are here.\n" + carryOver
 	case domain.TaskColumnPMUAT:
@@ -2196,11 +2175,10 @@ func changedSinceNote(sha string, changedSince map[string][]string) string {
 }
 
 func criteriaMessage(wf domain.Workflow, task domain.BoardTask, criteria []domain.AcceptanceCriterion, changedSince map[string][]string) string {
-	var sb strings.Builder
-	sb.WriteString(standingCriteriaMessage(task))
 	if len(criteria) == 0 {
-		return sb.String()
+		return ""
 	}
+	var sb strings.Builder
 	if listsEveryCriterion(wf, task) {
 		sb.WriteString(reviewCriteriaHeader(task.Column))
 		for _, c := range criteria {
@@ -2211,20 +2189,6 @@ func criteriaMessage(wf domain.Workflow, task domain.BoardTask, criteria []domai
 	sb.WriteString("\nOpen acceptance criteria (these define \"done\" for this task):\n")
 	for _, c := range criteria {
 		sb.WriteString(fmt.Sprintf("- [%s] %s\n", c.ID, c.Text))
-	}
-	if task.TaskType == "analiz" {
-		switch task.Column {
-		case domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision:
-			sb.WriteString("These are what your spec and plan must answer. Tick each one your documents cover with set_criterion_completed, " +
-				"in the same step that covered it. Never tick one the documents do not answer — say so in your summary comment instead.\n")
-		}
-		return sb.String()
-	}
-	switch task.Column {
-	case domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision:
-		sb.WriteString("Each one you satisfy in this run: call set_criterion_completed with its id, in the same step that did the work. " +
-			"The automatic hand-off to code_review is REFUSED while any criterion is still open, so an unticked criterion leaves your finished work parked in this column. " +
-			"Never tick a criterion you did not implement — if one is out of scope or blocked, say so in a comment instead.\n")
 	}
 	return sb.String()
 }
@@ -2249,29 +2213,9 @@ func buildTriggerMessage(job RunJob, wf domain.Workflow, criteria []domain.Accep
 
 %s
 
-Board bookkeeping is not work and is never a step of its own:
-- Claiming a task and moving it between columns takes seconds and announces what you are doing. It produces nothing. Do it inside the step that does the work, not as a separate step, and never as the first item of a plan.
-- The task is ALREADY in the column named below. Never move it to the column it is already in — that move is a no-op the board rejects, and planning it wastes a whole step.
-- The hand-off at the end is the system's: an implementation run that finishes with a green build and a real diff is moved to code_review for you. A step whose only content is "move the task to code_review" is rejected before the plan runs.
-- A run whose entire output is a claim and a move has done nothing and is recorded as incomplete.
-- Read a file once. Repeating the same read, grep or build to re-confirm something already in your context is the single most common way a run burns its budget without producing a change. If two passes over the code told you the same thing, the answer is not in another pass — make the edit.
+Every board tool call in this run is about THIS task: pass the task_id or task_key from the snapshot below verbatim. The keys in the tool descriptions ("T-1", "B-1", "A-1") are format examples, never the task you are working on. Tools that take a repository_id (get_deploy_target, update_deploy_target, list_incidents, create_board_task) want the repository_id UUID from the snapshot below — never the repository name. Tools without that field — list_board_tasks among them — are already scoped to this run's repository; passing one an extra field is a schema error. Use the exact tool names available to you (claim_board_task, move_board_task, add_task_comment, etc.) — do not invent tool names. Only claim tasks that are unassigned or already assigned to you.
 
-Event rules:
-- For need_revision: the reviewer's feedback is in the task comments provided in your context. Fix the work accordingly in this run; the hand-off back to code_review is automatic. Do not ask the human to repeat feedback that is already in the comments.
-- When your context has "The human's requirements written on this task", those comments amend the description and acceptance criteria for every role alike — the developer builds them, the reviewer, QA and PM judge the work against them. What they ask for is never scope creep.
-- If the payload has resumed=question_answered: you previously stopped on the question in payload.question and the human replied in payload.answer. Continue the work from where you stopped using that answer; do not ask it again.
-- Never move your own task to need_revision or back to todo — need_revision is how REVIEWERS hand work back to you. If you are missing information, use ask_user; the system parks the task as blocked until the human answers.
-- Only claim tasks that are unassigned or already assigned to you.
-- Use the exact tool names available to you (claim_board_task, move_board_task, add_task_comment, etc.). Do not invent tool names.
-- Every board tool call in this run is about THIS task: pass the task_id or task_key from the snapshot below verbatim. The keys in the tool descriptions ("T-1", "B-1", "A-1") are format examples, never the task you are working on.
-- Tools that take a repository_id (get_deploy_target, update_deploy_target, list_incidents, create_board_task) want the repository_id UUID from the snapshot below — never the repository name. Tools without that field — list_board_tasks among them — are already scoped to this run's repository; passing one an extra field is a schema error.
-
-Before you finish, in this order — these are calls, not prose in your summary:
-1. Build and test what you changed with run_terminal, and read the output. Red output is fixed in this run, not reported as done. Call list_component_checks and run the local command of every required check for the components this diff touches — passing them locally is what this step means.
-2. Every acceptance criterion you satisfied: set_criterion_completed with its id — ticked only after step 1 showed it working.
-3. Every criterion you did NOT satisfy: leave it open and say why in a comment.
 %s
-A run that skips any of 1-3 has its hand-off refused and its finished work parked in this column.
 
 Task snapshot:
 %s
@@ -2280,11 +2224,9 @@ Task snapshot:
 
 func closingStep(wf domain.Workflow, job RunJob) string {
 	if !wf.Has(job.Task.Column, domain.BehaviourBuildVerify) {
-		return "4. One add_task_comment with what you changed and the command output that verified it."
+		return "Close with an add_task_comment stating what you changed and the command output that verified it."
 	}
-	return "4. Do NOT post an add_task_comment announcing completion. Close with your final message instead — what you changed and the command output that verified it. " +
-		"The system re-runs build verification after you stop and publishes that summary to the card only once the gate passes; " +
-		"a completion comment posted from inside the run can claim success the gate is about to refute."
+	return "Close with your final message, not a card comment: the system re-runs build verification after you stop and publishes that result to the card itself once the gate passes."
 }
 
 func runInstruction(wf domain.Workflow, job RunJob) string {
@@ -2295,43 +2237,6 @@ func runInstruction(wf domain.Workflow, job RunJob) string {
 	return columnInstruction(wf, task)
 }
 
-const verifyBeforeFinishing = "Before you finish, RUN the code you wrote: build it and run the tests with run_terminal " +
-	"(call list_component_checks or get_project_brief for the project's own commands when those tools are available; " +
-	"otherwise check package.json / Makefile / go.mod / the README) and READ the output. " +
-	"Writing a file is not verifying it and neither is reading it back; \"it should work\" is not a result. " +
-	"A red build or a failing test is yours to fix in this same run — never hand off red work. " +
-	"If the change cannot be executed here (missing service, no credentials), say exactly that in your closing comment " +
-	"and name what you did check instead. A run whose ledger holds no executed command is treated as unverified and is not handed on."
-
-const handoffIsAutomatic = verifyBeforeFinishing +
-	" Do NOT move the task yourself and never plan a step for the move: when this run ends with a green build and a real diff on the branch, " +
-	"the system moves the task to code_review, opens the pull request and starts the pipeline. " +
-	"That move is REFUSED while an acceptance criterion is still open, so tick each one you satisfy with set_criterion_completed inside the step that satisfied it " +
-	"(list_acceptance_criteria gives you the ids if they are not in your context). " +
-	"Your run is finished when the work is done and verified — close it with a final MESSAGE saying what you changed and how you verified it. " +
-	"That message is your report to the system, NOT a card comment: a run that went green writes nothing on the task, because the diff, the pull request, the pipeline result and the ticked criteria already say it. " +
-	"Use add_task_comment only for something the next person has to act on — a question you could not answer yourself, a part of the task you did not do and why, a risk or a follow-up somebody must pick up."
-
-// humanRequirementsQA follows qaExecutionInstruction, which ends in a sentence.
-const humanRequirementsQA = " The human's requirement comments on the task, when your context has them, are tested exactly like acceptance criteria: " +
-	"a requirement they add that the product does not meet is a failure, and behaviour they asked for is never a deviation."
-
-const qaExecutionInstruction = "Test it as a black box, on a RUNNING product. " +
-	"Start by resolving the environment, before anything else: call get_deploy_target — if it returns a stage " +
-	"base_url, that is where you test (the deploy for this task already ran on entry to ready_for_qa; verify the " +
-	"target answers, and record the address with update_deploy_target if it is missing). If there is no stage " +
-	"target, boot the task branch yourself with run_terminal (install, then the project's dev/start command in the " +
-	"background) and test on 127.0.0.1. Other tasks boot their own copies on this machine at the same time, so " +
-	"the project's default port may already be another task's build: start yours on a free port you pick, open the " +
-	"address YOUR process printed, and when you are done stop exactly the PID you started — pkill/killall by name " +
-	"is refused, because it takes down every other task's servers too. Then walk the scenarios with the browser tools (browser_navigate → " +
-	"browser_wait_for → browser_fill/browser_click, browser_screenshot as evidence, browser_set_viewport for the " +
-	"phone width) or the mobile_* tools for a device app. Never test against production. " +
-	"Reading source is NOT testing: read_file/grep_code/get_repo_tree are there to find the start command, the " +
-	"port or the route you have to open — a verdict whose evidence is the code rather than an executed run is " +
-	"rejected and the round is failed. For a bound environment's own live logs or grouped errors, use " +
-	"query_runtime_logs / list_runtime_errors instead of get_deploy_logs, which stays for a CI job's output."
-
 func columnInstruction(wf domain.Workflow, task domain.BoardTask) string {
 	if stage, ok := wf.Stage(task.Column); ok && stage.Instructions != "" {
 		return stage.Instructions
@@ -2341,54 +2246,49 @@ func columnInstruction(wf domain.Workflow, task domain.BoardTask) string {
 	if target, ok := wf.Param(task.Column, domain.BehaviourReviewVerdictSweep, "pass_to"); ok && target != "" {
 		passTo = target
 	}
+	analiz := task.TaskType == domain.TaskTypeAnaliz
 	switch task.Column {
 	case domain.TaskColumnTodo:
+		if analiz {
+			return "This is an analiz task in `todo`. Claiming it and moving it to `in_progress` is the opening action of the step that starts the analysis, never a step of its own. Finishing with a document attached moves it to `analiz_review` automatically."
+		}
 		return "This task is in `todo`. If it is not relevant to your role, take no action. " +
 			"If it is: claim it, move it to in_progress as the opening action of the step that does the work (never a step of its own), " +
-			"and implement the work IN THIS SAME RUN. " + handoffIsAutomatic
+			"and implement the work IN THIS SAME RUN. A green build with a real diff moves it to code_review automatically; " +
+			"that move is refused while an acceptance criterion is still open."
 	case domain.TaskColumnInProgress:
+		if analiz {
+			return "This is an analiz task ALREADY claimed and ALREADY in `in_progress` — the move you might be tempted to plan first has happened. " +
+				"Attaching your spec and plan moves it to `analiz_review` automatically."
+		}
 		return "This task is ALREADY claimed and ALREADY in `in_progress` — the move you might be tempted to plan first has happened. " +
 			"Continue the implementation from where it stands (the task branch and its diff are in your context) and finish it in this run. " +
-			handoffIsAutomatic
+			"A green build with a real diff moves it to code_review automatically; that move is refused while an acceptance criterion is still open."
 	case domain.TaskColumnNeedRevision:
+		if analiz {
+			return "This is an analiz task in `need_revision`: the human rejected the spec/plan in `analiz_review`. " +
+				"Revising and reattaching the documents moves it back to `analiz_review` automatically."
+		}
 		return "This task came back from review. The feedback is in your context: the task comments, and — when the review happened on a pull request — " +
-			"the PR review comments. Read BOTH before you touch the code (list_task_comments and get_task_pull_request re-read them at any time), " +
-			"and apply every point in this run. " + handoffIsAutomatic
+			"the PR review comments. A green build with a real diff moves it back to code_review automatically."
 	case domain.TaskColumnCodeReview:
-		return "This task is in `code_review`: a developer finished it and you are the reviewer. " +
-			"The pull request and its complete diff are in your context — READ the diff and review those changes. " +
-			"Do not run the app, do not run builds or tests, and do not fix anything yourself: the build/test pipeline " +
-			"already ran on entry (get_pipeline_status is its result) and fixes are the developer's to make. " +
-			"Judge three things: (1) do the changes deliver what the task, its acceptance criteria and the human's requirement comments asked for, " +
-			"(2) is the code itself sound (correctness, layer boundaries, error handling, security, tests), " +
-			"(3) does the change break anything elsewhere in the domain — for that, read the surrounding code the diff " +
-			"touches (grep_code, expand_symbol_context, codebase_search) as much as you need. " +
-			"Three things hold for every change whether or not the card names them, and a diff that misses one is a finding: " +
-			"the project builds, the whole suite passes, and new or changed behaviour carries a unit test that would fail without the change " +
-			"(pure config, copy or asset edits excepted). A diff that adds a function, an endpoint or a branch with no test beside it is Important, not a nit. " +
-			"Finish with a verdict: clean and pipeline green → ready_for_qa, and write NO comment — an approval that says \"looks good\" is noise on the card; any Critical/Important finding or a red " +
-			"pipeline → need_revision with a numbered comment citing file:line."
+		return "This task is in `code_review` with the pull request, its diff and the pipeline result (get_pipeline_status) already in your context. " +
+			"A clean review with a green pipeline moves it to ready_for_qa; a finding or a red pipeline moves it to need_revision."
 	case domain.TaskColumnReadyForQA:
 		// Only reachable when the automatic ready_for_qa -> in_qa move was refused; in_qa is where testing is evidenced.
 		return "This task is still in `ready_for_qa`: the automatic move into in_qa did not go through, " +
 			"so testing has NOT started and the board does not show this task as under test. " +
-			"Move it to in_qa yourself as the opening action of your first testing step (not as a step of its own), " +
-			"then run the tests in this same run. " + qaExecutionInstruction + humanRequirementsQA +
-			" Record your own verdict on each acceptance criterion with " +
-			"review_criterion as you verify it — approve only what you executed, reject with a note saying what failed. " +
-			"Finish from in_qa: every acceptance criterion passes → " +
-			"move it to " + passTo + ", with the evidence in the review_criterion notes and NO comment on the card — a pass writes nothing; any criterion fails → move it to need_revision " +
-			"and comment the numbered expected-vs-actual per failure."
+			"Move it to in_qa yourself as the opening action of your first testing step (not as a step of its own), then test in this same run. " +
+			"Every acceptance criterion passing moves it to " + passTo + "; any failure moves it to need_revision."
 	case domain.TaskColumnInQA:
-		return "This task is ALREADY in `in_qa` — testing is under way and the move you might plan first has happened. " +
-			qaExecutionInstruction + humanRequirementsQA +
-			" Continue and finish the scenarios in this run, recording your verdict per acceptance criterion with " +
-			"review_criterion (approve what you executed and observed; reject with an expected-vs-actual note), then " +
-			"leave the column: all criteria pass → " + passTo + ", evidence in the criterion notes and no comment on the card (a pass is not news); " +
-			"any failure → need_revision with a comment giving expected-vs-actual per failure. Never leave a task parked in in_qa."
+		return "This task is ALREADY in `in_qa` — testing is under way and the move you might plan first has happened. Continue and finish the scenarios in this run. " +
+			"Every acceptance criterion passing moves it to " + passTo + "; any failure moves it to need_revision. Never leave a task parked in in_qa."
 	case domain.TaskColumnPMUAT:
 		return "This task is in `pm_uat`: acceptance control. Follow your pm_uat column instructions — verify by running the product, never by reading code."
 	case domain.TaskColumnDone:
+		if analiz {
+			return "This is an analiz task in `done` — the human's move here is the approval of your spec and plan; decompose it into implementation tasks to move it to `released`."
+		}
 		// Reachable only through the merge wake or a release hand-back: a done card with an unmerged PR, or a
 		// release the sweeper just settled, dispatched to the release engineer and nobody else.
 		// done must never read the default: its "move on to the next column" sentence is how done tasks drifted into released with no deploy.

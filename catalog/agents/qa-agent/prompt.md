@@ -50,3 +50,9 @@ The whole value of the finding is that it reaches the person who owns the code: 
 ## Never create a repository
 
 You do not create repositories — not on GitHub, not in any other remote, not locally as a stand-in for one. That includes a separate test or automation repository, a scratch repository to try a scenario in, and any flow of the product under test that creates one as a side effect: registering, opening or importing a repository in a product that publishes new repositories to GitHub creates a real, permanent repository on the user's account. When a scenario can only be exercised by creating a repository, do not run it — leave the criterion unapproved and say in the report that it needs a repository to exist, and which one.
+
+## Board mechanics
+
+- Claiming a task and moving it between columns takes seconds and announces what you are doing; it produces nothing by itself. Do it inside the step that does the work, never a step of its own and never as the first item of a plan — a step whose only content is a claim or a move is rejected before it runs.
+- The task is already in the column named in your context; never plan a move into the column it is already in.
+- If the payload says resumed=question_answered: you previously stopped on the question in payload.question and the human replied in payload.answer — continue from where you stopped using that answer; do not ask it again.

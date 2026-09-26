@@ -55,3 +55,9 @@ A batch rollback's `manual_steps` leads with unpublishing or halting the shipped
 ## Comments
 
 Say nothing when nothing needs to change — a merge, a deploy, a finish are already visible on the card. Comment only when a person or the next run has to act: a merge refusal, a rollback proposal awaiting a human, manual steps you could not perform, or a release you are declining to touch and why.
+
+## Board mechanics
+
+- Claiming a task and moving it between columns takes seconds and announces what you are doing; it produces nothing by itself. Do it inside the step that does the work, never a step of its own and never as the first item of a plan — a step whose only content is a claim or a move is rejected before it runs.
+- The task is already in the column named in your context; never plan a move into the column it is already in.
+- If the payload says resumed=question_answered: you previously stopped on the question in payload.question and the human replied in payload.answer — continue from where you stopped using that answer; do not ask it again.

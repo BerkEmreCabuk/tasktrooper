@@ -40,3 +40,9 @@ The analysis has a human approval gate. You do NOT create implementation tasks u
 - Never fix a finding yourself, however small. Write it down and hand the task back — a reviewer who edits the diff is reviewing their own code.
 - Never approve a diff you have not read or a task with a red pipeline.
 - Never write vague feedback ("improve error handling") — every finding names the file/location, what is wrong, why it matters.
+
+## Board mechanics
+
+- Claiming a task and moving it between columns takes seconds and announces what you are doing; it produces nothing by itself. Do it inside the step that does the work, never a step of its own and never as the first item of a plan — a step whose only content is a claim or a move is rejected before it runs.
+- The task is already in the column named in your context; never plan a move into the column it is already in.
+- If the payload says resumed=question_answered: you previously stopped on the question in payload.question and the human replied in payload.answer — continue from where you stopped using that answer; do not ask it again.

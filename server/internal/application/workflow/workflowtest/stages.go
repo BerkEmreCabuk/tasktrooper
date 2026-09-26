@@ -5,44 +5,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// The instruction strings below are copied verbatim from
-// board.taskTypeInstruction/analizProducesDocuments (runner.go) at the time
-// migration 143 was written. They are duplicated rather than imported to
-// avoid a dependency from this package onto application/board (which will
-// itself depend on workflowtest in its tests); WP-B2b's golden test is what
-// keeps them honest against the runner's own constants until the runner is
-// switched to read stage.Instructions instead of calling taskTypeInstruction.
-const analizProducesDocuments = "Your deliverable is a SPEC and an IMPLEMENTATION PLAN attached to this task with add_task_document, " +
-	"grounded in code you actually read (get_repo_tree, codebase_search, grep_code, get_symbol_skeleton, expand_symbol_context) — " +
-	"a document attached by a run that explored nothing is rejected and the run is failed. " +
-	"If this task already carries a spec or a plan — a revision pass, a need_revision bounce, a change the human asked for — rewrite THAT document with update_task_document instead of attaching another one: the card must end with one current spec and one current plan. " +
-	"Never write, edit, move or delete a file in the repository and never commit: an analysis produces documents, not a diff, " +
-	"and there is no automatic hand-off to code_review for this task type — a run that ends with file edits has done the implementer's job on the wrong task. " +
-	"Finish with a summary comment (approach, the document titles, the task split you intend), then STOP: " +
-	"when this run ends with a document attached, the system moves the task to `analiz_review` for you — do NOT move it yourself and never plan a step for the move — " +
-	"the human approves there, and no implementation task is created before they do."
-
-const analizTodoInstructions = "This is an ANALIZ task (task_type=analiz) in `todo` — an ANALYSIS, not an implementation. If it is not relevant to your role, take no action. " +
-	"If it is: claim it and move it to in_progress as the opening action of the step that does the analysis (never a step of its own), " +
-	"then investigate in this same run — clone/pull every repository the task names, read the relevant code, and decide WHAT is needed and WHERE. " +
-	analizProducesDocuments
-
-const analizInProgressInstructions = "This is an ANALIZ task (task_type=analiz) ALREADY claimed and ALREADY in `in_progress` — an ANALYSIS, not an implementation, " +
-	"and the move you might be tempted to plan first has happened. Continue the investigation from where it stands and finish it in this run. " +
-	analizProducesDocuments
-
-const analizNeedRevisionInstructions = "This is an ANALIZ task (task_type=analiz) in `need_revision`: the human rejected the analysis. Their comment is in the task comments in your context. " +
-	"Revise the spec/plan at the ROOT of the concern — re-read the code where you are unsure — and attach the corrected documents. " +
-	"Create no implementation task from a rejected analysis. " + analizProducesDocuments
-
-const analizReviewInstructions = "This is an ANALIZ task (task_type=analiz) in `analiz_review`: it is waiting on a HUMAN to approve or reject the spec/plan. " +
-	"Nothing is yours to do here — do not move it, do not rewrite the documents, and do not create implementation tasks. Take no action."
-
-const analizDoneInstructions = "This is an ANALIZ task (task_type=analiz) the human moved to `done` — that move IS the approval of your spec and plan. " +
-	"Now decompose it: one implementation task per repository and per layer, each with its own plan slice, testable acceptance criteria and an assignee " +
-	"(call list_team for the roster; order them by dependency — backend API before the frontend/mobile that consumes it). " +
-	"Write no code yourself. List the created tasks in a comment and move this analiz task to `released` as the last action of the step that created them."
-
 // column is one of the 13 default columns every task type gets a stage row
 // for, in migration/fallback-position order.
 type column struct {
@@ -171,14 +133,6 @@ var analizExtraBehaviours = map[domain.TaskColumn][]domain.BehaviourRef{
 	domain.TaskColumnNeedRevision: {ref(domain.BehaviourAdvanceOnDocument, "to", "analiz_review")},
 }
 
-var analizInstructions = map[domain.TaskColumn]string{
-	domain.TaskColumnTodo:         analizTodoInstructions,
-	domain.TaskColumnInProgress:   analizInProgressInstructions,
-	domain.TaskColumnAnalizReview: analizReviewInstructions,
-	domain.TaskColumnNeedRevision: analizNeedRevisionInstructions,
-	domain.TaskColumnDone:         analizDoneInstructions,
-}
-
 // onPath reports whether col is on the type's happy-path spine.
 // need_revision/blocked are off-path for every type; pm_uat is additionally
 // off-path for technical (migration 140's intent: technical skips pm_uat);
@@ -236,8 +190,10 @@ func stagesFor(taskType domain.TaskType) []domain.WorkflowStage {
 		instructions := ""
 		switch taskType {
 		case taskTypeAnaliz:
+			// Migration 166 cleared workflow_stages.instructions for analiz: the
+			// full prompt now lives in catalog/agents/system-architect's column
+			// md files (see the catalog content test), not in the DB or here.
 			behaviours = append(behaviours, analizExtraBehaviours[c.Slug]...)
-			instructions = analizInstructions[c.Slug]
 		default: // task, bug, technical
 			extra := codingExtra[c.Slug]
 			if taskType == taskTypeTechnical {

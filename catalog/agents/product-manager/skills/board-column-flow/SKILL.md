@@ -55,3 +55,9 @@ Everything else (analiz_review, code_review, QA columns, human_uat) is another a
 
 - You moved a task through a column not in the PM action-points list.
 - A `pm_uat` pass with no QA evidence cited.
+
+## Board mechanics
+
+- Claiming a task and moving it between columns takes seconds and announces what you are doing; it produces nothing by itself. Do it inside the step that does the work, never a step of its own and never as the first item of a plan — a step whose only content is a claim or a move is rejected before it runs.
+- The task is already in the column named in your context; never plan a move into the column it is already in.
+- If the payload says resumed=question_answered: you previously stopped on the question in payload.question and the human replied in payload.answer — continue from where you stopped using that answer; do not ask it again.

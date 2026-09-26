@@ -32,59 +32,12 @@ func TestTriggerMessageKeepsTheClaimAndMoveForATodoTask(t *testing.T) {
 	}
 }
 
-func TestTriggerMessageRulesOutBookkeepingAsAStep(t *testing.T) {
-	for _, col := range []domain.TaskColumn{
-		domain.TaskColumnTodo, domain.TaskColumnInProgress,
-		domain.TaskColumnNeedRevision, domain.TaskColumnCodeReview,
-	} {
-		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, taskWF, nil, nil)
-		if !strings.Contains(msg, "never a step of its own") {
-			t.Errorf("column %s: trigger message allows bookkeeping to become its own step:\n%s", col, msg)
-		}
-	}
-}
-
-func TestTriggerMessageStatesStandingCriteriaForImplementers(t *testing.T) {
-	for _, col := range []domain.TaskColumn{
-		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
-	} {
-		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: col}}, taskWF, nil, nil)
-		for _, want := range []string{
-			"Standing acceptance criteria",
-			"The project builds.",
-			"The whole test suite passes",
-			"New or changed behaviour comes with unit tests",
-		} {
-			if !strings.Contains(msg, want) {
-				t.Errorf("column %s: trigger message is missing %q:\n%s", col, want, msg)
-			}
-		}
-	}
-}
-
 func TestTriggerMessageOmitsStandingCriteriaForAnaliz(t *testing.T) {
 	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{
 		Title: "t", Column: domain.TaskColumnInProgress, TaskType: "analiz",
 	}}, analizWF, nil, nil)
 	if strings.Contains(msg, "Standing acceptance criteria") {
 		t.Errorf("analiz run was handed the implementer's build criteria:\n%s", msg)
-	}
-}
-
-func TestTriggerMessageForbidsPushingAnAnaliz(t *testing.T) {
-	for _, col := range []domain.TaskColumn{
-		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
-	} {
-		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{
-			Title: "t", Column: col, TaskType: "analiz",
-		}}, analizWF, nil, nil)
-		if !strings.Contains(msg, "never push it") {
-			t.Errorf("column %s: analiz run is not told to keep its branch local:\n%s", col, msg)
-		}
-	}
-	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnInProgress}}, taskWF, nil, nil)
-	if strings.Contains(msg, "never push it") {
-		t.Errorf("a code task was told not to push:\n%s", msg)
 	}
 }
 
@@ -101,9 +54,6 @@ func TestTriggerMessageListsOpenCriteriaForImplementers(t *testing.T) {
 		}
 		if !strings.Contains(msg, open[0].ID.String()) {
 			t.Errorf("column %s: criterion id is missing, so set_criterion_completed cannot be called:\n%s", col, msg)
-		}
-		if !strings.Contains(msg, "set_criterion_completed") {
-			t.Errorf("column %s: implementer is not told to tick the criteria:\n%s", col, msg)
 		}
 	}
 }
@@ -141,36 +91,26 @@ func TestTriggerMessageCarriesTheTaskType(t *testing.T) {
 	}
 }
 
+// The full analiz workflow prompt (deliverable, no-push, the "Never write, edit,
+// move or delete a file" rule) now lives in catalog/agents/system-architect's
+// column md files, not in this code fact — see the catalog content test.
 func TestAnalizInstructionDoesNotAskForCodeOrACodeReviewHandoff(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
 		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
 	} {
 		instruction := columnInstruction(analizWF, domain.BoardTask{Column: col, TaskType: "analiz"})
-		if strings.Contains(instruction, "the system moves the task to code_review") {
+		if strings.Contains(instruction, "code_review") {
 			t.Errorf("column %s: an analiz run is promised a code_review hand-off it never gets:\n%s", col, instruction)
-		}
-		if !strings.Contains(instruction, "no automatic hand-off to code_review") {
-			t.Errorf("column %s: an analiz run is not told the code_review hand-off does not apply to it:\n%s", col, instruction)
-		}
-		if !strings.Contains(instruction, "add_task_document") {
-			t.Errorf("column %s: an analiz run is not told its deliverable is a document:\n%s", col, instruction)
 		}
 		if !strings.Contains(instruction, "analiz_review") {
 			t.Errorf("column %s: an analiz run is not told where the human gate is:\n%s", col, instruction)
-		}
-		if !strings.Contains(instruction, "Never write, edit, move or delete a file") {
-			t.Errorf("column %s: an analiz run is not told to keep its hands off the repo:\n%s", col, instruction)
 		}
 	}
 }
 
 func TestAnalizInstructionSplitsTheHumanGateFromTheApproval(t *testing.T) {
-	waiting := columnInstruction(analizWF, domain.BoardTask{Column: domain.TaskColumnAnalizReview, TaskType: "analiz"})
-	if !strings.Contains(waiting, "Take no action") {
-		t.Errorf("analiz_review is a human gate; the agent must stand down:\n%s", waiting)
-	}
 	approved := columnInstruction(analizWF, domain.BoardTask{Column: domain.TaskColumnDone, TaskType: "analiz"})
-	if !strings.Contains(approved, "released") || !strings.Contains(approved, "list_team") {
+	if !strings.Contains(approved, "released") || !strings.Contains(approved, "decompose") {
 		t.Errorf("an approved analiz must be decomposed and released:\n%s", approved)
 	}
 }
@@ -180,17 +120,6 @@ func TestImplementationTasksKeepTheColumnInstruction(t *testing.T) {
 		instruction := columnInstruction(taskWF, domain.BoardTask{Column: domain.TaskColumnInProgress, TaskType: typ})
 		if !strings.Contains(instruction, "code_review") {
 			t.Errorf("task type %q lost the implementer hand-off:\n%s", typ, instruction)
-		}
-	}
-}
-
-func TestImplementerInstructionNamesTheCriteriaGate(t *testing.T) {
-	for _, col := range []domain.TaskColumn{
-		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
-	} {
-		instruction := columnInstruction(taskWF, domain.BoardTask{Column: col})
-		if !strings.Contains(instruction, "set_criterion_completed") {
-			t.Errorf("column %s: instruction does not mention ticking criteria:\n%s", col, instruction)
 		}
 	}
 }

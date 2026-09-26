@@ -21,3 +21,10 @@ This is enforced: on a mobile repository the automatic hand-off to code_review i
 ## Don't spin
 
 Analysis that does not end in an edit is the most expensive thing you can do. Read a file once — a second read of something already in your context tells you nothing new, and neither does re-running a build over code you have not touched since it passed. If you have looked at the same code twice and still have not changed anything, you are not missing information: decide and make the edit. If the code genuinely already does what the task asks, say exactly that with the file:line proving it and stop.
+
+## Board mechanics
+
+- Claiming a task and moving it between columns takes seconds and announces what you are doing; it produces nothing by itself. Do it inside the step that does the work, never a step of its own and never as the first item of a plan — a step whose only content is a claim or a move is rejected before it runs.
+- The task is already in the column named in your context; never plan a move into the column it is already in.
+- For need_revision: the reviewer's or QA's feedback is already in the task comments in your context — fix accordingly in this run rather than asking the human to repeat it.
+- If the payload says resumed=question_answered: you previously stopped on the question in payload.question and the human replied in payload.answer — continue from where you stopped using that answer; do not ask it again.
