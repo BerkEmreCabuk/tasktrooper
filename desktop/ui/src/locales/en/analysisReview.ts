@@ -1,0 +1,63 @@
+// analysisReview namespace: English source of truth.
+// The full-window review of a task's analysis document (pages/AnalysisReviewPage
+// and components/board/analysis/*): passage comments, sending them to the agent.
+export const analysisReview = {
+  page: {
+    back: "Back to board",
+    loadFailed: "The analysis could not be loaded",
+    taskNotFound: "Task not found",
+    taskNotFoundBody: "It may have been released or deleted since the link was made.",
+    noDocuments: "No analysis document yet",
+    noDocumentsBody: "The analyst has not written a document for this task yet.",
+    documentLabel: "Document",
+    frameTitle: "Analysis document",
+    submit: "Send comments ({count})",
+    submitOnlyInReview: "Comments can be sent while the analysis is waiting for your review.",
+    revising: "The agent is revising the analysis…",
+    revisingBody: "Your comments were sent. The document reloads here when the revision is done.",
+    approveWithOpenTitle: "Approve with unsent comments?",
+    approveWithOpenBody:
+      "Open comments ({count}) have not been sent to the agent. Approving moves the task to Done and leaves them unsent.",
+  },
+  submit: {
+    title: "Send your comments to the agent? ({count})",
+    description:
+      "All open comments go to the agent in one go. The task moves to Needs revision; the agent revises this analysis, answers each comment and sends it back for your review.",
+    noteLabel: "Note (optional)",
+    notePlaceholder: "Anything the agent should keep in mind for the whole revision",
+    confirm: "Send comments",
+    sent: "Comments sent ({count}). The agent is revising the analysis.",
+    failed: "The comments could not be sent",
+  },
+  panel: {
+    title: "Comments",
+    counts: "{open} open · {submitted} sent · {resolved} resolved",
+    empty: "No comments yet",
+    emptyBody: "Select a passage in the document to comment on it.",
+    selectHint: "Select text in the document to add another comment.",
+    commentingPaused: "Commenting is paused while the agent revises the analysis.",
+    composerTitle: "New comment",
+    composerPlaceholder: "What should change here?",
+    quoteTooLong: "The selection is too long ({max} characters at most). Select a shorter passage.",
+    add: "Add comment",
+    createFailed: "The comment could not be saved",
+    updateFailed: "The comment could not be updated",
+    deleteFailed: "The comment could not be deleted",
+    showInDocument: "Show in document",
+    editLabel: "Comment",
+    edit: "Edit",
+    delete: "Delete",
+    deleteTitle: "Delete this comment?",
+    deleteBody: "The comment and its highlight are removed.",
+    reopen: "Reopen",
+    notFound: "Not found in this version",
+    agentReply: "Agent's reply",
+    status: {
+      open: "Open",
+      submitted: "Sent",
+      resolved: "Resolved",
+    },
+  },
+};
+
+export type AnalysisReviewDict = typeof analysisReview;

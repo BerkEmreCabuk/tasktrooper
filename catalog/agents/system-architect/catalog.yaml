@@ -42,6 +42,8 @@ tool_policy:
         - update_task_document
         - attach_task_file
         - claim_board_task
+        - list_document_annotations
+        - resolve_document_annotations
         - get_pipeline_status
         - get_task_pull_request
         - comment_on_pull_request

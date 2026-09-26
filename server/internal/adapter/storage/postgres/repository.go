@@ -2175,16 +2175,30 @@ func NewTaskDocumentStore(pool *DB) *TaskDocumentStore {
 	return &TaskDocumentStore{pool: pool}
 }
 
-func (s *TaskDocumentStore) Create(ctx context.Context, doc domain.TaskDocument) (domain.TaskDocument, error) {
-	var created domain.TaskDocument
-	err := s.pool.QueryRow(ctx, `
-		INSERT INTO task_documents (task_id, title, content, position, created_by_type, created_by_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, task_id, title, content, position, created_by_type, created_by_id, created_at, updated_at
-	`, doc.TaskID, doc.Title, doc.Content, doc.Position, doc.CreatedByType, doc.CreatedByID).Scan(
-		&created.ID, &created.TaskID, &created.Title, &created.Content, &created.Position,
-		&created.CreatedByType, &created.CreatedByID, &created.CreatedAt, &created.UpdatedAt,
+const taskDocumentColumns = `id, task_id, title, content, format, position, created_by_type, created_by_id, created_at, updated_at`
+
+func scanTaskDocument(row pgx.Row) (domain.TaskDocument, error) {
+	var doc domain.TaskDocument
+	err := row.Scan(
+		&doc.ID, &doc.TaskID, &doc.Title, &doc.Content, &doc.Format, &doc.Position,
+		&doc.CreatedByType, &doc.CreatedByID, &doc.CreatedAt, &doc.UpdatedAt,
 	)
+	return doc, err
+}
+
+func documentFormatOrDefault(f domain.DocumentFormat) domain.DocumentFormat {
+	if f == "" {
+		return domain.DocumentFormatMarkdown
+	}
+	return f
+}
+
+func (s *TaskDocumentStore) Create(ctx context.Context, doc domain.TaskDocument) (domain.TaskDocument, error) {
+	created, err := scanTaskDocument(s.pool.QueryRow(ctx, `
+		INSERT INTO task_documents (task_id, title, content, format, position, created_by_type, created_by_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING `+taskDocumentColumns,
+		doc.TaskID, doc.Title, doc.Content, documentFormatOrDefault(doc.Format), doc.Position, doc.CreatedByType, doc.CreatedByID))
 	if err != nil {
 		return domain.TaskDocument{}, fmt.Errorf("create task document: %w", err)
 	}
@@ -2192,14 +2206,13 @@ func (s *TaskDocumentStore) Create(ctx context.Context, doc domain.TaskDocument)
 }
 
 func (s *TaskDocumentStore) Get(ctx context.Context, taskID, docID uuid.UUID) (domain.TaskDocument, error) {
-	var doc domain.TaskDocument
-	err := s.pool.QueryRow(ctx, `
-		SELECT id, task_id, title, content, position, created_by_type, created_by_id, created_at, updated_at
+	doc, err := scanTaskDocument(s.pool.QueryRow(ctx, `
+		SELECT `+taskDocumentColumns+`
 		FROM task_documents WHERE id = $1 AND task_id = $2
-	`, docID, taskID).Scan(
-		&doc.ID, &doc.TaskID, &doc.Title, &doc.Content, &doc.Position,
-		&doc.CreatedByType, &doc.CreatedByID, &doc.CreatedAt, &doc.UpdatedAt,
-	)
+	`, docID, taskID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.TaskDocument{}, fmt.Errorf("%w: %s", domain.ErrTaskDocumentNotFound, docID)
+	}
 	if err != nil {
 		return domain.TaskDocument{}, fmt.Errorf("get task document: %w", err)
 	}
@@ -2208,7 +2221,7 @@ func (s *TaskDocumentStore) Get(ctx context.Context, taskID, docID uuid.UUID) (d
 
 func (s *TaskDocumentStore) ListByTask(ctx context.Context, taskID uuid.UUID) ([]domain.TaskDocument, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, task_id, title, content, position, created_by_type, created_by_id, created_at, updated_at
+		SELECT `+taskDocumentColumns+`
 		FROM task_documents WHERE task_id = $1 ORDER BY position ASC, created_at ASC
 	`, taskID)
 	if err != nil {
@@ -2217,11 +2230,8 @@ func (s *TaskDocumentStore) ListByTask(ctx context.Context, taskID uuid.UUID) ([
 	defer rows.Close()
 	var docs []domain.TaskDocument
 	for rows.Next() {
-		var doc domain.TaskDocument
-		if err := rows.Scan(
-			&doc.ID, &doc.TaskID, &doc.Title, &doc.Content, &doc.Position,
-			&doc.CreatedByType, &doc.CreatedByID, &doc.CreatedAt, &doc.UpdatedAt,
-		); err != nil {
+		doc, err := scanTaskDocument(rows)
+		if err != nil {
 			return nil, err
 		}
 		docs = append(docs, doc)
@@ -2230,15 +2240,14 @@ func (s *TaskDocumentStore) ListByTask(ctx context.Context, taskID uuid.UUID) ([
 }
 
 func (s *TaskDocumentStore) Update(ctx context.Context, doc domain.TaskDocument) (domain.TaskDocument, error) {
-	var updated domain.TaskDocument
-	err := s.pool.QueryRow(ctx, `
-		UPDATE task_documents SET title = $3, content = $4, position = $5, updated_at = now()
+	updated, err := scanTaskDocument(s.pool.QueryRow(ctx, `
+		UPDATE task_documents SET title = $3, content = $4, format = $5, position = $6, updated_at = now()
 		WHERE id = $1 AND task_id = $2
-		RETURNING id, task_id, title, content, position, created_by_type, created_by_id, created_at, updated_at
-	`, doc.ID, doc.TaskID, doc.Title, doc.Content, doc.Position).Scan(
-		&updated.ID, &updated.TaskID, &updated.Title, &updated.Content, &updated.Position,
-		&updated.CreatedByType, &updated.CreatedByID, &updated.CreatedAt, &updated.UpdatedAt,
-	)
+		RETURNING `+taskDocumentColumns,
+		doc.ID, doc.TaskID, doc.Title, doc.Content, documentFormatOrDefault(doc.Format), doc.Position))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.TaskDocument{}, fmt.Errorf("%w: %s", domain.ErrTaskDocumentNotFound, doc.ID)
+	}
 	if err != nil {
 		return domain.TaskDocument{}, fmt.Errorf("update task document: %w", err)
 	}
@@ -2251,7 +2260,7 @@ func (s *TaskDocumentStore) Delete(ctx context.Context, taskID, docID uuid.UUID)
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("task document not found")
+		return fmt.Errorf("%w: %s", domain.ErrTaskDocumentNotFound, docID)
 	}
 	return nil
 }

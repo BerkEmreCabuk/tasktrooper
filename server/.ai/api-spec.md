@@ -493,6 +493,66 @@ unreachable.
   `query_runtime_logs` / `list_runtime_errors` / `list_deployments`
   (`.ai/tool-reference.md`).
 
+## Task documents and analysis review (migration 164)
+
+**Documents.** `domain.TaskDocument` carries `format: "markdown" | "html"` (column
+`task_documents.format`, CHECK-constrained, existing rows `markdown`).
+
+| Endpoint | Notes |
+|---|---|
+| `GET /v1/repositories/{id}/tasks/{taskId}/documents` | `{documents, count}`; single-task detail also carries `documents` |
+| `POST .../documents` | `{title, content, format?, position?}` → `201` document. `format` defaults to `markdown` |
+| `PATCH .../documents/{docId}` | `{title?, content?, format?, position?}`; omitted `format` keeps the document's own |
+| `DELETE .../documents/{docId}` | `204`; its annotations cascade |
+
+An `html` document is sanitized on every write, from the API and the agent tools alike
+(`repository.prepareDocumentContent` → `application/htmldoc.Sanitize`): `script`, `iframe`,
+`frame(set)`, `object`, `embed`, `applet`, `link`, `base`, `meta http-equiv`, `form`,
+`input`/`button`/`textarea`/`select`, `noscript`, `template` and SVG `set`/`animate*` are
+removed with their contents; every `on*` attribute, `srcdoc`, and any
+`javascript:`/`vbscript:`/`data:text/html` URL in `href`/`src`/`xlink:href`/`action`/… is
+stripped; an `img` survives only with an `https:` or `data:image/` source. `style` elements
+and attributes and inline `svg` are kept, and the result is always a full document
+(`<!DOCTYPE html><html><head>…</head><body>…</body></html>`). Over 1 MB
+(`domain.MaxHTMLDocumentBytes`, measured before sanitizing) or an unknown `format` → `400`.
+
+**Annotations.** A reviewer's comment anchored to a passage of a document by a text-quote
+selector (the passage's rendered text plus a little context either side), stored in
+`task_document_annotations` (FK to the document and the task, both `ON DELETE CASCADE`):
+
+```json
+{"id","task_id","document_id","quote","prefix","suffix","body",
+ "status":"open"|"submitted"|"resolved","reply","created_by_type":"user"|"agent",
+ "created_at","updated_at","submitted_at"?,"resolved_at"?}
+```
+
+`open` = a draft the human can still edit or delete; `submitted` = sent with a review and
+waiting for the agent; `resolved` = answered by the agent (`reply`).
+
+| Endpoint | Notes |
+|---|---|
+| `GET /v1/repositories/{id}/tasks/{taskId}/annotations[?document_id=]` | `{annotations: [...]}` ordered by `created_at`; `[]`, never `null` |
+| `POST .../documents/{docId}/annotations` | `{quote, prefix, suffix, body}` → `201`, `status: open`, `created_by_type: user`. `quote` 1–2000 characters, `body` 1–4000 (trimmed), `prefix`/`suffix` ≤ 200 each (characters, not bytes) → `400` otherwise; a document not on the task → `404` |
+| `PATCH .../annotations/{annId}` | `{body?, status?: "open"}`. `body` only while `open`; `status: "open"` reopens a `resolved` one (clears `reply`, `resolved_at`, `submitted_at`) and is a no-op on an `open` one. Anything else on a `submitted` one → `409`; any other `status` value → `400` |
+| `DELETE .../annotations/{annId}` | `204` while `open`, `409` otherwise |
+| `POST .../annotations/submit` | Optional `{note}` → `200 {submitted: n, task: <BoardTask>}`. `409` unless the task is in `analiz_review`; `400` with no `open` annotation |
+
+Submit (`repository.Service.SubmitAnnotations`) marks every `open` annotation `submitted`
+(one conditional UPDATE), adds ONE `user` comment — `Analysis review: n comments`, a
+numbered `"quote" → comment` list (each clipped) and the note — and then moves the task to
+`need_revision` through `UpdateTask` with `Actor: human`, exactly the path a drag onto the
+column takes, so `ReviewGate.OnHumanRejection` and `evolution.NotifyRevision` fire. The
+statuses and the comment are written before the move because the move dispatches the
+revision run, which reads both; if the move is refused the annotations go back to `open`.
+
+The revision run (`board.Runner.reviewAnnotationsMessage`) gets a system message
+`## Review comments on your analysis document` listing every `submitted` annotation — id,
+document, the quoted passage (one line, ≤ 600 bytes) and the full comment — capped at
+20000 bytes; when capped it says how many were left out and to call
+`list_document_annotations`. `derived_from` context (`Runner.analysisContext`) injects an
+html document as its text rendition (`htmldoc.Text`) with a 24000-byte budget instead of the
+markdown 12000.
+
 ## Deploy metadata, ordering relations, packages
 
 **Task fields** `before_deploy`, `after_deploy`, `rollback_plan` (nullable markdown) ride

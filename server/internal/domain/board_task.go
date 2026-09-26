@@ -219,29 +219,33 @@ type TaskRelationInput struct {
 }
 
 type TaskDocument struct {
-	ID            uuid.UUID `json:"id"`
-	TaskID        uuid.UUID `json:"task_id"`
-	Title         string    `json:"title"`
-	Content       string    `json:"content"`
-	Position      int       `json:"position"`
-	CreatedByType string    `json:"created_by_type"`
-	CreatedByID   string    `json:"created_by_id"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	ID            uuid.UUID      `json:"id"`
+	TaskID        uuid.UUID      `json:"task_id"`
+	Title         string         `json:"title"`
+	Content       string         `json:"content"`
+	Format        DocumentFormat `json:"format"`
+	Position      int            `json:"position"`
+	CreatedByType string         `json:"created_by_type"`
+	CreatedByID   string         `json:"created_by_id"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
 type CreateTaskDocumentRequest struct {
-	Title         string `json:"title"`
-	Content       string `json:"content,omitempty"`
-	Position      int    `json:"position,omitempty"`
-	CreatedByType string `json:"created_by_type,omitempty"`
-	CreatedByID   string `json:"created_by_id,omitempty"`
+	Title         string         `json:"title"`
+	Content       string         `json:"content,omitempty"`
+	Format        DocumentFormat `json:"format,omitempty"`
+	Position      int            `json:"position,omitempty"`
+	CreatedByType string         `json:"created_by_type,omitempty"`
+	CreatedByID   string         `json:"created_by_id,omitempty"`
 }
 
+// UpdateTaskDocumentRequest.Format nil keeps the document's current format.
 type UpdateTaskDocumentRequest struct {
-	Title    *string `json:"title,omitempty"`
-	Content  *string `json:"content,omitempty"`
-	Position *int    `json:"position,omitempty"`
+	Title    *string         `json:"title,omitempty"`
+	Content  *string         `json:"content,omitempty"`
+	Format   *DocumentFormat `json:"format,omitempty"`
+	Position *int            `json:"position,omitempty"`
 }
 
 type BoardTask struct {

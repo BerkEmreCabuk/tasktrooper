@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/board"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/htmldoc"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/indexer"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
@@ -59,6 +60,7 @@ type Service struct {
 	testCases        port.TaskTestCaseStore
 	relations        port.TaskRelationStore
 	documents        port.TaskDocumentStore
+	annotations      port.TaskDocumentAnnotationStore
 	comments         port.TaskCommentStore
 	attachments      port.AttachmentStore
 	columns          ColumnValidator
@@ -155,6 +157,10 @@ func (s *Service) SetCompletionStamper(cs *board.CompletionStamper) {
 
 func (s *Service) SetReviewGate(g *board.ReviewGate) {
 	s.reviewGate = g
+}
+
+func (s *Service) SetAnnotationStore(store port.TaskDocumentAnnotationStore) {
+	s.annotations = store
 }
 
 func (s *Service) SetEvolution(n RevisionNotifier) {
@@ -2021,6 +2027,14 @@ func (s *Service) AddDocument(ctx context.Context, repositoryID, taskID uuid.UUI
 	if s.documents == nil {
 		return domain.TaskDocument{}, fmt.Errorf("documents not enabled")
 	}
+	format, err := domain.NormalizeDocumentFormat(req.Format)
+	if err != nil {
+		return domain.TaskDocument{}, err
+	}
+	content, err := prepareDocumentContent(format, req.Content)
+	if err != nil {
+		return domain.TaskDocument{}, err
+	}
 	authorType := req.CreatedByType
 	if authorType == "" {
 		authorType = "user"
@@ -2028,7 +2042,8 @@ func (s *Service) AddDocument(ctx context.Context, repositoryID, taskID uuid.UUI
 	return s.documents.Create(ctx, domain.TaskDocument{
 		TaskID:        taskID,
 		Title:         strings.TrimSpace(req.Title),
-		Content:       req.Content,
+		Content:       content,
+		Format:        format,
 		Position:      req.Position,
 		CreatedByType: authorType,
 		CreatedByID:   req.CreatedByID,
@@ -2036,23 +2051,60 @@ func (s *Service) AddDocument(ctx context.Context, repositoryID, taskID uuid.UUI
 }
 
 func (s *Service) UpdateDocument(ctx context.Context, repositoryID, taskID, docID uuid.UUID, req domain.UpdateTaskDocumentRequest) (domain.TaskDocument, error) {
-	doc, err := s.documents.Get(ctx, taskID, docID)
-	if err != nil {
+	if _, err := s.tasks.Get(ctx, repositoryID, taskID); err != nil {
 		return domain.TaskDocument{}, err
 	}
-	if _, err := s.tasks.Get(ctx, repositoryID, taskID); err != nil {
+	if s.documents == nil {
+		return domain.TaskDocument{}, fmt.Errorf("documents not enabled")
+	}
+	doc, err := s.documents.Get(ctx, taskID, docID)
+	if err != nil {
 		return domain.TaskDocument{}, err
 	}
 	if req.Title != nil {
 		doc.Title = *req.Title
 	}
+	if req.Format != nil {
+		format, err := domain.NormalizeDocumentFormat(*req.Format)
+		if err != nil {
+			return domain.TaskDocument{}, err
+		}
+		doc.Format = format
+	}
+	if doc.Format == "" {
+		doc.Format = domain.DocumentFormatMarkdown
+	}
 	if req.Content != nil {
 		doc.Content = *req.Content
+	}
+	if req.Content != nil || req.Format != nil {
+		content, err := prepareDocumentContent(doc.Format, doc.Content)
+		if err != nil {
+			return domain.TaskDocument{}, err
+		}
+		doc.Content = content
 	}
 	if req.Position != nil {
 		doc.Position = *req.Position
 	}
 	return s.documents.Update(ctx, doc)
+}
+
+// prepareDocumentContent is the one door html content passes through on its
+// way to the store, from the HTTP API and the agent tools alike: size-checked
+// first (the limit is on what was sent, not on what survives), then sanitized.
+func prepareDocumentContent(format domain.DocumentFormat, content string) (string, error) {
+	if format != domain.DocumentFormatHTML {
+		return content, nil
+	}
+	if len(content) > domain.MaxHTMLDocumentBytes {
+		return "", fmt.Errorf("%w (got %d bytes) — keep the report scannable: summarize, link to code instead of pasting it", domain.ErrDocumentTooLarge, len(content))
+	}
+	clean, err := htmldoc.Sanitize(content)
+	if err != nil {
+		return "", fmt.Errorf("sanitize html document: %w", err)
+	}
+	return clean, nil
 }
 
 func (s *Service) DeleteDocument(ctx context.Context, repositoryID, taskID, docID uuid.UUID) error {

@@ -3,6 +3,7 @@
 // Namespaced by page/component. Interpolation uses {name} placeholders.
 import { addRepository } from "@/locales/en/addRepository";
 import { agentArea } from "@/locales/en/agentArea";
+import { analysisReview } from "@/locales/en/analysisReview";
 import { boardArea } from "@/locales/en/boardArea";
 import { chatArea } from "@/locales/en/chatArea";
 import { cloud } from "@/locales/en/cloud";
@@ -94,6 +95,7 @@ export const en = {
   },
   addRepository,
   agentArea,
+  analysisReview,
   boardArea,
   chatArea,
   cloud,

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 
@@ -34,11 +35,21 @@ type updateDocumentTool struct {
 }
 
 type updateDocumentArgs struct {
-	TaskID     string  `json:"task_id"`
-	DocumentID string  `json:"document_id"`
-	Title      string  `json:"title"`
-	NewTitle   *string `json:"new_title"`
-	Content    *string `json:"content"`
+	TaskID     string                 `json:"task_id"`
+	DocumentID string                 `json:"document_id"`
+	Title      string                 `json:"title"`
+	NewTitle   *string                `json:"new_title"`
+	Content    *string                `json:"content"`
+	Format     *domain.DocumentFormat `json:"format"`
+	Edits      []documentEdit         `json:"edits"`
+}
+
+// documentEdit is a find-and-replace on the stored source. A long html report
+// cannot be re-sent whole by every runtime — tool output and input caps cut it
+// — so a revision that touches three passages sends three edits instead.
+type documentEdit struct {
+	OldText string `json:"old_text"`
+	NewText string `json:"new_text"`
 }
 
 func newUpdateDocumentTool(kit *ToolKit) port.ToolExecutor {
@@ -55,7 +66,9 @@ func (t *updateDocumentTool) Definition() domain.ToolDefinition {
 			Description: "REWRITE a document that already exists on a board task, in place. " +
 				"This is the tool for every revision of a spec, a plan or a report already attached to the task: whoever reads that task must find one current document, not a pile of near-duplicates, so revise instead of adding a \"v2\". " +
 				"Identify the document by document_id or by its exact title; on a task that has exactly one document both may be omitted. " +
-				"`content` REPLACES the whole body — read it first with list_task_documents and send the full new text, not a fragment.",
+				"Either `content` REPLACES the whole body — read it first with list_task_documents (raw: true for html) and send the full new text, not a fragment — " +
+				"or `edits` changes passages in place: each old_text must appear exactly once in the current source (for html, the HTML source from list_task_documents raw: true) and is replaced by new_text, in order. " +
+				"The document keeps its format unless `format` is given; html is sanitized on save.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -75,7 +88,25 @@ func (t *updateDocumentTool) Definition() domain.ToolDefinition {
 					},
 					"content": map[string]interface{}{
 						"type":        "string",
-						"description": "The complete new markdown body. Replaces the existing content entirely.",
+						"description": "The complete new body (markdown, or a full HTML document for an html document). Replaces the existing content entirely. Not together with edits.",
+					},
+					"edits": map[string]interface{}{
+						"type":        "array",
+						"description": "Targeted replacements applied in order to the current source. Not together with content.",
+						"items": map[string]interface{}{
+							"type":                 "object",
+							"additionalProperties": false,
+							"properties": map[string]interface{}{
+								"old_text": map[string]interface{}{"type": "string", "description": "Exact text currently in the document; must occur exactly once."},
+								"new_text": map[string]interface{}{"type": "string", "description": "Replacement text (may be empty to delete)."},
+							},
+							"required": []string{"old_text", "new_text"},
+						},
+					},
+					"format": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{string(domain.DocumentFormatMarkdown), string(domain.DocumentFormatHTML)},
+						"description": "Change the document's format. Omit to keep the current one.",
 					},
 				},
 			},
@@ -90,8 +121,11 @@ func (t *updateDocumentTool) Execute(ctx context.Context, arguments string) doma
 			return toolError(updateTaskDocumentToolName, fmt.Sprintf("invalid arguments: %v", err))
 		}
 	}
-	if args.NewTitle == nil && args.Content == nil {
-		return toolError(updateTaskDocumentToolName, "nothing to update: pass content, new_title, or both")
+	if args.NewTitle == nil && args.Content == nil && args.Format == nil && len(args.Edits) == 0 {
+		return toolError(updateTaskDocumentToolName, "nothing to update: pass content or edits, new_title, format, or a combination")
+	}
+	if args.Content != nil && len(args.Edits) > 0 {
+		return toolError(updateTaskDocumentToolName, "pass content (the whole new body) or edits (passages to replace), not both")
 	}
 	taskID, err := t.kit.resolveTaskArg(ctx, args.TaskID)
 	if err != nil {
@@ -117,7 +151,14 @@ func (t *updateDocumentTool) Execute(ctx context.Context, arguments string) doma
 	if err != nil {
 		return toolError(updateTaskDocumentToolName, err.Error())
 	}
-	req := domain.UpdateTaskDocumentRequest{Content: args.Content}
+	req := domain.UpdateTaskDocumentRequest{Content: args.Content, Format: args.Format}
+	if len(args.Edits) > 0 {
+		edited, err := applyDocumentEdits(doc.Content, args.Edits)
+		if err != nil {
+			return toolError(updateTaskDocumentToolName, err.Error())
+		}
+		req.Content = &edited
+	}
 	if args.NewTitle != nil {
 		trimmed := strings.TrimSpace(*args.NewTitle)
 		if trimmed == "" {
@@ -132,6 +173,36 @@ func (t *updateDocumentTool) Execute(ctx context.Context, arguments string) doma
 	return toolJSON(updateTaskDocumentToolName, documentResult(updated, ""))
 }
 
+func applyDocumentEdits(content string, edits []documentEdit) (string, error) {
+	for i, e := range edits {
+		if e.OldText == "" {
+			return "", fmt.Errorf("edits[%d]: old_text is empty", i)
+		}
+		switch n := strings.Count(content, e.OldText); n {
+		case 1:
+			content = strings.Replace(content, e.OldText, e.NewText, 1)
+		case 0:
+			return "", fmt.Errorf("edits[%d]: old_text not found in the document as edited so far; nothing was saved — re-read the source with list_task_documents raw: true and copy the passage exactly", i)
+		default:
+			return "", fmt.Errorf("edits[%d]: old_text occurs %d times — include more surrounding text so it matches exactly once; nothing was saved", i, n)
+		}
+	}
+	return content, nil
+}
+
+// documentSummary is a written html document without its body: the agent
+// just sent that body, and echoing a report of tens of kilobytes back into
+// its context buys nothing.
+func documentSummary(doc domain.TaskDocument) map[string]interface{} {
+	out := map[string]interface{}{}
+	if raw, err := json.Marshal(doc); err == nil {
+		_ = json.Unmarshal(raw, &out)
+	}
+	delete(out, "content")
+	out["content_chars"] = utf8.RuneCountInString(doc.Content)
+	return out
+}
+
 // documentResult keeps the document's own fields at the top level of the tool
 // result and hangs the extra flags off the side. The session ledger reads `id`
 // and `title` straight off a board tool's result, so nesting the document under
@@ -139,7 +210,9 @@ func (t *updateDocumentTool) Execute(ctx context.Context, arguments string) doma
 // turn would then have no record that the document was touched at all.
 func documentResult(doc domain.TaskDocument, note string) map[string]interface{} {
 	out := map[string]interface{}{}
-	if raw, err := json.Marshal(doc); err == nil {
+	if doc.Format == domain.DocumentFormatHTML {
+		out = documentSummary(doc)
+	} else if raw, err := json.Marshal(doc); err == nil {
 		_ = json.Unmarshal(raw, &out)
 	}
 	out["updated"] = true

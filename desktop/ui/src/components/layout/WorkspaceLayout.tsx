@@ -25,7 +25,8 @@ export function WorkspaceLayout() {
   const isBoard = pathname === "/board";
   const isBacklog = pathname === "/backlog";
   const isReleased = pathname === "/released";
-  const fullBleed = isChat || isBoard || isBacklog || isReleased;
+  const isAnalysisReview = /^\/repositories\/[^/]+\/tasks\/[^/]+\/analysis\/?$/.test(pathname);
+  const fullBleed = isChat || isBoard || isBacklog || isReleased || isAnalysisReview;
   // The sidebar's roster and column config come back from cache first: a
   // reload (or the desktop shell restoring a tab) renders the nav immediately
   // instead of holding it on skeletons until the server answers.

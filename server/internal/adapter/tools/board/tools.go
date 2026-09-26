@@ -159,6 +159,8 @@ func NewExecutors(kit *ToolKit) []port.ToolExecutor {
 		newAddDocumentTool(kit),
 		newUpdateDocumentTool(kit),
 		newListDocumentsTool(kit),
+		newListAnnotationsTool(kit),
+		newResolveAnnotationsTool(kit),
 		newListCriteriaTool(kit),
 		newSetCriterionTool(kit),
 		newCancelCriterionTool(kit),

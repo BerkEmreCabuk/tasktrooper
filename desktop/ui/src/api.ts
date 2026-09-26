@@ -866,11 +866,15 @@ export interface TaskRelationInput {
   relation_type: TaskRelationType;
 }
 
+export type TaskDocumentFormat = "markdown" | "html";
+
 export interface TaskDocument {
   id: string;
   task_id: string;
   title: string;
   content: string;
+  /** Absent on documents written before the field existed: those are markdown. */
+  format?: TaskDocumentFormat;
   position: number;
   created_by_type: string;
   created_by_id: string;
@@ -881,14 +885,66 @@ export interface TaskDocument {
 export interface CreateTaskDocumentInput {
   title: string;
   content?: string;
+  format?: TaskDocumentFormat;
   position?: number;
 }
 
 export interface UpdateTaskDocumentInput {
   title?: string;
   content?: string;
+  format?: TaskDocumentFormat;
   position?: number;
 }
+
+export type TaskAnnotationStatus = "open" | "submitted" | "resolved";
+
+/**
+ * A reviewer's comment pinned to a passage of a task document. The passage is
+ * a text-quote selector (quote + up to 32 characters either side, whitespace
+ * collapsed), not an offset, so it can re-anchor after the agent rewrites the
+ * document around it.
+ */
+export interface TaskAnnotation {
+  id: string;
+  task_id: string;
+  document_id: string;
+  quote: string;
+  prefix: string;
+  suffix: string;
+  body: string;
+  status: TaskAnnotationStatus;
+  /** The agent's answer, written when it resolves the annotation. */
+  reply: string;
+  created_by_type: "user" | "agent";
+  created_at: string;
+  updated_at: string;
+  submitted_at?: string | null;
+  resolved_at?: string | null;
+}
+
+export interface CreateTaskAnnotationInput {
+  quote: string;
+  prefix: string;
+  suffix: string;
+  body: string;
+}
+
+/** `status: "open"` only reopens a resolved annotation; the body is editable only while open. */
+export interface UpdateTaskAnnotationInput {
+  body?: string;
+  status?: "open";
+}
+
+export interface SubmitTaskAnnotationsResult {
+  submitted: number;
+  task: BoardTask;
+}
+
+// Mirrors the server's validation limits so an oversized value is refused here
+// rather than as a 400 after the user has typed a comment.
+export const ANNOTATION_QUOTE_MAX = 2000;
+export const ANNOTATION_BODY_MAX = 4000;
+export const ANNOTATION_CONTEXT_MAX = 200;
 
 /**
  * Metadata of a stored binary attachment (image/document). The bytes live in
@@ -4309,6 +4365,43 @@ export const api = {
   deleteTaskDocument: (repositoryId: string, taskId: string, docId: string) =>
     request<void>(`/v1/repositories/${repositoryId}/tasks/${taskId}/documents/${docId}`, {
       method: "DELETE",
+    }),
+
+  listTaskAnnotations: (repositoryId: string, taskId: string, documentId?: string) => {
+    const query = documentId ? `?document_id=${encodeURIComponent(documentId)}` : "";
+    return request<{ annotations: TaskAnnotation[] | null }>(
+      `/v1/repositories/${repositoryId}/tasks/${taskId}/annotations${query}`,
+    );
+  },
+
+  createTaskAnnotation: (repositoryId: string, taskId: string, docId: string, data: CreateTaskAnnotationInput) =>
+    request<TaskAnnotation>(`/v1/repositories/${repositoryId}/tasks/${taskId}/documents/${docId}/annotations`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateTaskAnnotation: (
+    repositoryId: string,
+    taskId: string,
+    annotationId: string,
+    data: UpdateTaskAnnotationInput,
+  ) =>
+    request<TaskAnnotation>(`/v1/repositories/${repositoryId}/tasks/${taskId}/annotations/${annotationId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+
+  deleteTaskAnnotation: (repositoryId: string, taskId: string, annotationId: string) =>
+    request<void>(`/v1/repositories/${repositoryId}/tasks/${taskId}/annotations/${annotationId}`, {
+      method: "DELETE",
+    }),
+
+  // Sends every open annotation of the task at once: they become `submitted`,
+  // one summary comment is posted and the task moves to need_revision.
+  submitTaskAnnotations: (repositoryId: string, taskId: string, note?: string) =>
+    request<SubmitTaskAnnotationsResult>(`/v1/repositories/${repositoryId}/tasks/${taskId}/annotations/submit`, {
+      method: "POST",
+      body: JSON.stringify(note?.trim() ? { note: note.trim() } : {}),
     }),
 
   listAcceptanceCriteria: (repositoryId: string, taskId: string) =>

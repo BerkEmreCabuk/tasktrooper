@@ -1,16 +1,23 @@
-import { FileText, Trash2 } from "lucide-react";
+import { FileCode2, FileText, Trash2 } from "lucide-react";
 import { useState } from "react";
 import type { TaskDocument } from "@/api";
 import { MarkdownContent } from "@/components/markdown/MarkdownContent";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useI18n } from "@/hooks/useI18n";
+import { documentFormat } from "@/lib/analysis-review";
 import { formatRelativeDate } from "@/lib/utils";
 
 interface TaskDocumentListProps {
   documents: TaskDocument[];
   agentNameMap: Record<string, string>;
   onDelete: (docId: string) => void;
+  /**
+   * Opens an HTML document on the analysis review page. Agent-written HTML is
+   * only ever rendered in that page's sandboxed frame, never in this dialog.
+   */
+  onOpenReview?: (doc: TaskDocument) => void;
 }
 
 /**
@@ -21,7 +28,7 @@ interface TaskDocumentListProps {
  * pipeline, comments — off the bottom of the scroll. Each document is a card
  * with a one-line preview here; the full content opens in a reader dialog.
  */
-export function TaskDocumentList({ documents, agentNameMap, onDelete }: TaskDocumentListProps) {
+export function TaskDocumentList({ documents, agentNameMap, onDelete, onOpenReview }: TaskDocumentListProps) {
   const { t } = useI18n();
   const [openDocId, setOpenDocId] = useState<string | null>(null);
   // Read off the live list rather than a copy: the drawer polls every 2s, so a
@@ -33,6 +40,11 @@ export function TaskDocumentList({ documents, agentNameMap, onDelete }: TaskDocu
       ? (agentNameMap[doc.created_by_id] ?? t("boardArea.components.taskDetail.agentFallback"))
       : t("boardArea.components.taskDetail.userAuthor");
 
+  const open = (doc: TaskDocument) => {
+    if (documentFormat(doc) === "html" && onOpenReview) onOpenReview(doc);
+    else setOpenDocId(doc.id);
+  };
+
   if (documents.length === 0) {
     return <p className="text-xs text-muted-foreground">{t("boardArea.components.taskDetail.docsEmpty")}</p>;
   }
@@ -40,47 +52,59 @@ export function TaskDocumentList({ documents, agentNameMap, onDelete }: TaskDocu
   return (
     <>
       <div className="space-y-2">
-        {documents.map((doc) => (
-          <div
-            key={doc.id}
-            className="flex items-start gap-1 rounded-lg border border-border transition-colors hover:bg-muted/30"
-          >
-            <button
-              type="button"
-              className="flex min-w-0 flex-1 items-start gap-3 px-default py-compact text-left"
-              onClick={() => setOpenDocId(doc.id)}
+        {documents.map((doc) => {
+          const isHtml = documentFormat(doc) === "html";
+          const text = isHtml ? htmlText(doc.content) : doc.content;
+          const DocIcon = isHtml ? FileCode2 : FileText;
+          return (
+            <div
+              key={doc.id}
+              className="flex items-start gap-1 rounded-lg border border-border transition-colors hover:bg-muted/30"
             >
-              <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
-                <FileText className="h-4 w-4 text-muted-foreground" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-sm font-medium">{doc.title}</span>
-                <span className="mt-0.5 block text-micro text-muted-foreground">
-                  {authorOf(doc)}
-                  {" · "}
-                  {t("boardArea.components.taskDetail.docWords", { count: wordCount(doc.content) })}
-                  {" · "}
-                  {t("boardArea.components.taskDetail.docUpdated", {
-                    relative: formatRelativeDate(doc.updated_at),
-                  })}
+              <button
+                type="button"
+                className="flex min-w-0 flex-1 items-start gap-3 px-default py-compact text-left"
+                onClick={() => open(doc)}
+              >
+                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted">
+                  <DocIcon className="h-4 w-4 text-muted-foreground" />
                 </span>
-                {doc.content.trim() && (
-                  <span className="mt-1 line-clamp-1 block text-xs text-muted-foreground">
-                    {previewOf(doc.content)}
+                <span className="min-w-0 flex-1">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className="truncate text-sm font-medium">{doc.title}</span>
+                    {isHtml && (
+                      <Badge variant="outline" className="shrink-0">
+                        {t("boardArea.components.taskDetail.docHtmlBadge")}
+                      </Badge>
+                    )}
                   </span>
-                )}
-              </span>
-            </button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="mt-1.5 mr-1.5 h-7 w-7 shrink-0"
-              onClick={() => onDelete(doc.id)}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-        ))}
+                  <span className="mt-0.5 block text-micro text-muted-foreground">
+                    {authorOf(doc)}
+                    {" · "}
+                    {t("boardArea.components.taskDetail.docWords", { count: wordCount(text) })}
+                    {" · "}
+                    {t("boardArea.components.taskDetail.docUpdated", {
+                      relative: formatRelativeDate(doc.updated_at),
+                    })}
+                  </span>
+                  {text.trim() && (
+                    <span className="mt-1 line-clamp-1 block text-xs text-muted-foreground">
+                      {isHtml ? clip(text) : previewOf(text)}
+                    </span>
+                  )}
+                </span>
+              </button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="mt-1.5 mr-1.5 h-7 w-7 shrink-0"
+                onClick={() => onDelete(doc.id)}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          );
+        })}
       </div>
 
       <Dialog open={!!openDoc} onOpenChange={(next) => !next && setOpenDocId(null)}>
@@ -136,7 +160,25 @@ function previewOf(content: string): string {
     .replace(/[*_|]+/g, "")
     .replace(/\s+/g, " ")
     .trim();
-  return flat.length > 160 ? `${flat.slice(0, 160)}…` : flat;
+  return clip(flat);
+}
+
+function clip(text: string): string {
+  return text.length > 160 ? `${text.slice(0, 160)}…` : text;
+}
+
+// A regex strip, not a parse: this runs on every 2s poll for every card, and a
+// preview line only needs the words, never the markup.
+function htmlText(html: string): string {
+  return html
+    .replace(/<(script|style|head|template)[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function wordCount(content: string): number {

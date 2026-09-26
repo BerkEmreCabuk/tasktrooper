@@ -100,6 +100,33 @@ design, whether or not human review is turned on elsewhere — it's a pure
 human approval column, and a repository that doesn't use it can simply
 remove it from its column set.
 
+## Reviewing an analysis
+
+An `analiz` task ends with one analysis report: a single HTML page the
+architect attaches to the task, with the design and the implementation plan
+as sections of it. When the architect's run ends with the report attached,
+the card moves to Analiz Review on its own and waits for you.
+
+In the task drawer, **Review analysis** (under the approve/decline buttons)
+opens the report. Select any passage and add a comment on it; your comments
+stay drafts — you can edit or delete them — until you send them. Then:
+
+- **Approve** — move the card to Done. The architect creates the
+  implementation tasks, each linked back to the analysis.
+- **Request changes** — send every draft comment at once. The card moves to
+  Need Revision (the same move as declining it by hand, so it counts as a
+  rejection of the architect's work), and one comment on the card lists what
+  you sent. The architect's revision run gets every comment with the passage
+  it's about, revises the same report rather than attaching a new one, and
+  answers each comment with a one-line reply. The card then comes back to
+  Analiz Review; answered comments show as resolved with the reply next to
+  them, and you can reopen one that wasn't fixed.
+
+Sending a review only works while the card is in Analiz Review and has at
+least one unsent comment. The report is sanitized when it's saved — scripts,
+embedded frames, forms and external stylesheets are removed — and is limited
+to 1 MB.
+
 ## Configuring columns and owners
 
 - **Settings → Board Workflow** — add, remove, rename or reorder columns,

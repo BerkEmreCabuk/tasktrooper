@@ -78,6 +78,7 @@ import {
   taskTypeLabel,
   taskTypeOptions,
 } from "@/lib/project-board";
+import { analysisReviewPath } from "@/lib/analysis-review";
 import { formatDate, formatRelativeDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
@@ -619,7 +620,12 @@ export function TaskDetailDrawer({
                     it cannot be missed the way the old low-contrast inline
                     buttons were. */}
                 <HumanUatDecision task={task} repositoryId={repositoryId} onUpdated={onUpdated} />
-                <AnalizReviewDecision task={task} repositoryId={repositoryId} onUpdated={onUpdated} />
+                <AnalizReviewDecision
+                  task={task}
+                  repositoryId={repositoryId}
+                  onUpdated={onUpdated}
+                  documents={documents}
+                />
                 {/* A parked task is waiting on a human, so the question outranks
                     every other field here — it is what unblocks the work. */}
                 {task.blocked_at && (
@@ -993,6 +999,7 @@ export function TaskDetailDrawer({
                     documents={documents}
                     agentNameMap={agentNameMap}
                     onDelete={deleteDocument}
+                    onOpenReview={(doc) => navigate(analysisReviewPath(repositoryId, task.id, doc.id))}
                   />
                   <div className="space-y-2 rounded-lg border border-dashed border-border p-3">
                     <Input

@@ -16,6 +16,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agentfs"
 	appcontext "github.com/makifbaysal/tasktrooper/server/internal/application/context"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/htmldoc"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/memory"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/orchestrator"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/projectmodel"
@@ -875,7 +876,7 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 	changedSinceVerdict := r.changedSinceByVerifiedSHA(runCtx, workDir, criteriaItems)
 	triggerMsg := buildTriggerMessage(job, wf, criteriaItems, changedSinceVerdict)
 
-	var scoreMsg, kpiMsg, memMsg, diffMsg, prMsg, pipelineMsg, revisionMsg, clarificationsMsg, prevFailuresMsg, analysisMsg string
+	var scoreMsg, kpiMsg, memMsg, diffMsg, prMsg, pipelineMsg, revisionMsg, reviewMsg, clarificationsMsg, prevFailuresMsg, analysisMsg string
 
 	if r.perfStore != nil {
 		if perfScore, perfErr := r.perfStore.GetScore(runCtx, agentRec.ID); perfErr == nil {
@@ -935,6 +936,7 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 	comments := r.taskComments(ctx, job)
 	if job.isRevision() {
 		revisionMsg = revisionCommentsMessage(comments)
+		reviewMsg = r.reviewAnnotationsMessage(ctx, job)
 	}
 	clarificationsMsg = prompt.AnsweredClarificationsMessage(comments)
 	resumeCLISession := ""
@@ -982,6 +984,9 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 	}
 	if revisionMsg != "" {
 		history = append(history, domain.Message{Role: domain.RoleSystem, Content: revisionMsg})
+	}
+	if reviewMsg != "" {
+		history = append(history, domain.Message{Role: domain.RoleSystem, Content: reviewMsg})
 	}
 	if clarificationsMsg != "" {
 		history = append(history, domain.Message{Role: domain.RoleSystem, Content: clarificationsMsg})
@@ -1973,7 +1978,12 @@ type analysisReader interface {
 	AnalysisReferences(ctx context.Context, taskID uuid.UUID) ([]domain.AnalysisReference, error)
 }
 
-const analysisContextLimit = 12000
+// An html report's text rendition is denser than markdown of the same bytes —
+// spec and plan in one document — so it gets the larger budget.
+const (
+	analysisContextLimit     = 12000
+	htmlAnalysisContextLimit = 24000
+)
 
 func (r *Runner) analysisContext(ctx context.Context, job RunJob) string {
 	reader, ok := r.taskUpdater.(analysisReader)
@@ -2003,9 +2013,12 @@ func (r *Runner) analysisContext(ctx context.Context, job RunJob) string {
 		}
 		sb.WriteString(fmt.Sprintf("\n### %s (analiz task — read it with list_task_documents %s)\n", label, ref.Key))
 		for _, doc := range ref.Documents {
-			content := doc.Content
-			if len(content) > analysisContextLimit {
-				content = truncateHead(content, analysisContextLimit) +
+			content, limit := doc.Content, analysisContextLimit
+			if doc.Format == domain.DocumentFormatHTML {
+				content, limit = htmldoc.Text(doc.Content), htmlAnalysisContextLimit
+			}
+			if len(content) > limit {
+				content = truncateHead(content, limit) +
 					"\n…[truncated — call list_task_documents with task_id " + ref.Key + " to read the whole document]"
 			}
 			sb.WriteString(fmt.Sprintf("\n#### %s\n%s\n", doc.Title, content))

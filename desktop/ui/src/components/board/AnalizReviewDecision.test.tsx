@@ -1,21 +1,24 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import type { BoardTask } from "@/api";
+import type { BoardTask, TaskDocument } from "@/api";
 import { AnalizReviewDecision } from "@/components/board/AnalizReviewDecision";
 import { HumanUatDecision } from "@/components/board/HumanUatDecision";
 import { I18nProvider } from "@/hooks/useI18n";
 
-const { updateRepositoryTask, createTaskComment } = vi.hoisted(() => ({
+const { updateRepositoryTask, createTaskComment, listTaskAnnotations } = vi.hoisted(() => ({
   updateRepositoryTask: vi.fn(),
   createTaskComment: vi.fn(),
+  listTaskAnnotations: vi.fn(),
 }));
 
 vi.mock("@/api", async () => {
   const actual = await vi.importActual<typeof import("@/api")>("@/api");
   return {
     ...actual,
-    api: { ...actual.api, updateRepositoryTask, createTaskComment },
+    api: { ...actual.api, updateRepositoryTask, createTaskComment, listTaskAnnotations },
   };
 });
 
@@ -39,11 +42,32 @@ function makeTask(overrides: Partial<BoardTask> = {}): BoardTask {
   };
 }
 
-function renderWithI18n(task: BoardTask, onUpdated: () => void) {
+const htmlDoc: TaskDocument = {
+  id: "doc-1",
+  task_id: "task-1",
+  title: "analiz: 2026-09-20 checkout",
+  content: "<h1>Checkout</h1>",
+  format: "html",
+  position: 0,
+  created_by_type: "agent",
+  created_by_id: "agent-1",
+  created_at: "2026-09-20T00:00:00Z",
+  updated_at: "2026-09-20T00:00:00Z",
+};
+
+function Providers({ children }: { children: ReactNode }) {
+  return (
+    <MemoryRouter>
+      <I18nProvider>{children}</I18nProvider>
+    </MemoryRouter>
+  );
+}
+
+function renderWithI18n(task: BoardTask, onUpdated: () => void, documents?: TaskDocument[]) {
   return render(
-    <I18nProvider>
-      <AnalizReviewDecision task={task} repositoryId="repo-1" onUpdated={onUpdated} />
-    </I18nProvider>,
+    <Providers>
+      <AnalizReviewDecision task={task} repositoryId="repo-1" onUpdated={onUpdated} documents={documents} />
+    </Providers>,
   );
 }
 
@@ -51,6 +75,7 @@ describe("AnalizReviewDecision", () => {
   beforeEach(() => {
     updateRepositoryTask.mockReset();
     createTaskComment.mockReset();
+    listTaskAnnotations.mockReset().mockResolvedValue({ annotations: [] });
   });
 
   it("renders nothing when the task is not in analiz_review", () => {
@@ -62,10 +87,10 @@ describe("AnalizReviewDecision", () => {
   it("shows the approve/decline control for an analiz_review task, mutually exclusive with HumanUatDecision", () => {
     const task = makeTask();
     render(
-      <I18nProvider>
+      <Providers>
         <AnalizReviewDecision task={task} repositoryId="repo-1" onUpdated={vi.fn()} />
         <HumanUatDecision task={task} repositoryId="repo-1" onUpdated={vi.fn()} />
-      </I18nProvider>,
+      </Providers>,
     );
     expect(screen.getAllByText("Approve")).toHaveLength(1);
     expect(screen.getAllByText("Decline")).toHaveLength(1);
@@ -104,5 +129,32 @@ describe("AnalizReviewDecision", () => {
       expect(updateRepositoryTask).toHaveBeenCalledWith("repo-1", "task-1", { column: "need_revision" });
     });
     expect(onUpdated).toHaveBeenCalled();
+  });
+
+  it("offers no review link while the task has no documents", () => {
+    renderWithI18n(makeTask(), vi.fn());
+    expect(screen.queryByRole("link", { name: /Review analysis/ })).not.toBeInTheDocument();
+    expect(listTaskAnnotations).not.toHaveBeenCalled();
+  });
+
+  it("links to the analysis review page once the task has a document", async () => {
+    renderWithI18n(makeTask(), vi.fn(), [htmlDoc]);
+
+    const link = await screen.findByRole("link", { name: "Review analysis" });
+    expect(link).toHaveAttribute("href", "/repositories/repo-1/tasks/task-1/analysis");
+    expect(listTaskAnnotations).toHaveBeenCalledWith("repo-1", "task-1");
+  });
+
+  it("counts the open comments on the review link", async () => {
+    listTaskAnnotations.mockResolvedValue({
+      annotations: [
+        { id: "a1", status: "open" },
+        { id: "a2", status: "open" },
+        { id: "a3", status: "resolved" },
+      ],
+    });
+    renderWithI18n(makeTask(), vi.fn(), [htmlDoc]);
+
+    expect(await screen.findByRole("link", { name: "Review analysis (2 open comments)" })).toBeInTheDocument();
   });
 });

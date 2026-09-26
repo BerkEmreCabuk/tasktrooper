@@ -21,10 +21,10 @@ Each of these is a separate `create_board_task` field. Never paste one field's c
 
 - **`title`:** action-object format ("Add task export endpoint", not "Export work").
 - **`description`** (product only): user story ("As [persona], I want [capability], so that [outcome]") + context + which plan tasks it covers + the dependency line ("Depends on: …").
-- **`technical_description`** (technical only): the titles of the analiz task's spec and plan documents (`spec: …`, `plan: …`), the endpoints/files/schema this slice touches, and the **interfaces** — the exact names/types it consumes from and produces for its neighbors, copied from the plan's Interfaces blocks.
+- **`technical_description`** (technical only): the title of the analiz task's report (`analiz: …`) and the plan steps this slice implements (`#step-2`, `#step-3`), the endpoints/files/schema this slice touches, and the **interfaces** — the exact names/types it consumes from and produces for its neighbors, copied from the plan's Interfaces blocks.
 - **`acceptance_criteria`:** an array of strings, one observable Given/When/Then per item including error cases — copied or derived from the plan, never aspirational wording. Passing them as an array is what gives the task a real checklist; writing them as prose in `description` leaves it empty and the task can never be verified complete. **Product only:** a criterion is checked against the running system, never against the board — "moved to code_review", "PR opened", "QA notified", "the follow-up task is created" are workflow, and `create_board_task` drops them with the reason in its result.
 - **`assignee`:** the matching developer role — backend-developer / frontend-developer / mobile-developer.
-- **`derived_from`:** `["A-N"]` — the analiz task this slice came out of. REQUIRED on every task you create from an approved analysis. Your spec and plan are documents on that task and nowhere else; this reference is what feeds them into the developer's run and what makes `list_task_documents A-N` the answer when they need to re-read the plan. Naming the document titles in `technical_description` is not a substitute — a title is not a route.
+- **`derived_from`:** `["A-N"]` — the analiz task this slice came out of. REQUIRED on every task you create from an approved analysis. Your analysis report (spec and plan) is a document on that task and nowhere else; this reference is what feeds it into the developer's run and what makes `list_task_documents A-N` the answer when they need to re-read the plan. Naming the report's title in `technical_description` is not a substitute — a title is not a route.
 
 ## Ordering Is an Argument, Not a Sentence
 
@@ -58,7 +58,7 @@ Task creation happens ONLY after the human approves the analysis (see analiz-hum
 - A created task that comes back with `dropped_criteria` → you wrote board steps as criteria; replace them with statements about the product, not with the same sentence reworded.
 - A task whose AC mention two layers or two repositories.
 - A task the assignee cannot start because an interface it consumes is defined nowhere.
-- A created task with no `derived_from` → its developer has no route to your spec and plan. Fix it with `update_board_task` before you release the analiz task.
+- A created task with no `derived_from` → its developer has no route to your analysis report. Fix it with `update_board_task` before you release the analiz task.
 - An order that exists only as "Depends on: …" prose → nothing enforces it; add `blocked_by` / `deploy_depends_on`.
 - A cycle refused at creation → your split is wrong, not the board. Merge the two tasks or move the shared piece into its own task that goes first.
-- Moving the analiz task to `done` yourself → `done` is the human's approval move; you move it to `analiz_review` then `released`.
+- Moving the analiz task to `done` yourself → `done` is the human's approval move and `analiz_review` is the system's; you move it only to `released`.

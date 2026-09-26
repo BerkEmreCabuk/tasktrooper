@@ -12,9 +12,10 @@ import (
 const addTaskDocumentToolName = "add_task_document"
 
 type addDocumentArgs struct {
-	TaskID  string `json:"task_id"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
+	TaskID  string                `json:"task_id"`
+	Title   string                `json:"title"`
+	Content string                `json:"content"`
+	Format  domain.DocumentFormat `json:"format"`
 }
 
 type addDocumentTool struct {
@@ -34,7 +35,8 @@ func (t *addDocumentTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: addTaskDocumentToolName,
-			Description: "Add a NEW markdown document to a board task as the current agent. " +
+			Description: "Add a NEW document to a board task as the current agent — markdown by default, or a self-contained HTML page with `format: \"html\"` (an analysis report). " +
+				"HTML is sanitized on save: scripts, iframes, forms, event handlers and javascript: URLs are removed; inline <style>, inline SVG and data:/https images are kept. Limit 1 MB. " +
 				"Revising something already attached to the task is update_task_document's job, not this one — never write \"Spec v2\" next to \"Spec\". " +
 				"Writing a title that already exists on the task rewrites that document in place rather than duplicating it.",
 			Parameters: map[string]interface{}{
@@ -51,7 +53,12 @@ func (t *addDocumentTool) Definition() domain.ToolDefinition {
 					},
 					"content": map[string]interface{}{
 						"type":        "string",
-						"description": "Document content (markdown)",
+						"description": "Document content: markdown, or a full HTML document when format is html",
+					},
+					"format": map[string]interface{}{
+						"type":        "string",
+						"enum":        []string{string(domain.DocumentFormatMarkdown), string(domain.DocumentFormatHTML)},
+						"description": "markdown (default) or html",
 					},
 				},
 				"required": []string{"task_id", "title"},
@@ -111,9 +118,12 @@ func (t *addDocumentTool) Execute(ctx context.Context, arguments string) domain.
 	if updater, ok := t.kit.Tasks.(DocumentUpdater); ok {
 		if existing, ferr := t.kit.findDocument(ctx, repositoryID, taskID, "", args.Title); ferr == nil {
 			content := args.Content
-			updated, uerr := updater.UpdateDocument(ctx, repositoryID, taskID, existing.ID, domain.UpdateTaskDocumentRequest{
-				Content: &content,
-			})
+			req := domain.UpdateTaskDocumentRequest{Content: &content}
+			if args.Format != "" {
+				format := args.Format
+				req.Format = &format
+			}
+			updated, uerr := updater.UpdateDocument(ctx, repositoryID, taskID, existing.ID, req)
 			if uerr != nil {
 				return toolError(addTaskDocumentToolName, uerr.Error())
 			}
@@ -124,11 +134,15 @@ func (t *addDocumentTool) Execute(ctx context.Context, arguments string) domain.
 	doc, err := t.kit.Tasks.AddDocument(ctx, repositoryID, taskID, domain.CreateTaskDocumentRequest{
 		Title:         args.Title,
 		Content:       args.Content,
+		Format:        args.Format,
 		CreatedByType: "agent",
 		CreatedByID:   agentID.String(),
 	})
 	if err != nil {
 		return toolError(addTaskDocumentToolName, err.Error())
+	}
+	if doc.Format == domain.DocumentFormatHTML {
+		return toolJSON(addTaskDocumentToolName, documentSummary(doc))
 	}
 	return toolJSON(addTaskDocumentToolName, doc)
 }

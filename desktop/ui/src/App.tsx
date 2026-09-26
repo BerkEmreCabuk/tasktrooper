@@ -34,6 +34,7 @@ import { BacklogPage } from "@/pages/BacklogPage";
 import { ReleasedPage } from "@/pages/ReleasedPage";
 import { BoardPage } from "@/pages/BoardPage";
 import { AgentChatPage } from "@/pages/AgentChatPage";
+import { AnalysisReviewPage } from "@/pages/AnalysisReviewPage";
 import { AgentPerformancePage } from "@/pages/AgentPerformancePage";
 import { AgentMemoryPage } from "@/pages/AgentMemoryPage";
 import { SharedMemoryPage } from "@/pages/SharedMemoryPage";
@@ -86,6 +87,7 @@ export default function App() {
                 {/* The Deploy & Runtime tab absorbed this standalone page; the
                     operations matrix's "not configured" link still points here. */}
                 <Route path="repositories/:repositoryId/deploy" element={<RepositoryDeployRedirect />} />
+                <Route path="repositories/:repositoryId/tasks/:taskId/analysis" element={<AnalysisReviewPage />} />
                 <Route path="operations" element={<OperationsLayout />}>
                   <Route index element={<Navigate to="deployments" replace />} />
                   <Route path="deployments" element={<DeploymentsPage />} />

@@ -275,6 +275,30 @@ The pull request itself is now a task field — `pr_url` / `pr_number` on
 ensure, and `commit_task_changes`). Before this it survived only as the text of a
 `"Draft PR: <url>"` system comment.
 
+## Task documents and annotations
+
+`TaskDocument` carries `format: "markdown" | "html"` (absent → markdown); create/update accept it. The UI never
+renders an HTML document outside the sandboxed analysis frame (see `.ai/frontend-components.md`).
+
+An annotation is a comment pinned to a passage of one document by a text-quote selector:
+
+```json
+{"id": "…", "task_id": "…", "document_id": "…", "quote": "…", "prefix": "…", "suffix": "…",
+ "body": "…", "status": "open", "reply": "", "created_by_type": "user",
+ "created_at": "…", "updated_at": "…", "submitted_at": null, "resolved_at": null}
+```
+
+- `GET /v1/repositories/{id}/tasks/{taskId}/annotations[?document_id=]` → `{annotations}`.
+- `POST /v1/repositories/{id}/tasks/{taskId}/documents/{docId}/annotations` `{quote, prefix, suffix, body}` →
+  `201` annotation. Limits: quote ≤ 2000, body ≤ 4000, prefix/suffix ≤ 200 (mirrored as `ANNOTATION_*_MAX`).
+- `PATCH /v1/repositories/{id}/tasks/{taskId}/annotations/{annId}` `{body?, status?: "open"}` → annotation. The
+  body is editable only while `open`; `status: "open"` reopens a `resolved` one; anything else is `409`.
+- `DELETE /v1/repositories/{id}/tasks/{taskId}/annotations/{annId}` → `204`, only while `open`.
+- `POST /v1/repositories/{id}/tasks/{taskId}/annotations/submit` `{note?}` → `{submitted, task}`. Only in
+  `analiz_review` (`409` otherwise) and only with ≥ 1 open annotation (`400`). Marks them `submitted`, posts one
+  summary comment and moves the task to `need_revision`; the architect revises the same HTML document, resolves
+  each annotation with a `reply`, and the task returns to `analiz_review`.
+
 ## Repository registration
 
 - `POST /v1/repositories/open`, `POST /v1/repositories/import` and

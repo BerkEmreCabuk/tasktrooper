@@ -167,15 +167,38 @@ Granted: all four to `backend-developer`, `frontend-developer`, `mobile-develope
 
 ### `list_task_documents`
 
-Reads the documents attached to a board task, full content, in position order. The read half of `add_task_document`, added by migration 106 to `roleBoardReadTools` and backfilled to every existing agent that already holds `list_task_comments`.
+Reads the documents attached to a board task, in position order. The read half of `add_task_document`, added by migration 106 to `roleBoardReadTools` and backfilled to every existing agent that already holds `list_task_comments`.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `task_id` | string | no | Board task UUID or its board key. Defaults to the run's own task, like the other task-ref arguments. |
+| `document_id` | string | no | Only this document. Required together with `offset` when the task has more than one. |
+| `raw` | boolean | no | Return an `html` document's HTML source instead of its text rendition. |
+| `offset` | integer | no | Character offset into the returned content (a previous call's `next_offset`). |
+| `limit` | integer | no | Characters of content per document: default 12000 for raw html, unlimited otherwise, at most 100000. |
 
-Response JSON: `{task_id, count, documents: [{id, title, content, position, created_by_type, created_by_id, created_at, updated_at}]}`.
+Response JSON: `{task_id, count, documents: [{id, title, content, format, position, created_by_type, created_by_id, created_at, updated_at, rendered_as?, content_offset?, content_total_chars?, next_offset?}]}`.
 
-It exists for the reason `list_task_comments` does — a kit that ships only the writer gets a model that "checks the documents" by writing one — and it became load-bearing when an analysis stopped committing its spec to the repository. An analysis task's spec and plan are `task_documents` on that task and nothing else: no `docs/` commit, no file on any branch. An implementation task names its analysis with a `derived_from` relation, `board.Runner` reads that analysis's documents into the run's context automatically, and this tool is how a run re-reads a long plan halfway through or looks at an analysis it was not handed.
+An `html` document comes back as its **text rendition** by default (`rendered_as: "text"`, `application/htmldoc.Text`: headings as `#` lines, lists as `-`/`1.` items, table rows as `| a | b |`, `pre` fenced, SVG reduced to `[diagram: <title>]`, styles and markup gone). `raw: true` returns the HTML source instead — what the architect needs before revising it — windowed at 12000 characters so one result stays under the native loop's 16000-character tool-output cap (which cuts the middle of an oversized result); `next_offset` is present while more remains. Markdown documents are returned whole unless `offset`/`limit` is passed.
+
+It exists for the reason `list_task_comments` does — a kit that ships only the writer gets a model that "checks the documents" by writing one — and it became load-bearing when an analysis stopped committing its spec to the repository. An analysis task's report is a `task_document` on that task and nothing else: no `docs/` commit, no file on any branch. An implementation task names its analysis with a `derived_from` relation, `board.Runner` reads that analysis's documents into the run's context automatically (an html report as its text rendition, 24000-byte budget), and this tool is how a run re-reads a long plan halfway through or looks at an analysis it was not handed.
+
+### `add_task_document` / `update_task_document`: `format` and `edits`
+
+Both accept `format: "markdown" | "html"` (migration 164). `add_task_document` defaults to markdown; `update_task_document` keeps the document's current format unless `format` is given. HTML is sanitized on save by `repository.Service` (see `.ai/api-spec.md` → "Task documents and analysis review") and limited to 1 MB — over it the tool returns an error. The `require_repo_grounding` gate applies to both formats. A write of an html document returns the document without its `content` (`content_chars` instead): the agent just sent the body, and echoing a report back costs context.
+
+`update_task_document` also takes `edits: [{old_text, new_text}]` as an alternative to `content`: each `old_text` must occur exactly once in the document as edited so far and is replaced in order; any miss or ambiguity fails the whole call and saves nothing. It exists because a long html report cannot always be re-sent whole — the revision flow reads the source in windows and changes the passages the reviewer commented on.
+
+### `list_document_annotations` / `resolve_document_annotations`
+
+The agent's side of the passage-level review of an analysis report (migration 164, `internal/adapter/tools/board/annotations.go`). Granted to `system-architect` (`architectToolPolicy`); migration 164 backfills both to every existing agent that holds the `analyst` role and `update_task_document`.
+
+| Tool | Args | Notes |
+|---|---|---|
+| `list_document_annotations` | `task_id?`, `status?` (`open`/`submitted`/`resolved`) | `{task_id, count, annotations: [{id, document_id, document_title, quote, prefix?, suffix?, comment, status, reply?, created_at, submitted_at?, resolved_at?}]}`. `submitted` ones are the latest review's comments, waiting for an answer. |
+| `resolve_document_annotations` | `task_id?`, `items: [{id, reply}]` | Marks each `open`/`submitted` comment `resolved` with the reply (1–2000 characters). Items are independent: `{resolved: n, annotations, failed?: [{id, error}]}`; the call is an error only when nothing was resolved. `created_by_type` stays the human's. |
+
+A revision run whose task has `submitted` comments is also handed them in its context (`board.Runner.reviewAnnotationsMessage`, "## Review comments on your analysis document", capped at 20000 bytes with the omitted count and a pointer to `list_document_annotations`). The expected sequence: `list_task_documents raw:true` → `update_task_document` (edits or content) on the same document → `resolve_document_annotations` once for every comment. `advance_on_document` then moves the task back to `analiz_review` because the run used `update_task_document`.
 
 ### Task ordering arguments (`create_board_task` / `update_board_task`)
 

@@ -1,15 +1,15 @@
 ---
 name: technical-analysis-workflow
 category: architecture
-description: Turn an analiz request into a grounded technical understanding before any spec or plan
+description: Turn an analiz request into a grounded technical understanding before the analysis report is written
 ---
 # Technical Analysis Workflow
 
 ## Overview
 
-Turn an analiz task into a fully-formed technical understanding through investigation, not guessing. The spec and plan you write later are only as good as this grounding.
+Turn an analiz task into a fully-formed technical understanding through investigation, not guessing. The analysis report you write later — one HTML document whose sections are the spec and the plan (analiz-html-report) — is only as good as this grounding.
 
-**Hard gate:** Do NOT write the spec, the plan, or any implementation task until you have explored the actual repository and resolved the ambiguities below. This applies to EVERY analiz task regardless of perceived simplicity — "simple" requests are where unexamined assumptions cause the most wasted developer work.
+**Hard gate:** Do NOT write the report, or any implementation task, until you have explored the actual repository and resolved the ambiguities below. This applies to EVERY analiz task regardless of perceived simplicity — "simple" requests are where unexamined assumptions cause the most wasted developer work.
 
 ## The Process
 
@@ -18,7 +18,8 @@ Turn an analiz task into a fully-formed technical understanding through investig
 - **Do not trust the PM's list as complete.** The PM may miss a repo that also needs to change. Cross-check with the codebase indexes: codebase_search across each repo for the concepts involved, grep_code for the exact symbols/contracts, and follow API contracts to their consumers. If you find an affected repo the PM did not name, pull it and include it in the analysis (and note it in your review summary).
 - Explore before proposing anything: codebase_search for concepts, grep_code for exact symbols, get_repo_tree for structure, expand_symbol_context for focused reads.
 - Read existing docs and recent commits. Follow existing patterns — never invent a parallel convention.
-- **No commits.** You are analysing, not implementing — never commit to any repo. Your entire output (spec + plan) is attached to the analiz task via add_task_document and add_task_comment.
+- **No commits.** You are analysing, not implementing — never commit to any repo. Your entire output is the analysis report attached to the analiz task via add_task_document (`format: "html"`), plus a summary add_task_comment.
+- **Keep what you read.** Note each file path and symbol as you read it — the report's `context` section is a table of exactly these, and a path you did not see in this run has no place in it.
 
 ### 2. Understand the intent
 - Restate the request in your own words: what outcome is wanted, for whom, and why.
@@ -41,7 +42,7 @@ Turn an analiz task into a fully-formed technical understanding through investig
 
 ## Output
 
-This grounding feeds directly into spec-authoring and implementation-plan-authoring. If you cannot yet name the files to touch and the interfaces between units, the analysis is not done.
+This grounding feeds directly into the report: its `context` section (what exists, with real paths), then spec-authoring for the `design` section and implementation-plan-authoring for the `plan` section, all in the one document analiz-html-report describes. If you cannot yet name the files to touch and the interfaces between units, the analysis is not done.
 
 ## Worked Example
 
@@ -53,7 +54,7 @@ Analiz: "Users can export a project's tasks to CSV." PM named the `backend-api` 
 4. Approaches: (a) stream CSV from the handler, (b) build in a service and return bytes. Pick (b) — testable without HTTP. State it.
 5. Unknowns resolved from code (column order = the DTO fields). No stakeholder question needed.
 
-Now the files and interfaces are named → analysis is done, spec/plan can be written.
+Now the files and interfaces are named → analysis is done, the report can be written.
 
 ## Red Flags
 

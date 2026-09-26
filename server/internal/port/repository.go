@@ -179,10 +179,28 @@ type TaskRelationStore interface {
 
 type TaskDocumentStore interface {
 	Create(ctx context.Context, doc domain.TaskDocument) (domain.TaskDocument, error)
+	// Get wraps domain.ErrTaskDocumentNotFound when the document is not on
+	// that task.
 	Get(ctx context.Context, taskID, docID uuid.UUID) (domain.TaskDocument, error)
 	ListByTask(ctx context.Context, taskID uuid.UUID) ([]domain.TaskDocument, error)
 	Update(ctx context.Context, doc domain.TaskDocument) (domain.TaskDocument, error)
 	Delete(ctx context.Context, taskID, docID uuid.UUID) error
+}
+
+type TaskDocumentAnnotationStore interface {
+	Create(ctx context.Context, a domain.TaskDocumentAnnotation) (domain.TaskDocumentAnnotation, error)
+	// Get wraps domain.ErrAnnotationNotFound when the annotation is not on
+	// that task.
+	Get(ctx context.Context, taskID, id uuid.UUID) (domain.TaskDocumentAnnotation, error)
+	// ListByTask orders by created_at; documentID nil means every document.
+	ListByTask(ctx context.Context, taskID uuid.UUID, documentID *uuid.UUID) ([]domain.TaskDocumentAnnotation, error)
+	// Update writes body, status, reply and the two state timestamps.
+	Update(ctx context.Context, a domain.TaskDocumentAnnotation) (domain.TaskDocumentAnnotation, error)
+	Delete(ctx context.Context, taskID, id uuid.UUID) error
+	// MarkSubmitted moves the given annotations from open to submitted in one
+	// statement and returns the ids it actually moved; a row that stopped
+	// being open in the meantime is left alone.
+	MarkSubmitted(ctx context.Context, taskID uuid.UUID, ids []uuid.UUID, at time.Time) ([]uuid.UUID, error)
 }
 
 type InitiativeProjectStore interface {

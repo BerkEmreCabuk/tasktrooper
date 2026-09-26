@@ -1,34 +1,55 @@
-import { Eye } from "lucide-react";
+import { Eye, FileSearch } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { api, type BoardTask } from "@/api";
+import { api, type BoardTask, type TaskDocument } from "@/api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useI18n } from "@/hooks/useI18n";
+import { analysisReviewPath } from "@/lib/analysis-review";
 
 interface AnalizReviewDecisionProps {
   task: BoardTask;
   repositoryId: string;
   onUpdated: () => void;
+  documents?: TaskDocument[];
 }
 
 // Mirrors HumanUatDecision.tsx's rationale — see that file for why decline is
 // rendered inline rather than as a nested Radix Dialog. `analiz_review` and
 // `human_uat` are mutually exclusive columns, so at most one of these two
 // controls is ever visible on a given task.
-export function AnalizReviewDecision({ task, repositoryId, onUpdated }: AnalizReviewDecisionProps) {
+export function AnalizReviewDecision({ task, repositoryId, onUpdated, documents = [] }: AnalizReviewDecisionProps) {
   const { t } = useI18n();
   const [saving, setSaving] = useState(false);
   const [declining, setDeclining] = useState(false);
   const [reason, setReason] = useState("");
+  const [openComments, setOpenComments] = useState(0);
+  const hasDocuments = documents.length > 0;
+  const inReview = task.column === "analiz_review";
 
   useEffect(() => {
     setDeclining(false);
     setReason("");
   }, [task.id]);
 
-  if (task.column !== "analiz_review") return null;
+  useEffect(() => {
+    setOpenComments(0);
+    if (!hasDocuments || !inReview) return;
+    let cancelled = false;
+    api
+      .listTaskAnnotations(repositoryId, task.id)
+      .then((data) => {
+        if (!cancelled) setOpenComments((data.annotations ?? []).filter((a) => a.status === "open").length);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [repositoryId, task.id, hasDocuments, inReview]);
+
+  if (!inReview) return null;
 
   const approve = async () => {
     setSaving(true);
@@ -115,6 +136,16 @@ export function AnalizReviewDecision({ task, repositoryId, onUpdated }: AnalizRe
             </Button>
           </div>
         </div>
+      )}
+      {hasDocuments && (
+        <Button variant="outline" className="gap-2" asChild>
+          <Link to={analysisReviewPath(repositoryId, task.id)}>
+            <FileSearch />
+            {openComments > 0
+              ? t("boardArea.components.taskDetail.analizReviewOpenReviewCount", { count: openComments })
+              : t("boardArea.components.taskDetail.analizReviewOpenReview")}
+          </Link>
+        </Button>
       )}
     </section>
   );
