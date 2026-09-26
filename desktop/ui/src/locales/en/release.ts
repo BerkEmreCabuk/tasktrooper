@@ -212,6 +212,7 @@ export const release = {
       deployed: "Deployed",
       verifyUntil: "Verify until",
       finished: "Finished",
+      soaking: "The deploy is being watched; the verify window closes at {time}. Then the release engineer gives its verdict and the task moves to Released.",
     },
     releaseNotes: "Release notes",
     deployStatus: {

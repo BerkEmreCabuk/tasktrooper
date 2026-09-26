@@ -190,6 +190,11 @@ export function ReleaseDrawer({ releaseId, repositoryName, open, onOpenChange, o
                       <TimelineRow label={t("release.drawer.timeline.verifyUntil")} at={release.verify_until} />
                       <TimelineRow label={t("release.drawer.timeline.finished")} at={release.finished_at} />
                     </dl>
+                    {release.status === "verifying" && release.verify_until && (
+                      <p className="text-caption text-muted-foreground">
+                        {t("release.drawer.timeline.soaking", { time: formatDate(release.verify_until) })}
+                      </p>
+                    )}
                   </section>
 
                   {release.notes && (

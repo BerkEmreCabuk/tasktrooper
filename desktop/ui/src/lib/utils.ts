@@ -36,6 +36,13 @@ export function formatRelativeDate(iso: string): string {
   const date = new Date(iso);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
+  if (diffMs < -60000) {
+    const aheadMins = Math.ceil(-diffMs / 60000);
+    if (aheadMins < 60) return `in ${aheadMins}m`;
+    const aheadHours = Math.round(aheadMins / 60);
+    if (aheadHours < 24) return `in ${aheadHours}h`;
+    return formatDate(iso);
+  }
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);

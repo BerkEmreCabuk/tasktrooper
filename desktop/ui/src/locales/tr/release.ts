@@ -209,6 +209,7 @@ export const release: ReleaseDict = {
       deployed: "Deploy edildi",
       verifyUntil: "Doğrulama bitişi",
       finished: "Bitti",
+      soaking: "Deploy izleniyor; doğrulama penceresi {time} itibarıyla kapanır. Ardından release-engineer kararını verir ve iş Released'a geçer.",
     },
     releaseNotes: "Release notları",
     deployStatus: {
