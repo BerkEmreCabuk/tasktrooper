@@ -76,12 +76,8 @@ func (s *Service) TaskPreviews(ctx context.Context, repositoryID, taskID uuid.UU
 		}
 	}
 
-	for _, env := range envs {
-		comp, ok := active[env.ComponentID]
-		if !ok || !env.PerBranch() || env.Status != domain.LinkConfirmed || !env.Bound() {
-			continue
-		}
-		preview, err := s.taskPreview(ctx, env, comp, out.Branch, out.HeadSHA)
+	for _, env := range previewSources(envs, active) {
+		preview, err := s.taskPreview(ctx, env, active[env.ComponentID], out.Branch, out.HeadSHA)
 		if err != nil {
 			return domain.TaskPreviews{}, err
 		}
@@ -89,6 +85,33 @@ func (s *Service) TaskPreviews(ctx context.Context, repositoryID, taskID uuid.UU
 	}
 	sort.SliceStable(out.Previews, func(i, j int) bool { return out.Previews[i].ComponentName < out.Previews[j].ComponentName })
 	return out, nil
+}
+
+// previewSources is, per active component, the environment whose Vercel
+// project a branch is looked up in: its preview environment when one is
+// bound, else any other environment bound to a Vercel project. Vercel builds
+// every non-production push of a project as a preview, so a component linked
+// only for production still has per-branch previews to find.
+func previewSources(envs []domain.ComponentEnvironment, active map[uuid.UUID]domain.Component) []domain.ComponentEnvironment {
+	picked := make(map[uuid.UUID]domain.ComponentEnvironment)
+	var order []uuid.UUID
+	for _, env := range envs {
+		if _, ok := active[env.ComponentID]; !ok || env.Provider != domain.CloudVercel || env.Status != domain.LinkConfirmed || !env.Bound() {
+			continue
+		}
+		prev, seen := picked[env.ComponentID]
+		if !seen {
+			order = append(order, env.ComponentID)
+		}
+		if !seen || (env.PerBranch() && !prev.PerBranch()) {
+			picked[env.ComponentID] = env
+		}
+	}
+	out := make([]domain.ComponentEnvironment, 0, len(order))
+	for _, id := range order {
+		out = append(out, picked[id])
+	}
+	return out
 }
 
 func (s *Service) taskPreview(ctx context.Context, env domain.ComponentEnvironment, comp domain.Component, branch, sha string) (domain.TaskPreview, error) {

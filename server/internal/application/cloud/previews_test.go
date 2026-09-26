@@ -195,9 +195,40 @@ func (s *PreviewSuite) TestNoDeploymentYetIsStatusNoneWithEmptyFields() {
 	s.False(p.Protected)
 }
 
-func (s *PreviewSuite) TestNoPerBranchEnvironmentIsAnEmptyList() {
+func (s *PreviewSuite) TestProductionOnlyVercelComponentIsLookedUpInItsProject() {
 	s.Require().NoError(s.envs.DeleteEnvironment(s.ctx, s.preview.ID))
+	production := s.seedEnv(domain.EnvironmentProduction)
+	s.provider.previewFound = true
+	s.provider.preview = domain.CloudDeployment{ID: "dpl_1", Status: domain.CloudDeployReady, URL: "https://web-abc.vercel.app"}
+
+	out, err := s.svc.TaskPreviews(s.ctx, s.repoID, s.task.ID)
+	s.Require().NoError(err)
+
+	s.Equal([]previewCall{{domain.TaskBranchName(s.task), ""}}, s.provider.calls())
+	s.Require().Len(out.Previews, 1)
+	s.Equal(production.ID, out.Previews[0].EnvironmentID)
+	s.Equal(domain.TaskPreviewReady, out.Previews[0].Status)
+	s.Equal("https://web-abc.vercel.app", out.Previews[0].URL)
+}
+
+func (s *PreviewSuite) TestPreviewEnvironmentWinsOverProductionForTheSameComponent() {
 	s.seedEnv(domain.EnvironmentProduction)
+
+	out, err := s.svc.TaskPreviews(s.ctx, s.repoID, s.task.ID)
+	s.Require().NoError(err)
+
+	s.Len(s.provider.calls(), 1, "one lookup per component")
+	s.Require().Len(out.Previews, 1)
+	s.Equal(s.preview.ID, out.Previews[0].EnvironmentID)
+}
+
+func (s *PreviewSuite) TestNoVercelEnvironmentIsAnEmptyList() {
+	s.Require().NoError(s.envs.DeleteEnvironment(s.ctx, s.preview.ID))
+	ref := domain.CloudResourceRef{Kind: domain.CloudResourceCloudRunService, ID: "svc"}
+	s.envs.seed(domain.ComponentEnvironment{
+		RepositoryID: s.repoID, ComponentID: s.comp.ID, Environment: domain.EnvironmentProduction,
+		Status: domain.LinkConfirmed, Provider: domain.CloudGCP, AccountID: &s.acct.ID, Resource: &ref,
+	})
 
 	out, err := s.svc.TaskPreviews(s.ctx, s.repoID, s.task.ID)
 	s.Require().NoError(err)
