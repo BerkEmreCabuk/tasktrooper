@@ -236,6 +236,11 @@ func (s *TaskPRService) CommitTaskChanges(ctx context.Context, repositoryID, tas
 	if message == "" {
 		return domain.TaskCommitResult{}, fmt.Errorf("a commit message is required")
 	}
+	if !task.TaskType.PublishesBranch() {
+		return domain.TaskCommitResult{
+			Message: "This is an analysis: its deliverable is the documents attached to the task, and nothing of it is pushed. Keep any experiment in the local task workspace.",
+		}, nil
+	}
 	if s.git == nil {
 		return domain.TaskCommitResult{}, fmt.Errorf("git is not configured on this deployment")
 	}

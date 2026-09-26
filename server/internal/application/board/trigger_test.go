@@ -71,6 +71,23 @@ func TestTriggerMessageOmitsStandingCriteriaForAnaliz(t *testing.T) {
 	}
 }
 
+func TestTriggerMessageForbidsPushingAnAnaliz(t *testing.T) {
+	for _, col := range []domain.TaskColumn{
+		domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision,
+	} {
+		msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{
+			Title: "t", Column: col, TaskType: "analiz",
+		}}, analizWF, nil, nil)
+		if !strings.Contains(msg, "never push it") {
+			t.Errorf("column %s: analiz run is not told to keep its branch local:\n%s", col, msg)
+		}
+	}
+	msg := buildTriggerMessage(RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnInProgress}}, taskWF, nil, nil)
+	if strings.Contains(msg, "never push it") {
+		t.Errorf("a code task was told not to push:\n%s", msg)
+	}
+}
+
 func TestTriggerMessageListsOpenCriteriaForImplementers(t *testing.T) {
 	open := []domain.AcceptanceCriterion{
 		{ID: uuid.New(), Text: "Android button links to the Play Store listing"},

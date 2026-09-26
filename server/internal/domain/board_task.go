@@ -37,6 +37,13 @@ func ValidTaskType(t TaskType) bool {
 	}
 }
 
+// PublishesBranch is false for an analysis: it ships a document, not code. Its
+// agents may still branch and try things in the local task workspace, but none
+// of it is pushed or opened as a pull request.
+func (t TaskType) PublishesBranch() bool {
+	return t != TaskTypeAnaliz
+}
+
 // TaskKeyPrefix is the letter a task's key starts with: T-1 for work, B-1 for
 // a bug, A-1 for an analysis. Each prefix counts on its own, so the three
 // sequences do not interleave.

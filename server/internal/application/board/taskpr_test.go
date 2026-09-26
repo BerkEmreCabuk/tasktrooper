@@ -150,6 +150,21 @@ func TestCommitTaskChangesWithoutAWorkspaceIsANoOp(t *testing.T) {
 	assert.Zero(t, git.prPushCall, "nothing is pushed and no PR is opened for a branch that does not exist")
 }
 
+func TestCommitTaskChangesNeverPushesAnAnaliz(t *testing.T) {
+	repositoryID := uuid.New()
+	task := domain.BoardTask{ID: uuid.New(), RepositoryID: repositoryID, Key: "A-1", Title: "Plan the store link", TaskType: domain.TaskTypeAnaliz}
+	git := &taskPRGit{hasGit: true, headSHAs: []string{"aaa1111", "bbb2222"}}
+	svc, _ := newCommitFixture(task, repositoryID, git)
+
+	result, err := svc.CommitTaskChanges(context.Background(), repositoryID, task.ID, "try the idea")
+	require.NoError(t, err)
+
+	assert.False(t, result.Committed)
+	assert.Contains(t, result.Message, "analysis")
+	assert.Empty(t, git.commits)
+	assert.Zero(t, git.prPushCall)
+}
+
 func TestCommitTaskChangesSurvivesAFailedPROpen(t *testing.T) {
 	repositoryID := uuid.New()
 	task := domain.BoardTask{ID: uuid.New(), RepositoryID: repositoryID, Key: "DE-1", Title: "Add the store link"}

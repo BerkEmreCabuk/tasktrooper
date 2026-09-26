@@ -1678,7 +1678,7 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 				Msg("update task: workflow unavailable, skipping enter-stage side effects")
 		}
 
-		if wfErr == nil && wf.Has(*req.Column, domain.BehaviourEnsurePROnEnter) {
+		if wfErr == nil && wf.Has(*req.Column, domain.BehaviourEnsurePROnEnter) && updated.TaskType.PublishesBranch() {
 			s.ensurePullRequestAsync(ctx, updated)
 		}
 

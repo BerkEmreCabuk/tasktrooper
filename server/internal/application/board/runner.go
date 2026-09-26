@@ -1153,17 +1153,19 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 	}
 	run.Summary = truncateHead(run.Summary, 500)
 	if taskWorkspace != "" && resp.Clarification == nil && resp.ResourceBlock == nil && wf.Has(job.Task.Column, domain.BehaviourCommitOnFinish) {
-		commitMsg := r.writeCommitMessage(ctx, commitDetails{
-			TaskKey:   job.Task.Key,
-			Title:     job.Task.Title,
-			Summary:   run.Summary,
-			AgentName: agentRec.Name,
-			Writer:    agentWriterModel(agentRec),
-		})
-		if pushErr := r.git.CommitAndPush(ctx, taskWorkspace, commitMsg); pushErr != nil {
-			log.Warn().Err(pushErr).Str("task_id", job.Task.ID.String()).Msg("task workspace commit/push failed")
-		} else if r.branchIndexer != nil && taskBranch != "" {
-			r.branchIndexer.StartIndexBranch(ctx, job.RepositoryID, taskBranch, taskWorkspace)
+		if job.Task.TaskType.PublishesBranch() {
+			commitMsg := r.writeCommitMessage(ctx, commitDetails{
+				TaskKey:   job.Task.Key,
+				Title:     job.Task.Title,
+				Summary:   run.Summary,
+				AgentName: agentRec.Name,
+				Writer:    agentWriterModel(agentRec),
+			})
+			if pushErr := r.git.CommitAndPush(ctx, taskWorkspace, commitMsg); pushErr != nil {
+				log.Warn().Err(pushErr).Str("task_id", job.Task.ID.String()).Msg("task workspace commit/push failed")
+			} else if r.branchIndexer != nil && taskBranch != "" {
+				r.branchIndexer.StartIndexBranch(ctx, job.RepositoryID, taskBranch, taskWorkspace)
+			}
 		}
 		if buildVerified {
 			r.advanceToCodeReview(ctx, job, wf, taskWorkspace, toolUsage)
@@ -1889,7 +1891,8 @@ func (r *Runner) failRunOutOfBudget(
 	agentRec domain.Agent,
 	budgetErr *agent.BudgetExhaustedError,
 ) error {
-	if workspace != "" {
+	published := job.Task.TaskType.PublishesBranch()
+	if workspace != "" && published {
 		commitMsg := r.writeCommitMessage(ctx, commitDetails{
 			TaskKey:   job.Task.Key,
 			Title:     job.Task.Title,
@@ -1906,8 +1909,11 @@ func (r *Runner) failRunOutOfBudget(
 	}
 
 	if r.taskUpdater != nil {
-		content := "Run stopped before finishing — " + budgetErr.Error() +
-			"\n\nWork completed so far is committed to the task branch; the next run continues from there."
+		kept := "Work completed so far is committed to the task branch; the next run continues from there."
+		if !published {
+			kept = "Work completed so far stays in the local task workspace; the next run continues from there."
+		}
+		content := "Run stopped before finishing — " + budgetErr.Error() + "\n\n" + kept
 		if budgetErr.Partial != "" {
 			content += "\n\nAgent's own summary:\n\n" + budgetErr.Partial
 		}
@@ -2097,14 +2103,18 @@ func listsEveryCriterion(wf domain.Workflow, task domain.BoardTask) bool {
 	return isReviewColumn(wf, task.Column) || wf.Has(task.Column, domain.BehaviourCriterionVerdict)
 }
 
+const analizNoPushMessage = "\nThis analysis ships documents, not code. You may create a local branch in the task workspace and build or run " +
+	"things there to check an idea, but never push it: no `git push`, no commit_task_changes, no pull request. " +
+	"Nothing of this task goes to GitHub.\n"
+
 func standingCriteriaMessage(task domain.BoardTask) string {
-	if task.TaskType == "analiz" {
-		return ""
-	}
 	switch task.Column {
 	case domain.TaskColumnTodo, domain.TaskColumnInProgress, domain.TaskColumnNeedRevision:
 	default:
 		return ""
+	}
+	if !task.TaskType.PublishesBranch() {
+		return analizNoPushMessage
 	}
 	return "\nStanding acceptance criteria — they apply to every code task, they are not written on the card, and they are checked automatically before this task can be handed on:\n" +
 		"1. The project builds. A red build is not a finished task, whatever else is done.\n" +
