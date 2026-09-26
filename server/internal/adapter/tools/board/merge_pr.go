@@ -134,6 +134,7 @@ func isMergeRefusal(err error) bool {
 		domain.ErrMergeAlreadyMerged,
 		domain.ErrMergeClosed,
 		domain.ErrMergeChecksNotGreen,
+		domain.ErrMergeBaseRed,
 		domain.ErrMergeNotConfigured,
 		domain.ErrReleaseTargetMoved,
 		domain.ErrReleaseTargetUnverified,

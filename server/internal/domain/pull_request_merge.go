@@ -24,6 +24,13 @@ var (
 	// GitHub token, no PR client; distinct from a refusal about the PR itself,
 	// because the remedy is an operator's, not the agent's.
 	ErrMergeNotConfigured = errors.New("merge refused: merging is not configured on this deployment")
+	// ErrMergeBaseRed: GitHub blocks the merge because a required check is
+	// red, but that check is already red on the base branch's current head —
+	// not introduced by this pull request. GitHub itself will not merge a
+	// `blocked` PR regardless, so this still refuses; it exists so the
+	// refusal names the pre-existing failure instead of reading as a defect
+	// in the pull request.
+	ErrMergeBaseRed = errors.New("merge refused: a required check fails on the base branch's current head too")
 )
 
 // PullRequestMergeRequest is one squash-merge, fully specified by the caller.
@@ -86,6 +93,10 @@ type TaskPRMergeResult struct {
 	// Release is what the merge set in motion for the task's component: the
 	// release it opened (or joined), or that the merge itself was the release.
 	Release *ReleaseOpening `json:"release,omitempty"`
+	// PreexistingChecksNote is set when the merge proceeded over a red,
+	// non-required check (GitHub's `unstable`) that was already failing on
+	// the base branch's current head — see MergeTaskPullRequest.
+	PreexistingChecksNote string `json:"preexisting_checks_note,omitempty"`
 	// Message is the human sentence: what merged, and what did not go perfectly
 	// (a branch that could not be deleted, a SHA that could not be recorded)
 	// without pretending the merge itself failed.

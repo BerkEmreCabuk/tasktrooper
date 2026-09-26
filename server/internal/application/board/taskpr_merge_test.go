@@ -47,6 +47,28 @@ func (f *mergePRs) ReplyToReviewComment(context.Context, string, string, string,
 	return port.PullRequestComment{}, nil
 }
 
+// mergeChecksPRs is mergePRs plus port.PreMergeChecksReader, so tests control
+// which checks read as failing on the PR head vs. the base branch's current
+// head without hitting GitHub.
+type mergeChecksPRs struct {
+	mergePRs
+	baseSHA     string
+	baseSHAErr  error
+	failing     map[string][]string
+	failingErrs map[string]error
+}
+
+func (f *mergeChecksPRs) BranchHeadSHA(context.Context, string, string, string, string) (string, error) {
+	return f.baseSHA, f.baseSHAErr
+}
+
+func (f *mergeChecksPRs) FailingChecks(_ context.Context, _, _, _, ref string) ([]string, error) {
+	if err, ok := f.failingErrs[ref]; ok {
+		return nil, err
+	}
+	return f.failing[ref], nil
+}
+
 type mergeGates struct {
 	chainErr         error
 	pipeline         domain.TaskPipeline
@@ -470,6 +492,109 @@ func TestMergeTaskPullRequestRefusalMatrix(t *testing.T) {
 			assert.Empty(t, git.mergeReqs, "a refused merge must not call GitHub")
 		})
 	}
+}
+
+const mergeBaseSHA = "3333333333333333333333333333333333333333"
+
+func newMergeChecksFixture(task domain.BoardTask, pr port.PullRequest, prs *mergeChecksPRs, gates *mergeGates) (*TaskPRService, *taskPRGit, uuid.UUID) {
+	repositoryID := uuid.New()
+	tasks := &taskChatTaskStore{tasks: map[[2]uuid.UUID]domain.BoardTask{{repositoryID, task.ID}: task}}
+	git := &taskPRGit{hasGit: true, branch: pr.HeadRef}
+	prs.mergePRs = mergePRs{pr: pr}
+	svc := NewTaskPRService(TaskPRServiceDeps{
+		Tasks:         tasks,
+		Repos:         taskChatRepos{root: "/repos/widget"},
+		Git:           git,
+		PRs:           prs,
+		Tokens:        func(context.Context) (string, error) { return "tok", nil },
+		Gates:         gates,
+		WorkspaceRoot: "/data/workspaces",
+	})
+	return svc, git, repositoryID
+}
+
+func TestMergeTaskPullRequestMergesOverAPreexistingUnstableCheck(t *testing.T) {
+	task := mergeTask()
+	pr := openCleanPR()
+	pr.MergeableState = "unstable"
+	prs := &mergeChecksPRs{
+		baseSHA: mergeBaseSHA,
+		failing: map[string][]string{
+			mergeHeadSHA: {"server tests"},
+			mergeBaseSHA: {"server tests"},
+		},
+	}
+	gates := &mergeGates{pipeline: domain.TaskPipeline{Status: domain.PipelineStatusSuccess}}
+	svc, git, repositoryID := newMergeChecksFixture(task, pr, prs, gates)
+
+	result, err := svc.MergeTaskPullRequest(context.Background(), repositoryID, task.ID)
+	require.NoError(t, err)
+
+	assert.Len(t, git.mergeReqs, 1, "an unstable state with a pre-existing failure must still merge")
+	assert.True(t, result.Merged)
+	assert.Contains(t, result.PreexistingChecksNote, "server tests")
+	assert.Contains(t, result.PreexistingChecksNote, "main@"+domain.ShortSHA(mergeBaseSHA))
+	assert.Contains(t, result.Message, "server tests")
+}
+
+func TestMergeTaskPullRequestRefusesABlockedPreexistingFailureAsBaseRed(t *testing.T) {
+	task := mergeTask()
+	pr := openCleanPR()
+	pr.MergeableState = "blocked"
+	prs := &mergeChecksPRs{
+		baseSHA: mergeBaseSHA,
+		failing: map[string][]string{
+			mergeHeadSHA: {"server tests"},
+			mergeBaseSHA: {"server tests"},
+		},
+	}
+	gates := &mergeGates{pipeline: domain.TaskPipeline{Status: domain.PipelineStatusSuccess}}
+	svc, git, repositoryID := newMergeChecksFixture(task, pr, prs, gates)
+
+	_, err := svc.MergeTaskPullRequest(context.Background(), repositoryID, task.ID)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, domain.ErrMergeBaseRed)
+	assert.Contains(t, err.Error(), "server tests")
+	assert.Contains(t, err.Error(), "main@"+domain.ShortSHA(mergeBaseSHA))
+	assert.Empty(t, git.mergeReqs, "a base-red refusal must never call GitHub to merge anything")
+}
+
+func TestMergeTaskPullRequestRefusesUnstableWhenTheFailureIsNotOnTheBase(t *testing.T) {
+	task := mergeTask()
+	pr := openCleanPR()
+	pr.MergeableState = "unstable"
+	prs := &mergeChecksPRs{
+		baseSHA: mergeBaseSHA,
+		failing: map[string][]string{
+			mergeHeadSHA: {"server tests"},
+			mergeBaseSHA: {},
+		},
+	}
+	gates := &mergeGates{pipeline: domain.TaskPipeline{Status: domain.PipelineStatusSuccess}}
+	svc, git, repositoryID := newMergeChecksFixture(task, pr, prs, gates)
+
+	_, err := svc.MergeTaskPullRequest(context.Background(), repositoryID, task.ID)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, domain.ErrMergeChecksNotGreen)
+	assert.Empty(t, git.mergeReqs)
+}
+
+func TestMergeTaskPullRequestFallsBackToTheOldRefusalWhenTheBaseLookupFails(t *testing.T) {
+	task := mergeTask()
+	pr := openCleanPR()
+	pr.MergeableState = "unstable"
+	prs := &mergeChecksPRs{baseSHAErr: errors.New("network is down")}
+	gates := &mergeGates{pipeline: domain.TaskPipeline{Status: domain.PipelineStatusSuccess}}
+	svc, git, repositoryID := newMergeChecksFixture(task, pr, prs, gates)
+
+	_, err := svc.MergeTaskPullRequest(context.Background(), repositoryID, task.ID)
+
+	require.Error(t, err)
+	assert.ErrorIs(t, err, domain.ErrMergeChecksNotGreen)
+	assert.NotErrorIs(t, err, domain.ErrMergeBaseRed)
+	assert.Empty(t, git.mergeReqs)
 }
 
 func TestMergeTaskPullRequestRecordsAMergeItDidNotMake(t *testing.T) {

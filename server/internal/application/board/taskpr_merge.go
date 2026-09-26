@@ -105,10 +105,32 @@ func (s *TaskPRService) MergeTaskPullRequest(ctx context.Context, repositoryID, 
 		log.Warn().Str("task_id", taskID.String()).Int("pull_request", number).
 			Msg("merge: pull request is a legacy draft, so GitHub's mergeable state cannot be judged before un-drafting it")
 	}
-	if !pr.Draft && !mergeableStates[strings.ToLower(strings.TrimSpace(pr.MergeableState))] {
-		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"%w — GitHub reports pull request #%d as `%s` (expected `clean`). %s",
-			domain.ErrMergeChecksNotGreen, number, pr.MergeableState, mergeableStateRemedy(pr.MergeableState)))
+	var preexistingNote string
+	state := strings.ToLower(strings.TrimSpace(pr.MergeableState))
+	if !pr.Draft && !mergeableStates[state] {
+		proceed := false
+		if state == "unstable" || state == "blocked" {
+			if headFailing, baseFailing, baseRef, baseSHA, ok := s.preexistingBaseFailure(ctx, owner, repo, pr, token); ok && preexistingSubset(headFailing, baseFailing) {
+				switch state {
+				case "blocked":
+					return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
+						"%w — required checks fail on %s@%s too: %s — pre-existing on the base branch, not introduced by this pull request",
+						domain.ErrMergeBaseRed, baseRef, domain.ShortSHA(baseSHA), strings.Join(headFailing, ", ")))
+				case "unstable":
+					preexistingNote = fmt.Sprintf("merged over pre-existing failing checks: %s — they fail on %s@%s too",
+						strings.Join(headFailing, ", "), baseRef, domain.ShortSHA(baseSHA))
+					log.Info().Str("task_id", taskID.String()).Int("pull_request", number).
+						Str("base_ref", baseRef).Str("base_sha", baseSHA).Strs("failing_checks", headFailing).
+						Msg(preexistingNote)
+					proceed = true
+				}
+			}
+		}
+		if !proceed {
+			return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
+				"%w — GitHub reports pull request #%d as `%s` (expected `clean`). %s",
+				domain.ErrMergeChecksNotGreen, number, pr.MergeableState, mergeableStateRemedy(pr.MergeableState)))
+		}
 	}
 
 	switch err := domain.VerifiedCommitMatches(task.VerifiedSHA, pr.HeadSHA); {
@@ -148,14 +170,15 @@ func (s *TaskPRService) MergeTaskPullRequest(ctx context.Context, repositoryID, 
 	}
 
 	out := domain.TaskPRMergeResult{
-		Merged:         true,
-		PRNumber:       number,
-		PRURL:          prURL,
-		MergeCommitSHA: merge.MergeCommitSHA,
-		Branch:         pr.HeadRef,
-		BaseBranch:     pr.BaseRef,
-		BranchDeleted:  merge.BranchDeleted,
-		Undrafted:      merge.Undrafted,
+		Merged:                true,
+		PRNumber:              number,
+		PRURL:                 prURL,
+		MergeCommitSHA:        merge.MergeCommitSHA,
+		Branch:                pr.HeadRef,
+		BaseBranch:            pr.BaseRef,
+		BranchDeleted:         merge.BranchDeleted,
+		Undrafted:             merge.Undrafted,
+		PreexistingChecksNote: preexistingNote,
 	}
 	recordErr := s.recordMergeCommit(ctx, taskID, merge.MergeCommitSHA, prURL)
 	if s.releases != nil {
@@ -198,6 +221,57 @@ func (s *TaskPRService) pipelineIsGreen(ctx context.Context, repositoryID, taskI
 	return fmt.Errorf(
 		"%w — the last %s pipeline for this task FAILED.%s Send the task back to need_revision so the developer fixes it; a red build is not merged and then fixed on the default branch",
 		domain.ErrMergeChecksNotGreen, pipeline.Trigger, detail)
+}
+
+// preexistingBaseFailure reads which checks are red on the pull request's
+// head and on its base branch's current head, so an `unstable`/`blocked`
+// mergeable state can be told apart from a check this pull request actually
+// broke. ok is false whenever the comparison cannot be made — no
+// PreMergeChecksReader wired up, no base ref, or either read failing — and
+// the caller then falls back to refusing outright.
+func (s *TaskPRService) preexistingBaseFailure(ctx context.Context, owner, repo string, pr port.PullRequest, token string) (headFailing, baseFailing []string, baseRef, baseSHA string, ok bool) {
+	checker, supported := s.prs.(port.PreMergeChecksReader)
+	if !supported {
+		return nil, nil, "", "", false
+	}
+	baseRef = strings.TrimSpace(pr.BaseRef)
+	if baseRef == "" {
+		return nil, nil, "", "", false
+	}
+	sha, err := checker.BranchHeadSHA(ctx, token, owner, repo, baseRef)
+	if err != nil || strings.TrimSpace(sha) == "" {
+		return nil, nil, "", "", false
+	}
+	baseSHA = sha
+	baseFailing, err = checker.FailingChecks(ctx, token, owner, repo, baseSHA)
+	if err != nil {
+		return nil, nil, "", "", false
+	}
+	headFailing, err = checker.FailingChecks(ctx, token, owner, repo, pr.HeadSHA)
+	if err != nil {
+		return nil, nil, "", "", false
+	}
+	return headFailing, baseFailing, baseRef, baseSHA, true
+}
+
+// preexistingSubset reports whether every one of head's failing checks also
+// fails on base — the criterion for "pre-existing", not "introduced by this
+// pull request". A PR with no failing checks of its own is never pre-existing
+// (there is nothing to explain away).
+func preexistingSubset(head, base []string) bool {
+	if len(head) == 0 {
+		return false
+	}
+	inBase := make(map[string]bool, len(base))
+	for _, b := range base {
+		inBase[b] = true
+	}
+	for _, h := range head {
+		if !inBase[h] {
+			return false
+		}
+	}
+	return true
 }
 
 func mergeableStateRemedy(state string) string {
@@ -267,6 +341,9 @@ func mergeMessage(out domain.TaskPRMergeResult, branchDeleteErr string, recordEr
 		out.PRNumber, fallback(out.BaseBranch, "the base branch"), domain.ShortSHA(out.MergeCommitSHA))
 	if out.Undrafted {
 		sb.WriteString(" The PR was still a draft and was marked ready for review first.")
+	}
+	if out.PreexistingChecksNote != "" {
+		sb.WriteString(" " + out.PreexistingChecksNote + ".")
 	}
 	switch {
 	case out.Release != nil:

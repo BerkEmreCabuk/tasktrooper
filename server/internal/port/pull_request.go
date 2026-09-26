@@ -69,3 +69,19 @@ type PullRequestClient interface {
 	// looks for the answer.
 	ReplyToReviewComment(ctx context.Context, token, owner, repo string, number int, commentID int64, body string) (PullRequestComment, error)
 }
+
+// PreMergeChecksReader is an optional capability of a PullRequestClient: which
+// checks are red for a ref, and a branch's current head commit. A merge
+// blocked by GitHub's `unstable`/`blocked` mergeable state uses it to tell a
+// check failing on the pull request itself from one already red on the base
+// branch. Implementations that lack it are type-asserted for it, and the
+// caller falls back to the plain refusal when the assertion fails.
+type PreMergeChecksReader interface {
+	// FailingChecks returns the names of every check run and commit status
+	// that is red for ref (a SHA or branch name) — check run `name`, status
+	// `context`.
+	FailingChecks(ctx context.Context, token, owner, repo, ref string) ([]string, error)
+	// BranchHeadSHA is the branch's current head commit — not a PR's base SHA
+	// at the time it was opened, which can be stale.
+	BranchHeadSHA(ctx context.Context, token, owner, repo, branch string) (string, error)
+}
