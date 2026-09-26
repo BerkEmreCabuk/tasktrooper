@@ -23,6 +23,8 @@ Document it in the epic task description or via `add_task_document`.
 
 When a request grows while work is in progress: **create a new task** for the expansion. Do NOT edit the AC of an in-progress task — a moving target invalidates the developer's plan and QA's scenarios and silently inflates the estimate.
 
+**Except when the human changes the task themselves.** A comment the task's owner writes ON the task ("also show the logos in the marquee"), or their own edit of its description or criteria, is not mid-flight expansion to push back on — it is the task's requirement now. It outranks the original description and its out-of-scope list; every role builds, reviews, tests and accepts against it. Do not split it into a new task or treat it as creep unless the human asks for that.
+
 ## Worked Example
 
 Epic: "task export."

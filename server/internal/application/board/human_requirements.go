@@ -1,0 +1,58 @@
+package board
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+)
+
+// humanRequirementsLimit keeps the newest of the human's comments: a later
+// one supersedes an earlier one, so the oldest are the ones worth dropping.
+const humanRequirementsLimit = 10
+
+// humanRequirementsMessage hands every run on a task the comments the human
+// wrote on it, as requirements. Before it, only a revision run saw comments at
+// all (and only the last few of anyone's), so a scope change the human wrote
+// on the card was built by the developer and then flagged as scope creep by
+// the reviewer, who judged the diff against the description alone.
+func humanRequirementsMessage(comments []domain.TaskComment) string {
+	human := make([]domain.TaskComment, 0, len(comments))
+	for _, c := range comments {
+		content := strings.TrimSpace(c.Content)
+		if c.AuthorType != "user" || content == "" || prompt.IsClarificationComment(content) {
+			continue
+		}
+		// A double-submitted comment is one requirement, not two.
+		if n := len(human); n > 0 && strings.TrimSpace(human[n-1].Content) == content {
+			continue
+		}
+		human = append(human, c)
+	}
+	if len(human) == 0 {
+		return ""
+	}
+	if len(human) > humanRequirementsLimit {
+		human = human[len(human)-humanRequirementsLimit:]
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## The human's requirements written on this task (authoritative — they amend the description and acceptance criteria)\n")
+	sb.WriteString("The person who owns this task wrote these comments on it, oldest first. Each one is part of what the task asks for: " +
+		"where it adds to, changes or contradicts the description, its out-of-scope list or an acceptance criterion, the comment wins, " +
+		"and a later comment wins over an earlier one. Work that implements them is IN scope — build it, review it, test it and accept it " +
+		"against them exactly as you would an acceptance criterion; never flag it as scope creep, and never ask for it to be reverted or split into another task.\n")
+	for _, c := range human {
+		content := strings.TrimSpace(c.Content)
+		if len(content) > 2000 {
+			content = truncateHead(content, 2000) + "…"
+		}
+		stamp := ""
+		if !c.CreatedAt.IsZero() {
+			stamp = c.CreatedAt.UTC().Format("2006-01-02 15:04Z") + " "
+		}
+		sb.WriteString(fmt.Sprintf("- %s%s\n", stamp, content))
+	}
+	return sb.String()
+}

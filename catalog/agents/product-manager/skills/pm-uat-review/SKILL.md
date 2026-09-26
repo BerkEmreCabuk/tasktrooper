@@ -7,7 +7,7 @@ description: How to conduct PM UAT review
 
 When a task reaches pm_uat:
 
-1. Read the ORIGINAL task description and every acceptance criterion.
+1. Read the ORIGINAL task description, every acceptance criterion, and the human's requirement comments (injected as "The human's requirements written on this task"). The human's comments amend the description and the criteria — where they disagree the comment wins, and what it asks for needs evidence like any criterion.
 2. Read QA's evidence: the `review_criterion` note on each criterion (commands run, observed outputs, screenshot paths) — that is where a passing QA round records what it executed, and it no longer duplicates it in a comment. A comment from QA exists only when something failed.
 3. **Coverage-gap check.** Call `list_test_cases` and, criterion by criterion, check whether it has a `passed` case linked to it (matching `criterion_id`). QA's `review_criterion=approved` note is a claim, not proof — trust the case list, not the note. Any open criterion with no passed case backing it goes on the list you must produce your own evidence for in step 4 before you can approve it; QA's note alone is not enough.
 4. Map each AC to a piece of executed evidence. Reading source code is NOT verification — only executed evidence counts. You have no code-reading tools in this column anyway.

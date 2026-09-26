@@ -155,3 +155,15 @@ func TestRevisionCommentsMessageEmptyWithoutFeedback(t *testing.T) {
 	assert.Empty(t, revisionCommentsMessage(only))
 	assert.Empty(t, revisionCommentsMessage(nil))
 }
+
+func TestRevisionCommentsMessageLeavesTheHumansCommentsToTheirOwnMessage(t *testing.T) {
+	comments := []domain.TaskComment{
+		{AuthorType: "user", Content: "Show the logos in the runtimes marquee too."},
+		{AuthorType: "agent", Content: "Reviewer: RuntimeLogo has an empty alt."},
+	}
+
+	msg := revisionCommentsMessage(comments)
+
+	assert.Contains(t, msg, "empty alt")
+	assert.NotContains(t, msg, "runtimes marquee")
+}

@@ -934,6 +934,7 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 	}
 	analysisMsg = r.analysisContext(ctx, job)
 	comments := r.taskComments(ctx, job)
+	humanMsg := humanRequirementsMessage(comments)
 	if job.isRevision() {
 		revisionMsg = revisionCommentsMessage(comments)
 		reviewMsg = r.reviewAnnotationsMessage(ctx, job)
@@ -970,6 +971,9 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 		history = append(history, domain.Message{Role: domain.RoleSystem, Content: memMsg})
 	}
 	history = append(history, domain.Message{Role: domain.RoleUser, Content: triggerMsg})
+	if humanMsg != "" {
+		history = append(history, domain.Message{Role: domain.RoleSystem, Content: humanMsg})
+	}
 	if analysisMsg != "" {
 		history = append(history, domain.Message{Role: domain.RoleSystem, Content: analysisMsg})
 	}
@@ -1948,7 +1952,8 @@ func (r *Runner) taskComments(ctx context.Context, job RunJob) []domain.TaskComm
 func revisionCommentsMessage(comments []domain.TaskComment) string {
 	feedback := make([]domain.TaskComment, 0, len(comments))
 	for _, c := range comments {
-		if !prompt.IsClarificationComment(c.Content) {
+		// The human's own comments ride in humanRequirementsMessage, on every run.
+		if c.AuthorType != "user" && !prompt.IsClarificationComment(c.Content) {
 			feedback = append(feedback, c)
 		}
 	}
@@ -2243,6 +2248,7 @@ Board bookkeeping is not work and is never a step of its own:
 
 Event rules:
 - For need_revision: the reviewer's feedback is in the task comments provided in your context. Fix the work accordingly in this run; the hand-off back to code_review is automatic. Do not ask the human to repeat feedback that is already in the comments.
+- When your context has "The human's requirements written on this task", those comments amend the description and acceptance criteria for every role alike — the developer builds them, the reviewer, QA and PM judge the work against them. What they ask for is never scope creep.
 - If the payload has resumed=question_answered: you previously stopped on the question in payload.question and the human replied in payload.answer. Continue the work from where you stopped using that answer; do not ask it again.
 - Never move your own task to need_revision or back to todo — need_revision is how REVIEWERS hand work back to you. If you are missing information, use ask_user; the system parks the task as blocked until the human answers.
 - Only claim tasks that are unassigned or already assigned to you.
@@ -2296,6 +2302,10 @@ const handoffIsAutomatic = verifyBeforeFinishing +
 	"That message is your report to the system, NOT a card comment: a run that went green writes nothing on the task, because the diff, the pull request, the pipeline result and the ticked criteria already say it. " +
 	"Use add_task_comment only for something the next person has to act on — a question you could not answer yourself, a part of the task you did not do and why, a risk or a follow-up somebody must pick up."
 
+// humanRequirementsQA follows qaExecutionInstruction, which ends in a sentence.
+const humanRequirementsQA = " The human's requirement comments on the task, when your context has them, are tested exactly like acceptance criteria: " +
+	"a requirement they add that the product does not meet is a failure, and behaviour they asked for is never a deviation."
+
 const qaExecutionInstruction = "Test it as a black box, on a RUNNING product. " +
 	"Start by resolving the environment, before anything else: call get_deploy_target — if it returns a stage " +
 	"base_url, that is where you test (the deploy for this task already ran on entry to ready_for_qa; verify the " +
@@ -2339,7 +2349,7 @@ func columnInstruction(wf domain.Workflow, task domain.BoardTask) string {
 			"The pull request and its complete diff are in your context — READ the diff and review those changes. " +
 			"Do not run the app, do not run builds or tests, and do not fix anything yourself: the build/test pipeline " +
 			"already ran on entry (get_pipeline_status is its result) and fixes are the developer's to make. " +
-			"Judge three things: (1) do the changes deliver what the task and its acceptance criteria asked for, " +
+			"Judge three things: (1) do the changes deliver what the task, its acceptance criteria and the human's requirement comments asked for, " +
 			"(2) is the code itself sound (correctness, layer boundaries, error handling, security, tests), " +
 			"(3) does the change break anything elsewhere in the domain — for that, read the surrounding code the diff " +
 			"touches (grep_code, expand_symbol_context, codebase_search) as much as you need. " +
@@ -2353,7 +2363,7 @@ func columnInstruction(wf domain.Workflow, task domain.BoardTask) string {
 		return "This task is still in `ready_for_qa`: the automatic move into in_qa did not go through, " +
 			"so testing has NOT started and the board does not show this task as under test. " +
 			"Move it to in_qa yourself as the opening action of your first testing step (not as a step of its own), " +
-			"then run the tests in this same run. " + qaExecutionInstruction +
+			"then run the tests in this same run. " + qaExecutionInstruction + humanRequirementsQA +
 			" Record your own verdict on each acceptance criterion with " +
 			"review_criterion as you verify it — approve only what you executed, reject with a note saying what failed. " +
 			"Finish from in_qa: every acceptance criterion passes → " +
@@ -2361,13 +2371,13 @@ func columnInstruction(wf domain.Workflow, task domain.BoardTask) string {
 			"and comment the numbered expected-vs-actual per failure."
 	case domain.TaskColumnInQA:
 		return "This task is ALREADY in `in_qa` — testing is under way and the move you might plan first has happened. " +
-			qaExecutionInstruction +
+			qaExecutionInstruction + humanRequirementsQA +
 			" Continue and finish the scenarios in this run, recording your verdict per acceptance criterion with " +
 			"review_criterion (approve what you executed and observed; reject with an expected-vs-actual note), then " +
 			"leave the column: all criteria pass → " + passTo + ", evidence in the criterion notes and no comment on the card (a pass is not news); " +
 			"any failure → need_revision with a comment giving expected-vs-actual per failure. Never leave a task parked in in_qa."
 	case domain.TaskColumnPMUAT:
-		return "This task is in `pm_uat`: acceptance control. Compare the original request and every acceptance criterion " +
+		return "This task is in `pm_uat`: acceptance control. Compare the original request, the human's requirement comments on the task and every acceptance criterion " +
 			"against QA's executed evidence — which lives in the review_criterion note of each criterion, not in a comment (a QA round that passed writes none) — AND verify the critical flows yourself on the stage " +
 			"environment with the browser tools (get_deploy_target resolves the stage base_url; browser_navigate → " +
 			"browser_wait_for → browser_fill/browser_click, browser_screenshot as evidence, browser_set_viewport to walk the " +
