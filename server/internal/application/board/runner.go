@@ -1642,7 +1642,10 @@ func (r *Runner) failRun(ctx context.Context, run domain.TaskAgentRun, err error
 }
 
 func isUngroundedAnalysis(wf domain.Workflow, task domain.BoardTask, resp domain.AgentResponse, usage *registry.ToolUsage) bool {
-	if !wf.TypeHas(domain.BehaviourRequireRepoGrounding) || resp.Clarification != nil || usage == nil {
+	// Only the columns that produce the analysis document: in done the approved
+	// plan is decomposed into tasks, which needs no fresh read of the code.
+	if !wf.TypeHas(domain.BehaviourRequireRepoGrounding) || !wf.Has(task.Column, domain.BehaviourAdvanceOnDocument) ||
+		resp.Clarification != nil || usage == nil {
 		return false
 	}
 	return !usage.UsedAny(domain.CodeExplorationTools...)

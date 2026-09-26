@@ -16,7 +16,7 @@ func usageWith(tools ...string) *registry.ToolUsage {
 }
 
 func TestIsUngroundedAnalysis(t *testing.T) {
-	analiz := domain.BoardTask{TaskType: "analiz"}
+	analiz := domain.BoardTask{TaskType: "analiz", Column: domain.TaskColumnInProgress}
 	answered := domain.AgentResponse{Message: domain.Message{Content: "here is the spec"}}
 
 	cases := []struct {
@@ -39,6 +39,20 @@ func TestIsUngroundedAnalysis(t *testing.T) {
 			resp:  answered,
 			usage: usageWith("run_terminal", "codebase_search"),
 			want:  false,
+		},
+		{
+			name:  "decomposing an approved analiz in done needs no fresh read of the code",
+			task:  domain.BoardTask{TaskType: "analiz", Column: domain.TaskColumnDone},
+			resp:  answered,
+			usage: usageWith("list_task_documents", "create_board_task", "move_board_task"),
+			want:  false,
+		},
+		{
+			name:  "revising a rejected analiz still has to read the code",
+			task:  domain.BoardTask{TaskType: "analiz", Column: domain.TaskColumnNeedRevision},
+			resp:  answered,
+			usage: usageWith("list_task_documents", "add_task_document"),
+			want:  true,
 		},
 		{
 			name:  "implementation task is not gated",
