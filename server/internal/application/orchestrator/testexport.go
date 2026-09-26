@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -102,6 +103,35 @@ func MarkTaskBlockedForTest(ctx context.Context, catalog port.CatalogStore, plan
 
 func BuildReplannerSystemPromptForTest() string {
 	return buildReplannerSystemPrompt(nil, nil)
+}
+
+func PipelineCorrectionForTest(badResponse string, err error) []domain.Message {
+	return pipelineCorrection(badResponse, err)
+}
+
+func PipelineRejectionForTest(badResponse string, err error) []domain.Message {
+	return pipelineRejection(badResponse, err)
+}
+
+func ClarificationBlockedReasonForTest(req domain.ClarificationRequest) string {
+	return clarificationBlockedReason(req)
+}
+
+func PriorAttemptNoteForTest(number int, err error, stats agent.RunStats, used map[string]int, digest string) string {
+	p := priorAttempt{Number: number, Err: err, Stats: stats, Used: used, Digest: digest}
+	return p.note()
+}
+
+func ValidateClarificationQuestionsForTest(questions []domain.ClarificationQuestion) error {
+	return validateClarificationQuestions(questions)
+}
+
+func SynthesizeSystemPromptForTest() string {
+	return synthesizeSystemPrompt()
+}
+
+func SynthesizeUserContentForTest(userMessage, summary, fullResults string) string {
+	return synthesizeUserContent(userMessage, summary, fullResults)
 }
 
 func BuildPlannerPMSoloPromptForTest(lang string) string {

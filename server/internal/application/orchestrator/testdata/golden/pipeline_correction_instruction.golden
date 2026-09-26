@@ -1,0 +1,3 @@
+Your response could not be parsed: unexpected end of JSON input.
+Fix that exact spot. Common causes: a comma before a closing } or ], two commas in a row, an empty array element like [,], a missing value, or an unescaped quote inside a string.
+Return ONLY corrected valid JSON matching the schema, with no other text.

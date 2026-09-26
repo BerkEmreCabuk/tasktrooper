@@ -1,0 +1,1 @@
+task r1 repeats the title of task t1, which this run already ran ("Ship it"). A subtask that restates finished work runs it a second time and the board shows the same step twice. Repair by describing what is still MISSING, with its own distinct title, and reference the finished task in depends_on

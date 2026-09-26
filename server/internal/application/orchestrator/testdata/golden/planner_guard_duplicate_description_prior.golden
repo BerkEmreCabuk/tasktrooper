@@ -1,0 +1,1 @@
+task r1 repeats the description of task t1, which this run already ran. Renaming a finished instruction does not make it a new one — it runs the same work again and the board shows the round twice. Describe what is still MISSING instead, and reference the finished task in depends_on

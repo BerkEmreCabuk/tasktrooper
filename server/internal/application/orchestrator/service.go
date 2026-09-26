@@ -453,15 +453,23 @@ func marshalStoredPlan(output domain.PlannerOutput, verification *domain.Verific
 	return goccyjson.Marshal(doc)
 }
 
+func synthesizeSystemPrompt() string {
+	return "Summarize the orchestration results concisely for the user. Preserve key outcomes and file paths. Respond in the same language as the user request."
+}
+
+func synthesizeUserContent(userMessage, summary, fullResults string) string {
+	return strings.Join([]string{
+		"User request: " + userMessage,
+		"Plan summary: " + summary,
+		"Task results:\n" + fullResults,
+	}, "\n\n")
+}
+
 func (s *Service) synthesize(ctx context.Context, userMessage, summary, fullResults, model string, providerType domain.LLMProviderType) (string, error) {
 	resp, err := s.llm.Chat(ctx, domain.AgentRequest{
 		Messages: []domain.Message{
-			{Role: domain.RoleSystem, Content: "Summarize the orchestration results concisely for the user. Preserve key outcomes and file paths. Respond in the same language as the user request."},
-			{Role: domain.RoleUser, Content: strings.Join([]string{
-				"User request: " + userMessage,
-				"Plan summary: " + summary,
-				"Task results:\n" + fullResults,
-			}, "\n\n")},
+			{Role: domain.RoleSystem, Content: synthesizeSystemPrompt()},
+			{Role: domain.RoleUser, Content: synthesizeUserContent(userMessage, summary, fullResults)},
 		},
 		Model:        model,
 		ProviderType: providerType,
