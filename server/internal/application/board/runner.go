@@ -2135,7 +2135,7 @@ func reviewCriteriaHeader(column domain.TaskColumn) string {
 			"Never move the task to need_revision just to look for these ids: they are here.\n" + carryOver
 	case domain.TaskColumnPMUAT:
 		return "\nAcceptance criteria — record YOUR OWN PM verdict on EACH id below with review_criterion " +
-			"(approve only what executed evidence and your own check on stage cover; reject naming the gap). " +
+			"(approve only what you verified yourself by running the product; reject naming the gap). " +
 			"The developer's checkmark and QA's check are not your verdict. " +
 			"The forward move is refused while any id lacks your verdict on repositories that require criteria. " +
 			"Never move the task to need_revision just to look for these ids: they are here.\n" + carryOver
@@ -2387,15 +2387,7 @@ func columnInstruction(wf domain.Workflow, task domain.BoardTask) string {
 			"leave the column: all criteria pass → " + passTo + ", evidence in the criterion notes and no comment on the card (a pass is not news); " +
 			"any failure → need_revision with a comment giving expected-vs-actual per failure. Never leave a task parked in in_qa."
 	case domain.TaskColumnPMUAT:
-		return "This task is in `pm_uat`: acceptance control. Compare the original request, the human's requirement comments on the task and every acceptance criterion " +
-			"against QA's executed evidence — which lives in the review_criterion note of each criterion, not in a comment (a QA round that passed writes none) — AND verify the critical flows yourself on the stage " +
-			"environment with the browser tools (get_deploy_target resolves the stage base_url; browser_navigate → " +
-			"browser_wait_for → browser_fill/browser_click, browser_screenshot as evidence, browser_set_viewport to walk the " +
-			"same flow on a phone — never against production). " +
-			"Record YOUR verdict per criterion with review_criterion — " +
-			"the developer's checkmark and QA's check are not yours. Approve a criterion only when executed evidence covers it; " +
-			"reject with a note naming the gap. All approved → move to human_uat and write no comment: the move and the approved criteria are the verdict; " +
-			"any gap → move to need_revision with a numbered gap-list comment. Never approve by reading code — reading source is not verification."
+		return "This task is in `pm_uat`: acceptance control. Follow your pm_uat column instructions — verify by running the product, never by reading code."
 	case domain.TaskColumnDone:
 		// Reachable only through the merge wake or a release hand-back: a done card with an unmerged PR, or a
 		// release the sweeper just settled, dispatched to the release engineer and nobody else.

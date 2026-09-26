@@ -173,15 +173,17 @@ func developerToolPolicy() domain.ToolPolicy {
 }
 
 func productManagerToolPolicy() domain.ToolPolicy {
-	tools := make([]string, 0, len(roleWebTools)+len(roleCodeTools)+len(roleBrowserTools)+len(roleBoardReadTools)+len(roleBoardCreateTools)+len(roleBoardDeleteTools)+len(roleWorkspaceManageTools)+len(roleMemoryTools)+len(roleSkillTools)+2)
+	tools := make([]string, 0, len(roleWebTools)+len(roleCodeTools)+len(roleBrowserTools)+len(roleBoardReadTools)+len(roleBoardCreateTools)+len(roleBoardDeleteTools)+len(roleWorkspaceManageTools)+len(roleMemoryTools)+len(roleSkillTools)+4)
 	tools = append(tools, roleWebTools...)
 	// Read-only code tools: the PM verifies real file/endpoint names for technical_description — no shell.
 	tools = append(tools, roleCodeTools...)
-	// pm_uat: the PM walks the critical flows on stage; get_deploy_target resolves stage base_url.
+	// pm_uat: the PM walks the critical flows itself, in the browser; get_deploy_target resolves a stage base_url when one exists.
 	tools = append(tools, roleBrowserTools...)
 	tools = append(tools, roleMobileTools...)
 	// update_deploy_target only writes base_url/health_url when UAT finds the stage address unrecorded.
 	tools = append(tools, "get_deploy_target", "update_deploy_target")
+	// pm_uat: the PM launches the task's own build and walks it in the browser — no shell, so no other way to see it run.
+	tools = append(tools, "get_task_preview", "start_task_preview")
 	tools = append(tools, roleBoardReadTools...)
 	tools = append(tools, roleBoardCreateTools...)
 	tools = append(tools, roleBoardDeleteTools...)
@@ -241,7 +243,8 @@ func qaToolPolicy() domain.ToolPolicy {
 	// Green CI and stage base_url for the suite; prod requests banned — the rule layer says so separately.
 	tools = append(tools, "get_pipeline_status", "get_deploy_target", "update_deploy_target")
 	// The task branch's own Vercel preview, the first choice of test environment when it is built from the PR head.
-	tools = append(tools, "get_task_preview")
+	// start_task_preview runs the same checkout locally — QA already has the shell to hand-start a dev server, this is the shortcut.
+	tools = append(tools, "get_task_preview", "start_task_preview")
 	tools = append(tools, rolePRReadTools...)
 	tools = append(tools, roleMemoryTools...)
 	tools = append(tools, roleSkillTools...)

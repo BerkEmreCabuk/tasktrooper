@@ -1680,6 +1680,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			Git:           gitClient,
 			WorkspaceRoot: cfg.Storage.Sessions.WorkspaceRoot,
 		})
+		boardKit.LocalPreviews = localPreviewSvc
 
 		if settingsStore != nil && cfg.Tools.BoilerplateCatalog.Enabled {
 			e.reg.Register(boilerplatetools.New(settingsStore))

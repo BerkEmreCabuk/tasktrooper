@@ -35,6 +35,8 @@ tool_policy:
         - mobile_release_device
         - get_deploy_target
         - update_deploy_target
+        - get_task_preview
+        - start_task_preview
         - list_board_tasks
         - list_ready_tasks
         - move_board_task

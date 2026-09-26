@@ -161,6 +161,11 @@ func TestPMUATRunPolicyLosesCodeExplorationTools(t *testing.T) {
 			}
 			assert.Contains(t, policy.AllowTools, "browser_navigate")
 			assert.Contains(t, policy.AllowTools, "review_criterion")
+			// The PM's own way to see the product run with no stage/preview
+			// environment: neither a workspace writer nor code reading, so
+			// strip_writers/no_code_reading must not have taken it.
+			assert.Contains(t, policy.AllowTools, "start_task_preview")
+			assert.Contains(t, policy.AllowTools, "get_task_preview")
 		})
 	}
 }

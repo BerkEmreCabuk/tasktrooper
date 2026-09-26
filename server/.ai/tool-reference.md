@@ -111,7 +111,7 @@ Repository-scoped like the other task tools: the task is resolved against the ag
 
 ### `get_task_preview`
 
-The task branch's per-branch preview deployment (`internal/adapter/tools/board/task_preview.go`, backed by `cloud.Service.TaskPreviews`). Read-only, held by `qa-agent`. Optional `task_id` (UUID or board key; defaults to the run's task), repository-scoped like `get_pipeline_status`.
+The task branch's per-branch preview deployment (`internal/adapter/tools/board/task_preview.go`, backed by `cloud.Service.TaskPreviews`). Read-only, held by `qa-agent` and `product-manager`. Optional `task_id` (UUID or board key; defaults to the run's task), repository-scoped like `get_pipeline_status`.
 
 It looks at every active component whose `preview` environment is `per_branch` (bound to a Vercel project) and asks Vercel for the newest non-production deployment of the task's branch — the PR's head branch when GitHub is connected, else `domain.TaskBranchName` — preferring the one built from the PR head commit.
 
@@ -125,6 +125,20 @@ Response JSON: `{branch, pr_head_sha?, previews: [...], note?}`. Each preview is
 | `notes` | still building, older than the PR head, failed build, or protected with no bypass (the human creates one in the Vercel project's Settings → Deployment Protection) |
 
 The bypass secret reaches only this tool's output: the HTTP API returns `bypass_configured`, never the secret, and nothing logs it.
+
+### `start_task_preview`
+
+Starts (or reuses) the task branch's LOCAL preview (`internal/adapter/tools/board/local_preview.go`, backed by `application/localpreview.Service`): checks the branch out into the task workspace, detects a run command, starts it, and returns its `http://localhost` URL — the fallback for a repository with no per-branch Vercel preview and no stage environment. Held by `qa-agent` and `product-manager`; neither has a shell, so this is their only way to launch the product themselves.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `task_id` | string | no | Board task UUID or key; defaults to the run's task |
+
+If this repository already has an active preview for THIS task (`starting`/`running`), it is returned as-is rather than restarted. Otherwise a new one is started, replacing any preview the repository had for a different task. Either way, the call polls the preview's status for a few seconds before returning, since a dev server usually prints its URL quickly.
+
+Response JSON: `{status, url?, branch, command, detail?, log_tail?, note}`. `url` is empty until the process has printed a `http://localhost:<port>` line; `log_tail` (last 15 lines) is included when the preview failed or the URL has not appeared yet. `note` tells the caller what to do next: open `url` with `browser_navigate`, call the tool again because no URL has appeared, or report `detail`/`log_tail` on the task because the preview failed.
+
+Never production — this is the task's own branch, running on this machine.
 
 ### `record_test_cases` / `set_test_case_result` / `list_test_cases`
 

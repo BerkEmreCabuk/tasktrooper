@@ -33,7 +33,7 @@ need_revision ← any gate that rejects (code_review, in_qa, pm_uat, human_uat)
 | ready_for_qa | QA (queue — QA takes it into in_qa) | No |
 | in_qa | QA (testing in progress) | No |
 | need_revision | developer / architect | Read the reason; clarify AC if the gap is a requirements ambiguity, else leave the owner to fix |
-| **pm_uat** | **PM** | **Yes** — verify against AC using QA's evidence (see pm-uat-review) |
+| **pm_uat** | **PM** | **Yes** — verify against AC by walking each flow yourself in the browser; QA's evidence is a cross-check, not a substitute (see pm-uat-review) |
 | human_uat | stakeholder | No — stakeholder reviews |
 | done / released | — | Terminal; released per project convention |
 
@@ -41,7 +41,7 @@ need_revision ← any gate that rejects (code_review, in_qa, pm_uat, human_uat)
 
 - **backlog:** create tasks here; the stakeholder reviews/prioritizes before agents pick them up.
 - **todo:** move approved tasks here to trigger the assignee.
-- **pm_uat:** review against AC. All AC covered by QA evidence → `human_uat` with a "PM UAT passed: [what was verified]" comment. Any gap → `need_revision` with the specific AC gap quoted.
+- **pm_uat:** review against AC by walking each one yourself in the browser (QA's evidence is a cross-check, not a substitute). All AC confirmed → `human_uat` with a "PM UAT passed: [what was verified]" comment. Any gap → `need_revision` with the specific AC gap quoted.
 
 Everything else (analiz_review, code_review, QA columns, human_uat) is another actor's gate — don't move tasks through them.
 
@@ -49,7 +49,7 @@ Everything else (analiz_review, code_review, QA columns, human_uat) is another a
 
 - Moving an analiz task out of `analiz_review` — that's the human's approval gate.
 - Advancing a task in `code_review` — that's the architect's.
-- Approving in `pm_uat` by reading code instead of QA's executed evidence.
+- Approving in `pm_uat` by reading code, or on QA's evidence alone, instead of walking the flow yourself.
 
 ## Red Flags
 

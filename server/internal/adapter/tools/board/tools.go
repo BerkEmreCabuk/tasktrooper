@@ -134,6 +134,10 @@ type ToolKit struct {
 	// Previews backs get_task_preview. Built after this registration (it is
 	// the cloud service), so it is read at call time like Releases.
 	Previews TaskPreviewReader
+	// LocalPreviews backs start_task_preview. Built after this registration
+	// (it needs the workspace root and git wiring), so it is read at call
+	// time like Previews.
+	LocalPreviews LocalPreviewRunner
 }
 
 // SubscriptionLister is the read-only slice of port.BoardConfigStore
@@ -171,6 +175,7 @@ func NewExecutors(kit *ToolKit) []port.ToolExecutor {
 		newBoardSummaryTool(kit),
 		newGetPipelineStatusTool(kit),
 		newGetTaskPreviewTool(kit),
+		newStartTaskPreviewTool(kit),
 	}
 	if kit.Workspace != nil {
 		execs = append(execs,
