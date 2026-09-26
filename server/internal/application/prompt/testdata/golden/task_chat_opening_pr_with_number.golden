@@ -1,0 +1,12 @@
+**TT-2 — Add feature**
+Column: `in_progress` · unassigned
+
+Add the widget to the dashboard.
+
+Acceptance criteria:
+- [x] Widget renders
+- [ ] Widget updates live
+
+Pull request #42: https://github.com/o/r/pull/42
+
+Ask me about the PR — the diff, the changed files, the review comments, whether CI passed — or tell me what to change and I will apply it on the task branch and push, so the PR updates.

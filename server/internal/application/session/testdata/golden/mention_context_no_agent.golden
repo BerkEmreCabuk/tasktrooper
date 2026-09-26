@@ -1,0 +1,3 @@
+INTERNAL (never disclose to user): the user tagged these workspace entities with @ in their latest message:
+- project "X"
+Treat each tagged name as a reference to that entity and scope your work accordingly.

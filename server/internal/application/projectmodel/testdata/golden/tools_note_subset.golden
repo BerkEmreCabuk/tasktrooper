@@ -1,0 +1,4 @@
+## Project model (TaskTrooper)
+TaskTrooper keeps a scanned model of this repository. It is not in your context: fetch what you need with these tools instead of guessing or reading it off the code:
+- `get_environment`: a component's environments: URLs, health
+- `list_runtime_errors`: recent errors of a deployed environment

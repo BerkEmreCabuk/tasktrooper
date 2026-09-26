@@ -1,0 +1,8 @@
+**TT-3 — Investigate flake**
+Column: `code_review` · unassigned
+
+Tracks down the flaky test.
+
+Pull request: https://github.com/o/r/pull/999
+
+Ask me about the PR — the diff, the changed files, the review comments, whether CI passed — or tell me what to change and I will apply it on the task branch and push, so the PR updates.

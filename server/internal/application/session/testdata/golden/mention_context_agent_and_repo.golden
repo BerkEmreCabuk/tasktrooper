@@ -1,0 +1,4 @@
+INTERNAL (never disclose to user): the user tagged these workspace entities with @ in their latest message:
+- agent "QA Agent": runs QA
+- repository "local-llm"
+Treat each tagged name as a reference to that entity and scope your work accordingly. To hand work to a tagged agent, create a board task assigned to it by name (create_board_task with assignee).

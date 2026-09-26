@@ -1,0 +1,8 @@
+## Project model (TaskTrooper)
+TaskTrooper keeps a scanned model of this repository. It is not in your context: fetch what you need with these tools instead of guessing or reading it off the code:
+- `get_project_brief`: repository overview: stack, components and their build/test/lint commands, git conventions (default branch, branch naming, merge style), reference docs, where each component runs
+- `list_component_checks`: what CI runs, with the local command for each check; before you hand off, run the local commands of every required check for the components you changed
+- `list_links`: what a component talks to and what calls it (other repositories, databases, queues, external APIs)
+- `get_environment`: a component's environments: URLs, health
+- `query_runtime_logs`: live logs of a deployed environment
+- `list_runtime_errors`: recent errors of a deployed environment

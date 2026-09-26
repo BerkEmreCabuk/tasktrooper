@@ -1,0 +1,2 @@
+Conversation summary:
+Investigated the auth bug and fixed the token refresh race.

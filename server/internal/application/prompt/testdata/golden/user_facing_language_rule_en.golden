@@ -1,0 +1,4 @@
+## User-facing language (required)
+The configured application locale is English.
+All user-visible strings must be in English: clarification questions (questions[].prompt), option labels (options[].label), context, and summary.
+Internal sub-agent handoffs may use English.

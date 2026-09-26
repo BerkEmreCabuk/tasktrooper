@@ -1,0 +1,5 @@
+## Skills (index — load on demand)
+You have the skills below. Their full instructions are NOT included here. Immediately before applying a skill, call load_skill with its name, read the returned instructions, then follow them.
+
+- a — desc a
+- b — desc b

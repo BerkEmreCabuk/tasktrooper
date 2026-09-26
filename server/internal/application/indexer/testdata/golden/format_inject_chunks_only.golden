@@ -1,0 +1,7 @@
+## Relevant code
+### internal/auth/encrypt.go:Encrypt (lines 42-78)
+```go
+func Encrypt(password string) (string, error) {
+	return hash(password)
+}
+```
