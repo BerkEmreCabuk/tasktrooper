@@ -180,7 +180,7 @@ func (m *memRoleAdmin) ListAssignmentsByAgent(_ context.Context, agentID uuid.UU
 
 type memBoardConfigStore struct {
 	subs         map[uuid.UUID][]string
-	instructions map[uuid.UUID]map[string]string
+	instructions map[uuid.UUID]map[string]domain.AgentColumnInstruction
 }
 
 func (m *memBoardConfigStore) GetSettings(context.Context) (domain.BoardSettings, error) {
@@ -253,25 +253,48 @@ func (m *memBoardConfigStore) ListTransitions(context.Context) ([]domain.BoardTr
 func (m *memBoardConfigStore) ListAgentColumnInstructions(_ context.Context, agentID uuid.UUID) ([]domain.AgentColumnInstruction, error) {
 	per := m.instructions[agentID]
 	out := make([]domain.AgentColumnInstruction, 0, len(per))
-	for slug, text := range per {
-		out = append(out, domain.AgentColumnInstruction{ColumnSlug: slug, Instruction: text})
+	for slug, ins := range per {
+		ins.ColumnSlug = slug
+		out = append(out, ins)
 	}
 	return out, nil
 }
 
+// SetAgentColumnInstruction is the operator path: it always clears
+// CatalogSHA, mirroring the postgres store's own rule.
 func (m *memBoardConfigStore) SetAgentColumnInstruction(_ context.Context, agentID uuid.UUID, columnSlug, instruction string) error {
-	if m.instructions == nil {
-		m.instructions = map[uuid.UUID]map[string]string{}
-	}
-	if m.instructions[agentID] == nil {
-		m.instructions[agentID] = map[string]string{}
-	}
 	if instruction == "" {
-		delete(m.instructions[agentID], columnSlug)
+		if m.instructions[agentID] != nil {
+			delete(m.instructions[agentID], columnSlug)
+		}
 		return nil
 	}
-	m.instructions[agentID][columnSlug] = instruction
+	m.setInstruction(agentID, columnSlug, instruction, "")
 	return nil
+}
+
+func (m *memBoardConfigStore) SetCatalogColumnInstruction(_ context.Context, agentID uuid.UUID, columnSlug, instruction, sha string) error {
+	m.setInstruction(agentID, columnSlug, instruction, sha)
+	return nil
+}
+
+func (m *memBoardConfigStore) DeleteAgentColumnInstruction(_ context.Context, agentID uuid.UUID, columnSlug string) error {
+	if m.instructions[agentID] != nil {
+		delete(m.instructions[agentID], columnSlug)
+	}
+	return nil
+}
+
+func (m *memBoardConfigStore) setInstruction(agentID uuid.UUID, columnSlug, instruction, sha string) {
+	if m.instructions == nil {
+		m.instructions = map[uuid.UUID]map[string]domain.AgentColumnInstruction{}
+	}
+	if m.instructions[agentID] == nil {
+		m.instructions[agentID] = map[string]domain.AgentColumnInstruction{}
+	}
+	m.instructions[agentID][columnSlug] = domain.AgentColumnInstruction{
+		AgentID: agentID, ColumnSlug: columnSlug, Instruction: instruction, CatalogSHA: sha,
+	}
 }
 
 func (m *memBoardConfigStore) SetTransitions(context.Context, []domain.BoardTransition) error {

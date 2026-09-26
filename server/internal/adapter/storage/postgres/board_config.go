@@ -252,7 +252,7 @@ func (s *BoardConfigStore) SetAgentSubscriptionsDetailed(ctx context.Context, ag
 // for dispatch.
 func (s *BoardConfigStore) ListAgentColumnInstructions(ctx context.Context, agentID uuid.UUID) ([]domain.AgentColumnInstruction, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT column_slug, instruction FROM agent_column_instructions WHERE agent_id = $1 ORDER BY column_slug
+		SELECT column_slug, instruction, catalog_sha FROM agent_column_instructions WHERE agent_id = $1 ORDER BY column_slug
 	`, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("list agent column instructions: %w", err)
@@ -261,7 +261,7 @@ func (s *BoardConfigStore) ListAgentColumnInstructions(ctx context.Context, agen
 	var out []domain.AgentColumnInstruction
 	for rows.Next() {
 		var ins domain.AgentColumnInstruction
-		if err := rows.Scan(&ins.ColumnSlug, &ins.Instruction); err != nil {
+		if err := rows.Scan(&ins.ColumnSlug, &ins.Instruction, &ins.CatalogSHA); err != nil {
 			return nil, err
 		}
 		out = append(out, ins)
@@ -269,20 +269,35 @@ func (s *BoardConfigStore) ListAgentColumnInstructions(ctx context.Context, agen
 	return out, rows.Err()
 }
 
+// The operator path: clearing catalog_sha makes the row the operator's.
 func (s *BoardConfigStore) SetAgentColumnInstruction(ctx context.Context, agentID uuid.UUID, columnSlug, instruction string) error {
 	if strings.TrimSpace(instruction) == "" {
-		if _, err := s.pool.Exec(ctx, `
-			DELETE FROM agent_column_instructions WHERE agent_id = $1 AND column_slug = $2
-		`, agentID, columnSlug); err != nil {
-			return fmt.Errorf("delete agent column instruction: %w", err)
-		}
-		return nil
+		return s.DeleteAgentColumnInstruction(ctx, agentID, columnSlug)
 	}
 	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO agent_column_instructions (agent_id, column_slug, instruction) VALUES ($1, $2, $3)
-		ON CONFLICT (agent_id, column_slug) DO UPDATE SET instruction = EXCLUDED.instruction
+		INSERT INTO agent_column_instructions (agent_id, column_slug, instruction, catalog_sha) VALUES ($1, $2, $3, '')
+		ON CONFLICT (agent_id, column_slug) DO UPDATE SET instruction = EXCLUDED.instruction, catalog_sha = ''
 	`, agentID, columnSlug, instruction); err != nil {
 		return fmt.Errorf("upsert agent column instruction: %w", err)
+	}
+	return nil
+}
+
+func (s *BoardConfigStore) SetCatalogColumnInstruction(ctx context.Context, agentID uuid.UUID, columnSlug, instruction, sha string) error {
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO agent_column_instructions (agent_id, column_slug, instruction, catalog_sha) VALUES ($1, $2, $3, $4)
+		ON CONFLICT (agent_id, column_slug) DO UPDATE SET instruction = EXCLUDED.instruction, catalog_sha = EXCLUDED.catalog_sha
+	`, agentID, columnSlug, instruction, sha); err != nil {
+		return fmt.Errorf("upsert catalog column instruction: %w", err)
+	}
+	return nil
+}
+
+func (s *BoardConfigStore) DeleteAgentColumnInstruction(ctx context.Context, agentID uuid.UUID, columnSlug string) error {
+	if _, err := s.pool.Exec(ctx, `
+		DELETE FROM agent_column_instructions WHERE agent_id = $1 AND column_slug = $2
+	`, agentID, columnSlug); err != nil {
+		return fmt.Errorf("delete agent column instruction: %w", err)
 	}
 	return nil
 }

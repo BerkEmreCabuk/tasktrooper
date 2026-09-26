@@ -45,6 +45,11 @@ type AgentColumnInstruction struct {
 	AgentID     uuid.UUID `json:"agent_id"`
 	ColumnSlug  string    `json:"column_slug"`
 	Instruction string    `json:"instruction"`
+	// CatalogSHA is sha256 hex of Instruction as last written by the catalog
+	// sync; '' means operator-owned or unknown provenance. Equal to
+	// sha256(Instruction) means untouched since that write, so the sync may
+	// still overwrite or delete the row on the catalog's behalf.
+	CatalogSHA string `json:"catalog_sha,omitempty"`
 }
 
 type BoardTransition struct {

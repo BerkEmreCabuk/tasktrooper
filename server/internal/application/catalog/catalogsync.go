@@ -490,25 +490,70 @@ func (s *Service) stampSkillSHA(ctx context.Context, skill domain.Skill, sha str
 	return err
 }
 
-// Seeds catalog defaults into agent_column_instructions without clobbering operator prompts; clearing one back to empty resets to the default on next sync.
+// Kept off port.BoardConfigStore so the many fakes of it need no provenance.
+type catalogColumnInstructionStore interface {
+	SetCatalogColumnInstruction(ctx context.Context, agentID uuid.UUID, columnSlug, instruction, sha string) error
+	DeleteAgentColumnInstruction(ctx context.Context, agentID uuid.UUID, columnSlug string) error
+}
+
+func (s *Service) writeCatalogColumnInstruction(ctx context.Context, agentID uuid.UUID, columnSlug, instruction, sha string) error {
+	if setter, ok := s.boardConfig.(catalogColumnInstructionStore); ok {
+		return setter.SetCatalogColumnInstruction(ctx, agentID, columnSlug, instruction, sha)
+	}
+	return s.boardConfig.SetAgentColumnInstruction(ctx, agentID, columnSlug, instruction)
+}
+
+func (s *Service) deleteCatalogColumnInstruction(ctx context.Context, agentID uuid.UUID, columnSlug string) error {
+	if setter, ok := s.boardConfig.(catalogColumnInstructionStore); ok {
+		return setter.DeleteAgentColumnInstruction(ctx, agentID, columnSlug)
+	}
+	return s.boardConfig.SetAgentColumnInstruction(ctx, agentID, columnSlug, "")
+}
+
+// A row whose catalog_sha matches its own text is still what the sync wrote:
+// it follows the catalog, including deletion of a column the catalog dropped.
+// Any other row is an operator edit and is never touched.
 func (s *Service) reconcileColumnInstructions(ctx context.Context, agentID uuid.UUID, def domain.UpstreamAgent) error {
-	if s.boardConfig == nil || len(def.ColumnInstructions) == 0 {
+	if s.boardConfig == nil {
 		return nil
 	}
 	stored, err := s.boardConfig.ListAgentColumnInstructions(ctx, agentID)
 	if err != nil {
 		return fmt.Errorf("list column instructions for %s: %w", def.Name, err)
 	}
-	current := make(map[string]string, len(stored))
+	current := make(map[string]domain.AgentColumnInstruction, len(stored))
 	for _, ins := range stored {
-		current[ins.ColumnSlug] = ins.Instruction
+		current[ins.ColumnSlug] = ins
 	}
+	shipped := make(map[string]bool, len(def.ColumnInstructions))
+
 	for _, ci := range def.ColumnInstructions {
-		if have := current[string(ci.Column)]; have != "" && have != ci.Instruction {
+		slug := string(ci.Column)
+		shipped[slug] = true
+		sha := hashContent(ci.Instruction)
+		have, exists := current[slug]
+		catalogOwned := have.CatalogSHA != "" && have.CatalogSHA == hashContent(have.Instruction)
+		if !exists || have.Instruction == "" || catalogOwned {
+			if have.Instruction == ci.Instruction && have.CatalogSHA == sha {
+				continue
+			}
+			if err := s.writeCatalogColumnInstruction(ctx, agentID, slug, ci.Instruction, sha); err != nil {
+				return fmt.Errorf("set column instruction %s/%s: %w", def.Name, ci.Column, err)
+			}
 			continue
 		}
-		if err := s.boardConfig.SetAgentColumnInstruction(ctx, agentID, string(ci.Column), ci.Instruction); err != nil {
-			return fmt.Errorf("set column instruction %s/%s: %w", def.Name, ci.Column, err)
+		if have.Instruction != ci.Instruction {
+			log.Info().Str("agent", def.Name).Str("column", slug).
+				Msg("catalog: column instruction operator-edited; upstream change not applied")
+		}
+	}
+
+	for slug, have := range current {
+		if shipped[slug] || have.CatalogSHA == "" || have.CatalogSHA != hashContent(have.Instruction) {
+			continue
+		}
+		if err := s.deleteCatalogColumnInstruction(ctx, agentID, slug); err != nil {
+			return fmt.Errorf("delete column instruction %s/%s: %w", def.Name, slug, err)
 		}
 	}
 	return nil
