@@ -33,6 +33,7 @@ export const projectsHub: ProjectsHubDict = {
     deleteTitle: "{name} silinsin mi?",
     deleteDescription: "Bu projedeki repolar silinmez — yalnızca bu projeyle bağlantıları kalkar.",
     noDescription: "Açıklama yok",
+    repositoriesLabel: "Repolar",
     emptyRepos: "Henüz repo yok",
     linksTo: "Bağlantılı:",
     sharesPrefix: "Ortak kaynak:",

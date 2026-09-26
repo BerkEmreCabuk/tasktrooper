@@ -1,4 +1,4 @@
-import { FolderPlus, Pencil, Share2, Trash2 } from "lucide-react";
+import { FolderKanban, FolderPlus, Pencil, Share2, Trash2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { ProjectOverview } from "@/api";
 import { RepositoryOverviewRow } from "@/components/projects/hub/RepositoryOverviewRow";
@@ -18,9 +18,14 @@ interface ProjectCardProps {
 }
 
 /** One project card on the hub: header (name, type, counts, review badge,
- * edit/delete), a row per repository, and a footer that only appears when
- * this project crosses into another one — an independent project's card
- * ends at its last repository row. */
+ * edit/delete), its repositories hanging off a tree rail beneath it, and a
+ * footer that only appears when this project crosses into another one — an
+ * independent project's card ends at its last repository.
+ *
+ * Project and repository names read alike, so the two levels are told apart
+ * by shape: the project is a tinted band with a folder tile and a heading; a
+ * repository is a nested box on the rail, with a branch icon and its name in
+ * mono, the way git names it. */
 export function ProjectCard({ project, repositories, onEdit, onDelete }: ProjectCardProps) {
   const { t } = useI18n();
   const totalComponents = project.repositories.reduce((sum, r) => sum + r.components.length, 0);
@@ -28,23 +33,31 @@ export function ProjectCard({ project, repositories, onEdit, onDelete }: Project
 
   return (
     <Card className="w-full overflow-hidden p-0">
-      <div className="relative flex flex-wrap items-start justify-between gap-3 border-b border-border px-4 py-3 transition-colors hover:bg-muted/40">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <Link to={`/projects/${project.id}`} className="font-semibold after:absolute after:inset-0">
-              {project.name}
-            </Link>
-            <ProjectTypeBadge type={project.type} />
-            <span className="text-caption text-muted-foreground">
-              {t("projectsHub.card.counts", { repos: project.repositories.length, components: totalComponents })}
-            </span>
-            {project.review_count > 0 && (
-              <Badge variant="warning">{t("projectsHub.card.reviewBadge", { count: project.review_count })}</Badge>
-            )}
+      <div className="relative flex flex-wrap items-start justify-between gap-3 border-b border-border bg-muted/30 px-4 py-3 transition-colors hover:bg-muted/50">
+        <div className="flex min-w-0 items-start gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+            <FolderKanban className="h-5 w-5" aria-hidden />
           </div>
-          <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
-            {project.description || t("projectsHub.card.noDescription")}
-          </p>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                to={`/projects/${project.id}`}
+                className="text-lg font-semibold leading-tight after:absolute after:inset-0"
+              >
+                {project.name}
+              </Link>
+              <ProjectTypeBadge type={project.type} />
+              <span className="text-caption text-muted-foreground">
+                {t("projectsHub.card.counts", { repos: project.repositories.length, components: totalComponents })}
+              </span>
+              {project.review_count > 0 && (
+                <Badge variant="warning">{t("projectsHub.card.reviewBadge", { count: project.review_count })}</Badge>
+              )}
+            </div>
+            <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+              {project.description || t("projectsHub.card.noDescription")}
+            </p>
+          </div>
         </div>
         <div className="relative z-10 flex shrink-0 gap-1">
           <Button
@@ -81,10 +94,24 @@ export function ProjectCard({ project, repositories, onEdit, onDelete }: Project
         />
       ) : (
         <>
-          <div className="divide-y divide-border">
-            {repositories.map((repo) => (
-              <RepositoryOverviewRow key={repo.id} repository={repo} projectId={project.id} />
-            ))}
+          <div className="px-4 pb-4 pt-3">
+            <p className="mb-2 pl-[3.25rem] text-micro font-medium uppercase tracking-wider text-muted-foreground">
+              {t("projectsHub.card.repositoriesLabel")}
+            </p>
+            {/* The rail sits under the folder tile's centre (h-9 → 1.125rem),
+                so each repository visibly hangs off this project; it bridges
+                the gap to the next repository and stops at the last one's
+                branch, like a tree's └. */}
+            <ul className="ml-[1.125rem] space-y-2">
+              {repositories.map((repo) => (
+                <li
+                  key={repo.id}
+                  className="relative pl-6 before:absolute before:-bottom-2 before:left-0 before:top-0 before:w-px before:bg-border after:absolute after:left-0 after:top-5 after:h-px after:w-6 after:bg-border last:before:bottom-auto last:before:h-5"
+                >
+                  <RepositoryOverviewRow repository={repo} projectId={project.id} />
+                </li>
+              ))}
+            </ul>
           </div>
           {hasCrossProject && (
             <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-muted/20 px-4 py-2 text-caption text-muted-foreground">

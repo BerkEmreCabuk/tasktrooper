@@ -32,6 +32,7 @@ export const projectsHub = {
     deleteTitle: "Delete {name}?",
     deleteDescription: "Repositories in this project are not deleted — they only lose the link to it.",
     noDescription: "No description",
+    repositoriesLabel: "Repositories",
     emptyRepos: "No repositories yet",
     linksTo: "Links to",
     sharesPrefix: "Shares",

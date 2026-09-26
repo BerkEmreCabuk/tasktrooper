@@ -1,3 +1,4 @@
+import { GitBranch } from "lucide-react";
 import { Link } from "react-router-dom";
 import type { RepositorySummary } from "@/api";
 import { EnvironmentChips } from "@/components/projects/hub/EnvironmentChips";
@@ -13,7 +14,7 @@ interface RepositoryOverviewRowProps {
   projectId: string;
 }
 
-/** One repository line inside a project card: name, shape, its components
+/** One repository box inside a project card: name, shape, its components
  * (a RoleBadge per component, path shown only for a monorepo's many), a
  * single-component repo's stack summary, scan status and review count. */
 export function RepositoryOverviewRow({ repository, projectId }: RepositoryOverviewRowProps) {
@@ -21,12 +22,13 @@ export function RepositoryOverviewRow({ repository, projectId }: RepositoryOverv
   const single = repository.shape === "single";
 
   return (
-    <div className="relative flex flex-wrap items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-muted/40">
+    <div className="relative flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-background/60 px-3 py-2.5 transition-colors hover:border-primary/40 hover:bg-muted/40">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
+          <GitBranch className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
           <Link
             to={`/repositories/${repository.id}?project=${projectId}`}
-            className="truncate font-medium after:absolute after:inset-0"
+            className="truncate font-mono text-sm font-medium after:absolute after:inset-0"
           >
             {repository.name}
           </Link>
@@ -34,7 +36,7 @@ export function RepositoryOverviewRow({ repository, projectId }: RepositoryOverv
           {repository.git_warning && <GitWarningIcon warning={repository.git_warning} className="relative z-10" />}
         </div>
         {repository.components.length > 0 && (
-          <div className="mt-1.5 space-y-1">
+          <div className="ml-6 mt-1.5 space-y-1">
             {repository.components.map((c) => {
               const envs = repository.environments.filter((e) => e.component_id === c.id);
               return single ? (
@@ -53,7 +55,7 @@ export function RepositoryOverviewRow({ repository, projectId }: RepositoryOverv
           </div>
         )}
         {single && repository.components[0]?.stack_summary && (
-          <p className="mt-1 text-micro text-muted-foreground">{repository.components[0].stack_summary}</p>
+          <p className="ml-6 mt-1 text-micro text-muted-foreground">{repository.components[0].stack_summary}</p>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-3 text-caption">
