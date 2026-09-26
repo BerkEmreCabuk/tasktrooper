@@ -245,7 +245,7 @@ func (s *Service) runLLM(ctx context.Context, agentRec domain.Agent, evidence st
 
 	retryMsgs := append(messages,
 		domain.Message{Role: domain.RoleAssistant, Content: raw},
-		domain.Message{Role: domain.RoleUser, Content: "Your previous output was not valid JSON (" + parseErr.Error() + "). Respond again with ONLY the JSON object, no prose, no code fences."},
+		domain.Message{Role: domain.RoleUser, Content: retryNotJSONMessage(parseErr)},
 	)
 	raw2, err := callOnce(retryMsgs)
 	if err != nil {

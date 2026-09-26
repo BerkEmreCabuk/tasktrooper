@@ -16,6 +16,14 @@ func kpiComposite(kpis []domain.AgentKPI, results []domain.AgentKPIResult) float
 	return kpi.CompositeScore(kpis, results)
 }
 
+// retryNotJSONMessage asks for a clean retry after an unparsable JSON
+// response; shared by reflect.go's reflection call and promote.go's
+// classification calls, both of which hit this failure mode the same way.
+// See catalog/system/prompts/evolution/retry_not_json.md.
+func retryNotJSONMessage(parseErr error) string {
+	return "Your previous output was not valid JSON (" + parseErr.Error() + "). Respond again with ONLY the JSON object, no prose, no code fences."
+}
+
 func reflectionSystemPrompt(agentRec domain.Agent, cfg domain.EvolutionConfig) string {
 	var b strings.Builder
 	b.WriteString("You are the self-improvement process of the agent \"" + agentRec.Name + "\".\n")
@@ -200,6 +208,63 @@ func hasAnyReflectionField(fields map[string]json.RawMessage) bool {
 	return false
 }
 
+// evidenceHeader opens the evidence report; see
+// catalog/system/prompts/evolution/evidence_header.md.
+func evidenceHeader(from, to, trigger string) string {
+	return fmt.Sprintf("# Evidence window: %s → %s (trigger: %s)\n\n", from, to, trigger)
+}
+
+// evidenceBaselineBlock reports the previous reflection's snapshot as the
+// comparison baseline; see
+// catalog/system/prompts/evolution/evidence_baseline.md. summary is already
+// truncated by the caller; empty means the previous reflection had none.
+func evidenceBaselineBlock(date, snapshotJSON, summary string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "## Baseline (previous reflection, %s)\n%s\n", date, snapshotJSON)
+	if summary != "" {
+		fmt.Fprintf(&b, "Previous self-assessment: %s\n", summary)
+	}
+	b.WriteString("Compare current performance against this baseline: did your last changes help or hurt?\n\n")
+	return b.String()
+}
+
+// evidenceCurrentPerformance reports the agent's live score; see
+// catalog/system/prompts/evolution/evidence_current_performance.md.
+func evidenceCurrentPerformance(score string, runsPassed, runsRevised int) string {
+	return fmt.Sprintf("## Current performance\nScore: %s | clean: %d | revised: %d\n\n", score, runsPassed, runsRevised)
+}
+
+// evidenceKPISection reports KPI attainment; see
+// catalog/system/prompts/evolution/evidence_kpi.md. lines are already
+// formatted per-KPI rows; composite is pre-formatted (e.g. "82.0").
+func evidenceKPISection(lines []string, composite string) string {
+	var b strings.Builder
+	b.WriteString("## KPI attainment (your objectives)\n")
+	for _, l := range lines {
+		b.WriteString(l + "\n")
+	}
+	fmt.Fprintf(&b, "Composite KPI score: %s/100\n\n", composite)
+	return b.String()
+}
+
+// evidenceLinesBlock renders one of the evidence report's repeated
+// "## Header\n- line\n- line\n\n" sections, shared by every list-shaped
+// section (score events, revision feedback, task runs, chat messages,
+// skills, rules, memories, regressions); see
+// catalog/system/prompts/evolution/evidence_lines_block.md. header already
+// carries its own trailing newline(s); an empty lines is valid (a header
+// with nothing under it).
+func evidenceLinesBlock(header string, lines []string) string {
+	var b strings.Builder
+	b.WriteString(header)
+	if len(lines) > 0 {
+		b.WriteString(strings.Join(lines, "\n"))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
 // Only window data, excluding previously reviewed material; the previous reflection's snapshot is the comparison baseline.
 func (s *Service) gatherEvidence(
 	ctx context.Context,
@@ -209,23 +274,23 @@ func (s *Service) gatherEvidence(
 	var b strings.Builder
 	from, to := reflection.WindowStart, reflection.WindowEnd
 
-	fmt.Fprintf(&b, "# Evidence window: %s → %s (trigger: %s)\n\n", from.Format("2006-01-02 15:04"), to.Format("2006-01-02 15:04"), reflection.Trigger)
+	b.WriteString(evidenceHeader(from.Format("2006-01-02 15:04"), to.Format("2006-01-02 15:04"), reflection.Trigger))
 
 	var baseline *domain.PerformanceSnapshot
 	if prev, err := s.store.LatestCompletedReflection(ctx, agentRec.ID); err == nil && prev != nil {
 		if prev.PerformanceSnapshot != nil {
 			baseline = prev.PerformanceSnapshot
 			snapJSON, _ := json.Marshal(prev.PerformanceSnapshot)
-			fmt.Fprintf(&b, "## Baseline (previous reflection, %s)\n%s\n", prev.CompletedAt.Format("2006-01-02"), string(snapJSON))
+			summary := ""
 			if prev.Summary != "" {
-				fmt.Fprintf(&b, "Previous self-assessment: %s\n", truncate(prev.Summary, 600))
+				summary = truncate(prev.Summary, 600)
 			}
-			b.WriteString("Compare current performance against this baseline: did your last changes help or hurt?\n\n")
+			b.WriteString(evidenceBaselineBlock(prev.CompletedAt.Format("2006-01-02"), string(snapJSON), summary))
 		}
 	}
 
 	score, _ := s.perf.GetScore(ctx, agentRec.ID)
-	fmt.Fprintf(&b, "## Current performance\nScore: %.1f | clean: %d | revised: %d\n\n", score.Score, score.RunsPassed, score.RunsRevised)
+	b.WriteString(evidenceCurrentPerformance(fmt.Sprintf("%.1f", score.Score), score.RunsPassed, score.RunsRevised))
 
 	if s.kpis != nil {
 		kpis, err := s.kpis.ListKPIs(ctx, agentRec.ID)
@@ -235,7 +300,7 @@ func (s *Service) gatherEvidence(
 			for _, r := range results {
 				byKPI[r.KPIID] = r
 			}
-			b.WriteString("## KPI attainment (your objectives)\n")
+			var lines []string
 			for _, k := range kpis {
 				if !k.Enabled {
 					continue
@@ -244,19 +309,19 @@ func (s *Service) gatherEvidence(
 				if r, ok := byKPI[k.ID]; ok {
 					line += fmt.Sprintf(" | measured %.4g → attainment %.0f%%", r.MeasuredValue, r.Attainment*100)
 				}
-				b.WriteString(line + "\n")
+				lines = append(lines, line)
 			}
-			fmt.Fprintf(&b, "Composite KPI score: %.1f/100\n\n", kpiComposite(kpis, results))
+			b.WriteString(evidenceKPISection(lines, fmt.Sprintf("%.1f", kpiComposite(kpis, results))))
 		}
 	}
 
 	events, _ := s.perf.EventsInWindow(ctx, agentRec.ID, from, to)
 	if len(events) > 0 {
-		b.WriteString("## Score events in window\n")
+		var lines []string
 		for _, e := range events {
-			fmt.Fprintf(&b, "- %s %s (%+.0f): %s\n", e.CreatedAt.Format("01-02 15:04"), e.EventType, e.Delta, e.Reason)
+			lines = append(lines, fmt.Sprintf("- %s %s (%+.0f): %s", e.CreatedAt.Format("01-02 15:04"), e.EventType, e.Delta, e.Reason))
 		}
-		b.WriteString("\n")
+		b.WriteString(evidenceLinesBlock("## Score events in window\n", lines))
 	}
 
 	revisionTaskIDs := map[uuid.UUID]bool{}
@@ -266,7 +331,7 @@ func (s *Service) gatherEvidence(
 		}
 	}
 	if len(revisionTaskIDs) > 0 && s.comments != nil {
-		b.WriteString("## Revision feedback (user/QA comments on revised tasks)\n")
+		var lines []string
 		n := 0
 		for taskID := range revisionTaskIDs {
 			if n >= 5 {
@@ -280,11 +345,11 @@ func (s *Service) gatherEvidence(
 				if c.CreatedAt.Before(from) || c.CreatedAt.After(to) {
 					continue
 				}
-				fmt.Fprintf(&b, "- [task %s, %s] %s\n", taskID.String()[:8], c.AuthorType, truncate(c.Content, 400))
+				lines = append(lines, fmt.Sprintf("- [task %s, %s] %s", taskID.String()[:8], c.AuthorType, truncate(c.Content, 400)))
 			}
 			n++
 		}
-		b.WriteString("\n")
+		b.WriteString(evidenceLinesBlock("## Revision feedback (user/QA comments on revised tasks)\n", lines))
 	}
 
 	if runs, err := s.runs.ListRecent(ctx, 200); err == nil {
@@ -299,7 +364,7 @@ func (s *Service) gatherEvidence(
 			}
 		}
 		if len(lines) > 0 {
-			b.WriteString("## Task runs in window\n" + strings.Join(lines, "\n") + "\n\n")
+			b.WriteString(evidenceLinesBlock("## Task runs in window\n", lines))
 		}
 	}
 
@@ -312,8 +377,7 @@ func (s *Service) gatherEvidence(
 		for _, st := range stacks {
 			stackNames[st.ID] = st.Name
 		}
-		fmt.Fprintf(&b, "## Current skills — %d of %d budget used\n", len(skills), s.cfg.MaxSkillsPerAgent)
-		b.WriteString("(id | name | tech stack | enabled)\n")
+		var lines []string
 		for _, sk := range skills {
 			stack := "general"
 			if sk.TechStackID != nil {
@@ -321,28 +385,29 @@ func (s *Service) gatherEvidence(
 					stack = name
 				}
 			}
-			fmt.Fprintf(&b, "- %s | %s | %s | %v — %s\n", sk.ID, sk.Name, stack, sk.Enabled, truncate(sk.Description, 120))
+			lines = append(lines, fmt.Sprintf("- %s | %s | %s | %v — %s", sk.ID, sk.Name, stack, sk.Enabled, truncate(sk.Description, 120)))
 		}
-		b.WriteString("\n")
+		header := fmt.Sprintf("## Current skills — %d of %d budget used\n(id | name | tech stack | enabled)\n", len(skills), s.cfg.MaxSkillsPerAgent)
+		b.WriteString(evidenceLinesBlock(header, lines))
 	}
 	rules, _ := s.catalog.ListRulesByAgent(ctx, agentRec.ID)
 	if len(rules) > 0 {
-		fmt.Fprintf(&b, "## Current rules — %d of %d budget used\n", len(rules), s.cfg.MaxRulesPerAgent)
-		b.WriteString("(id | name | priority | enabled)\n")
+		var lines []string
 		for _, r := range rules {
-			fmt.Fprintf(&b, "- %s | %s | %d | %v — %s\n", r.ID, r.Name, r.Priority, r.Enabled, truncate(r.Content, 120))
+			lines = append(lines, fmt.Sprintf("- %s | %s | %d | %v — %s", r.ID, r.Name, r.Priority, r.Enabled, truncate(r.Content, 120)))
 		}
-		b.WriteString("\n")
+		header := fmt.Sprintf("## Current rules — %d of %d budget used\n(id | name | priority | enabled)\n", len(rules), s.cfg.MaxRulesPerAgent)
+		b.WriteString(evidenceLinesBlock(header, lines))
 	}
 	if s.memories != nil {
 		// Reads every scope, otherwise it would propose deleting memories it cannot see.
 		q := domain.MemoryQuery{AgentID: agentRec.ID, Owner: domain.MemoryOwnerAgent, Repo: domain.MemoryRepoScopeAny, Limit: 20}
 		if mems, err := s.memories.List(ctx, q); err == nil && len(mems) > 0 {
-			b.WriteString("## Current memories (id | scope | content)\n")
+			var lines []string
 			for _, m := range mems {
-				fmt.Fprintf(&b, "- %s | %s | %s\n", m.ID, m.Scope, truncate(m.Content, 150))
+				lines = append(lines, fmt.Sprintf("- %s | %s | %s", m.ID, m.Scope, truncate(m.Content, 150)))
 			}
-			b.WriteString("\n")
+			b.WriteString(evidenceLinesBlock("## Current memories (id | scope | content)\n", lines))
 		}
 	}
 
@@ -386,7 +451,7 @@ func (s *Service) appendChatEvidence(ctx context.Context, b *strings.Builder, ag
 		}
 	}
 	if len(lines) > 0 {
-		b.WriteString("## Chat messages in window (user corrections/praise are key signals)\n" + strings.Join(lines, "\n") + "\n\n")
+		b.WriteString(evidenceLinesBlock("## Chat messages in window (user corrections/praise are key signals)\n", lines))
 	}
 }
 
@@ -410,6 +475,6 @@ func (s *Service) appendRegressionReport(ctx context.Context, b *strings.Builder
 			e.ID, e.ChangeType, e.TargetName, e.CreatedAt.Format("2006-01-02")))
 	}
 	if len(lines) > 0 {
-		b.WriteString("## ⚠ Regressed changes (your earlier changes that hurt performance — consider reverting)\n" + strings.Join(lines, "\n") + "\n\n")
+		b.WriteString(evidenceLinesBlock("## ⚠ Regressed changes (your earlier changes that hurt performance — consider reverting)\n", lines))
 	}
 }

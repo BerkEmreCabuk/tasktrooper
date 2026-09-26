@@ -316,6 +316,12 @@ func (s *Service) run(ctx context.Context, cancel context.CancelFunc, jobID uuid
 // command would be touching the user's working tree.
 var readOnlyTools = []string{"read_file", "grep_code", "glob", "codebase_search"}
 
+// smokeRetryMessage asks the agent to answer again after an unparsable
+// reply; see catalog/system/prompts/smokegen/retry.md.
+func smokeRetryMessage(parseErr error) string {
+	return "That was not a valid JSON object (" + parseErr.Error() + "). Reply again with ONLY the JSON object {\"checks\":[...]}, no prose, no code fences."
+}
+
 func (s *Service) propose(ctx context.Context, comp domain.Component, repo domain.Repository, agentRec domain.Agent, brief string, existing []domain.SmokeCheck) ([]domain.SmokeCheck, error) {
 	runCtx := registry.ContextWithWorkspaceDir(ctx, repo.RootPath)
 	messages := []domain.Message{
@@ -347,7 +353,7 @@ func (s *Service) propose(ctx context.Context, comp domain.Component, repo domai
 	}
 	retry := append(messages,
 		domain.Message{Role: domain.RoleAssistant, Content: raw},
-		domain.Message{Role: domain.RoleUser, Content: "That was not a valid JSON object (" + parseErr.Error() + "). Reply again with ONLY the JSON object {\"checks\":[...]}, no prose, no code fences."},
+		domain.Message{Role: domain.RoleUser, Content: smokeRetryMessage(parseErr)},
 	)
 	raw2, err := call(retry)
 	if err != nil {

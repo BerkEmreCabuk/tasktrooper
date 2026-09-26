@@ -390,7 +390,7 @@ func (s *Service) promotionChat(ctx context.Context, system, user, model string,
 	}
 	retry := append(messages,
 		domain.Message{Role: domain.RoleAssistant, Content: raw},
-		domain.Message{Role: domain.RoleUser, Content: "Your previous output was not valid JSON (" + parseErr.Error() + "). Respond again with ONLY the JSON object, no prose, no code fences."},
+		domain.Message{Role: domain.RoleUser, Content: retryNotJSONMessage(parseErr)},
 	)
 	raw2, err := call(retry)
 	if err != nil {
@@ -447,23 +447,34 @@ For each promotion set agents to the roster names the skill is relevant for; use
 
 Respond with a single JSON object matching the provided schema.`
 
+// teamPromotionAgentLine and teamPromotionMemoryLine format one roster/memory
+// row; teamPromotionUserMessage joins them under their section headers. See
+// catalog/system/prompts/evolution/team_promotion_user.md.
+func teamPromotionAgentLine(a domain.Agent) string {
+	return fmt.Sprintf("- %s: %s", a.Name, truncate(a.Description, 160))
+}
+
+func teamPromotionMemoryLine(m domain.AgentMemory) string {
+	scope := "global"
+	if m.RepositoryID != nil {
+		scope = "repository-specific"
+	}
+	category := m.Category
+	if category == "" {
+		category = "-"
+	}
+	return fmt.Sprintf("- id: %s | category: %s | scope: %s\n  %s", m.ID, category, scope, strings.ReplaceAll(m.Content, "\n", "\n  "))
+}
+
 func teamPromotionUserMessage(memories []domain.AgentMemory, agents []domain.Agent) string {
 	var b strings.Builder
 	b.WriteString("## Agent roster\n")
 	for _, a := range agents {
-		b.WriteString(fmt.Sprintf("- %s: %s\n", a.Name, truncate(a.Description, 160)))
+		b.WriteString(teamPromotionAgentLine(a) + "\n")
 	}
 	b.WriteString("\n## Team memories\n")
 	for _, m := range memories {
-		scope := "global"
-		if m.RepositoryID != nil {
-			scope = "repository-specific"
-		}
-		category := m.Category
-		if category == "" {
-			category = "-"
-		}
-		b.WriteString(fmt.Sprintf("- id: %s | category: %s | scope: %s\n  %s\n", m.ID, category, scope, strings.ReplaceAll(m.Content, "\n", "\n  ")))
+		b.WriteString(teamPromotionMemoryLine(m) + "\n")
 	}
 	return b.String()
 }

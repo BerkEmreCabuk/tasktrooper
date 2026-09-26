@@ -8,15 +8,28 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-// Asks the LLM to merge a skill changed both locally and upstream; the local copy's tags and tech stack win, and the model reconciles the prose.
-func (s *Service) mergeSkill(ctx context.Context, agent domain.Agent, local domain.Skill, usk domain.UpstreamSkill) error {
-	system := "You merge two versions of the same agent skill into one SKILL.md document. " +
+// mergeSkillSystemPrompt is the fixed instruction for reconciling two SKILL.md
+// versions; see catalog/system/prompts/catalog/merge_skill_system.md.
+func mergeSkillSystemPrompt() string {
+	return "You merge two versions of the same agent skill into one SKILL.md document. " +
 		"Reply with ONLY the merged document, frontmatter first (name:, description:, category:), " +
 		"then ---, then the merged body. Keep every distinct instruction from both sides; " +
 		"drop only what the two versions contradict themselves about."
+}
+
+// mergeSkillUserMessage carries the two document bodies the LLM must
+// reconcile; see catalog/system/prompts/catalog/merge_skill_user.md.
+func mergeSkillUserMessage(skillName, local, upstream string) string {
 	var user strings.Builder
-	fmt.Fprintf(&user, "Skill: %s\nThis machine's current copy (LOCAL):\n---\n%s\n---\n", local.Name, local.Content)
-	fmt.Fprintf(&user, "New catalog revision (UPSTREAM):\n---\n%s\n---\n", usk.Content)
+	fmt.Fprintf(&user, "Skill: %s\nThis machine's current copy (LOCAL):\n---\n%s\n---\n", skillName, local)
+	fmt.Fprintf(&user, "New catalog revision (UPSTREAM):\n---\n%s\n---\n", upstream)
+	return user.String()
+}
+
+// Asks the LLM to merge a skill changed both locally and upstream; the local copy's tags and tech stack win, and the model reconciles the prose.
+func (s *Service) mergeSkill(ctx context.Context, agent domain.Agent, local domain.Skill, usk domain.UpstreamSkill) error {
+	system := mergeSkillSystemPrompt()
+	user := mergeSkillUserMessage(local.Name, local.Content, usk.Content)
 
 	model := agent.Model
 	if model == "" {
@@ -25,7 +38,7 @@ func (s *Service) mergeSkill(ctx context.Context, agent domain.Agent, local doma
 	resp, err := s.llm.Chat(ctx, domain.AgentRequest{
 		Messages: []domain.Message{
 			{Role: domain.RoleSystem, Content: system},
-			{Role: domain.RoleUser, Content: user.String()},
+			{Role: domain.RoleUser, Content: user},
 		},
 		Model: model,
 	})
