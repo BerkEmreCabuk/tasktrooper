@@ -261,8 +261,10 @@ export function SmokeChecksEditor({ checks, onChange, componentId, baseUrl }: Sm
           <p className="text-micro text-muted-foreground">{t("release.deliveryEdit.smoke.description")}</p>
         </div>
         <div className="flex items-center gap-2">
-          {generateButton()}
-          <DropdownMenu>
+          {checks.length > 0 && generateButton()}
+          {/* Modal on purpose: this editor lives inside the delivery FormDialog, whose focus trap
+              closes a non-modal menu the instant it opens; no item here opens another dialog. */}
+          <DropdownMenu modal>
             <DropdownMenuTrigger asChild>
               <Button type="button" size="sm" variant="outline" disabled={checks.length >= MAX_SMOKE_CHECKS}>
                 <Plus className="mr-1 h-3.5 w-3.5" />
