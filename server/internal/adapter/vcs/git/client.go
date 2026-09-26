@@ -464,7 +464,15 @@ func (c *Client) refreshTaskWorkspace(ctx context.Context, projectRoot, workspac
 	}
 
 	if target := c.rebaseTarget(ctx, workspacePath, branch, fetched); target != "" && (!dirty || stashed) {
-		if out, err := c.run(ctx, workspacePath, "git", "rebase", "--no-autostash", target); err != nil {
+		// A squash-merged branch whose remote was deleted replays commits the
+		// default branch already holds in another shape, which can only conflict.
+		if target != "origin/"+branch && c.alreadyMergedInto(ctx, workspacePath, target) {
+			if out, err := c.run(ctx, workspacePath, "git", "reset", "--hard", target); err != nil {
+				restore()
+				return fmt.Errorf("task workspace %s: task branch %s is already merged into %s but could not be moved onto it: %w (%s)",
+					workspacePath, branch, target, err, strings.TrimSpace(out))
+			}
+		} else if out, err := c.run(ctx, workspacePath, "git", "rebase", "--no-autostash", target); err != nil {
 			restore()
 			return fmt.Errorf(
 				"task workspace %s: task branch %s conflicts with %s and could not be rebased onto it; the rebase was aborted and the workspace left untouched — resolve it by hand (cd %s && git rebase %s) or delete the workspace to start the branch again: %w (%s)",
@@ -516,6 +524,21 @@ func (c *Client) rebaseTarget(ctx context.Context, workspacePath, branch string,
 		return ""
 	}
 	return "origin/" + def
+}
+
+// alreadyMergedInto: merging HEAD into target yields target's own tree, so
+// HEAD adds nothing target lacks. Unlike ancestry this holds after a squash.
+func (c *Client) alreadyMergedInto(ctx context.Context, workspacePath, target string) bool {
+	out, err := c.run(ctx, workspacePath, "git", "merge-tree", "--write-tree", target, "HEAD")
+	if err != nil {
+		return false
+	}
+	merged, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+	targetTree, err := c.run(ctx, workspacePath, "git", "rev-parse", target+"^{tree}")
+	if err != nil {
+		return false
+	}
+	return merged != "" && merged == strings.TrimSpace(targetTree)
 }
 
 func (c *Client) checkoutTaskBranch(ctx context.Context, workspacePath, branch string) error {

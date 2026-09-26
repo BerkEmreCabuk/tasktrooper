@@ -386,6 +386,51 @@ func TestEnsureTaskWorkspaceReuseConflictAbortsAndFails(t *testing.T) {
 	}
 }
 
+func TestEnsureTaskWorkspaceReuseAfterSquashMergeMovesOntoDefault(t *testing.T) {
+	f := newTaskFixture(t)
+	if err := f.ensure(t); err != nil {
+		t.Fatalf("first EnsureTaskWorkspace: %v", err)
+	}
+	f.commitLocal(t, "shared.go", "package main // v1\n")
+	f.commitLocal(t, "shared.go", "package main // v2\n")
+	gitRun(t, f.workspace, "push", "origin", testBranch)
+
+	// The PR is squash-merged and its branch deleted: main holds the branch's
+	// content as one commit, so replaying v1 onto it conflicts.
+	gitRun(t, f.author, "fetch", "origin")
+	gitRun(t, f.author, "merge", "--squash", "origin/"+testBranch)
+	gitRun(t, f.author, "commit", "-m", "squash: task")
+	gitRun(t, f.author, "push", "origin", "main")
+	gitRun(t, f.author, "push", "origin", "--delete", testBranch)
+
+	if err := f.ensure(t); err != nil {
+		t.Fatalf("reuse after squash merge: %v", err)
+	}
+	requireNoRebaseInProgress(t, f.workspace)
+	if got, want := gitRun(t, f.workspace, "rev-parse", "HEAD"), gitRun(t, f.author, "rev-parse", "HEAD"); got != want {
+		t.Fatalf("HEAD = %s, want origin/main %s", got, want)
+	}
+	if got := gitRun(t, f.workspace, "rev-parse", "--abbrev-ref", "HEAD"); got != testBranch {
+		t.Fatalf("branch = %s, want %s", got, testBranch)
+	}
+}
+
+func TestEnsureTaskWorkspaceReuseKeepsUnmergedWorkWhenRemoteBranchIsGone(t *testing.T) {
+	f := newTaskFixture(t)
+	if err := f.ensure(t); err != nil {
+		t.Fatalf("first EnsureTaskWorkspace: %v", err)
+	}
+	localHead := f.commitLocal(t, "shared.go", "package main // agent version\n")
+	f.pushUpstream(t, "shared.go", "package main // upstream version\n")
+
+	if err := f.ensure(t); err == nil {
+		t.Fatal("expected a real conflict to still be reported")
+	}
+	if got := gitRun(t, f.workspace, "rev-parse", "HEAD"); got != localHead {
+		t.Fatalf("unmerged work was discarded: HEAD = %s, want %s", got, localHead)
+	}
+}
+
 func TestEnsureTaskWorkspaceReuseKeepsDirtyTree(t *testing.T) {
 	f := newTaskFixture(t)
 	if err := f.ensure(t); err != nil {
