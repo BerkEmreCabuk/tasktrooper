@@ -1,4 +1,4 @@
-import { Archive, ArrowRight, Inbox, Plus, Trash2 } from "lucide-react";
+import { Archive, ArrowRight, FolderKanban, Inbox, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -12,6 +12,7 @@ import {
   type WorkspaceConfig,
 } from "@/api";
 import { CreateTaskDialog } from "@/components/board/CreateTaskDialog";
+import { ProjectScopeSelect } from "@/components/board/ProjectScopeSelect";
 import { TaskDetailDrawer } from "@/components/board/TaskDetailDrawer";
 import { NoRepositoriesNotice } from "@/components/workspace/NoProjectsNotice";
 import { PageHeader } from "@/components/admin/PageHeader";
@@ -20,19 +21,24 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCachedState, useFirstLoad } from "@/hooks/useCachedState";
 import { useI18n } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
+import { useProjectScope } from "@/hooks/useProjectScope";
 import {
   CACHE_AGENTS,
   CACHE_CONFIG,
   CACHE_PROJECTS,
   CACHE_REPOS,
   CACHE_TASKS,
+  PROJECT_SCOPE_ALL,
+  PROJECT_SCOPE_NONE,
   boardColumnsSplit,
+  filterTasksByScope,
   mergeTaskList,
+  projectScopeCounts,
+  taskCreateDefaults,
   taskPriorityLabel,
   taskTypeLabel,
 } from "@/lib/project-board";
@@ -65,8 +71,8 @@ export function BacklogPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [defaultRepositoryId, setDefaultRepositoryId] = useState("");
-  const [projectFilter, setProjectFilter] = useState("all");
   const navigate = useNavigate();
+  const { scope, setScope } = useProjectScope(initiativeProjects);
 
   const openTaskCreate = () => {
     if (repositories.length === 0) {
@@ -145,17 +151,27 @@ export function BacklogPage() {
 
   usePolling(refreshTasks, TASK_POLL_MS, !loading);
 
+  const backlogColumnTasks = useMemo(
+    () => tasks.filter((task) => task.column === backlogSlug),
+    [tasks, backlogSlug],
+  );
+
+  const scopeCounts = useMemo(
+    () => projectScopeCounts(backlogColumnTasks, repositories),
+    [backlogColumnTasks, repositories],
+  );
+
   const backlogTasks = useMemo(
     () =>
-      tasks
-        .filter((task) => task.column === backlogSlug)
-        .filter((task) => {
-          if (projectFilter === "all") return true;
-          if (projectFilter === "none") return !task.initiative_project_id;
-          return task.initiative_project_id === projectFilter;
-        })
+      filterTasksByScope(backlogColumnTasks, scope, repositories)
+        .slice()
         .sort((a, b) => a.position - b.position),
-    [tasks, backlogSlug, projectFilter],
+    [backlogColumnTasks, scope, repositories],
+  );
+
+  const createDefaults = useMemo(
+    () => taskCreateDefaults(repositories, scope, defaultRepositoryId),
+    [repositories, scope, defaultRepositoryId],
   );
 
   // Looked up against every task, not just the backlog slice: changing the
@@ -259,22 +275,12 @@ export function BacklogPage() {
           description={t("boardArea.backlog.description")}
           action={
             <div className="flex flex-wrap gap-2">
-              {initiativeProjects.length > 0 && (
-                <Select value={projectFilter} onValueChange={setProjectFilter}>
-                  <SelectTrigger className="w-44">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t("boardArea.backlog.filterAllProjects")}</SelectItem>
-                    <SelectItem value="none">{t("boardArea.backlog.filterNoProject")}</SelectItem>
-                    {initiativeProjects.map((project) => (
-                      <SelectItem key={project.id} value={project.id}>
-                        {project.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
+              <ProjectScopeSelect
+                projects={initiativeProjects}
+                value={scope}
+                onChange={setScope}
+                counts={scopeCounts}
+              />
               <Button variant="outline" asChild className="gap-2">
                 <Link to="/released">
                   <Archive className="h-4 w-4" />
@@ -305,8 +311,14 @@ export function BacklogPage() {
             {backlogTasks.length === 0 ? (
               <Card className="border-dashed">
                 <EmptyState
-                  icon={Inbox}
-                  title={t("boardArea.backlog.emptyTitle")}
+                  icon={scope === PROJECT_SCOPE_ALL ? Inbox : FolderKanban}
+                  title={
+                    scope === PROJECT_SCOPE_ALL
+                      ? t("boardArea.backlog.emptyTitle")
+                      : scope === PROJECT_SCOPE_NONE
+                        ? t("boardArea.projectScope.emptyNoneTitle")
+                        : t("boardArea.projectScope.emptyTitle")
+                  }
                   description={
                     repositories.length === 0
                       ? t("boardArea.backlog.emptyNoRepo")
@@ -496,12 +508,13 @@ export function BacklogPage() {
         <CreateTaskDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}
-          repositories={repositories}
+          repositories={createDefaults.repositories}
           initiativeProjects={initiativeProjects}
           columns={columns}
           agents={agents}
           memberAgentIds={memberIds}
-          defaultRepositoryId={defaultRepositoryId}
+          defaultRepositoryId={createDefaults.repositoryId}
+          defaultInitiativeProjectId={createDefaults.initiativeProjectId}
           defaultColumn={backlogSlug}
           title={t("boardArea.backlog.createDialogTitle")}
           onCreated={load}

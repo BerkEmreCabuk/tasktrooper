@@ -57,6 +57,8 @@ export const projectsHub: ProjectsHubDict = {
   project: {
     breadcrumb: "Projeler",
     edit: "Düzenle",
+    board: "Board",
+    backlog: "Backlog",
     notFound: {
       title: "Proje bulunamadı",
       description: "Silinmiş olabilir ya da bağlantı hatalı.",

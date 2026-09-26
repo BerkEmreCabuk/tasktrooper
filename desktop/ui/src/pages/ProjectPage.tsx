@@ -1,4 +1,4 @@
-import { ChevronRight, FolderKanban, Plus } from "lucide-react";
+import { ChevronRight, FolderKanban, Inbox, Kanban, Plus } from "lucide-react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -98,6 +98,18 @@ export function ProjectPage() {
         description={project.description || undefined}
         action={
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" asChild className="gap-2">
+              <Link to={`/board?project=${project.id}`}>
+                <Kanban className="h-4 w-4" />
+                {t("projectsHub.project.board")}
+              </Link>
+            </Button>
+            <Button variant="outline" asChild className="gap-2">
+              <Link to={`/backlog?project=${project.id}`}>
+                <Inbox className="h-4 w-4" />
+                {t("projectsHub.project.backlog")}
+              </Link>
+            </Button>
             <Button variant="outline" asChild className="gap-2">
               <Link to={`/projects/new?project=${project.id}`}>
                 <Plus className="h-4 w-4" />

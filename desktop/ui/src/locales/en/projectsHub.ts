@@ -56,6 +56,8 @@ export const projectsHub = {
   project: {
     breadcrumb: "Projects",
     edit: "Edit",
+    board: "Board",
+    backlog: "Backlog",
     notFound: {
       title: "Project not found",
       description: "It may have been deleted, or the link is wrong.",

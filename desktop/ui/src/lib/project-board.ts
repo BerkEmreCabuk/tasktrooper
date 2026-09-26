@@ -2,6 +2,7 @@ import { AlertTriangle, CheckCircle2, Loader2, MinusCircle, XCircle, type Lucide
 import type {
   BoardTask,
   PipelineGateReason,
+  Repository,
   TaskPipeline,
   TaskPriority,
   TaskType,
@@ -19,7 +20,114 @@ export const CACHE_CONFIG = "board.config";
 export const CACHE_AGENTS = "board.agents";
 export const CACHE_WORKFLOWS = "board.workflows";
 
+/** Which slice of the workspace the board and backlog show: every task, the
+ * tasks that belong to no project, or one project's id. */
+export type ProjectScope = string;
+export const PROJECT_SCOPE_ALL = "all";
+export const PROJECT_SCOPE_NONE = "none";
 
+type ScopedTask = Pick<BoardTask, "repository_id" | "initiative_project_id">;
+type ScopedRepository = Pick<Repository, "id" | "project_ids">;
+
+export function isProjectScope(scope: ProjectScope): boolean {
+  return scope !== PROJECT_SCOPE_ALL && scope !== PROJECT_SCOPE_NONE;
+}
+
+function repositoryProjectIndex(repositories: readonly ScopedRepository[]): Map<string, readonly string[]> {
+  return new Map(repositories.map((repo) => [repo.id, repo.project_ids ?? []]));
+}
+
+// A task's own initiative project is an explicit choice and wins outright; only
+// a task that never picked one inherits every project its repository is in.
+function taskProjectIds(task: ScopedTask, index: Map<string, readonly string[]>): readonly string[] {
+  if (task.initiative_project_id) return [task.initiative_project_id];
+  return index.get(task.repository_id) ?? [];
+}
+
+export function taskBelongsToProject(
+  task: ScopedTask,
+  projectId: string,
+  repositories: readonly ScopedRepository[],
+): boolean {
+  return taskProjectIds(task, repositoryProjectIndex(repositories)).includes(projectId);
+}
+
+export function taskHasNoProject(task: ScopedTask, repositories: readonly ScopedRepository[]): boolean {
+  return taskProjectIds(task, repositoryProjectIndex(repositories)).length === 0;
+}
+
+export function filterTasksByScope<T extends ScopedTask>(
+  tasks: T[],
+  scope: ProjectScope,
+  repositories: readonly ScopedRepository[],
+): T[] {
+  if (scope === PROJECT_SCOPE_ALL) return tasks;
+  const index = repositoryProjectIndex(repositories);
+  if (scope === PROJECT_SCOPE_NONE) return tasks.filter((task) => taskProjectIds(task, index).length === 0);
+  return tasks.filter((task) => taskProjectIds(task, index).includes(scope));
+}
+
+/**
+ * The scope to switch to so `task` is on screen, or null when the current one
+ * already shows it: the task's single project, else every project.
+ */
+export function scopeShowingTask(
+  task: ScopedTask,
+  scope: ProjectScope,
+  repositories: readonly ScopedRepository[],
+): ProjectScope | null {
+  const ids = taskProjectIds(task, repositoryProjectIndex(repositories));
+  if (scope === PROJECT_SCOPE_ALL) return null;
+  if (scope === PROJECT_SCOPE_NONE ? ids.length === 0 : ids.includes(scope)) return null;
+  return ids.length === 1 ? ids[0] : PROJECT_SCOPE_ALL;
+}
+
+export interface ProjectScopeCounts {
+  all: number;
+  none: number;
+  byProject: Record<string, number>;
+}
+
+export function projectScopeCounts(
+  tasks: readonly ScopedTask[],
+  repositories: readonly ScopedRepository[],
+): ProjectScopeCounts {
+  const index = repositoryProjectIndex(repositories);
+  const byProject: Record<string, number> = {};
+  let none = 0;
+  for (const task of tasks) {
+    const ids = taskProjectIds(task, index);
+    if (ids.length === 0) none += 1;
+    for (const id of new Set(ids)) byProject[id] = (byProject[id] ?? 0) + 1;
+  }
+  return { all: tasks.length, none, byProject };
+}
+
+export interface TaskCreateDefaults<R> {
+  repositories: R[];
+  repositoryId: string;
+  initiativeProjectId?: string;
+}
+
+/**
+ * What the create-task dialog opens with while the page is scoped: the
+ * project preselected, and its repositories first (and preselected) — the
+ * others stay pickable, since a project's work can land in a repository it
+ * does not own yet. Anything but a project scope leaves the defaults alone.
+ */
+export function taskCreateDefaults<R extends ScopedRepository>(
+  repositories: R[],
+  scope: ProjectScope,
+  fallbackRepositoryId: string,
+): TaskCreateDefaults<R> {
+  if (!isProjectScope(scope)) return { repositories, repositoryId: fallbackRepositoryId };
+  const own = repositories.filter((repo) => repo.project_ids?.includes(scope));
+  if (own.length === 0) {
+    return { repositories, repositoryId: fallbackRepositoryId, initiativeProjectId: scope };
+  }
+  const rest = repositories.filter((repo) => !repo.project_ids?.includes(scope));
+  return { repositories: [...own, ...rest], repositoryId: own[0].id, initiativeProjectId: scope };
+}
 
 /**
  * Replaces a task list with a freshly fetched one while keeping the object (and

@@ -139,6 +139,14 @@ describe("ProjectPage", () => {
     await waitFor(() => expect(getProjectMap).toHaveBeenCalledWith("proj-1"));
   });
 
+  it("links to the board and the backlog scoped to this project", async () => {
+    renderPage();
+    await screen.findByRole("tab", { name: "Architecture" });
+
+    expect(screen.getByRole("link", { name: "Board" })).toHaveAttribute("href", "/board?project=proj-1");
+    expect(screen.getByRole("link", { name: "Backlog" })).toHaveAttribute("href", "/backlog?project=proj-1");
+  });
+
   it("renders one repositories-tab row per repository", async () => {
     renderPage();
     await screen.findByRole("tab", { name: "Architecture" });

@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { TaskTypeDef } from "@/api";
 import {
+  filterTasksByScope,
   pipelineStatusVariant,
+  projectScopeCounts,
   runStatusVariant,
+  taskBelongsToProject,
+  taskCreateDefaults,
+  taskHasNoProject,
   taskPipelineCardIcon,
   taskTypeLabel,
   taskTypeOptions,
@@ -181,5 +186,95 @@ describe("taskPipelineCardIcon", () => {
   it("colors the running/pending board-card icon with the info hue, not warning", () => {
     expect(taskPipelineCardIcon("running")?.className).toBe("text-info animate-spin");
     expect(taskPipelineCardIcon("pending")?.className).toBe("text-info animate-spin");
+  });
+});
+
+describe("project scope membership", () => {
+  const repositories = [
+    { id: "repo-shop", project_ids: ["proj-shop"] },
+    { id: "repo-shared", project_ids: ["proj-shop", "proj-ops"] },
+    { id: "repo-loose", project_ids: [] },
+    { id: "repo-bare" },
+  ];
+  const task = (repository_id: string, initiative_project_id?: string) => ({ repository_id, initiative_project_id });
+
+  it("puts a task in the project it names", () => {
+    expect(taskBelongsToProject(task("repo-loose", "proj-shop"), "proj-shop", repositories)).toBe(true);
+  });
+
+  it("falls back to the repository's projects when the task names none", () => {
+    expect(taskBelongsToProject(task("repo-shop"), "proj-shop", repositories)).toBe(true);
+    expect(taskBelongsToProject(task("repo-shared"), "proj-ops", repositories)).toBe(true);
+    expect(taskBelongsToProject(task("repo-shop"), "proj-ops", repositories)).toBe(false);
+  });
+
+  it("lets a task's own project win over its repository's membership", () => {
+    const explicit = task("repo-shop", "proj-ops");
+    expect(taskBelongsToProject(explicit, "proj-ops", repositories)).toBe(true);
+    expect(taskBelongsToProject(explicit, "proj-shop", repositories)).toBe(false);
+  });
+
+  it("counts a task as project-less only when neither it nor its repository has one", () => {
+    expect(taskHasNoProject(task("repo-loose"), repositories)).toBe(true);
+    expect(taskHasNoProject(task("repo-bare"), repositories)).toBe(true);
+    expect(taskHasNoProject(task("repo-unknown"), repositories)).toBe(true);
+    expect(taskHasNoProject(task("repo-shop"), repositories)).toBe(false);
+    expect(taskHasNoProject(task("repo-loose", "proj-shop"), repositories)).toBe(false);
+  });
+
+  it("filters by scope and counts every scope at once", () => {
+    const tasks = [
+      task("repo-shop"),
+      task("repo-shared"),
+      task("repo-shop", "proj-ops"),
+      task("repo-loose"),
+    ];
+    expect(filterTasksByScope(tasks, "all", repositories)).toBe(tasks);
+    expect(filterTasksByScope(tasks, "proj-shop", repositories)).toEqual([tasks[0], tasks[1]]);
+    expect(filterTasksByScope(tasks, "proj-ops", repositories)).toEqual([tasks[1], tasks[2]]);
+    expect(filterTasksByScope(tasks, "none", repositories)).toEqual([tasks[3]]);
+    expect(projectScopeCounts(tasks, repositories)).toEqual({
+      all: 4,
+      none: 1,
+      byProject: { "proj-shop": 2, "proj-ops": 2 },
+    });
+  });
+});
+
+describe("taskCreateDefaults", () => {
+  const repositories = [
+    { id: "repo-a", project_ids: [] },
+    { id: "repo-b", project_ids: ["proj-1"] },
+    { id: "repo-c", project_ids: ["proj-2"] },
+    { id: "repo-d", project_ids: ["proj-2"] },
+  ];
+
+  it("leaves everything alone outside a project scope", () => {
+    for (const scope of ["all", "none"]) {
+      const defaults = taskCreateDefaults(repositories, scope, "repo-a");
+      expect(defaults.repositories).toBe(repositories);
+      expect(defaults.repositoryId).toBe("repo-a");
+      expect(defaults.initiativeProjectId).toBeUndefined();
+    }
+  });
+
+  it("preselects the project and its only repository", () => {
+    const defaults = taskCreateDefaults(repositories, "proj-1", "repo-a");
+    expect(defaults.initiativeProjectId).toBe("proj-1");
+    expect(defaults.repositoryId).toBe("repo-b");
+    expect(defaults.repositories.map((r) => r.id)).toEqual(["repo-b", "repo-a", "repo-c", "repo-d"]);
+  });
+
+  it("puts a multi-repository project's repositories first", () => {
+    const defaults = taskCreateDefaults(repositories, "proj-2", "repo-a");
+    expect(defaults.repositoryId).toBe("repo-c");
+    expect(defaults.repositories.map((r) => r.id)).toEqual(["repo-c", "repo-d", "repo-a", "repo-b"]);
+  });
+
+  it("keeps the page's repository for a project that has none", () => {
+    const defaults = taskCreateDefaults(repositories, "proj-empty", "repo-a");
+    expect(defaults.initiativeProjectId).toBe("proj-empty");
+    expect(defaults.repositoryId).toBe("repo-a");
+    expect(defaults.repositories).toBe(repositories);
   });
 });

@@ -59,6 +59,21 @@ Placement rule: **atoms only in `components/ui/`**; molecules/organisms in the c
   too). `BoardPage`'s card shows the agent badge; `created_by` shows when no agent is set.
 - Clearing the assignee sends `null`.
 
+## Board & backlog project scope
+
+| Piece | What it is |
+|---|---|
+| `hooks/useProjectScope.ts` | The scope both pages share: `"all"`, `"none"` or a project id. `?project=` wins; without it, the last choice in localStorage (`tt.board.projectScope`, every access in try/catch). A valid `?project=` is remembered too, so the sidebar's plain `/board`/`/backlog` links keep it. An id that is no longer a project, or any scope while no project exists, reads as `"all"`. `setScope(next, dropParams?)` writes both, dropping other params in the same navigation. |
+| `board/ProjectScopeSelect.tsx` | Molecule: the header picker, always rendered on both pages — "All projects", each project, "No project" (only when a project exists and such tasks exist or it is selected), each with the count for the page it sits on. With no project at all it offers "All projects" plus "Create a project", which navigates to `/projects` without touching the scope. |
+| `lib/project-board.ts` | Pure, unit-tested rule: a task belongs to its `initiative_project_id`; without one, to every project its repository's `project_ids` lists. "No project" = neither. `filterTasksByScope`, `projectScopeCounts`, `scopeShowingTask` (the scope a `?task=` link switches to so its card is visible), `taskCreateDefaults` (under a project: `CreateTaskDialog`'s `defaultInitiativeProjectId` preselected, its repositories first and the first one preselected). |
+
+- `BoardPage` filters every lane (column counts follow), hides the card's project badge under a
+  project scope (the repository badge stays), and shows a dashed empty state with "New Task" when the
+  scope has no cards. `?task=<id>` still opens the drawer: a task outside the scope switches the scope
+  (`scopeShowingTask`), and a task missing from the cached board waits for the first fetch.
+- `BacklogPage` uses the same hook, picker and rule (it replaced its own local project filter).
+- `ProjectPage`'s header links to `/board?project=<id>` and `/backlog?project=<id>`.
+
 ## Projects (hub, repository, add)
 
 The from-scratch Projects redesign: a projects hub, one page per project, one

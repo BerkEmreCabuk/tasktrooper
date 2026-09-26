@@ -1,4 +1,15 @@
-import { Activity, Bot, Clock, GripVertical, HelpCircle, Inbox, Loader2, Plus, Trash2 } from "lucide-react";
+import {
+  Activity,
+  Bot,
+  Clock,
+  FolderKanban,
+  GripVertical,
+  HelpCircle,
+  Inbox,
+  Loader2,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -15,6 +26,7 @@ import {
 } from "@/api";
 import { BoardLane } from "@/components/board/BoardLane";
 import { CreateTaskDialog } from "@/components/board/CreateTaskDialog";
+import { ProjectScopeSelect } from "@/components/board/ProjectScopeSelect";
 import { TaskDetailDrawer } from "@/components/board/TaskDetailDrawer";
 import { NoRepositoriesNotice } from "@/components/workspace/NoProjectsNotice";
 import { ActivityFeed } from "@/components/workspace/ActivityFeed";
@@ -23,10 +35,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCachedState, useFirstLoad } from "@/hooks/useCachedState";
 import { tStatic, useI18n } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
+import { useProjectScope } from "@/hooks/useProjectScope";
 import {
   CACHE_AGENTS,
   CACHE_CONFIG,
@@ -34,12 +48,19 @@ import {
   CACHE_REPOS,
   CACHE_TASKS,
   CACHE_WORKFLOWS,
+  PROJECT_SCOPE_ALL,
+  PROJECT_SCOPE_NONE,
   blockedResourceLabel,
   boardColumnsSplit,
   boardLanes,
+  filterTasksByScope,
   formatResumeIn,
+  isProjectScope,
   mergeTaskList,
   pipelineGateReasonLabel,
+  projectScopeCounts,
+  scopeShowingTask,
+  taskCreateDefaults,
   taskPipelineCardIcon,
   taskPriorityLabel,
   taskTypeLabel,
@@ -95,8 +116,11 @@ export function BoardPage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [activeAgentTaskIds, setActiveAgentTaskIds] = useState<Set<string>>(new Set());
   const [activityOpen, setActivityOpen] = useState(false);
+  const [fetched, setFetched] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { scope, setScope } = useProjectScope(initiativeProjects);
+  const projectScoped = isProjectScope(scope);
 
   // Keep the open drawer's task in sync with the latest board data: after an
   // edit (e.g. assigning an agent) load() refetches tasks, and the selected
@@ -108,17 +132,35 @@ export function BoardPage() {
     );
   }, [tasks]);
 
-  // A notification-center click lands here as `?task=<id>` — open that task's
-  // drawer once the board's own task list has loaded, then drop the param so
-  // the URL doesn't keep re-triggering it. A task that no longer exists
-  // (released/deleted since the notification fired) just clears silently.
+  // A notification-center click (or the add-repository flow's "Open task")
+  // lands here as `?task=<id>` — open that task's drawer once the board's own
+  // task list has loaded, then drop the param so the URL doesn't keep
+  // re-triggering it. A board painted from the cache can predate the task, so
+  // a miss only counts once the first fetch is in; a task that still does not
+  // exist (released/deleted since the link was made) then just clears
+  // silently. A task outside the current project scope takes the scope with
+  // it: the drawer must not open over a board its card is filtered out of.
+  // Handled once per param: the navigation that drops it lands in a
+  // transition, and a second pass over the same id in between would race it.
+  const handledTaskParam = useRef<string | null>(null);
   useEffect(() => {
     const taskId = searchParams.get("task");
-    if (!taskId || loading) return;
+    if (!taskId) {
+      handledTaskParam.current = null;
+      return;
+    }
+    if (loading || handledTaskParam.current === taskId) return;
     const found = tasks.find((task) => task.id === taskId);
+    if (!found && !fetched) return;
+    handledTaskParam.current = taskId;
     if (found) {
       setSelectedTask(found);
       setDrawerOpen(true);
+      const revealing = scopeShowingTask(found, scope, repositories);
+      if (revealing) {
+        setScope(revealing, ["task"]);
+        return;
+      }
     }
     setSearchParams(
       (prev) => {
@@ -128,7 +170,7 @@ export function BoardPage() {
       },
       { replace: true },
     );
-  }, [searchParams, setSearchParams, tasks, loading]);
+  }, [searchParams, setSearchParams, tasks, loading, fetched, scope, setScope, repositories]);
 
   const openTaskCreate = () => {
     if (repositories.length === 0) {
@@ -203,6 +245,7 @@ export function BoardPage() {
       toast.error(reason instanceof Error ? reason.message : tStatic("boardArea.board.loadFailed"));
     }
     setLoading(false);
+    setFetched(true);
   }, [
     setTasks,
     setConfig,
@@ -285,17 +328,35 @@ export function BoardPage() {
     return invalid;
   }, [columns, draggedAllowedColumns]);
 
+  const boardColumnTasks = useMemo(() => {
+    const slugs = new Set(board.map((col) => col.slug));
+    return tasks.filter((task) => slugs.has(task.column));
+  }, [tasks, board]);
+
+  const scopeCounts = useMemo(
+    () => projectScopeCounts(boardColumnTasks, repositories),
+    [boardColumnTasks, repositories],
+  );
+
+  const scopedTasks = useMemo(
+    () => filterTasksByScope(boardColumnTasks, scope, repositories),
+    [boardColumnTasks, scope, repositories],
+  );
+
   const boardTasks = useMemo(() => {
     const grouped: Record<string, BoardTask[]> = {};
     for (const col of board) grouped[col.slug] = [];
-    for (const task of tasks) {
-      if (grouped[task.column]) grouped[task.column].push(task);
-    }
+    for (const task of scopedTasks) grouped[task.column].push(task);
     for (const col of board) {
       grouped[col.slug].sort((a, b) => a.position - b.position);
     }
     return grouped;
-  }, [tasks, board]);
+  }, [scopedTasks, board]);
+
+  const createDefaults = useMemo(
+    () => taskCreateDefaults(repositories, scope, defaultRepositoryId),
+    [repositories, scope, defaultRepositoryId],
+  );
 
   // The card lands in its new column on the drop, not a round-trip later. The
   // request still decides: the server answers with the task as it actually
@@ -381,7 +442,7 @@ export function BoardPage() {
 
   const TaskCard = ({ task }: { task: BoardTask }) => {
     const assignee = agentName(task.assignee_agent_id);
-    const initiative = initiativeName(task.initiative_project_id);
+    const initiative = projectScoped ? undefined : initiativeName(task.initiative_project_id);
     const agentRunning = activeAgentTaskIds.has(task.id);
     const pipelineIcon = taskPipelineCardIcon(task.latest_pipeline_status, task.latest_pipeline_gate_reason);
     // A skipped gate explains itself; an ordinary pipeline just names its status.
@@ -583,6 +644,12 @@ export function BoardPage() {
           title={t("boardArea.board.title")}
           action={
             <div className="flex flex-wrap gap-2">
+              <ProjectScopeSelect
+                projects={initiativeProjects}
+                value={scope}
+                onChange={setScope}
+                counts={scopeCounts}
+              />
               <Button variant="outline" className="gap-2" onClick={() => setActivityOpen(true)}>
                 <Activity className="h-4 w-4" />
                 {t("boardArea.board.activity")}
@@ -611,34 +678,56 @@ export function BoardPage() {
         {repositories.length === 0 && (
           <NoRepositoriesNotice className="mb-4 border-amber-500/30 bg-amber-500/5 p-4" />
         )}
-        <div className="flex min-h-0 flex-1 overflow-x-auto pb-1">
-          <div className="flex h-full min-h-0 min-w-max gap-3">
-            {lanes.map((lane) => (
-              <BoardLane
-                key={lane.key}
-                className="w-60"
-                stages={lane.columns.map((column) => ({
-                  slug: column.slug,
-                  label: column.label,
-                  count: (boardTasks[column.slug] ?? []).length,
-                }))}
-                dragging={dragTaskId !== null}
-                dropColumn={dropColumn}
-                onDropColumnChange={(slug) => setDropColumn((c) => (c === slug ? c : slug))}
-                onDropTask={onDrop}
-                invalidStages={invalidStages}
-                renderStage={(stage) => {
-                  const stageTasks = boardTasks[stage.slug] ?? [];
-                  return stageTasks.length === 0 ? (
-                    <p className="px-2 py-6 text-center text-xs text-muted-foreground">{t("boardArea.board.emptyColumn")}</p>
-                  ) : (
-                    stageTasks.map((task) => TaskCard({ task }))
-                  );
-                }}
-              />
-            ))}
+        {scope !== PROJECT_SCOPE_ALL && scopedTasks.length === 0 ? (
+          <Card className="border-dashed">
+            <EmptyState
+              icon={FolderKanban}
+              title={
+                scope === PROJECT_SCOPE_NONE
+                  ? t("boardArea.projectScope.emptyNoneTitle")
+                  : t("boardArea.projectScope.emptyTitle")
+              }
+              description={t("boardArea.projectScope.boardEmptyHint")}
+              action={
+                <Button onClick={openTaskCreate} className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  {t("boardArea.board.newTask")}
+                </Button>
+              }
+            />
+          </Card>
+        ) : (
+          <div className="flex min-h-0 flex-1 overflow-x-auto pb-1">
+            <div className="flex h-full min-h-0 min-w-max gap-3">
+              {lanes.map((lane) => (
+                <BoardLane
+                  key={lane.key}
+                  className="w-60"
+                  stages={lane.columns.map((column) => ({
+                    slug: column.slug,
+                    label: column.label,
+                    count: (boardTasks[column.slug] ?? []).length,
+                  }))}
+                  dragging={dragTaskId !== null}
+                  dropColumn={dropColumn}
+                  onDropColumnChange={(slug) => setDropColumn((c) => (c === slug ? c : slug))}
+                  onDropTask={onDrop}
+                  invalidStages={invalidStages}
+                  renderStage={(stage) => {
+                    const stageTasks = boardTasks[stage.slug] ?? [];
+                    return stageTasks.length === 0 ? (
+                      <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+                        {t("boardArea.board.emptyColumn")}
+                      </p>
+                    ) : (
+                      stageTasks.map((task) => TaskCard({ task }))
+                    );
+                  }}
+                />
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {config && selectedTask && (
@@ -674,12 +763,13 @@ export function BoardPage() {
         <CreateTaskDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}
-          repositories={repositories}
+          repositories={createDefaults.repositories}
           initiativeProjects={initiativeProjects}
           columns={allColumns}
           agents={agents}
           memberAgentIds={memberIds}
-          defaultRepositoryId={defaultRepositoryId}
+          defaultRepositoryId={createDefaults.repositoryId}
+          defaultInitiativeProjectId={createDefaults.initiativeProjectId}
           defaultColumn="todo"
           onCreated={load}
         />

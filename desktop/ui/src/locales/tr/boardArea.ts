@@ -46,8 +46,15 @@ export const boardArea: BoardAreaDict = {
     dropToColumn: "Bırak → {column}",
     releasedArchive: "Yayınlananlar",
     createDialogTitle: "Backlog'a Görev Ekle",
-    filterAllProjects: "Tüm projeler",
-    filterNoProject: "Projesiz",
+  },
+  projectScope: {
+    label: "Proje",
+    all: "Tüm projeler",
+    none: "Projesi olmayanlar",
+    emptyTitle: "Bu projede henüz görev yok",
+    emptyNoneTitle: "Projesi olmayan görev yok",
+    boardEmptyHint: "Görevler backlog'dan çıktığında burada görünür.",
+    createProject: "Proje oluştur",
   },
   board: {
     repoFallback: "Depo",

@@ -48,8 +48,16 @@ export const boardArea = {
     dropToColumn: "Drop to move to {column}",
     releasedArchive: "Released",
     createDialogTitle: "Add Task to Backlog",
-    filterAllProjects: "All projects",
-    filterNoProject: "No project",
+  },
+  // The project picker the board and the backlog share (hooks/useProjectScope).
+  projectScope: {
+    label: "Project",
+    all: "All projects",
+    none: "No project",
+    emptyTitle: "No tasks in this project yet",
+    emptyNoneTitle: "Every task belongs to a project",
+    boardEmptyHint: "Tasks show up here once they leave the backlog.",
+    createProject: "Create a project",
   },
   board: {
     repoFallback: "Repository",
