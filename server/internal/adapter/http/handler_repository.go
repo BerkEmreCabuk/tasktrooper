@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/newrepo"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -149,6 +150,51 @@ func (h *Handler) CreateRepository(c *fiber.Ctx) error {
 		return badRequest(c, err.Error())
 	}
 	return c.Status(fiber.StatusCreated).JSON(repo)
+}
+
+func (h *Handler) registerNewRepositoryRoute(app fiber.Router) {
+	if h.newRepoSvc == nil {
+		return
+	}
+	app.Post("/v1/repositories/new", h.CreateNewRepository)
+}
+
+type newRepositoryTask struct {
+	ID    string `json:"id"`
+	Key   string `json:"key"`
+	Title string `json:"title"`
+}
+
+// CreateNewRepository — POST /v1/repositories/new
+//
+// Creates an empty repository from the person's answers (role, stack, notes,
+// which docs they want) instead of scanning a folder that has no code yet.
+// 400 for anything refused before the repository existed — validation and
+// git/GitHub setup, after which nothing is left on disk; 500 when the
+// repository was created but a later step failed, so the client refreshes
+// its list instead of retrying the name.
+func (h *Handler) CreateNewRepository(c *fiber.Ctx) error {
+	var req domain.NewRepositoryRequest
+	if err := c.BodyParser(&req); err != nil {
+		return badRequest(c, "invalid request body")
+	}
+	res, err := h.newRepoSvc.Create(h.enrichContext(c), req)
+	if err != nil {
+		var incomplete *newrepo.IncompleteError
+		if errors.As(err, &incomplete) {
+			return internalError(c, err)
+		}
+		return badRequest(c, err.Error())
+	}
+	var task *newRepositoryTask
+	if res.Task != nil {
+		task = &newRepositoryTask{ID: res.Task.ID.String(), Key: res.Task.Key, Title: res.Task.Title}
+	}
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"repository":   res.Repository,
+		"component_id": res.ComponentID.String(),
+		"task":         task,
+	})
 }
 
 func (h *Handler) GetRepository(c *fiber.Ctx) error {

@@ -42,7 +42,11 @@ export function DoneStep({ repos, projectId, projectName, stats }: DoneStepProps
     <div className="space-y-6">
       <div className="flex flex-col items-center gap-2 py-6 text-center">
         <CheckCircle2 className="h-10 w-10 text-success" aria-hidden />
-        <h2 className="text-title font-semibold">{t("addRepository.done.added", { names, project: projectName })}</h2>
+        <h2 className="text-title font-semibold">
+          {readyRepos.length > 0
+            ? t("addRepository.done.added", { names, project: projectName })
+            : t("addRepository.done.noneAdded", { project: projectName })}
+        </h2>
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

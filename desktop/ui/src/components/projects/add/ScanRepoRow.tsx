@@ -1,7 +1,7 @@
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type RepositoryModel } from "@/api";
-import type { PendingRepo } from "@/components/projects/add/flow-types";
+import type { PendingRepo, ScanOutcome } from "@/components/projects/add/flow-types";
 import { RoleBadge } from "@/components/projects/model/RoleBadge";
 import { type CloneProgress, ScanProgressList } from "@/components/projects/model/ScanProgressList";
 import { Button } from "@/components/ui/button";
@@ -10,48 +10,91 @@ import { useI18n } from "@/hooks/useI18n";
 import { useScanProgress } from "@/hooks/useScanProgress";
 import { effectiveRole } from "@/lib/project-model";
 
+export const NO_SCAN_TIMEOUT_MS = 20_000;
+export const SCAN_CAP_MS = 5 * 60_000;
+
 interface ScanRepoRowProps {
   repo: PendingRepo;
   onRetry: (localId: string) => void;
-  /** Reports whether this row is done moving (import failed, or its scan
-   * reached succeeded/failed) — the Scan step's Continue button is a
-   * function of every row's settled state. */
-  onSettledChange: (localId: string, settled: boolean) => void;
+  /** Reports how far this row's scan got; anything but `pending` is settled,
+   * and the Scan step's Continue button is a function of every row's outcome. */
+  onOutcomeChange: (localId: string, outcome: ScanOutcome) => void;
+  noScanTimeoutMs?: number;
+  scanCapMs?: number;
 }
+
+const OUTCOME_HINT: Partial<Record<ScanOutcome, string>> = {
+  failed: "addRepository.scan.scanFailed",
+  not_started: "addRepository.scan.scanNotStarted",
+  slow: "addRepository.scan.scanSlow",
+};
 
 /** One row of the Scan step: the shared ScanProgressList (a GitHub import's
  * clone shown as its first stage, driven by the import call), then a summary
  * of what components were found. */
-export function ScanRepoRow({ repo, onRetry, onSettledChange }: ScanRepoRowProps) {
+export function ScanRepoRow({
+  repo,
+  onRetry,
+  onOutcomeChange,
+  noScanTimeoutMs = NO_SCAN_TIMEOUT_MS,
+  scanCapMs = SCAN_CAP_MS,
+}: ScanRepoRowProps) {
   const { t } = useI18n();
-  const { scan, finished } = useScanProgress(repo.repositoryId, { enabled: repo.status === "ready" });
+  const ready = repo.status === "ready";
+  const [gaveUp, setGaveUp] = useState<"not_started" | "slow" | null>(null);
+  const { scan, finished } = useScanProgress(repo.repositoryId, { enabled: ready && gaveUp === null });
   const [model, setModel] = useState<RepositoryModel | null>(null);
+  const hasScan = scan !== null;
   const clones = repo.recipe.method === "github";
   const clone: CloneProgress | undefined = clones
     ? {
-        state: repo.status === "importing" ? "running" : repo.status === "ready" ? "done" : "failed",
+        state: repo.status === "importing" ? "running" : ready ? "done" : "failed",
         error: repo.error,
       }
     : undefined;
 
-  useEffect(() => {
-    const settled = repo.status === "import_failed" || (repo.status === "ready" && finished);
-    onSettledChange(repo.localId, settled);
-  }, [repo.status, repo.localId, finished, onSettledChange]);
+  const outcome: ScanOutcome = !ready
+    ? "pending"
+    : finished
+      ? scan?.status === "succeeded"
+        ? "succeeded"
+        : "failed"
+      : (gaveUp ?? "pending");
 
   useEffect(() => {
-    if (repo.status === "ready" && finished && scan?.status === "succeeded" && repo.repositoryId) {
+    if (!ready) setGaveUp(null);
+  }, [ready]);
+
+  useEffect(() => {
+    if (!ready || finished) return;
+    const timer = window.setTimeout(() => setGaveUp((prev) => prev ?? "slow"), scanCapMs);
+    return () => window.clearTimeout(timer);
+  }, [ready, finished, repo.repositoryId, scanCapMs]);
+
+  useEffect(() => {
+    if (!ready || hasScan) return;
+    const timer = window.setTimeout(() => setGaveUp((prev) => prev ?? "not_started"), noScanTimeoutMs);
+    return () => window.clearTimeout(timer);
+  }, [ready, hasScan, repo.repositoryId, noScanTimeoutMs]);
+
+  useEffect(() => {
+    onOutcomeChange(repo.localId, outcome);
+  }, [repo.localId, outcome, onOutcomeChange]);
+
+  useEffect(() => {
+    if (ready && finished && scan?.status === "succeeded" && repo.repositoryId) {
       void api
         .getRepositoryModel(repo.repositoryId)
         .then(setModel)
         .catch(() => setModel(null));
     }
-  }, [repo.status, finished, scan?.status, repo.repositoryId]);
+  }, [ready, finished, scan?.status, repo.repositoryId]);
 
   const activeRoles = (model?.components ?? [])
     .filter((c) => c.status === "active")
     .map((c) => effectiveRole(c))
     .filter((r): r is NonNullable<typeof r> => Boolean(r));
+  const hint = ready ? OUTCOME_HINT[outcome] : undefined;
 
   return (
     <Card>
@@ -81,13 +124,11 @@ export function ScanRepoRow({ repo, onRetry, onSettledChange }: ScanRepoRowProps
           </div>
         )}
 
-        {(repo.status === "ready" || clones) && (
+        {(ready || clones) && (
           <>
-            <ScanProgressList scan={repo.status === "ready" ? scan : null} clone={clone} />
-            {finished && scan?.status === "failed" && (
-              <p className="text-caption text-muted-foreground">{t("addRepository.scan.scanFailedHint")}</p>
-            )}
-            {finished && scan?.status === "succeeded" && model && (
+            <ScanProgressList scan={ready ? scan : null} clone={clone} />
+            {hint && <p className="text-caption text-muted-foreground">{t(hint)}</p>}
+            {outcome === "succeeded" && model && (
               <div className="flex flex-wrap items-center gap-1.5 pt-1">
                 <span className="text-caption text-muted-foreground">
                   {t("addRepository.scan.componentsFound", { count: model.components.filter((c) => c.status === "active").length })}

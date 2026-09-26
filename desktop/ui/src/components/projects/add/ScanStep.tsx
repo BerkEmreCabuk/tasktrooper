@@ -1,30 +1,38 @@
 import { useCallback, useState } from "react";
 import { ScanRepoRow } from "@/components/projects/add/ScanRepoRow";
-import type { PendingRepo } from "@/components/projects/add/flow-types";
+import type { PendingRepo, ScanOutcome } from "@/components/projects/add/flow-types";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/hooks/useI18n";
 
 interface ScanStepProps {
   repos: PendingRepo[];
   onRetry: (localId: string) => void;
-  onContinue: () => void;
+  onContinue: (outcomes: Record<string, ScanOutcome>) => void;
+  noScanTimeoutMs?: number;
+  scanCapMs?: number;
 }
 
 /**
  * Step 2: one row per queued repository, each driving its own import +
  * scan. "Continue to review" only needs every row settled — a failed
- * import or a failed scan both count as settled, since either can be
- * retried/re-run later without blocking the rest of the flow.
+ * import, a failed scan, a scan that never started or one past the client
+ * cap all count, since each can be retried/re-run later from the repository
+ * page. "Continue without waiting" leaves the rest running server-side.
  */
-export function ScanStep({ repos, onRetry, onContinue }: ScanStepProps) {
+export function ScanStep({ repos, onRetry, onContinue, noScanTimeoutMs, scanCapMs }: ScanStepProps) {
   const { t } = useI18n();
-  const [settled, setSettled] = useState<Record<string, boolean>>({});
+  const [outcomes, setOutcomes] = useState<Record<string, ScanOutcome>>({});
 
-  const handleSettledChange = useCallback((localId: string, isSettled: boolean) => {
-    setSettled((prev) => (prev[localId] === isSettled ? prev : { ...prev, [localId]: isSettled }));
+  const handleOutcomeChange = useCallback((localId: string, outcome: ScanOutcome) => {
+    setOutcomes((prev) => (prev[localId] === outcome ? prev : { ...prev, [localId]: outcome }));
   }, []);
 
-  const allSettled = repos.length > 0 && repos.every((r) => r.status === "import_failed" || settled[r.localId] === true);
+  const settled = (r: PendingRepo) => {
+    if (r.status === "import_failed") return true;
+    const outcome = outcomes[r.localId];
+    return r.status === "ready" && outcome !== undefined && outcome !== "pending";
+  };
+  const allSettled = repos.length > 0 && repos.every(settled);
   const names = repos.map((r) => r.label).join(", ");
 
   return (
@@ -36,13 +44,25 @@ export function ScanStep({ repos, onRetry, onContinue }: ScanStepProps) {
 
       <div className="space-y-3">
         {repos.map((repo) => (
-          <ScanRepoRow key={repo.localId} repo={repo} onRetry={onRetry} onSettledChange={handleSettledChange} />
+          <ScanRepoRow
+            key={repo.localId}
+            repo={repo}
+            onRetry={onRetry}
+            onOutcomeChange={handleOutcomeChange}
+            noScanTimeoutMs={noScanTimeoutMs}
+            scanCapMs={scanCapMs}
+          />
         ))}
       </div>
 
-      <div className="flex items-center justify-end gap-3">
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <span className="text-caption text-muted-foreground">{t("addRepository.scan.continueHint")}</span>
-        <Button size="lg" disabled={!allSettled} onClick={onContinue}>
+        {!allSettled && repos.length > 0 && (
+          <Button size="lg" variant="outline" onClick={() => onContinue(outcomes)}>
+            {t("addRepository.scan.skipWaiting")}
+          </Button>
+        )}
+        <Button size="lg" disabled={!allSettled} onClick={() => onContinue(outcomes)}>
           {t("addRepository.scan.continue")}
         </Button>
       </div>

@@ -83,7 +83,7 @@ export const repositoryPage: RepositoryPageDict = {
     docsCodingStandards: "Kodlama standartları",
     docsTestStandards: "Test standartları",
     docsArchitecture: "Mimari",
-    docsLocalRun: "Yerel çalıştırma",
+    docsLocalRun: "Yerel çalıştırma scripti",
     docsQueue: "Kuyruğa al",
     docsQueued: "Kuyrukta",
     docsQueuedCount: "{count} doküman kuyrukta",

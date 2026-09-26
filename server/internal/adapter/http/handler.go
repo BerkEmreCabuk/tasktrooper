@@ -42,6 +42,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/mcp"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/memory"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/mobiledevice"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/newrepo"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prodops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/projectmodel"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/rag"
@@ -108,6 +109,7 @@ type Handler struct {
 	indexAllowedRoots []string
 	embedMapSvc       *embedmap.Service
 	repositorySvc     *repository.Service
+	newRepoSvc        *newrepo.Service
 	initiativeSvc     *initiative.Service
 	workspaceSvc      *workspace.Service
 	workflowSvc       *workflow.Service
@@ -174,6 +176,7 @@ type Config struct {
 	IndexAllowedRoots []string
 	EmbedMapSvc       *embedmap.Service
 	RepositorySvc     *repository.Service
+	NewRepoSvc        *newrepo.Service
 	InitiativeSvc     *initiative.Service
 	WorkspaceSvc      *workspace.Service
 	WorkflowSvc       *workflow.Service
@@ -235,6 +238,7 @@ func NewHandler(cfg Config) *Handler {
 		indexAllowedRoots: cfg.IndexAllowedRoots,
 		embedMapSvc:       cfg.EmbedMapSvc,
 		repositorySvc:     cfg.RepositorySvc,
+		newRepoSvc:        cfg.NewRepoSvc,
 		initiativeSvc:     cfg.InitiativeSvc,
 		workspaceSvc:      cfg.WorkspaceSvc,
 		workflowSvc:       cfg.WorkflowSvc,
@@ -297,6 +301,7 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	app.Post("/v1/sessions/:id/cancel", h.CancelSession)
 	h.registerIndexRoutes(app)
 	h.registerEmbeddingMapRoutes(app)
+	h.registerNewRepositoryRoute(app)
 	h.registerRepositoryRoutes(app)
 	// Registered before registerInitiativeRoutes: fiber matches routes in
 	// registration order, so /v1/projects/overview must be mounted before

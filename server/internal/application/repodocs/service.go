@@ -183,18 +183,40 @@ func docInstructions(doc resolvedDoc) string {
 	case domain.RepoDocArchitecture:
 		return "Cover: the major components/layers and how they depend on each other, the data flow for a typical request or task, and the boundaries that must not be crossed (e.g. hexagonal layering, module isolation).\n"
 	case domain.RepoDocLocalRun:
-		var b strings.Builder
-		fmt.Fprintf(&b, "This one is NOT a markdown guide: %s must be a COMPLETE, executable local bootstrap script.\n", doc.fullPath)
-		b.WriteString("Running it on a fresh machine must leave the project running, with no other step:\n")
-		b.WriteString("- install every dependency and toolchain the project needs (check first, install only what is missing)\n")
-		b.WriteString("- prepare env/config: create the .env (or equivalent) from the example, fill in the local defaults, run whatever migrations and seeds a first run needs\n")
-		b.WriteString("- start every service the project needs to actually work — the app plus its database, cache, queue or emulator — not just the app process\n")
-		b.WriteString("- idempotent: running it a second time must be safe and must not duplicate anything\n")
-		b.WriteString("- executable (`chmod +x`), with a `#!/usr/bin/env bash` shebang and `set -euo pipefail`\n")
-		fmt.Fprintf(&b, "- a short usage header comment at the top: what it does, how to run it, and the port/URL it comes up on\n")
-		fmt.Fprintf(&b, "- accepts an optional port argument (`%s [port]`) overriding the default, so it can be rerun when the default port is already in use\n", doc.fullPath)
-		b.WriteString("Everything in it must match what this repository actually needs today — its real package manager, build tool and ports — not a generic template. Do not write a markdown guide instead of, or alongside, the script.\n")
-		return b.String()
+		return localRunScriptRequirements(doc.fullPath) +
+			"Everything in it must match what this repository actually needs today — its real package manager, build tool and ports — not a generic template. Do not write a markdown guide instead of, or alongside, the script.\n"
+	}
+	return ""
+}
+
+func localRunScriptRequirements(fullPath string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "This one is NOT a markdown guide: %s must be a COMPLETE, executable local bootstrap script.\n", fullPath)
+	b.WriteString("Running it on a fresh machine must leave the project running, with no other step:\n")
+	b.WriteString("- install every dependency and toolchain the project needs (check first, install only what is missing)\n")
+	b.WriteString("- prepare env/config: create the .env (or equivalent) from the example, fill in the local defaults, run whatever migrations and seeds a first run needs\n")
+	b.WriteString("- start every service the project needs to actually work — the app plus its database, cache, queue or emulator — not just the app process\n")
+	b.WriteString("- idempotent: running it a second time must be safe and must not duplicate anything\n")
+	b.WriteString("- executable (`chmod +x`), with a `#!/usr/bin/env bash` shebang and `set -euo pipefail`\n")
+	b.WriteString("- a short usage header comment at the top: what it does, how to run it, and the port/URL it comes up on\n")
+	fmt.Fprintf(&b, "- accepts an optional port argument (`%s [port]`) overriding the default, so it can be rerun when the default port is already in use\n", fullPath)
+	return b.String()
+}
+
+// NewRepoDocInstructions is docInstructions for a repository with no code yet:
+// there is nothing to describe, so each doc PRESCRIBES the conventions the
+// first commit and every later change must follow.
+func NewRepoDocInstructions(kind, fullPath string) string {
+	switch kind {
+	case domain.RepoDocCodingStandards:
+		return "Prescribe the conventions for the chosen stack: the formatter and linter to use (add their config files to the repository so they actually run), naming and file-layout conventions, the error-handling style, and the few rules that matter most for this kind of project. Keep it short and concrete — rules, not a tutorial.\n"
+	case domain.RepoDocTestStandards:
+		return "Prescribe how this project is tested: the test runner and the exact command to run it (wire it up, with at least one passing example test if there is code to test), which layers to use (unit/integration/e2e — pick what fits this stack), where test files live and how they are named, and how a new feature's tests should be structured.\n"
+	case domain.RepoDocArchitecture:
+		return "Prescribe the architecture: the layers or modules and the direction of dependencies between them, where each kind of code goes in the directory layout, the data flow for a typical request or job, and the boundaries that must not be crossed.\n"
+	case domain.RepoDocLocalRun:
+		return localRunScriptRequirements(fullPath) +
+			"Everything in it must match the chosen stack and what this pull request adds — the real package manager, build tool and ports — not a generic template. Do not write a markdown guide instead of, or alongside, the script.\n"
 	}
 	return ""
 }
@@ -262,7 +284,7 @@ func bundleDescription(repo domain.Repository, docs []resolvedDoc) string {
 	fmt.Fprintf(&b, "Author the reference docs listed below for this %s repository, ALL of them in a single branch so exactly one pull request contains every file.\n\n", repo.Kind)
 	b.WriteString("Do not open a pull request per document, and do not stop after the first one — the task is finished when every path below exists and is correct.\n\n")
 	for i, doc := range docs {
-		fmt.Fprintf(&b, "%d. `%s` — %s for %s\n", i+1, doc.fullPath, docKindLabel(doc.kind), docScopeLabel(doc))
+		fmt.Fprintf(&b, "%d. `%s` — %s for %s\n", i+1, doc.fullPath, DocKindLabel(doc.kind), docScopeLabel(doc))
 	}
 	for _, doc := range docs {
 		fmt.Fprintf(&b, "\n---\n\n## `%s`\n\n", doc.fullPath)
@@ -275,7 +297,7 @@ func bundleDescription(repo domain.Repository, docs []resolvedDoc) string {
 	return b.String()
 }
 
-func docKindLabel(kind string) string {
+func DocKindLabel(kind string) string {
 	switch kind {
 	case domain.RepoDocCodingStandards:
 		return "coding standards"
@@ -410,13 +432,13 @@ func (s *Service) setDocPath(ctx context.Context, repo domain.Repository, doc re
 			return err
 		}
 		docs := comp.Docs
-		setDocKind(&docs, doc.kind, doc.path)
+		docs.SetPath(doc.kind, doc.path)
 		_, err = s.components.UpdateComponent(ctx, id, domain.ComponentPatch{Docs: &docs})
 		return err
 	}
 	if doc.subProjectPath == "" {
 		docs := repo.Docs
-		setDocKind(&docs, doc.kind, doc.path)
+		docs.SetPath(doc.kind, doc.path)
 		_, err := s.repos.Update(ctx, repo.ID, domain.UpdateRepositoryRequest{Docs: &docs})
 		return err
 	}
@@ -425,7 +447,7 @@ func (s *Service) setDocPath(ctx context.Context, repo domain.Repository, doc re
 	found := false
 	for i := range subs {
 		if subs[i].Path == doc.subProjectPath {
-			setDocKind(&subs[i].Docs, doc.kind, doc.path)
+			subs[i].Docs.SetPath(doc.kind, doc.path)
 			found = true
 			break
 		}
@@ -435,19 +457,6 @@ func (s *Service) setDocPath(ctx context.Context, repo domain.Repository, doc re
 	}
 	_, err := s.repos.Update(ctx, repo.ID, domain.UpdateRepositoryRequest{SubProjects: &subs})
 	return err
-}
-
-func setDocKind(docs *domain.RepositoryDocs, kind, path string) {
-	switch kind {
-	case domain.RepoDocCodingStandards:
-		docs.CodingStandards = path
-	case domain.RepoDocTestStandards:
-		docs.TestStandards = path
-	case domain.RepoDocArchitecture:
-		docs.Architecture = path
-	case domain.RepoDocLocalRun:
-		docs.LocalRun = path
-	}
 }
 
 func (s *Service) systemTaskAssignee(ctx context.Context, kind string, subProjects []domain.RepoSubProject) *uuid.UUID {

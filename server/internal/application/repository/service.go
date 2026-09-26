@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +41,8 @@ type ModelRefresher interface {
 	RefreshIfStale(ctx context.Context, repositoryID uuid.UUID, reason string)
 
 	RefreshAfterPush(ctx context.Context, repositoryID uuid.UUID, reason string)
+
+	RefreshIfNeverScanned(ctx context.Context, repositoryID uuid.UUID, reason string)
 }
 
 // ComponentResolver validates a task's component_id: it must name a
@@ -568,11 +572,17 @@ func (s *Service) Open(ctx context.Context, req domain.OpenRepositoryRequest) (d
 		s.ensureGitAsync(ctx, existing.ID, absRoot, name)
 		existing = s.syncRemoteURL(ctx, existing, req.CloneURL)
 		s.startIndex(ctx, existing.ID, absRoot)
+		if s.modelRefresher != nil {
+			s.modelRefresher.RefreshIfNeverScanned(ctx, existing.ID, "import")
+		}
 		return s.withGitWarning(existing), nil
 	}
+	return s.registerNew(ctx, absRoot, name, req, true)
+}
 
+func (s *Service) registerNew(ctx context.Context, absRoot, name string, req domain.OpenRepositoryRequest, scan bool) (domain.Repository, error) {
 	if err := s.ensureGitSync(ctx, absRoot, name, req.Owner); err != nil {
-		return domain.Repository{}, fmt.Errorf("git/github kurulumu: %w", err)
+		return domain.Repository{}, fmt.Errorf("git/GitHub setup failed: %w", err)
 	}
 	remoteURL := strings.TrimSpace(req.CloneURL)
 	if remoteURL == "" && s.git != nil {
@@ -598,7 +608,7 @@ func (s *Service) Open(ctx context.Context, req domain.OpenRepositoryRequest) (d
 
 	s.setupWebhookAsync(ctx, repo.ID)
 
-	if s.modelRefresher != nil {
+	if scan && s.modelRefresher != nil {
 		s.modelRefresher.RefreshAsync(ctx, repo.ID, "import")
 	}
 	return s.withGitWarning(repo), nil
@@ -729,13 +739,23 @@ func (s *Service) withGitWarning(repo domain.Repository) domain.Repository {
 }
 
 func (s *Service) Create(ctx context.Context, req domain.CreateRepositoryRequest) (domain.Repository, error) {
+	return s.create(ctx, req, true)
+}
 
+// CreateWithoutScan is Create for a repository that starts empty: a scan of an
+// empty folder can only find a placeholder root component, so the first scan
+// waits for the first push to the default branch (webhook or poll).
+func (s *Service) CreateWithoutScan(ctx context.Context, req domain.CreateRepositoryRequest) (domain.Repository, error) {
+	return s.create(ctx, req, false)
+}
+
+func (s *Service) create(ctx context.Context, req domain.CreateRepositoryRequest, scan bool) (domain.Repository, error) {
 	if err := validateRequestKind(req.Kind); err != nil {
 		return domain.Repository{}, err
 	}
-	name := strings.TrimSpace(req.Name)
-	if name == "" {
-		return domain.Repository{}, fmt.Errorf("name is required")
+	name, err := domain.NewRepoDirName(req.Name)
+	if err != nil {
+		return domain.Repository{}, err
 	}
 	parent := strings.TrimSpace(req.ParentDir)
 	if parent == "" {
@@ -754,20 +774,56 @@ func (s *Service) Create(ctx context.Context, req domain.CreateRepositoryRequest
 		return domain.Repository{}, err
 	}
 	rootPath := filepath.Join(parentDir, name)
-	if _, err := os.Stat(rootPath); err == nil {
-		return domain.Repository{}, fmt.Errorf("directory already exists: %s", rootPath)
+	if _, err := os.Lstat(rootPath); err == nil {
+		return domain.Repository{}, fmt.Errorf("directory already exists: %s — choose another name, or import the existing folder instead", rootPath)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return domain.Repository{}, fmt.Errorf("check directory: %w", err)
 	}
-	if err := os.MkdirAll(rootPath, 0o755); err != nil {
+	if existing, err := s.repos.GetByRootPath(ctx, rootPath); err == nil && existing.ID != uuid.Nil {
+		return domain.Repository{}, fmt.Errorf("repository %q is already registered at %s (its folder is missing) — restore or remove it first", existing.Name, rootPath)
+	}
+	if err := os.Mkdir(rootPath, 0o755); err != nil {
 		return domain.Repository{}, fmt.Errorf("create directory: %w", err)
 	}
-	return s.Open(ctx, domain.OpenRepositoryRequest{
+	repo, err := s.registerNew(ctx, rootPath, name, domain.OpenRepositoryRequest{
 		RootPath:    rootPath,
 		Description: req.Description,
 		ProjectIDs:  req.ProjectIDs,
 		Owner:       req.Owner,
+		Kind:        strings.TrimSpace(req.Kind),
+	}, scan)
+	if err != nil {
+		return domain.Repository{}, s.abandonNewDirectory(ctx, rootPath, err)
+	}
+	return repo, nil
+}
 
-		Kind: strings.TrimSpace(req.Kind),
-	})
+// abandonNewDirectory undoes a create that failed after its folder was made,
+// so retrying the same name works. The GitHub repository cannot be taken back
+// from here; the error says so, since a retry would collide with it.
+func (s *Service) abandonNewDirectory(ctx context.Context, rootPath string, cause error) error {
+	cleanupCtx := context.WithoutCancel(ctx)
+	remote := ""
+	var created *domain.RemoteRepoCreatedError
+	if errors.As(cause, &created) {
+		remote = created.URL
+	} else if s.git != nil {
+		remote = s.git.OriginURL(cleanupCtx, rootPath)
+	}
+	if orphan, err := s.repos.GetByRootPath(cleanupCtx, rootPath); err == nil && orphan.ID != uuid.Nil {
+		if err := s.repos.Delete(cleanupCtx, orphan.ID); err != nil {
+			log.Warn().Err(err).Str("repository_id", orphan.ID.String()).Msg("create repository: removing the half-registered row failed")
+		}
+	}
+	var notes strings.Builder
+	if err := os.RemoveAll(rootPath); err != nil {
+		log.Warn().Err(err).Str("root", rootPath).Msg("create repository: removing the new directory failed")
+		fmt.Fprintf(&notes, "; the folder %s could not be removed (%v), delete it before retrying", rootPath, err)
+	}
+	if remote != "" {
+		fmt.Fprintf(&notes, "; the GitHub repository %s was already created — delete it on GitHub, or import it, before creating this name again", remote)
+	}
+	return fmt.Errorf("%w%s", cause, notes.String())
 }
 
 func (s *Service) Update(ctx context.Context, id uuid.UUID, req domain.UpdateRepositoryRequest) (domain.Repository, error) {

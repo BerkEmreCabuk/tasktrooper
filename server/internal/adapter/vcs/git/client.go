@@ -128,12 +128,15 @@ func (c *Client) EnsureRepoWithRemote(ctx context.Context, rootPath, name, owner
 		if err != nil {
 			return fmt.Errorf("github repo create: %w", err)
 		}
+		created := func(err error) error {
+			return &domain.RemoteRepoCreatedError{URL: githubRepoURL(repo), Err: err}
+		}
 		if _, err := c.run(ctx, rootPath, "git", "remote", "add", "origin", repo.CloneURL); err != nil {
-			return fmt.Errorf("git remote add: %w", err)
+			return created(fmt.Errorf("git remote add: %w", err))
 		}
 		args := append(authFlags(tok), "push", "-u", "origin", "HEAD")
 		if out, err := c.run(ctx, rootPath, "git", args...); err != nil {
-			return fmt.Errorf("git push: %w (%s)", err, strings.TrimSpace(out))
+			return created(fmt.Errorf("git push: %w (%s)", err, strings.TrimSpace(out)))
 		}
 		return nil
 	}
@@ -1066,18 +1069,15 @@ func envOrDefault(key, fallback string) string {
 }
 
 func sanitizeRepoName(name string) string {
-	var b strings.Builder
-	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
-			b.WriteRune(r)
-		case r == ' ':
-			b.WriteRune('-')
-		}
+	if s := domain.SanitizeRepoName(name); s != "" {
+		return s
 	}
-	s := strings.Trim(b.String(), "-._")
-	if s == "" {
-		s = "project"
+	return "project"
+}
+
+func githubRepoURL(repo githubapi.Repo) string {
+	if full := strings.TrimSpace(repo.FullName); full != "" {
+		return "https://github.com/" + full
 	}
-	return s
+	return strings.TrimSuffix(repo.CloneURL, ".git")
 }

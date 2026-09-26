@@ -33,6 +33,7 @@ Column slugs are global in `board_columns`. Default template: `backlog`, `todo`,
 |--------|------|
 | GET/POST | `/v1/repositories` |
 | POST | `/v1/repositories/open` |
+| POST | `/v1/repositories/new` (empty repository from the person's answers: root component + one bootstrap task, no scan until the first push — see api-spec) |
 | GET/PATCH/DELETE | `/v1/repositories/:id` |
 | POST | `/v1/repositories/:id/restore` (re-clone the working copy onto this host) |
 | PUT | `/v1/repositories/:id/projects` |

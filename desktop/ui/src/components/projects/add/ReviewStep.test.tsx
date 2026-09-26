@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Component, Repository, RepositoryModel } from "@/api";
 
@@ -67,15 +67,19 @@ function makeModel(repo: Repository, opts: { withReview: boolean }): RepositoryM
   };
 }
 
-function makeRepo(repositoryId: string, label: string): PendingRepo {
+function makeRepo(repositoryId: string, label: string, overrides: Partial<PendingRepo> = {}): PendingRepo {
   return {
     localId: repositoryId,
     label,
     recipe: { method: "folder", rootPath: `/repos/${label}` },
     status: "ready",
     repositoryId,
+    scanOutcome: "succeeded",
+    ...overrides,
   };
 }
+
+const finishButton = () => screen.getByRole("button", { name: "Finish" });
 
 describe("ReviewStep", () => {
   beforeEach(() => {
@@ -119,5 +123,44 @@ describe("ReviewStep", () => {
       expect(screen.getByText("Nothing to ask — everything was detected with confidence")).toBeInTheDocument(),
     );
     expect(screen.queryByText("Needs your answer")).not.toBeInTheDocument();
+  });
+
+  it("gives un-analyzed repos one line each and never blocks Finish on them", async () => {
+    const onFinish = vi.fn();
+    render(
+      <I18nProvider>
+        <ReviewStep
+          repos={[
+            makeRepo("repo-failed", "platform", { scanOutcome: "failed" }),
+            makeRepo("repo-running", "docs", { scanOutcome: "pending" }),
+            makeRepo("repo-silent", "infra", { scanOutcome: "not_started" }),
+            makeRepo("", "broken", { localId: "l-broken", status: "import_failed", repositoryId: undefined }),
+          ]}
+          onFinish={onFinish}
+        />
+      </I18nProvider>,
+    );
+
+    expect(getRepositoryModel).not.toHaveBeenCalled();
+    expect(screen.getAllByText("Not analyzed — you can rescan it from the repository page.")).toHaveLength(2);
+    expect(screen.getByText(/Analysis is still running in the background/)).toBeInTheDocument();
+    expect(screen.getByText("Import failed — not added.")).toBeInTheDocument();
+    expect(finishButton()).toBeEnabled();
+
+    fireEvent.click(finishButton());
+    expect(onFinish).toHaveBeenCalledWith({ components: 0, checks: 0, requiredChecks: 0, links: 0, reviewAnswered: 0 });
+  });
+
+  it("waits for analyzed repos' models, but a model that fails to load does not dead-end Finish", async () => {
+    getRepositoryModel.mockRejectedValue(new Error("model unavailable"));
+    render(
+      <I18nProvider>
+        <ReviewStep repos={[makeRepo("repo-unloadable", "platform")]} onFinish={vi.fn()} />
+      </I18nProvider>,
+    );
+
+    expect(finishButton()).toBeDisabled();
+    expect(await screen.findByText("model unavailable")).toBeInTheDocument();
+    await waitFor(() => expect(finishButton()).toBeEnabled());
   });
 });

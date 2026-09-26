@@ -17,19 +17,25 @@ import { componentLabel, effectiveRole, factValue, requiredChecks, stackSummary 
 interface RepoReviewCardProps {
   repositoryId: string;
   onModelChange: (repositoryId: string, model: RepositoryModel) => void;
+  /** A model that will not load must not hold the step's Finish button hostage. */
+  onLoadError?: (repositoryId: string) => void;
 }
 
 /** One repository's Review-step card: the shared ReviewList for anything
  * medium-confidence, and a collapsible summary of everything the scan saved
  * directly. Reports its model up to ReviewStep on every load/reload, which
  * is how the step knows the aggregate review count and the Done stats. */
-export function RepoReviewCard({ repositoryId, onModelChange }: RepoReviewCardProps) {
+export function RepoReviewCard({ repositoryId, onModelChange, onLoadError }: RepoReviewCardProps) {
   const { t } = useI18n();
   const { model, error, reload } = useRepositoryModel(repositoryId);
 
   useEffect(() => {
     if (model) onModelChange(repositoryId, model);
   }, [model, repositoryId, onModelChange]);
+
+  useEffect(() => {
+    if (error && !model) onLoadError?.(repositoryId);
+  }, [error, model, repositoryId, onLoadError]);
 
   if (error && !model) {
     return (

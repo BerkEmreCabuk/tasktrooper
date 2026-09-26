@@ -258,3 +258,50 @@ func (s *ScanSuite) TestRefreshIfStaleOnlyWhenStaleOrMissing() {
 	s.svc.RefreshIfStale(context.Background(), repo.ID, "poll")
 	s.Eventually(func() bool { return s.scanner.callCount() == 2 }, time.Second, 5*time.Millisecond)
 }
+
+func (s *ScanSuite) TestRefreshIfNeverScannedOnlyStartsTheFirstScan() {
+	repo := domain.Repository{ID: uuid.New(), Name: "first-scan", RootPath: "/repos/first-scan"}
+	s.repos.set(repo)
+
+	s.svc.RefreshIfNeverScanned(context.Background(), repo.ID, "import")
+	s.Eventually(func() bool { return s.scanner.callCount() == 1 }, time.Second, 5*time.Millisecond)
+	latest, err := s.store.LatestScan(context.Background(), repo.ID)
+	s.Require().NoError(err)
+	s.Equal(domain.ScanTriggerImport, latest.Trigger)
+	first := s.awaitScan(latest.ID)
+
+	s.store.mu.Lock()
+	agedScan := s.store.scans[first.ID]
+	agedScan.StartedAt = s.svc.now().Add(-30 * 24 * time.Hour)
+	s.store.scans[first.ID] = agedScan
+	s.store.mu.Unlock()
+
+	s.svc.RefreshIfNeverScanned(context.Background(), repo.ID, "import")
+	time.Sleep(20 * time.Millisecond)
+	s.Equal(1, s.scanner.callCount())
+}
+
+func (s *ScanSuite) TestRefreshAfterPushRunsARepositorysFirstScanAsItsImport() {
+	repo := domain.Repository{ID: uuid.New(), Name: "created-empty", RootPath: "/repos/created-empty"}
+	s.repos.set(repo)
+
+	s.svc.RefreshAfterPush(context.Background(), repo.ID, "push")
+	s.Eventually(func() bool { return s.scanner.callCount() == 1 }, time.Second, 5*time.Millisecond)
+	first, err := s.store.LatestScan(context.Background(), repo.ID)
+	s.Require().NoError(err)
+	s.Equal(domain.ScanTriggerImport, first.Trigger)
+	first = s.awaitScan(first.ID)
+
+	s.store.mu.Lock()
+	aged := s.store.scans[first.ID]
+	aged.StartedAt = s.svc.now().Add(-time.Hour)
+	s.store.scans[first.ID] = aged
+	s.store.mu.Unlock()
+
+	s.svc.RefreshAfterPush(context.Background(), repo.ID, "push")
+	s.Eventually(func() bool { return s.scanner.callCount() == 2 }, time.Second, 5*time.Millisecond)
+	second, err := s.store.LatestScan(context.Background(), repo.ID)
+	s.Require().NoError(err)
+	s.Equal(domain.ScanTriggerPush, second.Trigger)
+	s.awaitScan(second.ID)
+}

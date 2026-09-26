@@ -229,10 +229,33 @@ func (s *Service) RefreshIfStale(ctx context.Context, repositoryID uuid.UUID, re
 	}
 }
 
+// RefreshIfNeverScanned starts a repository's first scan and otherwise does
+// nothing: re-opening an already registered folder must not rescan a model
+// the person may be reviewing, but one that was never scanned would stay
+// without a model until its next push.
+func (s *Service) RefreshIfNeverScanned(ctx context.Context, repositoryID uuid.UUID, reason string) {
+	_, err := s.store.LatestScan(ctx, repositoryID)
+	if err == nil {
+		return
+	}
+	if !errors.Is(err, port.ErrNotFound) {
+		log.Warn().Err(err).Str("repository_id", repositoryID.String()).Msg("scan: first-scan check failed")
+		return
+	}
+	s.RefreshAsync(ctx, repositoryID, reason)
+}
+
 // RefreshAfterPush always starts a scan: scans are cheap, unlike the agent
-// profile refresh they replaced.
+// profile refresh they replaced. A repository's first-ever scan runs as its
+// import even when a push woke it — a repository created empty is scanned
+// first after its bootstrap merge, and a push trigger would queue everything
+// that scan finds for review as if it had been added to a reviewed model.
 func (s *Service) RefreshAfterPush(ctx context.Context, repositoryID uuid.UUID, reason string) {
-	if _, _, err := s.StartScan(ctx, repositoryID, domain.ScanTriggerPush); err != nil {
+	trigger := domain.ScanTriggerPush
+	if _, err := s.store.LatestScan(ctx, repositoryID); errors.Is(err, port.ErrNotFound) {
+		trigger = domain.ScanTriggerImport
+	}
+	if _, _, err := s.StartScan(ctx, repositoryID, trigger); err != nil {
 		log.Warn().Err(err).Str("repository_id", repositoryID.String()).Str("reason", reason).Msg("scan: RefreshAfterPush failed to start")
 	}
 }

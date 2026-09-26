@@ -696,6 +696,29 @@ export interface RepositoryDocs {
 
 export type RepoDocKind = "coding_standards" | "test_standards" | "architecture" | "local_run";
 
+export const REPO_DOC_KINDS: RepoDocKind[] = ["coding_standards", "test_standards", "architecture", "local_run"];
+
+/** POST /v1/repositories/new body. Nothing is scanned: the repository has no
+ * code yet, so its root component is created with the chosen `role` and a
+ * bootstrap board task scaffolds it (when `scaffold`) and writes `docs`. */
+export interface NewRepositoryRequest {
+  name: string;
+  owner?: string;
+  description?: string;
+  project_ids?: string[];
+  role: ComponentRole;
+  stack?: string;
+  notes?: string;
+  scaffold: boolean;
+  docs: RepoDocKind[];
+}
+
+export interface NewRepositoryResponse {
+  repository: Repository;
+  component_id: string;
+  task: { id: string; key: string; title: string } | null;
+}
+
 /** GET /v1/repositories/{id}/docs/task response. An empty `task_id` means no
  * docs-bundle task is currently active for the repository. */
 export type RepoDocsTaskStatus = {
@@ -3954,6 +3977,12 @@ export const api = {
     request<Repository>("/v1/repositories", {
       method: "POST",
       body: JSON.stringify({ name, parent_dir: parentDir, description, project_ids: projectIds, owner }),
+    }),
+
+  createNewRepository: (body: NewRepositoryRequest) =>
+    request<NewRepositoryResponse>("/v1/repositories/new", {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
 
   createProject: (name: string, parentDir: string, description: string) =>

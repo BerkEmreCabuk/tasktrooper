@@ -289,6 +289,44 @@ watch keys off rather than the default branch.
   detected from the working copy (Flutter/Xcode markers → mobile; several projects under
   `apps/`/`packages/` → monorepo; a react/vue/svelte/vite/next `package.json` →
   frontend; otherwise backend) and persisted with the row.
+- `POST /v1/repositories` (create an empty repository) names the local folder with the
+  same sanitized name GitHub gets (`domain.SanitizeRepoName`: lower-case, `[a-z0-9._-]`,
+  spaces → `-`; nothing usable left or longer than 100 → 400), always a single path
+  component under `<workspace>/repos`. An existing folder, or a registered repository
+  whose folder is missing, → 400. When any step after the folder was made fails
+  (git init, GitHub create/push, registering the row, linking projects), the folder and
+  any half-registered row are removed so the same name can be retried; if the GitHub
+  repository was already created the 400 message says so and names it
+  (`domain.RemoteRepoCreatedError`, else the working copy's origin).
+- `POST /v1/repositories/new` — create a brand-new repository **from the person's answers
+  instead of a scan** (`application/newrepo`). Body:
+  `{name, owner?, description?, project_ids?, role, stack?, notes?, scaffold, docs?}` —
+  `role` is a component role (`frontend|backend|mobile|desktop|worker|library|infra|cli|other`),
+  `docs` ⊆ `coding_standards|test_standards|architecture|local_run` (duplicates ignored).
+  Everything is validated before anything touches disk or GitHub. Then: the repository is
+  created exactly as `POST /v1/repositories` creates one (same naming and cleanup, `kind`
+  = the role's legacy kind) but **no scan starts** — there is no code yet; the first push
+  to the default branch scans it through the existing webhook (`HandleGitHubPush` →
+  `RefreshAfterPush`) or, on a desktop install, the freshness poll (`SweepIndexFreshness`
+  → `RefreshAfterPush`), neither of which needs an earlier scan; a repository's first-ever
+  scan runs with trigger `import` even when a push woke it, so what it finds is not queued
+  for review as a later addition. The root component `.`
+  is added with the chosen role, name = the repository name, and its docs set to
+  `DefaultRepoDocPath(kind)` for each chosen kind. When `scaffold` is true or `docs` is
+  non-empty, one board task "Set up <name>" is opened (todo, medium, created by system,
+  assignee = `system_task_assignee` for the role's area, linked to the root component)
+  whose description carries the answers verbatim and asks for, on one branch in one PR:
+  the runnable skeleton (preferring a `search_boilerplate_catalog` starter), each doc
+  written at its default path PRESCRIBING conventions for the stack
+  (`repodocs.NewRepoDocInstructions`; `local_run` is the bootstrap script), and
+  `CLAUDE.md` + `AGENTS.md` with a docs index.
+  → 201 `{"repository": Repository, "component_id": uuid, "task": {"id","key","title"} | null}`
+  (`task` null only when nothing was asked for). 400 with the reason for validation and
+  git/GitHub failures (nothing left on disk); 500 when the repository was created but
+  adding the component or opening the task failed — the message says the repository exists.
+- `POST /v1/repositories/open` on a folder that is **already registered** starts a scan
+  only when that repository has never been scanned (`RefreshIfNeverScanned`); one that
+  has a scan is left alone, as before.
 - `PATCH /v1/repositories/{id}` accepts `kind` too. `name` and `description` are applied
   unconditionally on this route: an omitted description clears the stored one.
 - `PATCH /v1/repositories/{id}` also accepts `release_engine` (`auto|github_actions|local`):

@@ -281,6 +281,20 @@ func ValidRepoDocKind(k string) bool {
 	return false
 }
 
+// SetPath records path as the doc of this kind; an unknown kind is ignored.
+func (d *RepositoryDocs) SetPath(kind, path string) {
+	switch kind {
+	case RepoDocCodingStandards:
+		d.CodingStandards = path
+	case RepoDocTestStandards:
+		d.TestStandards = path
+	case RepoDocArchitecture:
+		d.Architecture = path
+	case RepoDocLocalRun:
+		d.LocalRun = path
+	}
+}
+
 // DefaultRepoDocPath is where a generated doc of this kind lands absent an
 // explicit path — the .ai/ convention. local_run is deliberately the bootstrap
 // script, not a document: what a fresh machine needs is a thing to run.
@@ -470,6 +484,67 @@ type CreateRepositoryRequest struct {
 	// Kind: empty means auto-detect.
 	Kind string `json:"kind,omitempty"`
 }
+
+// NewRepositoryRequest creates an empty repository from what the person said
+// it will be; Role, Stack, Notes and Docs shape the bootstrap task instead of
+// a scan, since there is no code to scan yet.
+type NewRepositoryRequest struct {
+	Name        string        `json:"name"`
+	Owner       string        `json:"owner,omitempty"`
+	Description string        `json:"description,omitempty"`
+	ProjectIDs  []uuid.UUID   `json:"project_ids,omitempty"`
+	Role        ComponentRole `json:"role"`
+	Stack       string        `json:"stack,omitempty"`
+	Notes       string        `json:"notes,omitempty"`
+	Scaffold    bool          `json:"scaffold"`
+	Docs        []string      `json:"docs,omitempty"`
+}
+
+// maxRepoNameLen is GitHub's own limit; a longer name would be refused only
+// after the local folder already exists.
+const maxRepoNameLen = 100
+
+// SanitizeRepoName is the name a new repository gets both on GitHub and as its
+// local folder, so the two never drift apart. "" means nothing usable was left.
+func SanitizeRepoName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		case r == ' ':
+			b.WriteRune('-')
+		}
+	}
+	return strings.Trim(b.String(), "-._")
+}
+
+// NewRepoDirName validates a requested repository name and returns the single
+// path component it becomes.
+func NewRepoDirName(name string) (string, error) {
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("name is required")
+	}
+	clean := SanitizeRepoName(name)
+	if clean == "" {
+		return "", fmt.Errorf("name %q has no letters or digits to build a repository name from", name)
+	}
+	if len(clean) > maxRepoNameLen {
+		return "", fmt.Errorf("name is too long: at most %d characters", maxRepoNameLen)
+	}
+	return clean, nil
+}
+
+// RemoteRepoCreatedError is a repository setup failure that happened after the
+// hosted (GitHub) repository was already created, so whoever cleans up the
+// local side can tell the person the remote one still exists.
+type RemoteRepoCreatedError struct {
+	URL string
+	Err error
+}
+
+func (e *RemoteRepoCreatedError) Error() string { return e.Err.Error() }
+func (e *RemoteRepoCreatedError) Unwrap() error { return e.Err }
 
 // ImportGitHubRepositoryRequest, mevcut bir GitHub reposunu çalışma alanına
 // klonlayıp kod deposu olarak kaydeder.

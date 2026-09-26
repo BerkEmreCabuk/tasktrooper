@@ -1,6 +1,7 @@
 // Shared shapes for the add-repository flow (components/projects/add/**).
 // Kept separate from useAddRepositoryFlow so step components can import types
 // without pulling in the reducer.
+import type { NewRepositoryRequest } from "@/api";
 
 export type PendingRepoStatus = "importing" | "import_failed" | "ready";
 
@@ -16,13 +17,12 @@ export interface FolderImportRecipe {
   rootPath: string;
 }
 
-export interface EmptyImportRecipe {
-  method: "empty";
-  name: string;
-  owner?: string;
-}
+export type ImportRecipe = GitHubImportRecipe | FolderImportRecipe;
 
-export type ImportRecipe = GitHubImportRecipe | FolderImportRecipe | EmptyImportRecipe;
+/** How far a ready repository's scan got by the time the Scan step was left.
+ * `not_started` and `slow` are client-side give-ups (no scan appeared / it ran
+ * past the cap); the server keeps whatever it was doing. */
+export type ScanOutcome = "pending" | "succeeded" | "failed" | "not_started" | "slow";
 
 /** One repository queued in this flow. `recipe` is kept (not just the import
  * call's result) so Retry can redo exactly the call that failed. */
@@ -33,6 +33,7 @@ export interface PendingRepo {
   status: PendingRepoStatus;
   repositoryId?: string;
   error?: string;
+  scanOutcome?: ScanOutcome;
 }
 
 export type ProjectChoice =
@@ -47,8 +48,11 @@ export interface GitHubSourceSelection {
 export interface SourceSelection {
   github: GitHubSourceSelection | null;
   folderPath: string;
-  empty: { name: string; owner?: string } | null;
 }
+
+export type SourceMode = "folder" | "github" | "new";
+
+export type NewRepositoryInput = Omit<NewRepositoryRequest, "project_ids">;
 
 export interface DoneStats {
   components: number;

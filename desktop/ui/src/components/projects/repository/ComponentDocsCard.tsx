@@ -16,7 +16,7 @@ const DEFAULT_DOC_PATH: Record<RepoDocKind, string> = {
   coding_standards: ".ai/coding-standards.md",
   test_standards: ".ai/test-standards.md",
   architecture: ".ai/architecture.md",
-  local_run: ".ai/local-deploy.md",
+  local_run: "scripts/dev.sh",
 };
 
 const DOC_FIELDS: { key: RepoDocKind; labelKey: string }[] = [

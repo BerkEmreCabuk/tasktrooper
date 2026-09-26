@@ -1,6 +1,14 @@
 import { useCallback, useReducer, useRef } from "react";
-import { api, type Repository } from "@/api";
-import type { DoneStats, ImportRecipe, PendingRepo, ProjectChoice, SourceSelection } from "@/components/projects/add/flow-types";
+import { api, type NewRepositoryResponse, type Repository } from "@/api";
+import type {
+  DoneStats,
+  ImportRecipe,
+  NewRepositoryInput,
+  PendingRepo,
+  ProjectChoice,
+  ScanOutcome,
+  SourceSelection,
+} from "@/components/projects/add/flow-types";
 
 interface FlowState {
   step: number;
@@ -8,6 +16,7 @@ interface FlowState {
   projectName: string;
   repos: PendingRepo[];
   doneStats: DoneStats | null;
+  created: NewRepositoryResponse | null;
 }
 
 const initialState: FlowState = {
@@ -16,6 +25,7 @@ const initialState: FlowState = {
   projectName: "",
   repos: [],
   doneStats: null,
+  created: null,
 };
 
 type Action =
@@ -24,7 +34,11 @@ type Action =
   | { type: "SET_IMPORTING"; localId: string }
   | { type: "IMPORT_SUCCEEDED"; localId: string; repositoryId: string }
   | { type: "IMPORT_FAILED"; localId: string; error: string }
-  | { type: "FINISH"; stats: DoneStats };
+  | { type: "CONTINUE_TO_REVIEW"; outcomes: Record<string, ScanOutcome> }
+  | { type: "FINISH"; stats: DoneStats }
+  | { type: "CREATED"; projectId: string; projectName: string; result: NewRepositoryResponse };
+
+export const DONE_STEP = 3;
 
 function reducer(state: FlowState, action: Action): FlowState {
   switch (action.type) {
@@ -49,8 +63,22 @@ function reducer(state: FlowState, action: Action): FlowState {
         ...state,
         repos: state.repos.map((r) => (r.localId === action.localId ? { ...r, status: "import_failed", error: action.error } : r)),
       };
+    case "CONTINUE_TO_REVIEW":
+      return {
+        ...state,
+        step: 2,
+        repos: state.repos.map((r) => ({ ...r, scanOutcome: action.outcomes[r.localId] ?? r.scanOutcome })),
+      };
     case "FINISH":
-      return { ...state, step: 3, doneStats: action.stats };
+      return { ...state, step: DONE_STEP, doneStats: action.stats };
+    case "CREATED":
+      return {
+        ...state,
+        step: DONE_STEP,
+        projectId: action.projectId,
+        projectName: action.projectName,
+        created: action.result,
+      };
     default:
       return state;
   }
@@ -77,15 +105,6 @@ function buildRepos(selection: SourceSelection): PendingRepo[] {
       status: "importing",
     });
   }
-  const emptyName = selection.empty?.name.trim();
-  if (emptyName) {
-    repos.push({
-      localId: crypto.randomUUID(),
-      label: emptyName,
-      recipe: { method: "empty", name: emptyName, owner: selection.empty?.owner },
-      status: "importing",
-    });
-  }
   return repos;
 }
 
@@ -103,27 +122,37 @@ function runRecipe(recipe: ImportRecipe, projectId: string): Promise<Repository>
       });
     case "folder":
       return api.openRepository(recipe.rootPath, undefined, [projectId]);
-    case "empty":
-      return api.createRepository(recipe.name, "", undefined, [projectId], recipe.owner || undefined);
   }
 }
 
 /**
  * Orchestrates the add-repository flow's state: which step is active, the
- * chosen/created project, and every queued repository's import.
+ * chosen/created project, and either every queued import or the one
+ * repository created from scratch.
  *
  * GitHub imports run one at a time (each is a synchronous clone on the
  * server — running several at once would just queue behind each other
- * anyway and makes the per-row order confusing); a folder open or an empty
- * repository create has no clone to wait on, so those start immediately and
- * in parallel with the GitHub queue.
+ * anyway and makes the per-row order confusing); a folder open has no clone
+ * to wait on, so it starts immediately and in parallel with the GitHub queue.
  */
 export function useAddRepositoryFlow() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const stateRef = useRef(state);
   stateRef.current = state;
+  // A new-repository create that fails after its new project was made must
+  // not make a second project with the same name on Retry.
+  const createdProjectRef = useRef<{ name: string; id: string } | null>(null);
 
   const setStep = useCallback((step: number) => dispatch({ type: "SET_STEP", step }), []);
+
+  const resolveProject = useCallback(async (choice: ProjectChoice) => {
+    if (choice.mode === "existing") return { projectId: choice.projectId, projectName: choice.projectName };
+    const reused = createdProjectRef.current;
+    if (reused && reused.name === choice.name) return { projectId: reused.id, projectName: choice.name };
+    const project = await api.createInitiativeProject({ name: choice.name });
+    createdProjectRef.current = { name: choice.name, id: project.id };
+    return { projectId: project.id, projectName: choice.name };
+  }, []);
 
   const runOne = useCallback((repo: PendingRepo, projectId: string) => {
     return runRecipe(repo.recipe, projectId)
@@ -139,9 +168,7 @@ export function useAddRepositoryFlow() {
    * nothing) if creating a brand-new project fails. */
   const startScan = useCallback(
     async (choice: ProjectChoice, selection: SourceSelection) => {
-      const projectId =
-        choice.mode === "existing" ? choice.projectId : (await api.createInitiativeProject({ name: choice.name })).id;
-      const projectName = choice.mode === "existing" ? choice.projectName : choice.name;
+      const { projectId, projectName } = await resolveProject(choice);
       const repos = buildRepos(selection);
       dispatch({ type: "START_SCAN", projectId, projectName, repos });
 
@@ -153,7 +180,19 @@ export function useAddRepositoryFlow() {
       })();
       for (const repo of otherRepos) void runOne(repo, projectId);
     },
-    [runOne],
+    [resolveProject, runOne],
+  );
+
+  /** Creates a repository from scratch. There is no code to scan yet, so this
+   * skips Scan and Review and lands on Done with the bootstrap task. Throws on
+   * any failure so the caller can show it next to the form it came from. */
+  const createNewRepository = useCallback(
+    async (choice: ProjectChoice, input: NewRepositoryInput) => {
+      const { projectId, projectName } = await resolveProject(choice);
+      const result = await api.createNewRepository({ ...input, project_ids: [projectId] });
+      dispatch({ type: "CREATED", projectId, projectName, result });
+    },
+    [resolveProject],
   );
 
   const retryImport = useCallback(
@@ -167,7 +206,12 @@ export function useAddRepositoryFlow() {
     [runOne],
   );
 
+  const continueToReview = useCallback(
+    (outcomes: Record<string, ScanOutcome>) => dispatch({ type: "CONTINUE_TO_REVIEW", outcomes }),
+    [],
+  );
+
   const finish = useCallback((stats: DoneStats) => dispatch({ type: "FINISH", stats }), []);
 
-  return { state, setStep, startScan, retryImport, finish };
+  return { state, setStep, startScan, createNewRepository, retryImport, continueToReview, finish };
 }

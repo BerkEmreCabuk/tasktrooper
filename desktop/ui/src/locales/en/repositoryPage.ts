@@ -84,7 +84,7 @@ export const repositoryPage = {
     docsCodingStandards: "Coding standards",
     docsTestStandards: "Test standards",
     docsArchitecture: "Architecture",
-    docsLocalRun: "Local run",
+    docsLocalRun: "Local run script",
     docsQueue: "Queue",
     docsQueued: "Queued",
     docsQueuedCount: "{count} queued",

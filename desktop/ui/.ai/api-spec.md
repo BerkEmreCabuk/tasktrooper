@@ -290,6 +290,25 @@ ensure, and `commit_task_changes`). Before this it survived only as the text of 
   `sub_repo_kinds` (a deduplicated set of kind values used only for GitHub
   Actions pipeline job routing): `sub_projects` is the addressable,
   human-curated list shown in the initial-setup dialog.
+- `POST /v1/repositories/new` (`api.createNewRepository`) — a repository from
+  scratch. Body `{ name, owner?, description?, project_ids?, role:
+  ComponentRole, stack?, notes?, scaffold: boolean, docs: RepoDocKind[] }` →
+  201 `{ repository, component_id, task: { id, key, title } | null }`. The
+  server creates the local folder and a private GitHub repository, does NOT
+  scan (there is no code yet), creates the root component with `role` and
+  records the `docs` paths, and opens a bootstrap board task ("Set up
+  <name>") that scaffolds the project (when `scaffold`) and writes the chosen
+  reference docs plus the CLAUDE.md/AGENTS.md index in one PR; the repository
+  is analyzed after that PR merges. `name` is sanitized server-side to
+  lower-case `[a-z0-9._-]` (spaces → `-`, ≤100 chars; the UI mirrors it). A
+  400's message (validation, directory exists, `git/GitHub setup failed: …`) is
+  shown verbatim with Retry. A 500 whose message starts `repository "<name>"
+  was created, but … failed` means the repository exists and a later step
+  (root component / bootstrap task) failed — no Retry; setup is finished from
+  the repository page. The add flow no longer calls `POST /v1/repositories`
+  for an empty repository.
+- `POST /v1/repositories/open` on a folder that is already registered starts a
+  scan when that repository has none yet.
 - `PATCH /v1/repositories/{id}` also accepts `release_engine`
   (`auto|github_actions|local`) — which machine builds/uploads a mobile store
   release. `auto` (default) is GitHub Actions, falling back to this machine;
@@ -666,7 +685,9 @@ Errors: `{ "error": "message" }` with 400 (bad input), 404 (unknown id), 409
   deploy, match. Import (`POST /v1/repositories/import|open`, `POST
   /v1/repositories`) now starts a scan instead of the old profile refresh —
   poll `GET /v1/repositories/{id}/scans/latest` every 1s until `status` is
-  `succeeded`/`failed`.
+  `succeeded`/`failed`. The add flow gives up client-side (the scan keeps
+  running on the server) when `scan` is still `null` after 20s or the scan is
+  still going after 5 min.
 - Edits: `POST /v1/repositories/{id}/components` (`NewComponentRequest
   {path, name?, role}`) → 201; `PATCH /v1/components/{id}` (`ComponentPatch
   {name?, role?, commands?: {<purpose>: string|null}, gates?, docs?, status?,

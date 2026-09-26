@@ -87,7 +87,7 @@ pipeline-config endpoints — that model is `RepositoryModel`
 | `pages/ProjectsPage.tsx` | The hub: a Cards/Map segmented toggle (`?view=map`) over either every project as a `hub/ProjectCard` + an unassigned-repositories card + filters, or `map/WorkspaceMapView`; "Add repository" / "New project" either way. |
 | `pages/ProjectPage.tsx` | One project, tabbed (`?tab=`): Architecture (`map/ProjectArchitectureMap`, the default the moment the project has a repository), Repositories table, cross-project Review queue, Settings. |
 | `pages/RepositoryPage.tsx` | One repository, tabbed (`?tab=`): overview, components, checks, links, deploy, settings. |
-| `pages/AddRepositoryPage.tsx` | The `/projects/new` wizard: Source → Scan → Review → Done, driven by `add/useAddRepositoryFlow`. |
+| `pages/AddRepositoryPage.tsx` | The `/projects/new` wizard, driven by `add/useAddRepositoryFlow`: Source → Scan → Review → Done for a folder/GitHub import, Source → Done for a new repository (nothing to scan yet; the stepper shows only those two). |
 | `hooks/useProjectsOverview.ts` | `GET /v1/projects/overview` for the hub; cached (`CACHE_PROJECTS_OVERVIEW`), paints last snapshot on a failed refresh. |
 | `hooks/useProjectOverview.ts` | `GET /v1/projects/:id/overview` for `ProjectPage`; same per-id cache-then-refresh contract as `useRepositoryModel`. |
 | `hooks/useProjectMap.ts` | `GET /v1/projects/:id/map` for the Architecture tab; same per-id cache-then-refresh contract, loaded only once that tab mounts. |
@@ -147,9 +147,39 @@ badge; a refresh button, polling every 15s while any is queued/building; nothing
 In the human UAT box, `board/TaskPreviewActions` puts an "Open preview" button per ready preview beside
 `LocalPreviewPanel`'s "Run locally" (its `actions` slot); both read `hooks/useTaskPreviews`.
 
-`components/projects/add/`: `SourceStep`, `ScanStep` (+ `ScanRepoRow`), `ReviewStep`
-(+ `RepoReviewCard`), `DoneStep`, `GitHubRepoPicker`, and the pure
-`useAddRepositoryFlow` state machine the page drives.
+`components/projects/add/`: `SourceStep`, `SourceModePicker`, `NewRepositoryForm`,
+`ScanStep` (+ `ScanRepoRow`), `ReviewStep` (+ `RepoReviewCard`), `DoneStep`,
+`NewRepositoryDoneStep`, `GitHubRepoPicker`, and the pure `useAddRepositoryFlow`
+state machine the page drives.
+
+- **Source** — the project card, then `SourceModePicker`: three exclusive radio
+  cards (folder / GitHub / new repository; icon + title + one line, no fields).
+  Only the picked mode's details render below it — the folder path + Browse,
+  `GitHubRepoPicker` (or the not-connected notice), or `NewRepositoryForm`
+  (name checked and previewed with `sanitizeRepoName`/`repoNameError`, which
+  mirror the server's `domain.SanitizeRepoName`/`NewRepoDirName` — lower-case
+  `[a-z0-9._-]`, spaces → `-`, ≤100 chars; GitHub owner, "what will this be",
+  role from `COMPONENT_ROLES`, stack with a `<datalist>` of suggestions, notes,
+  scaffold switch, reference-doc checkboxes reusing
+  `repositoryPage.components.docs*`). The primary button follows the mode:
+  "Import" / "Create".
+- **New repository** — `createNewRepository` → `POST /v1/repositories/new`; a
+  failure shows inline under the form with Retry (a project the attempt already
+  created is reused, not made twice). The one exception is the server's
+  partial-create 500 (`repository "<name>" was created, but … failed`): the
+  name is taken, so it shows the message with a link to the project (or
+  `/projects`) instead of Retry, and Create stays disabled for that name. Success skips Scan and Review and lands
+  on `NewRepositoryDoneStep`: the setup task (`/board?task=<id>`), "Open
+  repository", "Open project".
+- **Scan** — each `ScanRepoRow` reports a `ScanOutcome` (`pending`,
+  `succeeded`, `failed`, `not_started` — no scan after 20s, `slow` — still
+  running after 5 min; both timeouts are props for tests). Anything but
+  `pending` is settled and a failed scan says the repo can go on unanalyzed.
+  "Continue without waiting" leaves while scans still run server-side.
+- **Review** — a `RepoReviewCard` only for repos whose scan succeeded; every
+  other repo gets one line (not analyzed / still running / still importing /
+  import failed). Finish waits only for those cards' models (a model that
+  fails to load counts), so it never dead-ends.
 
 `components/projects/model/` — shared molecules reading `RepositoryModel`/
 `ProjectDetail` shapes, used across hub/repository/add: `ConfidenceBadge`,

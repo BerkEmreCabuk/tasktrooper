@@ -86,6 +86,7 @@ import (
 	mcpsvc "github.com/makifbaysal/tasktrooper/server/internal/application/mcp"
 	memoryapp "github.com/makifbaysal/tasktrooper/server/internal/application/memory"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/mobiledevice"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/newrepo"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/orchestrator"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prodops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/projectmodel"
@@ -269,6 +270,7 @@ type engine struct {
 	deploySvc       *deploy.Service
 	repoDocsSvc     *repodocs.Service
 	projectModelSvc *projectmodel.Service
+	newRepoSvc      *newrepo.Service
 	cloudSvc        *cloudapp.Service
 	prodOpsSvc      *prodops.Service
 	healthMonitor   *prodops.Monitor
@@ -1588,6 +1590,13 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			}
 		}
 		e.projectModelSvc = modelSvc
+		if modelSvc != nil {
+			newRepoSvc := newrepo.NewService(repositorySvc, modelSvc, repositorySvc)
+			if workflowSvc != nil {
+				newRepoSvc.SetRoleResolver(workflowSvc)
+			}
+			e.newRepoSvc = newRepoSvc
+		}
 
 		if attachmentStore != nil {
 			// Task detail responses carry attachment metadata alongside documents.
@@ -2636,6 +2645,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		IndexAllowedRoots: cfg.Indexer.AllowedRoots,
 		EmbedMapSvc:       embedMapSvc,
 		RepositorySvc:     repositorySvc,
+		NewRepoSvc:        e.newRepoSvc,
 		DeploySvc:         e.deploySvc,
 		RepoDocsSvc:       e.repoDocsSvc,
 		ProdOpsSvc:        e.prodOpsSvc,
