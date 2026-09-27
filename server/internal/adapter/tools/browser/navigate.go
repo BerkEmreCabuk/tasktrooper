@@ -40,15 +40,13 @@ func (t *navigateTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        navigateToolName,
-			Description: "Open a URL in the shared headless browser. Returns the page title, the final URL after redirects and a short text summary of the page. The browser session persists across browser_* calls, so later clicks and screenshots act on this page.",
+			Name: navigateToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"url": map[string]interface{}{
-						"type":        "string",
-						"description": "The full URL to open (must start with http:// or https://)",
+						"type": "string",
 					},
 				},
 				"required": []string{"url"},

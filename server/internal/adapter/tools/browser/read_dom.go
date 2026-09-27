@@ -62,23 +62,18 @@ func (t *readDOMTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: readDOMToolName,
-			Description: "Read the current page of the shared browser. Returns the page URL and title, then either the rendered text (default), the outer HTML (as_text:false), or — with contains — every element whose text or attributes hold a string, each with its selector and whether it is actually visible. " +
-				"Use contains to answer \"did the thing I added render?\": rendered text does not include hidden elements or icon-only buttons, so an empty text read is not proof of absence. Output is truncated at 100KB.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"selector": map[string]interface{}{
-						"type":        "string",
-						"description": "CSS selector of the element to read (default: body)",
+						"type": "string",
 					},
 					"as_text": map[string]interface{}{
-						"type":        "boolean",
-						"description": "true returns rendered innerText, false returns outer HTML (default: true)",
+						"type": "boolean",
 					},
 					"contains": map[string]interface{}{
-						"type":        "string",
-						"description": "Search the element's subtree for this string in text and attributes instead of dumping it. Returns each match with its selector, visibility and surrounding HTML — the reliable way to check whether something is on the page.",
+						"type": "string",
 					},
 				},
 			},

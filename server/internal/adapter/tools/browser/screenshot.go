@@ -44,19 +44,16 @@ func (t *screenshotTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        screenshotToolName,
-			Description: "Take a screenshot of the current page of the shared browser and attach it to the result so you can see it. Set width to 390 to emulate a mobile viewport.",
+			Name: screenshotToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"full_page": map[string]interface{}{
-						"type":        "boolean",
-						"description": "Capture the entire scrollable page instead of just the viewport (default: false)",
+						"type": "boolean",
 					},
 					"width": map[string]interface{}{
-						"type":        "integer",
-						"description": "Viewport width in CSS pixels (default: 1440; use 390 for mobile)",
+						"type": "integer",
 					},
 				},
 			},

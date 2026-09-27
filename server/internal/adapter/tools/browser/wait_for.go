@@ -35,19 +35,16 @@ func (t *waitForTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        waitForToolName,
-			Description: "Wait until an element matching a CSS selector is visible on the current page of the shared browser. Use after navigation or a click that triggers async rendering.",
+			Name: waitForToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"selector": map[string]interface{}{
-						"type":        "string",
-						"description": "CSS selector of the element to wait for",
+						"type": "string",
 					},
 					"timeout_seconds": map[string]interface{}{
-						"type":        "integer",
-						"description": "How long to wait before giving up (default: 10, max: 30)",
+						"type": "integer",
 					},
 				},
 				"required": []string{"selector"},

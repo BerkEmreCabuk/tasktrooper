@@ -43,24 +43,19 @@ func (t *viewportTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: viewportToolName,
-			Description: "Switch the shared browser between mobile, tablet and desktop emulation — viewport size, device pixel ratio, touch support and mobile user agent — and report the responsive state of the current page: whether it scrolls horizontally and which elements overflow the viewport. " +
-				"The emulation persists for every later browser_* call, so read the DOM and take screenshots after switching. Call with no arguments to report the current viewport without changing it.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"device": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{"mobile", "tablet", "desktop"},
-						"description": "Preset to emulate: mobile (390x844, touch, mobile user agent), tablet (768x1024, touch) or desktop (1440x900, no touch)",
+						"type": "string",
+						"enum": []string{"mobile", "tablet", "desktop"},
 					},
 					"width": map[string]interface{}{
-						"type":        "integer",
-						"description": "Custom viewport width in CSS pixels; overrides the preset width",
+						"type": "integer",
 					},
 					"height": map[string]interface{}{
-						"type":        "integer",
-						"description": "Custom viewport height in CSS pixels; overrides the preset height",
+						"type": "integer",
 					},
 				},
 			},

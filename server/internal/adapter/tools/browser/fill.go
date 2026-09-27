@@ -36,23 +36,19 @@ func (t *fillTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        fillToolName,
-			Description: "Clear an input or textarea matching a CSS selector on the current page of the shared browser and type a value into it. Optionally press Enter afterwards to submit.",
+			Name: fillToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"selector": map[string]interface{}{
-						"type":        "string",
-						"description": "CSS selector of the input to fill",
+						"type": "string",
 					},
 					"value": map[string]interface{}{
-						"type":        "string",
-						"description": "Text to type into the input",
+						"type": "string",
 					},
 					"submit": map[string]interface{}{
-						"type":        "boolean",
-						"description": "Press Enter after typing (default: false)",
+						"type": "boolean",
 					},
 				},
 				"required": []string{"selector", "value"},

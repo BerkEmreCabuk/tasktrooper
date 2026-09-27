@@ -33,15 +33,13 @@ func (t *clickTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        clickToolName,
-			Description: "Click the first element matching a CSS selector on the current page of the shared browser. Waits for the element to become visible first.",
+			Name: clickToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"selector": map[string]interface{}{
-						"type":        "string",
-						"description": "CSS selector of the element to click",
+						"type": "string",
 					},
 				},
 				"required": []string{"selector"},

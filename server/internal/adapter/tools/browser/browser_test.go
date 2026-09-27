@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 )
 
@@ -79,6 +81,20 @@ func TestDefinitions(t *testing.T) {
 		{name: "browser_set_viewport", required: nil},
 	}
 
+	// The description is filled by application/registry.Register from
+	// catalog/system/tools/<name>.md, not Definition() itself — see board's
+	// golden_tool_definitions_test.go (WP8a) for the same shift. Registered
+	// once here so the per-tool loop below can look up the decorated version
+	// alongside the raw one.
+	reg := registry.New()
+	for _, tool := range tools {
+		reg.Register(tool)
+	}
+	decoratedByName := map[string]domain.ToolDefinition{}
+	for _, d := range reg.Definitions() {
+		decoratedByName[d.Function.Name] = d
+	}
+
 	byName := map[string]bool{}
 	for i, tool := range tools {
 		def := tool.Definition()
@@ -88,7 +104,7 @@ func TestDefinitions(t *testing.T) {
 		if def.Type != "function" {
 			t.Errorf("%s: definition type = %q, want function", tool.Name(), def.Type)
 		}
-		if def.Function.Description == "" {
+		if decoratedByName[tool.Name()].Function.Description == "" {
 			t.Errorf("%s: empty description", tool.Name())
 		}
 		raw, err := json.Marshal(def)
