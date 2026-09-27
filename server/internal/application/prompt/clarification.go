@@ -7,15 +7,6 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
-const clarificationGuidance = `## Clarification policy
-- Never assume missing requirements, scope, preferences, or constraints.
-- Read the repository before you ask about it: file layout, where a section or component lives, routing and existing config are yours to find, not the human's to describe.
-- If anything is still unclear after looking, call ask_user before proceeding — follow the ask_user tool definition (text mode vs choice mode).
-- ask_user context, prompt, and option labels must be in the user-facing language (see language instruction).
-- Do not write clarification questions in your message body.
-- Read the thread first; do not repeat answered questions.
-- Only continue after the user submits clarification answers.`
-
 var clarificationGuidanceKey = Define[struct{}]("clarification.guidance", struct{}{})
 
 func ClarificationGuidance() string {
@@ -23,12 +14,6 @@ func ClarificationGuidance() string {
 }
 
 // ask_user is refused over MCP before any policy filtering (it parks a task in a way a live CLI session cannot offer), so this says the opposite of clarificationGuidance: no ask_user, and the questions live in the closing message the runner already surfaces on the card.
-const cliClarificationGuidance = `## Missing information
-- Never assume missing requirements, scope, preferences, or constraints.
-- Read the repository before you call something unknown: file layout, where a section or component lives, routing and existing config are yours to find, not the human's to describe.
-- You cannot reach the human mid-run — this session has no way to wait for an answer. Where the choice is reversible, decide with what you have and say what you assumed. Where it is not, stop and state in your closing message what is missing and what you would need; that message is shown on the task card.
-- Read the task's comments first. A question already answered there is decided, not open.`
-
 var cliClarificationGuidanceKey = Define[struct{}]("clarification.cli_guidance", struct{}{})
 
 func CLIClarificationGuidance() string {
@@ -211,11 +196,6 @@ func BuildClarificationResponse(req domain.ClarificationRequest) domain.AgentRes
 		Clarification: &reqCopy,
 	}
 }
-
-const askUserTaskGuidance = `## Internal: user clarification
-If you need information from the user, call ask_user — follow its tool definition (text mode vs choice mode, no-repeat rule).
-Anything the repository can answer (file layout, where a page or component lives, routing, existing config) you must find with your read tools first; ask_user is refused until this run has read the code.
-Never write clarification questions as markdown in your reply.`
 
 var askUserTaskGuidanceKey = Define[struct{}]("clarification.ask_user_task_guidance", struct{}{})
 
