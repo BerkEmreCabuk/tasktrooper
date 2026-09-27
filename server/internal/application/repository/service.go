@@ -17,6 +17,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/board"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/htmldoc"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/indexer"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -293,7 +294,7 @@ func (s *Service) ReviewTaskCriterion(ctx context.Context, criterionID, agentID 
 	case ok && channel == string(domain.CriterionReviewRolePM):
 		role = domain.CriterionReviewRolePM
 	default:
-		return domain.CriterionCheck{}, fmt.Errorf("criterion verdicts are recorded while the task is under QA (ready_for_qa/in_qa) or PM UAT (pm_uat); task %s is in %s — do not move the task to reach the criteria: their ids are in your run context and in move refusals; if the task already left your column, stop and report instead of retrying", task.Key, task.Column)
+		return domain.CriterionCheck{}, fmt.Errorf("%s", criterionVerdictWrongColumnKey.Render(criterionVerdictWrongColumnInput{Key: task.Key, Column: string(task.Column)}))
 	}
 	check := domain.CriterionCheck{CriterionID: criterionID, Role: role, Approved: approved, Note: note}
 	if agentID != uuid.Nil {
@@ -375,11 +376,7 @@ func (s *Service) criteriaGate(ctx context.Context, taskID uuid.UUID, taskType d
 		return nil
 	}
 
-	msg := fmt.Sprintf("cannot move to %s: %d acceptance criteria incomplete: %s — "+
-		"if you implemented them, tick each with set_criterion_completed; "+
-		"if one is deliberately not being done, cancel it with cancel_criterion and a reason; "+
-		"if you are reviewing (QA in ready_for_qa/in_qa, PM in pm_uat), record your verdict with review_criterion instead",
-		target, len(open), strings.Join(open, "; "))
+	msg := criteriaIncompleteKey.Render(criteriaIncompleteInput{Target: string(target), Count: len(open), Open: open})
 	return domain.NewCriteriaGateError(target, domain.CriteriaGateReasonIncomplete, openCriteria, msg)
 }
 
@@ -439,11 +436,11 @@ func (s *Service) criteriaReviewGate(ctx context.Context, taskID uuid.UUID, task
 		}
 	}
 	if len(rejected) > 0 {
-		msg := fmt.Sprintf("cannot move to %s: %d acceptance criteria are rejected by %s: %s — move the task to need_revision instead, or re-verify and approve them (review_criterion)", target, len(rejected), role, strings.Join(rejected, "; "))
+		msg := criteriaRejectedKey.Render(criteriaRejectedInput{Target: string(target), Count: len(rejected), Role: string(role), Rejected: rejected})
 		return domain.NewCriteriaGateError(target, domain.CriteriaGateReasonRejected, rejectedCriteria, msg)
 	}
 	if len(unchecked) > 0 {
-		msg := fmt.Sprintf("cannot move to %s: %d acceptance criteria await your %s verdict: %s — call review_criterion with each id above, then retry the move", target, len(unchecked), role, strings.Join(unchecked, "; "))
+		msg := criteriaUncheckedKey.Render(criteriaUncheckedInput{Target: string(target), Count: len(unchecked), Role: string(role), Unchecked: unchecked})
 		return domain.NewCriteriaGateError(target, domain.CriteriaGateReasonUnchecked, uncheckedCriteria, msg)
 	}
 	return nil
@@ -518,18 +515,7 @@ func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid
 }
 
 func workflowSetupTaskBrief(kind string) string {
-	return fmt.Sprintf(`Create and push GitHub Actions CI/CD workflows for this repository (kind: %s).
-
-Required jobs (under .github/workflows):
-- validate: lint / static analysis / type checking
-- build: compilation (%s)
-- test: automated tests
-- stage_deploy: a workflow_dispatch-triggerable workflow that deploys to staging
-- preprod_deploy: (optional) a workflow_dispatch-triggerable workflow that deploys to a pre-production environment
-- prod_deploy: a workflow_dispatch-triggerable workflow that deploys to production
-
-Once each workflow exists, save the job/workflow mapping under Repository Settings > Pipeline so the QA gate and release steps run through GitHub Actions.`,
-		kind, buildHintForKind(kind))
+	return workflowSetupTaskBriefKey.Render(workflowSetupTaskBriefInput{Kind: kind})
 }
 
 func buildHintForKind(kind string) string {
@@ -1879,9 +1865,9 @@ func validateAgentSelfMove(task domain.BoardTask, req domain.UpdateBoardTaskRequ
 	}
 	switch *req.Column {
 	case domain.TaskColumnNeedRevision:
-		return fmt.Errorf("you are this task's assignee: need_revision is reserved for reviewers handing work back. Fix the work yourself and move the task to code_review when done; if you are missing information, use ask_user instead")
+		return fmt.Errorf("%s", prompt.Text(selfMoveNeedRevisionKey))
 	case domain.TaskColumnTodo:
-		return fmt.Errorf("you claimed this task: do not move it back to todo. Continue the work and move it to code_review when done; if you are missing information, use ask_user")
+		return fmt.Errorf("%s", prompt.Text(selfMoveTodoKey))
 	}
 	return nil
 }
@@ -1911,7 +1897,7 @@ func (s *Service) validateMoveAllowed(ctx context.Context, taskID uuid.UUID, tas
 			gateBlockers = append(gateBlockers, domain.WorkOrderGateBlocker{Key: b.Key, Title: b.Title})
 		}
 		return domain.NewWorkOrderGateError(target, gateBlockers,
-			fmt.Sprintf("work order: this task is blocked until these are done: %s", strings.Join(labels, ", ")))
+			workOrderBlockedKey.Render(workOrderBlockedInput{Labels: labels}))
 	}
 	return nil
 }

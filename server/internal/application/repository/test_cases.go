@@ -230,9 +230,7 @@ func (s *Service) testCaseGate(ctx context.Context, taskID uuid.UUID, taskType d
 		return nil
 	}
 	if len(items) == 0 {
-		return fmt.Errorf("cannot move to %s: this task carries no test cases — "+
-			"record the cases you derived and executed with record_test_cases (title, category, status, expected/actual, evidence), "+
-			"including the ones you considered and rejected as status=invalid with the reason in notes", target)
+		return fmt.Errorf("%s", testCasesMissingKey.Render(testCasesMissingInput{Target: string(target)}))
 	}
 	var planned []string
 	for _, c := range items {
@@ -241,9 +239,7 @@ func (s *Service) testCaseGate(ctx context.Context, taskID uuid.UUID, taskType d
 		}
 	}
 	if len(planned) > 0 {
-		return fmt.Errorf("cannot move to %s: %d test case(s) are still planned and were never executed: %s — "+
-			"run each one and record its result (passed/failed), or mark it skipped with what blocked it, or invalid with why it is not a valid case",
-			target, len(planned), strings.Join(planned, "; "))
+		return fmt.Errorf("%s", testCasesPlannedKey.Render(testCasesPlannedInput{Target: string(target), Count: len(planned), Planned: planned}))
 	}
 	return nil
 }
