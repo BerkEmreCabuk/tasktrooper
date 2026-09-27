@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -105,19 +106,15 @@ func (t *readFileTool) Execute(ctx context.Context, arguments string) domain.Too
 	info, err := os.Stat(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return toolError(readFileToolName, fmt.Sprintf(
-				"no such file: %s. Paths are relative to the workspace root — use get_repo_tree or grep_code to find the real path instead of guessing another one.",
-				args.Path))
+			return toolError(readFileToolName, prompt.CodeReadNoSuchFileText(args.Path))
 		}
 		return toolError(readFileToolName, fmt.Sprintf("stat %s: %v", args.Path, err))
 	}
 	if info.IsDir() {
-		return toolError(readFileToolName, fmt.Sprintf(
-			"%s is a directory, not a file. Use get_repo_tree to list what is inside it.", args.Path))
+		return toolError(readFileToolName, prompt.CodeReadIsDirectoryText(args.Path))
 	}
 	if info.Size() > maxReadFileBytes {
-		return toolError(readFileToolName, fmt.Sprintf(
-			"%s is %d bytes, too large to read. Search it with grep_code instead.", args.Path, info.Size()))
+		return toolError(readFileToolName, prompt.CodeReadTooLargeText(args.Path, info.Size()))
 	}
 
 	raw, err := os.ReadFile(abs)
@@ -192,9 +189,9 @@ func renderFileWindow(displayPath, content string, offset, limit int) string {
 	footer := ""
 	switch {
 	case last < total && truncated:
-		footer = fmt.Sprintf("\n[stopped at line %d: this call's character budget is full. Continue with read_file offset=%d.]", last, last+1)
+		footer = "\n" + prompt.CodeReadTruncatedText(last, last+1)
 	case last < total:
-		footer = fmt.Sprintf("\n[%d more lines. Continue with read_file offset=%d.]", total-last, last+1)
+		footer = "\n" + prompt.CodeReadContinueText(total-last, last+1)
 	default:
 		footer = "\n[end of file]"
 	}

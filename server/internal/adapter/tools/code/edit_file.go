@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -85,7 +86,7 @@ func (t *editFileTool) Execute(ctx context.Context, arguments string) domain.Too
 		return toolError(editFileToolName, "path is required")
 	}
 	if args.OldString == "" {
-		return toolError(editFileToolName, "old_string is required. To create a file or replace it whole, use write_file.")
+		return toolError(editFileToolName, prompt.CodeEditMissingOldStringText())
 	}
 	if args.OldString == args.NewString {
 		return toolError(editFileToolName, "old_string and new_string are identical — this edit would change nothing.")
@@ -103,9 +104,7 @@ func (t *editFileTool) Execute(ctx context.Context, arguments string) domain.Too
 	info, err := os.Stat(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return toolError(editFileToolName, fmt.Sprintf(
-				"no such file: %s. Paths are relative to the workspace root — use get_repo_tree or grep_code to find it, or write_file to create it.",
-				args.Path))
+			return toolError(editFileToolName, prompt.CodeEditNoSuchFileText(args.Path))
 		}
 		return toolError(editFileToolName, fmt.Sprintf("stat %s: %v", args.Path, err))
 	}
@@ -132,13 +131,9 @@ func (t *editFileTool) Execute(ctx context.Context, arguments string) domain.Too
 		// The single most common failure: the model reconstructs the text from
 		// memory instead of copying it, and whitespace or a line-number prefix
 		// differs. Say which, rather than letting it retry the same string.
-		return toolError(editFileToolName, fmt.Sprintf(
-			"old_string was not found in %s. Copy it exactly from read_file output — without the line-number prefix, "+
-				"and with the file's own indentation and line breaks.", args.Path))
+		return toolError(editFileToolName, prompt.CodeEditNotFoundText(args.Path))
 	case count > 1 && !args.ReplaceAll:
-		return toolError(editFileToolName, fmt.Sprintf(
-			"old_string matches %d places in %s. Either pass replace_all:true to change all %d, "+
-				"or include the surrounding lines so it matches exactly one.", count, args.Path, count))
+		return toolError(editFileToolName, prompt.CodeEditMultipleMatchesText(count, args.Path))
 	}
 
 	replacements := 1
@@ -181,8 +176,8 @@ func editSummary(path string, replacements int, lines []int) string {
 	for _, n := range shown {
 		parts = append(parts, fmt.Sprint(n))
 	}
-	return fmt.Sprintf("%s at line %s%s. The edit is on disk — do not grep to verify it.",
-		summary, strings.Join(parts, ", "), suffix)
+	return fmt.Sprintf("%s at line %s%s. %s",
+		summary, strings.Join(parts, ", "), suffix, prompt.CodeEditDiskNoteText())
 }
 
 // changedLineNumbers reports the 1-based lines where the match starts, counted

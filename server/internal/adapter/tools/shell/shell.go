@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/toolchain"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
@@ -195,11 +196,9 @@ func (s *shellTool) Execute(ctx context.Context, arguments string) domain.ToolRe
 		// again on the same wall.
 		retry := ""
 		if timeout < s.maxTimeout {
-			retry = fmt.Sprintf(" This command needs longer than %s: re-run it with timeout_seconds up to %d. "+
-				"Do not repeat it unchanged — it will hit the same wall.", timeout, int(s.maxTimeout.Seconds()))
+			retry = " " + prompt.ShellTimeoutRetryBelowText(timeout, int(s.maxTimeout.Seconds()))
 		} else {
-			retry = fmt.Sprintf(" This is already the maximum budget (%s). Narrow the command — build or test one package"+
-				" instead of the whole tree — rather than repeating it.", s.maxTimeout)
+			retry = " " + prompt.ShellTimeoutAtCeilingText(s.maxTimeout)
 		}
 		return domain.ToolResult{
 			Name:    ToolName,
@@ -230,11 +229,8 @@ func (s *shellTool) Execute(ctx context.Context, arguments string) domain.ToolRe
 	// Silence is how the write commands report success, so the result says so.
 	if strings.TrimSpace(output) == "" {
 		return domain.ToolResult{
-			Name: ToolName,
-			Content: "exit status 0, no output. The command ran and succeeded; it simply printed nothing. " +
-				"Writers (sed, mv, cp, mkdir) are silent on success, and a check that found nothing " +
-				"(git status --porcelain on a clean tree) is silent too. Do not re-run it to check — read the " +
-				"file or the state if you need to confirm.",
+			Name:    ToolName,
+			Content: prompt.ShellSilentSuccessText(),
 			IsError: false,
 		}
 	}
@@ -270,9 +266,7 @@ func windowedReadHint(command string) string {
 	if err1 != nil || err2 != nil || to-from >= 200 {
 		return ""
 	}
-	return "\n\n[You read this file through a " + strconv.Itoa(to-from+1) + "-line window. Use read_file instead: " +
-		"it returns up to 800 numbered lines and the file's total length in a single call. " +
-		"Sliding a small window down a file costs one whole agent turn per window.]"
+	return "\n\n" + prompt.ShellSlidingWindowHintText(to-from+1)
 }
 
 // commandSeparators split a shell line into the commands it actually runs.

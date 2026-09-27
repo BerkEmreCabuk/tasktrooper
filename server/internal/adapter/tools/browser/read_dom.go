@@ -9,6 +9,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -186,7 +187,7 @@ func (t *readDOMTool) Execute(ctx context.Context, arguments string) domain.Tool
 	}
 
 	if probe.BadSelector != "" {
-		return toolError(readDOMToolName, fmt.Sprintf("%q is not a valid CSS selector: %s", selector, probe.BadSelector))
+		return toolError(readDOMToolName, prompt.BrowserBadSelectorText(fmt.Sprintf("%q", selector), probe.BadSelector))
 	}
 	if probe.Matches == 0 {
 		return toolError(readDOMToolName, notFoundReport(selector, probe))
@@ -255,14 +256,14 @@ func notFoundReport(selector string, probe domProbe) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "no element matches %q after %s.\n%s\n", selector, readDOMSettleWindow, pageHeader(probe))
 	if len(probe.Anchors) == 0 {
-		b.WriteString("\nThe page has no elements with an id, no buttons, links or inputs at all — it is most likely blank or still loading. Check the url above is the one you meant.")
+		b.WriteString("\n" + prompt.BrowserReadDOMNoAnchorsText())
 		return b.String()
 	}
 	b.WriteString("\nElements that ARE on this page:\n")
 	for _, anchor := range probe.Anchors {
 		fmt.Fprintf(&b, "- %s\n", anchor)
 	}
-	b.WriteString("\nPick one of these, or call browser_wait_for if the element renders later. Repeating this exact call will return this same answer.")
+	b.WriteString("\n" + prompt.BrowserReadDOMPickOneText())
 	return b.String()
 }
 
@@ -277,7 +278,7 @@ func readReport(selector, contains string, asText bool, probe domProbe) string {
 
 	if contains != "" {
 		if probe.HitCount == 0 {
-			fmt.Fprintf(&b, "\n%q appears nowhere in the text or attributes of %s on this page. It is not rendered here — this is a definitive answer, do not re-read the DOM to confirm it. If you expected it, the page is stale (reload), the build did not include your change, or the element is on another route.", contains, selector)
+			fmt.Fprintf(&b, "\n%s", prompt.BrowserReadDOMContainsNotFoundText(fmt.Sprintf("%q", contains), selector))
 			return b.String()
 		}
 		fmt.Fprintf(&b, "\n%q found in %d element(s)", contains, probe.HitCount)
@@ -301,16 +302,12 @@ func readReport(selector, contains string, asText bool, probe domProbe) string {
 	// see. That difference is the whole question a UI check is asking, so it is
 	// said before the content rather than left to be inferred from it.
 	if !probe.Visible {
-		b.WriteString("note: this element is in the DOM but NOT visible (hidden, zero-size or transparent). " +
-			"What follows is what the page holds, not what a user sees.\n")
+		b.WriteString(prompt.BrowserReadDOMHiddenNoteText() + "\n")
 	}
 
 	if asText {
 		if strings.TrimSpace(probe.Text) == "" {
-			fmt.Fprintf(&b, "\nThe element matched but its rendered text is empty (outer HTML is %d chars, element %s). "+
-				"Rendered text never includes hidden elements, icon-only buttons or attribute values — an empty read is NOT proof the content is missing. "+
-				"Call again with as_text:false to read the HTML, or with contains:\"<what you are looking for>\" to search text and attributes.",
-				probe.HTMLLen, visibility(probe.Visible))
+			fmt.Fprintf(&b, "\n%s", prompt.BrowserReadDOMEmptyTextText(probe.HTMLLen, visibility(probe.Visible)))
 			return b.String()
 		}
 		fmt.Fprintf(&b, "text (%d chars):\n%s", probe.TextLen, probe.Text)
@@ -318,12 +315,12 @@ func readReport(selector, contains string, asText bool, probe domProbe) string {
 	}
 
 	if strings.TrimSpace(probe.HTML) == "" {
-		b.WriteString("\nThe element matched but has no outer HTML, which should not happen — re-read with a different selector.")
+		fmt.Fprintf(&b, "\n%s", prompt.BrowserReadDOMEmptyHTMLText())
 		return b.String()
 	}
 	fmt.Fprintf(&b, "html (%d chars", probe.HTMLLen)
 	if probe.HTMLLen > len(probe.HTML) {
-		fmt.Fprintf(&b, ", first %d shown — use contains to search the rest instead of paging through it", len(probe.HTML))
+		fmt.Fprintf(&b, "%s", prompt.BrowserReadDOMTruncatedHintText(len(probe.HTML)))
 	}
 	fmt.Fprintf(&b, "):\n%s", probe.HTML)
 	return b.String()

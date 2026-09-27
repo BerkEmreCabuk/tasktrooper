@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -106,7 +107,7 @@ func (t *writeFileTool) Execute(ctx context.Context, arguments string) domain.To
 	}
 	return domain.ToolResult{
 		Name: writeFileToolName,
-		Content: fmt.Sprintf("%s: %s, %d lines, %d bytes. The file is on disk — do not read it back to check.",
-			args.Path, verb, len(splitLines(content)), len(content)),
+		Content: fmt.Sprintf("%s: %s, %d lines, %d bytes. %s",
+			args.Path, verb, len(splitLines(content)), len(content), prompt.CodeWriteDiskNoteText()),
 	}
 }

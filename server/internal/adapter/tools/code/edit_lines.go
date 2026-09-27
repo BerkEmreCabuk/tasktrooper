@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -96,11 +97,10 @@ func (t *editLinesTool) Execute(ctx context.Context, arguments string) domain.To
 	case "":
 		return toolError(editLinesToolName, "mode is required: replace, insert_after or delete")
 	default:
-		return toolError(editLinesToolName, fmt.Sprintf(
-			"unknown mode %q. Use replace, insert_after or delete.", args.Mode))
+		return toolError(editLinesToolName, prompt.CodeEditLinesUnknownModeText(fmt.Sprintf("%q", args.Mode)))
 	}
 	if mode != modeDelete && args.Text == "" && mode == modeReplace {
-		return toolError(editLinesToolName, "text is required for replace. To remove lines, use mode delete.")
+		return toolError(editLinesToolName, prompt.CodeEditLinesTextRequiredText())
 	}
 
 	root, err := resolveProjectRoot(ctx)
@@ -115,8 +115,7 @@ func (t *editLinesTool) Execute(ctx context.Context, arguments string) domain.To
 	info, err := os.Stat(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return toolError(editLinesToolName, fmt.Sprintf(
-				"no such file: %s. Use get_repo_tree or grep_code to find it, or write_file to create it.", args.Path))
+			return toolError(editLinesToolName, prompt.CodeEditLinesNoSuchFileText(args.Path))
 		}
 		return toolError(editLinesToolName, fmt.Sprintf("stat %s: %v", args.Path, err))
 	}
@@ -234,5 +233,5 @@ func lineEditSummary(path, mode string, before int, updated []string, from, to i
 	for i := windowStart; i <= windowEnd; i++ {
 		body.WriteString(fmt.Sprintf("%6d→%s\n", i, updated[i-1]))
 	}
-	return head + body.String() + "[the edit is on disk — do not read the file again to check]"
+	return head + body.String() + prompt.CodeEditLinesDiskNoteText()
 }

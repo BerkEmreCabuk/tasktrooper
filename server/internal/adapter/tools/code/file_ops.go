@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -97,8 +98,7 @@ func (t *deleteFileTool) Execute(ctx context.Context, arguments string) domain.T
 	info, err := os.Stat(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return toolError(deleteFileToolName, fmt.Sprintf(
-				"no such path: %s. It is already gone, or the path is wrong — check with get_repo_tree.", args.Path))
+			return toolError(deleteFileToolName, prompt.CodeDeleteNoSuchPathText(args.Path))
 		}
 		return toolError(deleteFileToolName, fmt.Sprintf("stat %s: %v", args.Path, err))
 	}
@@ -109,16 +109,14 @@ func (t *deleteFileTool) Execute(ctx context.Context, arguments string) domain.T
 			return toolError(deleteFileToolName, fmt.Sprintf("read %s: %v", args.Path, readErr))
 		}
 		if len(entries) > 0 && !args.Recursive {
-			return toolError(deleteFileToolName, fmt.Sprintf(
-				"%s is a directory with %d entries. Pass recursive:true to delete it and everything inside.",
-				args.Path, len(entries)))
+			return toolError(deleteFileToolName, prompt.CodeDeleteNeedsRecursiveText(args.Path, len(entries)))
 		}
 		if err := os.RemoveAll(abs); err != nil {
 			return toolError(deleteFileToolName, fmt.Sprintf("delete %s: %v", args.Path, err))
 		}
 		return domain.ToolResult{
 			Name:    deleteFileToolName,
-			Content: fmt.Sprintf("%s: directory deleted (%d entries). Gone from disk — do not check.", args.Path, len(entries)),
+			Content: fmt.Sprintf("%s: directory deleted (%d entries). %s", args.Path, len(entries), prompt.CodeDeleteDiskNoteText()),
 		}
 	}
 
@@ -127,7 +125,7 @@ func (t *deleteFileTool) Execute(ctx context.Context, arguments string) domain.T
 	}
 	return domain.ToolResult{
 		Name:    deleteFileToolName,
-		Content: fmt.Sprintf("%s: deleted (%d bytes). Gone from disk — do not check.", args.Path, info.Size()),
+		Content: fmt.Sprintf("%s: deleted (%d bytes). %s", args.Path, info.Size(), prompt.CodeDeleteDiskNoteText()),
 	}
 }
 
@@ -185,16 +183,14 @@ func (t *moveFileTool) Execute(ctx context.Context, arguments string) domain.Too
 
 	if _, err := os.Stat(src); err != nil {
 		if os.IsNotExist(err) {
-			return toolError(moveFileToolName, fmt.Sprintf(
-				"no such path: %s. Check it with get_repo_tree.", args.From))
+			return toolError(moveFileToolName, prompt.CodeMoveNoSuchPathText(args.From))
 		}
 		return toolError(moveFileToolName, fmt.Sprintf("stat %s: %v", args.From, err))
 	}
 
 	if _, err := os.Stat(dst); err == nil {
 		if !args.Overwrite {
-			return toolError(moveFileToolName, fmt.Sprintf(
-				"%s already exists. Pass overwrite:true to replace it, or pick another destination.", args.To))
+			return toolError(moveFileToolName, prompt.CodeMoveDestExistsText(args.To))
 		}
 		if err := os.RemoveAll(dst); err != nil {
 			return toolError(moveFileToolName, fmt.Sprintf("replace %s: %v", args.To, err))
@@ -209,10 +205,8 @@ func (t *moveFileTool) Execute(ctx context.Context, arguments string) domain.Too
 	}
 
 	return domain.ToolResult{
-		Name: moveFileToolName,
-		Content: fmt.Sprintf("moved %s to %s. Done on disk — do not check. "+
-			"Imports and references to the old path are NOT updated; grep_code for it if the file was code.",
-			args.From, args.To),
+		Name:    moveFileToolName,
+		Content: prompt.CodeMoveSuccessText(args.From, args.To),
 	}
 }
 

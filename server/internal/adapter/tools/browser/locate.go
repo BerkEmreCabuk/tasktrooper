@@ -10,6 +10,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -128,29 +129,25 @@ func explainSelectorFailure(ctx context.Context, s *Session, name, op, selector 
 	var b strings.Builder
 	switch {
 	case probe.BadSelector != "":
-		return toolError(name, fmt.Sprintf("%q is not a valid CSS selector: %s", selector, probe.BadSelector))
+		return toolError(name, prompt.BrowserBadSelectorText(fmt.Sprintf("%q", selector), probe.BadSelector))
 	case probe.Matches == 0:
 		fmt.Fprintf(&b, "%s failed: no element matches %q on this page.\n%s\n", op, selector, probe.header())
 		if len(probe.Anchors) == 0 {
-			b.WriteString("\nThe page has no elements with an id, no buttons, links or inputs at all — it is blank or still loading. Check the url above is the one you meant.")
+			b.WriteString("\n" + prompt.BrowserLocateNoAnchorsText())
 			break
 		}
 		b.WriteString("\nElements that ARE on this page:\n")
 		for _, anchor := range probe.Anchors {
 			fmt.Fprintf(&b, "- %s\n", anchor)
 		}
-		b.WriteString("\nUse one of these, or browser_read_dom with contains to search the page. Repeating this exact call will fail the same way.")
+		b.WriteString("\n" + prompt.BrowserLocatePickOneText())
 	case probe.Visible == 0:
 		fmt.Fprintf(&b, "%s failed: %q matches %d element(s) in the DOM, but none of them is visible "+
-			"(hidden, zero-size or transparent), so it cannot be interacted with.\n%s\n"+
-			"\nThe markup is there and the rendering is not: open the container that holds it first, or fix the styling that hides it. "+
-			"browser_read_dom with contains shows its HTML.",
-			op, selector, probe.Matches, probe.header())
+			"(hidden, zero-size or transparent), so it cannot be interacted with.\n%s\n\n%s",
+			op, selector, probe.Matches, probe.header(), prompt.BrowserLocateNotVisibleText())
 	default:
-		fmt.Fprintf(&b, "%s failed although %q matches %d visible element(s).\n%s\n"+
-			"\nThe element is on the page but the action did not complete — it may be covered by an overlay, disabled, or moving. "+
-			"Take a screenshot to see the state of the page before trying again.",
-			op, selector, probe.Visible, probe.header())
+		fmt.Fprintf(&b, "%s failed although %q matches %d visible element(s).\n%s\n\n%s",
+			op, selector, probe.Visible, probe.header(), prompt.BrowserLocateActionIncompleteText())
 	}
 	return toolError(name, b.String())
 }

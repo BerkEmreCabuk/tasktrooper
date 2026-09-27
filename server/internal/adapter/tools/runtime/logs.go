@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -148,7 +149,7 @@ func (t *queryRuntimeLogsTool) Execute(ctx context.Context, arguments string) do
 		"count":       len(entries),
 	}
 	if page.Truncated {
-		out["note"] = "the provider capped this window; older entries in range were not returned"
+		out["note"] = prompt.RuntimeLogsTruncatedText()
 	}
 	return toolJSON(name, out)
 }

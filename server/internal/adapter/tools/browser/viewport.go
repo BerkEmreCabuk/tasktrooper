@@ -9,6 +9,7 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/device"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -221,7 +222,7 @@ func renderResponsiveReport(preset string, r responsiveReport) string {
 		b.WriteString("\nlayout: the page itself does not scroll horizontally, but content sticks out past the edge.\n")
 	}
 	if r.OverflowCount == 0 {
-		b.WriteString("No single element could be pinned down as the cause — a fixed width or a min-width on a container is the usual reason.")
+		b.WriteString(prompt.BrowserViewportNoElementPinnedText())
 		return b.String()
 	}
 	fmt.Fprintf(&b, "\n%d element(s) extend past the viewport", r.OverflowCount)
@@ -232,6 +233,6 @@ func renderResponsiveReport(preset string, r responsiveReport) string {
 	for _, item := range r.Overflow {
 		fmt.Fprintf(&b, "- %s — spans x %d…%d (%d px wide)\n", item.Selector, item.Left, item.Right, item.Width)
 	}
-	b.WriteString("\nElements inside a clipping or scrolling container are excluded, so these are real overflow. Take a screenshot to see them.")
+	b.WriteString("\n" + prompt.BrowserViewportOverflowTailText())
 	return b.String()
 }

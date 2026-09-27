@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
@@ -162,7 +163,7 @@ func (t *catalogTool) Execute(ctx context.Context, arguments string) domain.Tool
 		Count:     len(matches),
 		Entries:   matches,
 		Files:     files,
-		Hint:      "To use an entry, copy its 'path' directory from the repo above as your project's starting point, then adapt names/config — don't regenerate its files from scratch.",
+		Hint:      prompt.BoilerplateCatalogHintText(),
 	}
 
 	out, err := json.Marshal(payload)

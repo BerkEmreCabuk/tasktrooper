@@ -10,6 +10,7 @@ import (
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -156,14 +157,10 @@ func (t *screenshotTool) Execute(ctx context.Context, arguments string) domain.T
 	content := fmt.Sprintf("screenshot attached: %s, viewport %dx%d, full_page=%v, %d bytes\nurl: %s\ntitle: %s",
 		mediaType, shot.Width, shot.Height, a.FullPage, len(buf), shot.URL, shot.Title)
 	if len(shot.BrokenImages) > 0 {
-		content += fmt.Sprintf("\n\nWARNING: %d image(s) on this page FAILED TO LOAD and render as a broken-image placeholder:\n- %s\n"+
-			"The page does NOT render correctly. Fix these before any \"looks correct\" verdict: the referenced asset file is missing, "+
-			"its path is wrong, or it is not a real image. If the asset does not exist yet, download the real one with download_file.",
-			len(shot.BrokenImages), strings.Join(shot.BrokenImages, "\n- "))
+		content += prompt.BrowserScreenshotBrokenImagesText(len(shot.BrokenImages), strings.Join(shot.BrokenImages, "\n- "))
 	}
 	if shot.LoadingImages > 0 {
-		content += fmt.Sprintf("\n\nNote: %d image(s) were still loading when the screenshot was taken — wait and retake before judging them.",
-			shot.LoadingImages)
+		content += prompt.BrowserScreenshotLoadingImagesText(shot.LoadingImages)
 	}
 	return domain.ToolResult{
 		Name:    screenshotToolName,

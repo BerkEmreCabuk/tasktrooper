@@ -37,3 +37,9 @@ func RuntimeEnvironmentNotBoundText(env, component string) string {
 func RuntimeInvalidSinceText(raw string) string {
 	return runtimeInvalidSinceKey.Render(runtimeInvalidSinceInput{Raw: raw})
 }
+
+var runtimeLogsTruncatedKey = Define[struct{}]("tool_results.runtime_logs_truncated", struct{}{})
+
+// RuntimeLogsTruncatedText is query_runtime_logs' "note" field when the
+// provider capped the returned window.
+func RuntimeLogsTruncatedText() string { return Text(runtimeLogsTruncatedKey) }
