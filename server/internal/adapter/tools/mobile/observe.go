@@ -50,16 +50,12 @@ func newLaunchTool(s device, targets AppResolver) port.ToolExecutor {
 func (t *launchTool) Name() string { return launchToolName }
 
 func (t *launchTool) Definition() domain.ToolDefinition {
-	return def(launchToolName,
-		"Install (if needed) and open this repository's Android build on the shared test device, and take the device lease. "+
-			"Call this before any other mobile_* tool. The package and artifact come from the repository's deploy target — you cannot open an arbitrary app.",
-		map[string]interface{}{
-			"repository_id": map[string]interface{}{"type": "string", "description": "Repository UUID"},
-			"env": map[string]interface{}{
-				"type": "string", "enum": domain.DeployEnvs(),
-				"description": "Which environment's build to test (default: stage)",
-			},
-		}, "repository_id")
+	return def(launchToolName, "", map[string]interface{}{
+		"repository_id": map[string]interface{}{"type": "string"},
+		"env": map[string]interface{}{
+			"type": "string", "enum": domain.DeployEnvs(),
+		},
+	}, "repository_id")
 }
 
 func (t *launchTool) Execute(ctx context.Context, arguments string) domain.ToolResult {
@@ -109,9 +105,7 @@ func newScreenshotTool(s device) port.ToolExecutor { return &screenshotTool{sess
 func (t *screenshotTool) Name() string { return screenshotToolName }
 
 func (t *screenshotTool) Definition() domain.ToolDefinition {
-	return def(screenshotToolName,
-		"Take a screenshot of the connected Android device and attach it to the result so you can see it.",
-		map[string]interface{}{})
+	return def(screenshotToolName, "", map[string]interface{}{})
 }
 
 func (t *screenshotTool) Execute(ctx context.Context, _ string) domain.ToolResult {
@@ -162,14 +156,11 @@ func (t *readUITool) Name() string { return readUIToolName }
 const maxSourceBytes = 60 * 1024
 
 func (t *readUITool) Definition() domain.ToolDefinition {
-	return def(readUIToolName,
-		"Read the view hierarchy of the current screen as XML — the mobile equivalent of reading the DOM. Use it to find the resource-id or label to address with the other mobile_* tools, and to assert what is on screen.",
-		map[string]interface{}{
-			"filter": map[string]interface{}{
-				"type":        "string",
-				"description": "Keep only lines containing this substring (case-insensitive). Use it on a busy screen to find one element.",
-			},
-		})
+	return def(readUIToolName, "", map[string]interface{}{
+		"filter": map[string]interface{}{
+			"type": "string",
+		},
+	})
 }
 
 func (t *readUITool) Execute(ctx context.Context, arguments string) domain.ToolResult {
@@ -219,12 +210,9 @@ const (
 func (t *waitForTool) Definition() domain.ToolDefinition {
 	props := selectorProperties()
 	props["timeout_seconds"] = map[string]interface{}{
-		"type":        "integer",
-		"description": fmt.Sprintf("How long to wait (default: %d, max: %d)", defaultWaitSeconds, maxWaitSeconds),
+		"type": "integer",
 	}
-	return def(waitForToolName,
-		"Wait until an element appears on the connected Android device. Use it after a tap that starts a load, instead of taking a screenshot and hoping the screen has settled.",
-		props)
+	return def(waitForToolName, "", props)
 }
 
 type waitForArgs struct {

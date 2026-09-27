@@ -91,20 +91,16 @@ type selectorArgs struct {
 func selectorProperties() map[string]interface{} {
 	return map[string]interface{}{
 		"text": map[string]interface{}{
-			"type":        "string",
-			"description": "Visible label of the element, matched exactly (e.g. \"Sign in\")",
+			"type": "string",
 		},
 		"resource_id": map[string]interface{}{
-			"type":        "string",
-			"description": "Android resource-id, with or without the package prefix (e.g. \"login_button\")",
+			"type": "string",
 		},
 		"content_desc": map[string]interface{}{
-			"type":        "string",
-			"description": "Accessibility label (content-desc) of the element",
+			"type": "string",
 		},
 		"xpath": map[string]interface{}{
-			"type":        "string",
-			"description": "XPath over the hierarchy from mobile_read_ui. Last resort — prefer the other three, they survive layout changes",
+			"type": "string",
 		},
 	}
 }

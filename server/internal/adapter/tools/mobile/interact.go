@@ -3,6 +3,7 @@ package mobile
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -29,11 +30,9 @@ func (t *tapTool) Name() string { return tapToolName }
 
 func (t *tapTool) Definition() domain.ToolDefinition {
 	props := selectorProperties()
-	props["x"] = map[string]interface{}{"type": "integer", "description": "Absolute x pixel; only with y, and only when no selector can address the target"}
-	props["y"] = map[string]interface{}{"type": "integer", "description": "Absolute y pixel; only with x"}
-	return def(tapToolName,
-		"Tap an element on the connected Android device. Address it by text, resource_id or content_desc; x/y is a fallback for canvases and maps.",
-		props)
+	props["x"] = map[string]interface{}{"type": "integer"}
+	props["y"] = map[string]interface{}{"type": "integer"}
+	return def(tapToolName, "", props)
 }
 
 type tapArgs struct {
@@ -95,11 +94,9 @@ func (t *typeTextTool) Name() string { return typeTextToolName }
 
 func (t *typeTextTool) Definition() domain.ToolDefinition {
 	props := selectorProperties()
-	props["value"] = map[string]interface{}{"type": "string", "description": "Text to type into the field"}
-	props["clear"] = map[string]interface{}{"type": "boolean", "description": "Clear the field first (default: true)"}
-	return def(typeTextToolName,
-		"Type text into a field on the connected Android device.",
-		props, "value")
+	props["value"] = map[string]interface{}{"type": "string"}
+	props["clear"] = map[string]interface{}{"type": "boolean"}
+	return def(typeTextToolName, "", props, "value")
 }
 
 type typeTextArgs struct {
@@ -144,18 +141,14 @@ func newSwipeTool(s device) port.ToolExecutor { return &swipeTool{session: s} }
 func (t *swipeTool) Name() string { return swipeToolName }
 
 func (t *swipeTool) Definition() domain.ToolDefinition {
-	return def(swipeToolName,
-		"Swipe on the connected Android device — scroll a list, dismiss a sheet, page a carousel.",
-		map[string]interface{}{
-			"direction": map[string]interface{}{
-				"type": "string", "enum": []string{"up", "down", "left", "right"},
-				"description": "Direction the finger moves. \"up\" scrolls the content down the page.",
-			},
-			"distance": map[string]interface{}{
-				"type":        "number",
-				"description": "Fraction of the screen to travel, 0.1–0.9 (default: 0.6)",
-			},
-		}, "direction")
+	return def(swipeToolName, "", map[string]interface{}{
+		"direction": map[string]interface{}{
+			"type": "string", "enum": []string{"up", "down", "left", "right"},
+		},
+		"distance": map[string]interface{}{
+			"type": "number",
+		},
+	}, "direction")
 }
 
 type swipeArgs struct {
@@ -252,11 +245,13 @@ func (t *pressButtonTool) Definition() domain.ToolDefinition {
 	for k := range androidKeycodes {
 		names = append(names, k)
 	}
-	return def(pressButtonToolName,
-		"Press a hardware or system button on the connected Android device.",
-		map[string]interface{}{
-			"button": map[string]interface{}{"type": "string", "enum": names, "description": "Button to press"},
-		}, "button")
+	// Deterministic order: Definition() is captured byte-for-byte in
+	// testdata/tool_definitions.golden.json (see golden_tool_definitions_test.go),
+	// and Go map iteration order is randomized per run.
+	sort.Strings(names)
+	return def(pressButtonToolName, "", map[string]interface{}{
+		"button": map[string]interface{}{"type": "string", "enum": names},
+	}, "button")
 }
 
 func (t *pressButtonTool) Execute(ctx context.Context, arguments string) domain.ToolResult {
@@ -287,14 +282,11 @@ func newRotateTool(s device) port.ToolExecutor { return &rotateTool{session: s} 
 func (t *rotateTool) Name() string { return rotateToolName }
 
 func (t *rotateTool) Definition() domain.ToolDefinition {
-	return def(rotateToolName,
-		"Rotate the connected Android device, to check a layout in the other orientation.",
-		map[string]interface{}{
-			"orientation": map[string]interface{}{
-				"type": "string", "enum": []string{"portrait", "landscape"},
-				"description": "Target orientation",
-			},
-		}, "orientation")
+	return def(rotateToolName, "", map[string]interface{}{
+		"orientation": map[string]interface{}{
+			"type": "string", "enum": []string{"portrait", "landscape"},
+		},
+	}, "orientation")
 }
 
 func (t *rotateTool) Execute(ctx context.Context, arguments string) domain.ToolResult {
@@ -325,9 +317,7 @@ func newUnlockTool(s device) port.ToolExecutor { return &unlockTool{session: s} 
 func (t *unlockTool) Name() string { return unlockToolName }
 
 func (t *unlockTool) Definition() domain.ToolDefinition {
-	return def(unlockToolName,
-		"Wake and unlock the connected Android device. The lease already unlocks it, so this is only needed when the screen locked itself mid-run (a long read, a slow build) and the app is hidden behind the lock screen.",
-		map[string]interface{}{})
+	return def(unlockToolName, "", map[string]interface{}{})
 }
 
 // Execute never takes the PIN as an argument. The credential is the operator's,
@@ -358,9 +348,7 @@ func newReleaseTool(s device) port.ToolExecutor { return &releaseTool{session: s
 func (t *releaseTool) Name() string { return releaseToolName }
 
 func (t *releaseTool) Definition() domain.ToolDefinition {
-	return def(releaseToolName,
-		"Hand the shared test device back when you are done with it, so a task waiting on it can start immediately instead of waiting out the idle timeout. Call this as the last mobile step of your run.",
-		map[string]interface{}{})
+	return def(releaseToolName, "", map[string]interface{}{})
 }
 
 func (t *releaseTool) Execute(ctx context.Context, _ string) domain.ToolResult {

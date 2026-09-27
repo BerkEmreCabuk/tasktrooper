@@ -40,16 +40,16 @@
           "button": {
             "description": "Button to press",
             "enum": [
-              "home",
-              "recent_apps",
-              "enter",
-              "delete",
               "back",
-              "volume_up",
-              "volume_down",
+              "delete",
+              "enter",
+              "home",
+              "menu",
               "power",
+              "recent_apps",
               "search",
-              "menu"
+              "volume_down",
+              "volume_up"
             ],
             "type": "string"
           }

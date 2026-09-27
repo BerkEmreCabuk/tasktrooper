@@ -59,16 +59,14 @@ func (t *loadSkillTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        loadSkillToolName,
-			Description: "Load the full instructions of one of your skills by name or id. Call this right before applying a skill listed in your skill index, then follow the returned instructions.",
+			Name: loadSkillToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"skill"},
 				"properties": map[string]interface{}{
 					"skill": map[string]interface{}{
-						"type":        "string",
-						"description": "Skill name (from your skill index) or skill UUID",
+						"type": "string",
 					},
 				},
 			},
@@ -148,32 +146,26 @@ func (t *createSkillTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        createSkillToolName,
-			Description: "Create a new skill for yourself when no skill in your index covers the work at hand. Write the skill as durable, reusable instructions (not a log of this task) so future runs can load and follow it. The skill joins your index immediately.",
+			Name: createSkillToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"name", "description", "content"},
 				"properties": map[string]interface{}{
 					"name": map[string]interface{}{
-						"type":        "string",
-						"description": "Short kebab-case skill name, e.g. terraform-state-recovery",
+						"type": "string",
 					},
 					"description": map[string]interface{}{
-						"type":        "string",
-						"description": "One line stating when to apply the skill — this is what the index shows",
+						"type": "string",
 					},
 					"category": map[string]interface{}{
-						"type":        "string",
-						"description": "Optional grouping label, e.g. backend, qa, devops",
+						"type": "string",
 					},
 					"content": map[string]interface{}{
-						"type":        "string",
-						"description": "Full step-by-step instructions in markdown, written to be followed verbatim on a future task",
+						"type": "string",
 					},
 					"tech_stack": map[string]interface{}{
-						"type":        "string",
-						"description": "Optional: the exact name of one of your tech stacks, when the skill only applies inside that technology. Omit for a general skill that holds whatever the code is written in.",
+						"type": "string",
 					},
 				},
 			},
