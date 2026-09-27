@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -28,36 +29,36 @@ func (s *TaskPRService) MergeTaskPullRequest(ctx context.Context, repositoryID, 
 
 	if task.Column != domain.TaskColumnDone {
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"%w — %s is in `%s`. A pull request is merged when the board has signed the task off, not while it is still being reviewed or tested",
-			domain.ErrMergeTaskNotDone, taskLabel(task), task.Column))
+			"%w — %s", domain.ErrMergeTaskNotDone,
+			mergeTaskNotDoneKey.Render(taskLabelColumnInput{Label: taskLabel(task), Column: string(task.Column)})))
 	}
 
 	if sha := strings.TrimSpace(task.MergeCommitSHA); sha != "" {
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"%w — %s was merged as %s. Nothing further is needed here",
-			domain.ErrMergeAlreadyMerged, taskLabel(task), domain.ShortSHA(sha)))
+			"%w — %s", domain.ErrMergeAlreadyMerged,
+			mergeAlreadyMergedRecordedKey.Render(taskLabelSHAInput{Label: taskLabel(task), SHA: domain.ShortSHA(sha)})))
 	}
 
 	number, prURL := taskPRRef(task)
 	if prURL == "" {
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"%w — %s has no pull request recorded, so there is nothing to merge. Its branch was never pushed, or the PR was opened outside the board",
-			domain.ErrMergeNoPullRequest, taskLabel(task)))
+			"%w — %s", domain.ErrMergeNoPullRequest,
+			mergeNoPRRecordedKey.Render(taskLabelInput{Label: taskLabel(task)})))
 	}
 	if number <= 0 {
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"%w — the recorded pull request URL (%s) carries no readable number, so it cannot be merged through the API. Merge it by hand",
-			domain.ErrMergeNoPullRequest, prURL))
+			"%w — %s", domain.ErrMergeNoPullRequest,
+			mergePRNumberUnreadableKey.Render(mergeURLInput{URL: prURL})))
 	}
 
 	if s.gates == nil || s.prs == nil || s.git == nil {
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"%w — this deployment has no GitHub pull-request access wired up", domain.ErrMergeNotConfigured))
+			"%w — %s", domain.ErrMergeNotConfigured, prompt.Text(mergeNotConfiguredKey)))
 	}
 	token := s.token(ctx)
 	if token == "" {
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"%w — GitHub is not connected", domain.ErrMergeNotConfigured))
+			"%w — %s", domain.ErrMergeNotConfigured, prompt.Text(mergeGitHubNotConnectedKey)))
 	}
 
 	if err := s.gates.CheckReviewChain(ctx, repositoryID, taskID); err != nil {
@@ -83,7 +84,7 @@ func (s *TaskPRService) MergeTaskPullRequest(ctx context.Context, repositoryID, 
 	owner, repo, err := s.ownerRepo(ctx, repositoryID, taskID)
 	if err != nil {
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"merge refused: the GitHub owner/repo for this task could not be resolved: %w", err))
+			"merge refused: %s: %w", prompt.Text(mergeOwnerRepoUnresolvedKey), err))
 	}
 	pr, err := s.prs.GetPullRequest(ctx, token, owner, repo, number)
 	if err != nil {
@@ -93,13 +94,13 @@ func (s *TaskPRService) MergeTaskPullRequest(ctx context.Context, repositoryID, 
 	if pr.Merged {
 		s.recordMergeCommit(ctx, taskID, pr.HeadSHA, "")
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"%w — pull request #%d is already merged on GitHub (it was merged outside this board)",
-			domain.ErrMergeAlreadyMerged, number))
+			"%w — %s", domain.ErrMergeAlreadyMerged,
+			mergeAlreadyMergedOnGitHubKey.Render(mergeNumberInput{Number: number})))
 	}
 	if strings.EqualFold(pr.State, "closed") {
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"%w — pull request #%d was closed without merging. Someone decided against this change; reopening it is a human's call",
-			domain.ErrMergeClosed, number))
+			"%w — %s", domain.ErrMergeClosed,
+			mergeClosedKey.Render(mergeNumberInput{Number: number})))
 	}
 	if pr.Draft {
 		log.Warn().Str("task_id", taskID.String()).Int("pull_request", number).
@@ -114,11 +115,14 @@ func (s *TaskPRService) MergeTaskPullRequest(ctx context.Context, repositoryID, 
 				switch state {
 				case "blocked":
 					return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-						"%w — required checks fail on %s@%s too: %s — pre-existing on the base branch, not introduced by this pull request",
-						domain.ErrMergeBaseRed, baseRef, domain.ShortSHA(baseSHA), strings.Join(headFailing, ", ")))
+						"%w — %s", domain.ErrMergeBaseRed,
+						mergeBaseRedKey.Render(mergeBaseRedInput{
+							BaseRef: baseRef, BaseSHA: domain.ShortSHA(baseSHA), FailingChecks: strings.Join(headFailing, ", "),
+						})))
 				case "unstable":
-					preexistingNote = fmt.Sprintf("merged over pre-existing failing checks: %s — they fail on %s@%s too",
-						strings.Join(headFailing, ", "), baseRef, domain.ShortSHA(baseSHA))
+					preexistingNote = mergePreexistingNoteKey.Render(mergePreexistingNoteInput{
+						FailingChecks: strings.Join(headFailing, ", "), BaseRef: baseRef, BaseSHA: domain.ShortSHA(baseSHA),
+					})
 					log.Info().Str("task_id", taskID.String()).Int("pull_request", number).
 						Str("base_ref", baseRef).Str("base_sha", baseSHA).Strs("failing_checks", headFailing).
 						Msg(preexistingNote)
@@ -128,22 +132,24 @@ func (s *TaskPRService) MergeTaskPullRequest(ctx context.Context, repositoryID, 
 		}
 		if !proceed {
 			return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-				"%w — GitHub reports pull request #%d as `%s` (expected `clean`). %s",
-				domain.ErrMergeChecksNotGreen, number, pr.MergeableState, mergeableStateRemedy(pr.MergeableState)))
+				"%w — %s", domain.ErrMergeChecksNotGreen,
+				mergeChecksNotGreenKey.Render(mergeChecksNotGreenInput{
+					Number: number, State: pr.MergeableState, Remedy: mergeableStateRemedy(pr.MergeableState),
+				})))
 		}
 	}
 
 	switch err := domain.VerifiedCommitMatches(task.VerifiedSHA, pr.HeadSHA); {
 	case errors.Is(err, domain.ErrReleaseTargetUnverified):
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"%w: no verified commit is stamped on this task, while its pull request is at %s. "+
-				"Move it back through review (need_revision → code_review → … → done): reaching done stamps the commit that was signed off, which is what this gate compares against",
-			domain.ErrReleaseTargetUnverified, domain.ShortSHA(pr.HeadSHA)))
+			"%w: %s", domain.ErrReleaseTargetUnverified,
+			mergeTargetUnverifiedKey.Render(mergeTargetUnverifiedInput{SHA: domain.ShortSHA(pr.HeadSHA)})))
 	case errors.Is(err, domain.ErrReleaseTargetMoved):
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf(
-			"%w: verified at %s, but the pull request head is now at %s. "+
-				"Something was pushed after this task was signed off — send it back through review so the new commits are reviewed and QA'd; returning it to done re-stamps the verified commit",
-			domain.ErrReleaseTargetMoved, domain.ShortSHA(task.VerifiedSHA), domain.ShortSHA(pr.HeadSHA)))
+			"%w: %s", domain.ErrReleaseTargetMoved,
+			mergeTargetMovedKey.Render(mergeTargetMovedInput{
+				VerifiedSHA: domain.ShortSHA(task.VerifiedSHA), HeadSHA: domain.ShortSHA(pr.HeadSHA),
+			})))
 	case err != nil:
 		return domain.TaskPRMergeResult{}, s.refuse(task, fmt.Errorf("merge refused: %w", err))
 	}
@@ -219,8 +225,8 @@ func (s *TaskPRService) pipelineIsGreen(ctx context.Context, repositoryID, taskI
 		detail = " Failing jobs: " + strings.Join(failed, ", ") + "."
 	}
 	return fmt.Errorf(
-		"%w — the last %s pipeline for this task FAILED.%s Send the task back to need_revision so the developer fixes it; a red build is not merged and then fixed on the default branch",
-		domain.ErrMergeChecksNotGreen, pipeline.Trigger, detail)
+		"%w — %s", domain.ErrMergeChecksNotGreen,
+		mergePipelineFailedKey.Render(mergePipelineFailedInput{Trigger: string(pipeline.Trigger), Detail: detail}))
 }
 
 // preexistingBaseFailure reads which checks are red on the pull request's
@@ -275,20 +281,7 @@ func preexistingSubset(head, base []string) bool {
 }
 
 func mergeableStateRemedy(state string) string {
-	switch strings.ToLower(strings.TrimSpace(state)) {
-	case "blocked":
-		return "A required check is red or still running, or a required review is missing. Read the PR checks (get_task_pull_request) and send the task back to need_revision if the build is broken."
-	case "unstable":
-		return "A check on this PR is failing. It is not a required one, so GitHub would merge it — this board does not: report the failing check and send the task back to need_revision if it is real."
-	case "dirty":
-		return "The branch conflicts with its base. It has to be rebased or merged by whoever owns the code — send the task back to need_revision."
-	case "behind":
-		return "The base branch has moved and this repository requires branches to be up to date. The branch has to be brought up to date by whoever owns the code — send the task back to need_revision."
-	case "unknown", "":
-		return "GitHub has not finished computing this PR's mergeability. Wait a moment and read the PR again before trying once more."
-	default:
-		return "Read the PR's checks and conversation before doing anything else."
-	}
+	return mergeStateRemedyKey.Render(mergeStateRemedyInput{State: strings.ToLower(strings.TrimSpace(state))})
 }
 
 // Recorded merge is a warning, not a failure: an error sends the agent to merge a merged PR.
@@ -336,32 +329,27 @@ func mergeCommitBody(task domain.BoardTask, prURL string) string {
 }
 
 func mergeMessage(out domain.TaskPRMergeResult, branchDeleteErr string, recordErr error) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "Merged pull request #%d into %s as %s (squash).",
-		out.PRNumber, fallback(out.BaseBranch, "the base branch"), domain.ShortSHA(out.MergeCommitSHA))
-	if out.Undrafted {
-		sb.WriteString(" The PR was still a draft and was marked ready for review first.")
+	releaseNext := ""
+	if out.Release != nil {
+		releaseNext = out.Release.Next
 	}
-	if out.PreexistingChecksNote != "" {
-		sb.WriteString(" " + out.PreexistingChecksNote + ".")
-	}
-	switch {
-	case out.Release != nil:
-		sb.WriteString(" " + out.Release.Next)
-	case out.AutoReleased:
-		sb.WriteString(" This repository has no deploy target configured, so the merge released the task directly — do not call trigger_release.")
-	}
-	switch {
-	case out.BranchDeleted:
-		sb.WriteString(" Branch " + out.Branch + " deleted.")
-	case branchDeleteErr != "":
-		sb.WriteString(" The branch " + out.Branch + " could NOT be deleted (" + branchDeleteErr + "); delete it by hand.")
-	}
+	recordErrText := ""
 	if recordErr != nil {
-		sb.WriteString(" WARNING: the merge commit could not be recorded on the task (" + recordErr.Error() +
-			"), so the board may ask for this merge again — say so on the card.")
+		recordErrText = recordErr.Error()
 	}
-	return sb.String()
+	return mergeMessageKey.Render(mergeMessageInput{
+		PRNumber:        out.PRNumber,
+		BaseBranch:      fallback(out.BaseBranch, "the base branch"),
+		MergeCommitSHA:  domain.ShortSHA(out.MergeCommitSHA),
+		Undrafted:       out.Undrafted,
+		PreexistingNote: out.PreexistingChecksNote,
+		ReleaseNext:     releaseNext,
+		AutoReleased:    out.AutoReleased,
+		BranchDeleted:   out.BranchDeleted,
+		Branch:          out.Branch,
+		BranchDeleteErr: branchDeleteErr,
+		RecordErr:       recordErrText,
+	})
 }
 
 func fallback(value, alt string) string {

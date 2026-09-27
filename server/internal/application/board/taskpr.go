@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -331,14 +333,14 @@ func (s *TaskPRService) CommentOnPullRequest(ctx context.Context, repositoryID, 
 	}
 	number, prURL := taskPRRef(task)
 	if prURL == "" {
-		return domain.PullRequestComment{}, fmt.Errorf("this task has no pull request yet, so there is nothing to comment on — push the branch first (commit_task_changes)")
+		return domain.PullRequestComment{}, errors.New(prompt.Text(commentNoPRKey))
 	}
 	if number <= 0 {
-		return domain.PullRequestComment{}, fmt.Errorf("the recorded pull request URL (%s) carries no readable number, so the comment cannot be posted through the API", prURL)
+		return domain.PullRequestComment{}, errors.New(commentPRNumberUnreadableKey.Render(mergeURLInput{URL: prURL}))
 	}
 	token := s.token(ctx)
 	if token == "" {
-		return domain.PullRequestComment{}, fmt.Errorf("GitHub is not connected, so nothing can be posted to the pull request")
+		return domain.PullRequestComment{}, errors.New(prompt.Text(commentGitHubNotConnectedKey))
 	}
 	owner, repo, err := s.ownerRepo(ctx, repositoryID, taskID)
 	if err != nil {
