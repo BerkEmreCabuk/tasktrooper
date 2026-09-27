@@ -38,11 +38,7 @@ func humanRequirementsMessage(comments []domain.TaskComment) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("## The human's requirements written on this task (authoritative — they amend the description and acceptance criteria)\n")
-	sb.WriteString("The person who owns this task wrote these comments on it, oldest first. Each one is part of what the task asks for: " +
-		"where it adds to, changes or contradicts the description, its out-of-scope list or an acceptance criterion, the comment wins, " +
-		"and a later comment wins over an earlier one. Work that implements them is IN scope — build it, review it, test it and accept it " +
-		"against them exactly as you would an acceptance criterion; never flag it as scope creep, and never ask for it to be reverted or split into another task.\n")
+	sb.WriteString(humanRequirementsHeader())
 	for _, c := range human {
 		content := strings.TrimSpace(c.Content)
 		if len(content) > 2000 {
@@ -55,4 +51,16 @@ func humanRequirementsMessage(comments []domain.TaskComment) string {
 		sb.WriteString(fmt.Sprintf("- %s%s\n", stamp, content))
 	}
 	return sb.String()
+}
+
+// humanRequirementsHeader states why these comments are here and how they
+// rank against the description, the out-of-scope list and the acceptance
+// criteria — every run needs this framing, not just the ones with comments
+// to show, so it stays fixed while the comment list below it varies.
+func humanRequirementsHeader() string {
+	return "## The human's requirements written on this task (authoritative — they amend the description and acceptance criteria)\n" +
+		"The person who owns this task wrote these comments on it, oldest first. Each one is part of what the task asks for: " +
+		"where it adds to, changes or contradicts the description, its out-of-scope list or an acceptance criterion, the comment wins, " +
+		"and a later comment wins over an earlier one. Work that implements them is IN scope — build it, review it, test it and accept it " +
+		"against them exactly as you would an acceptance criterion; never flag it as scope creep, and never ask for it to be reverted or split into another task.\n"
 }

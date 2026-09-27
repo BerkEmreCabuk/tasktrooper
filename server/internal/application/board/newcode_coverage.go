@@ -329,6 +329,13 @@ func newCodeCoverageReport(ctx context.Context, dir string, hits lineHits) strin
 		log.Debug().Str("dir", dir).Str("detail", res.Detail).Msg("new-code coverage not measured")
 		return "[unverified] new-code coverage: " + res.Detail
 	}
+	return renderNewCodeCoverage(res)
+}
+
+// renderNewCodeCoverage is the pure formatting half of newCodeCoverageReport:
+// everything once a measurement exists, with no git or filesystem access of
+// its own.
+func renderNewCodeCoverage(res NewCodeCoverage) string {
 	if res.Total < newCodeMinLines {
 		return fmt.Sprintf("[new-code coverage] %d of %d changed lines covered — too few to read anything into.",
 			res.Covered, res.Total)

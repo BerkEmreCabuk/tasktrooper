@@ -113,8 +113,7 @@ func (r *Runner) verifyAndFix(
 		history = append(history, domain.Message{Role: domain.RoleAssistant, Content: resp.Message.Content})
 		history = withFindingsDigest(history, agent.DigestFromSteps(rec.Steps(ctx), "", 0))
 		history = append(history,
-			domain.Message{Role: domain.RoleUser, Content: "Automated verification failed in the task workspace. Fix these errors, then re-check your work. " +
-				"Do not post an add_task_comment about the fix or the task being done — the system publishes your closing summary to the card once these checks pass:\n\n" + failReport},
+			domain.Message{Role: domain.RoleUser, Content: verifyFixPrompt(failReport)},
 		)
 		fixed, err := r.agentLoop.RunTask(ctx, history, model, agentRec.ProviderType, policy,
 			agent.WithLightModel(agentRec.Model),
@@ -128,6 +127,13 @@ func (r *Runner) verifyAndFix(
 		}
 		resp = fixed
 	}
+}
+
+// verifyFixPrompt is the turn handed back to the agent when the automated
+// build/vet/test pass still fails after its own hand-off.
+func verifyFixPrompt(failReport string) string {
+	return "Automated verification failed in the task workspace. Fix these errors, then re-check your work. " +
+		"Do not post an add_task_comment about the fix or the task being done — the system publishes your closing summary to the card once these checks pass:\n\n" + failReport
 }
 
 func withFindingsDigest(history []domain.Message, digest string) []domain.Message {

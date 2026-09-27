@@ -263,15 +263,21 @@ func coverageReport(ctx context.Context, dir string, repo domain.Repository, sub
 
 	threshold := coverageThreshold(repo, subProjectPath)
 	if repo.EffectiveCoverageGate(subProjectPath).Enabled && res.Percent+0.005 < threshold {
-		notes = append(notes, fmt.Sprintf(
-			coverageWarningMarker+" overall %.1f%% is below the %.0f%% this repository asks for.\n"+
-				"What is missing is coverage of code this task did not touch, so treat it as a note for whoever "+
-				"reads this run: if untested paths sit next to your change — the branches that handle errors and "+
-				"edge cases — covering them is worth a few minutes. "+
-				"It does not hold the task: the hand-off proceeds either way.",
-			res.Percent, threshold))
+		notes = append(notes, coverageOverallWarning(res.Percent, threshold))
 	}
 	return strings.Join(notes, "\n")
+}
+
+// coverageOverallWarning is advisory-only: the caller never holds the task
+// on it, so it just says what is missing and why it does not matter here.
+func coverageOverallWarning(percent, threshold float64) string {
+	return fmt.Sprintf(
+		coverageWarningMarker+" overall %.1f%% is below the %.0f%% this repository asks for.\n"+
+			"What is missing is coverage of code this task did not touch, so treat it as a note for whoever "+
+			"reads this run: if untested paths sit next to your change — the branches that handle errors and "+
+			"edge cases — covering them is worth a few minutes. "+
+			"It does not hold the task: the hand-off proceeds either way.",
+		percent, threshold)
 }
 
 func overallCoverageNote(repo domain.Repository, subProjectPath string, percent float64) string {
@@ -292,19 +298,33 @@ func runMutation(ctx context.Context, dir string, repo domain.Repository, subPro
 		log.Debug().Str("dir", dir).Str("detail", res.Detail).Msg("mutation testing not run")
 		return ""
 	}
-	note := fmt.Sprintf(
-		"[mutation] %.1f%% of mutants killed. Coverage says which lines ran; this says whether a test would have "+
-			"noticed them behaving differently. A low score with high coverage means assertions are missing, not lines.",
-		res.Percent)
+	note := mutationNote(res.Percent)
 	gate := repo.EffectiveMutationGate(subProjectPath)
 	if !gate.Enabled || gate.Threshold <= 0 {
 		return note
 	}
 	if res.Percent+0.005 < gate.Threshold {
-		return note + fmt.Sprintf(
-			"\n"+mutationWarningMarker+" %.1f%% is below the %.0f%% this repository asks for. "+
-				"Say so in your hand-off; it does not hold the task.",
-			res.Percent, gate.Threshold)
+		return note + mutationWarning(res.Percent, gate.Threshold)
 	}
-	return note + fmt.Sprintf(" (threshold %.0f%%, met)", gate.Threshold)
+	return note + mutationGateMet(gate.Threshold)
+}
+
+func mutationGateMet(threshold float64) string {
+	return fmt.Sprintf(" (threshold %.0f%%, met)", threshold)
+}
+
+// mutationNote always runs — reported score, not a verdict.
+func mutationNote(percent float64) string {
+	return fmt.Sprintf(
+		"[mutation] %.1f%% of mutants killed. Coverage says which lines ran; this says whether a test would have "+
+			"noticed them behaving differently. A low score with high coverage means assertions are missing, not lines.",
+		percent)
+}
+
+// mutationWarning is advisory-only, same as coverageOverallWarning.
+func mutationWarning(percent, threshold float64) string {
+	return fmt.Sprintf(
+		"\n"+mutationWarningMarker+" %.1f%% is below the %.0f%% this repository asks for. "+
+			"Say so in your hand-off; it does not hold the task.",
+		percent, threshold)
 }

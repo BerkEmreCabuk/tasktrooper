@@ -944,6 +944,22 @@ func pipelineFailureReport(p domain.TaskPipeline) string {
 	return strings.Join(parts, "\n\n")
 }
 
+// pipelineFailureComment is the ordinary case: the pipeline failed and the
+// task is (elsewhere) bounced back to need_revision to fix it.
+func pipelineFailureComment(stage, report string) string {
+	return fmt.Sprintf("Pipeline failed — %s:\n\n```\n%s\n```", stage, report)
+}
+
+// pipelineFailureBlockedCIComment is the deploy-only exception: GitHub
+// Actions itself is unavailable, so the failure is not the task's code and
+// the task is deliberately NOT bounced to need_revision — reportPipelineFailure
+// reads blockedCI to skip that move.
+func pipelineFailureBlockedCIComment(stage, report string) string {
+	return fmt.Sprintf("Deploy could not run — %s:\n\n```\n%s\n```\n\n"+
+		"GitHub Actions is unavailable for this repository (billing, spending limit or Actions disabled), so this is not a code problem and the task is NOT being sent back to need_revision. "+
+		"Deploy it the way this repository documents doing it locally, or move the task to `blocked` if it has no local deploy path.", stage, report)
+}
+
 func (p *PipelineRunner) reportPipelineFailure(ctx context.Context, job pipelineJob, pipeline domain.TaskPipeline) {
 	if p.tasks == nil {
 		return
@@ -957,11 +973,9 @@ func (p *PipelineRunner) reportPipelineFailure(ctx context.Context, job pipeline
 	}
 	report := pipelineFailureReport(pipeline)
 	blockedCI := isDeployTrigger(pipeline.Trigger) && githubapi.IsCIUnavailableText(report)
-	comment := fmt.Sprintf("Pipeline failed — %s:\n\n```\n%s\n```", stage, report)
+	comment := pipelineFailureComment(stage, report)
 	if blockedCI {
-		comment = fmt.Sprintf("Deploy could not run — %s:\n\n```\n%s\n```\n\n"+
-			"GitHub Actions is unavailable for this repository (billing, spending limit or Actions disabled), so this is not a code problem and the task is NOT being sent back to need_revision. "+
-			"Deploy it the way this repository documents doing it locally, or move the task to `blocked` if it has no local deploy path.", stage, report)
+		comment = pipelineFailureBlockedCIComment(stage, report)
 	}
 	if len(comment) > 3000 {
 		comment = truncateHead(comment, 3000) + "\n…(truncated)"

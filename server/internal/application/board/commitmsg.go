@@ -61,10 +61,7 @@ func englishCommitBody(ctx context.Context, llm port.LLMClient, d commitDetails)
 	if llm == nil || fallback == "" {
 		return fallback
 	}
-	input := "Task title: " + strings.TrimSpace(d.Title)
-	if summary := strings.TrimSpace(d.Summary); summary != "" {
-		input += "\n\nWhat the agent reports it did:\n" + truncateHead(summary, 2000)
-	}
+	input := commitMessageUserInput(strings.TrimSpace(d.Title), strings.TrimSpace(d.Summary))
 	resp, err := llm.Chat(ctx, domain.AgentRequest{
 		ProviderType: d.Writer.Provider,
 		Model:        d.Writer.Model,
@@ -86,6 +83,17 @@ func englishCommitBody(ctx context.Context, llm port.LLMClient, d commitDetails)
 		return fallback
 	}
 	return written
+}
+
+// commitMessageUserInput is the user turn handed to the commit-writer LLM:
+// the task title, and — when the run left one — its own summary, already
+// trimmed and truncated by the caller.
+func commitMessageUserInput(title, summary string) string {
+	input := "Task title: " + title
+	if summary != "" {
+		input += "\n\nWhat the agent reports it did:\n" + truncateHead(summary, 2000)
+	}
+	return input
 }
 
 func sanitizeCommitMessage(raw string) string {
