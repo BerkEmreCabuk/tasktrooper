@@ -1,0 +1,319 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "codebase_search",
+      "description": "Semantic search over the indexed workspace codebase. Returns matching code chunks ranked by relevance.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "query": {
+            "description": "Natural language or keyword query describing the code to find",
+            "type": "string"
+          },
+          "top_k": {
+            "description": "Maximum number of results to return",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "delete_file",
+      "description": "Delete a file, or an empty directory, inside the workspace. Pass recursive:true to remove a directory and everything in it. Use this instead of `rm` through the shell. This removes the ENTIRE file. To remove a function, a block or a range of lines from a file that must survive, use edit_lines with mode:delete — there is no delete_lines tool.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "description": "Path to delete, relative to the workspace root",
+            "type": "string"
+          },
+          "recursive": {
+            "description": "Required to delete a directory that is not empty. Deletes everything inside it.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "edit_file",
+      "description": "Replace an exact string in a workspace file. This is how you change code — not `sed -i` through the shell. The result says how many occurrences changed and on which lines, so you never need to grep afterwards to check whether the edit landed. Use replace_all to change every occurrence in the file in one call.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "new_string": {
+            "description": "Replacement text. Pass an empty string to delete the matched text.",
+            "type": "string"
+          },
+          "old_string": {
+            "description": "Exact text to replace, copied from read_file output without the line-number prefix. Must match a single place in the file unless replace_all is set — include surrounding lines to make it unique.",
+            "type": "string"
+          },
+          "path": {
+            "description": "Path of the file to edit, relative to the workspace root",
+            "type": "string"
+          },
+          "replace_all": {
+            "description": "Replace every occurrence in the file rather than requiring a unique match. This is how you remove or rename a symbol across a file in one call instead of one edit per occurrence.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "path",
+          "old_string",
+          "new_string"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "edit_lines",
+      "description": "Change a workspace file by line number: replace a range of lines, insert new lines after a line, or delete a range. Use it with the line numbers read_file gives you — this is how you add a function, insert an import or remove a block, where edit_file would mean echoing back the existing text exactly. The result shows the changed region as it now stands, so you never need to re-read the file to check. Line numbers refer to the file as it is NOW: after an edit that adds or removes lines, work bottom-up or read the file again.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "end_line": {
+            "description": "Last line of the range, 1-based and inclusive. Defaults to start_line. Ignored for insert_after.",
+            "type": "integer"
+          },
+          "mode": {
+            "description": "replace: text takes the place of lines start_line..end_line. insert_after: text is inserted after start_line (use 0 to insert at the top of the file). delete: lines start_line..end_line are removed.",
+            "enum": [
+              "replace",
+              "insert_after",
+              "delete"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "description": "Path of the file to edit, relative to the workspace root",
+            "type": "string"
+          },
+          "start_line": {
+            "description": "First line of the range, 1-based. For insert_after, the line the new text goes after (0 = top of file).",
+            "type": "integer"
+          },
+          "text": {
+            "description": "The new lines, for replace and insert_after. Written as-is; no trailing newline needed.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "mode",
+          "start_line"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "expand_symbol_context",
+      "description": "Expand symbol context using the dependency graph and retrieve related code chunks.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "depth": {
+            "description": "Call-graph expansion depth",
+            "type": "integer"
+          },
+          "file_path": {
+            "description": "File containing the symbol (disambiguates homonymous symbols)",
+            "type": "string"
+          },
+          "max_chunks": {
+            "description": "Maximum number of chunks to return",
+            "type": "integer"
+          },
+          "symbol_name": {
+            "description": "Symbol to expand from",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol_name"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_repo_tree",
+      "description": "Return a lazy-expandable directory tree for the workspace, optionally scoped to a path prefix.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "max_depth": {
+            "description": "Maximum directory depth to render",
+            "type": "integer"
+          },
+          "prefix": {
+            "description": "Directory prefix to expand (empty for repository root)",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_symbol_skeleton",
+      "description": "Return symbol skeletons for a file or a specific symbol from the mapper and index store.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "file_path": {
+            "description": "Relative file path within the workspace",
+            "type": "string"
+          },
+          "symbol_name": {
+            "description": "Optional symbol name to filter results",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "grep_code",
+      "description": "Search workspace files with ripgrep using a regex pattern. Case-insensitive by default. Respects .gitignore via exclusion globs.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "case_sensitive": {
+            "description": "Match case exactly, for both pattern and glob. Default false: the search ignores case, so \"coming soon\" also finds \"Coming Soon\" and glob \"*.TSX\" still matches .tsx files.",
+            "type": "boolean"
+          },
+          "glob": {
+            "description": "Optional glob filter for file paths (e.g. *.go)",
+            "type": "string"
+          },
+          "max_results": {
+            "description": "Maximum number of matching lines to return (default: 100)",
+            "type": "integer"
+          },
+          "path": {
+            "description": "Relative path within the workspace to search (default: workspace root)",
+            "type": "string"
+          },
+          "pattern": {
+            "description": "Regular expression pattern to search for",
+            "type": "string"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "move_file",
+      "description": "Move or rename a file or directory inside the workspace. Missing parent directories of the destination are created. Use this instead of `mv` through the shell. Renaming a symbol's file does not update the code that imports it — grep_code for the old path afterwards.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "description": "Current path, relative to the workspace root",
+            "type": "string"
+          },
+          "overwrite": {
+            "description": "Replace the destination if it already exists. Without it, an existing destination is an error.",
+            "type": "boolean"
+          },
+          "to": {
+            "description": "New path, relative to the workspace root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "read_file",
+      "description": "Read a workspace file with line numbers. Returns up to 800 lines per call and tells you the file's total line count, so one call is normally the whole file. Prefer this over reading files through the shell — `cat`, `sed -n`, `head` and `tail` cost an entire agent turn per window and lose the line numbers you need to edit by.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "How many lines to return (default 800). Do not lower it to page through a file in small windows — read it in one call.",
+            "type": "integer"
+          },
+          "offset": {
+            "description": "First line to return, 1-based (default 1). Only needed for a file too long to return in one call.",
+            "type": "integer"
+          },
+          "path": {
+            "description": "Path of the file to read, relative to the workspace root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "write_file",
+      "description": "Create a workspace file, or replace one whole. Parent directories are created as needed. This is how you write a new file — not a shell heredoc, which mangles backticks, quotes and template literals. To change part of an existing file use edit_file or edit_lines instead; this overwrites everything.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Full contents of the file. Written verbatim; a trailing newline is added when missing.",
+            "type": "string"
+          },
+          "path": {
+            "description": "Path of the file to write, relative to the workspace root",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "content"
+        ],
+        "type": "object"
+      }
+    }
+  }
+]
