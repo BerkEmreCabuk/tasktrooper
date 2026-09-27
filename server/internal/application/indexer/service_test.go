@@ -75,6 +75,18 @@ func (s *ServiceSuite) TestIndexSessionIncrementalSkipsUnchanged() {
 }
 
 func (s *ServiceSuite) TestInterruptedPassKeepsFinishedFilesAndResumes() {
+	// One worker: with several, a second file's chunk can reach the embedder
+	// before the first file finished, so no file would be complete when the
+	// pass is cancelled — the test is about resume, not about concurrency.
+	s.svc = indexer.NewService(
+		s.store,
+		s.llm,
+		mapper.NewService(domain.MappingConfig{Enabled: true, MaxFiles: 50, TreeMaxDepth: 4}),
+		chunker.DefaultRegistry(),
+		domain.IndexerConfig{Enabled: true, TopK: 5, ReindexOnChange: true, Concurrency: 1},
+		domain.GraphConfig{Enabled: true},
+		"embed-model",
+	)
 
 	passCtx, cancelPass := context.WithCancel(context.Background())
 	defer cancelPass()
