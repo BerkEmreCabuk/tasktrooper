@@ -100,3 +100,41 @@ func TestGoldenSubtaskWorkspaceNote(t *testing.T) {
 	assertGolden(t, "subtask_workspace_note_nested", prompt.SubtaskWorkspaceNote("/data/ws/abc/subtask-1"))
 	assertGolden(t, "subtask_workspace_note_empty", prompt.SubtaskWorkspaceNote(""))
 }
+
+func TestGoldenMemoryContextMessage(t *testing.T) {
+	assertGolden(t, "memory_context_empty", prompt.MemoryContextMessage(nil, ""))
+
+	agentID := uuid.New()
+	repoID := uuid.New()
+	assertGolden(t, "memory_context_global_and_team", prompt.MemoryContextMessage([]domain.AgentMemory{
+		{AgentID: agentID, Content: "User prefers Turkish", Category: "preference"},
+		{AgentID: agentID, Content: "Never push to main"},
+		{Content: "Build with make dev"},
+	}, ""))
+
+	assertGolden(t, "memory_context_project_and_global", prompt.MemoryContextMessage([]domain.AgentMemory{
+		{AgentID: agentID, RepositoryID: &repoID, Content: "Verify with make check"},
+		{RepositoryID: &repoID, Content: "Stage deploys on merge"},
+		{AgentID: agentID, Content: "Never push to main"},
+	}, "tasktrooper"))
+}
+
+func TestGoldenKPIContextMessage(t *testing.T) {
+	assertGolden(t, "kpi_context_empty", prompt.KPIContextMessage(nil, nil))
+
+	kpiID := uuid.New()
+	assertGolden(t, "kpi_context_with_result", prompt.KPIContextMessage(
+		[]domain.AgentKPI{
+			{ID: kpiID, MetricKey: "revisions_received", Name: "Haftalık revizyon", Period: "weekly", TargetFull: 1, TargetHalf: 3, Enabled: true},
+			{ID: uuid.New(), MetricKey: "disabled_metric", Enabled: false},
+		},
+		[]domain.AgentKPIResult{{KPIID: kpiID, MeasuredValue: 2, Attainment: 0.5}},
+	))
+
+	assertGolden(t, "kpi_context_no_result_no_name", prompt.KPIContextMessage(
+		[]domain.AgentKPI{
+			{ID: uuid.New(), MetricKey: "clean_time_in_progress", Period: domain.KPIPeriodWeekly, TargetFull: 6, TargetHalf: 16, Weight: 1, Enabled: true},
+		},
+		nil,
+	))
+}
