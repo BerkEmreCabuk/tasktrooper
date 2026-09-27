@@ -1,0 +1,97 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "delete_memory",
+      "description": "Delete one of your own memories by id (when it is outdated or wrong).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "memory_id": {
+            "description": "UUID of the memory to delete",
+            "type": "string"
+          }
+        },
+        "required": [
+          "memory_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "save_memory",
+      "description": "Save a fact a LATER run — on a different task, weeks from now — will need and could not work out for itself. Before saving, apply that test: if the note stops being true once this task is finished, it is not a memory. Progress on the card you are on, what you verified, which commit fixed what, why a check went red, what you moved where: that is the task's story and belongs in its comments (add_task_comment), which is where people and later runs look for it. A memory never names a task key, a PR number, a commit SHA or a column move — the durable version of the same lesson is that sentence with the card taken out of it. Reusable know-how (a procedure you would follow again) is a skill, not a memory; this tool routes those to the skill catalog for you. Two independent choices decide where it lands: scope (project = only valid inside the repository you are working in, e.g. its build command, its architecture quirks; global = valid everywhere, e.g. a user preference or a habit you want to keep) and shared (false = your own memory, true = team memory every agent reads). Default to scope=project while working on a repository — a lesson learned in one codebase is usually wrong in another. Team memory (shared=true) is read by every agent on every run, so it holds only what the whole team would act on: raise the bar there, do not narrate.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "description": "Optional category (e.g. preference, lesson, convention, feedback)",
+            "type": "string"
+          },
+          "content": {
+            "description": "One concise, self-contained fact or lesson, stated so it still reads true a month from now: no task key, no PR number, no commit SHA, no \"this task\", no column move. A note that fails that is rejected with the reason.",
+            "type": "string"
+          },
+          "scope": {
+            "description": "project = bound to the current repository (default when one is in play); global = valid across every repository",
+            "enum": [
+              "project",
+              "global"
+            ],
+            "type": "string"
+          },
+          "shared": {
+            "description": "true = team memory visible to all agents; false (default) = your own memory",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "search_memory",
+      "description": "Search the memories you can read: your own plus the team's, from this repository plus the global ones. Empty query returns the most recent. Use scope to narrow to project or global memories, and owner to look only at your own or only at the team's.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "owner": {
+            "description": "all (default) = your memories plus the team's; self = only yours; team = only the team's",
+            "enum": [
+              "all",
+              "self",
+              "team"
+            ],
+            "type": "string"
+          },
+          "query": {
+            "description": "Optional semantic search query",
+            "type": "string"
+          },
+          "scope": {
+            "description": "all (default) = this repository's memories plus the global ones; project = only this repository; global = only repository-independent",
+            "enum": [
+              "all",
+              "project",
+              "global"
+            ],
+            "type": "string"
+          },
+          "top_k": {
+            "description": "Max results (default 5)",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  }
+]
