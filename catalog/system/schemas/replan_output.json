@@ -1,0 +1,37 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "summary": { "type": "string" },
+    "tasks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "description": { "type": "string" },
+          "agent_id": { "type": "string" },
+          "skill_ids": { "type": "array", "items": { "type": "string" } },
+          "tool_names": { "type": "array", "items": { "type": "string" } },
+          "subtask_rules": { "type": "array", "items": { "type": "string" } },
+          "depends_on": { "type": "array", "items": { "type": "string" } },
+          "parallel_group": { "type": "integer" }
+        },
+        "required": [
+          "id",
+          "title",
+          "description",
+          "agent_id",
+          "skill_ids",
+          "tool_names",
+          "subtask_rules",
+          "depends_on",
+          "parallel_group"
+        ]
+      }
+    }
+  },
+  "required": ["summary", "tasks"]
+}

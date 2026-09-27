@@ -47,7 +47,7 @@ func (e *IntakeExtractor) Extract(ctx context.Context, userMessage string, histo
 			Messages:       buildPipelineLLMMessages(systemPrompt, history, userMessage, nil, corrections),
 			Model:          model,
 			ProviderType:   opts.ProviderType,
-			ResponseFormat: domain.JSONSchemaResponseFormat("goal_intake", intakeOutputSchema()),
+			ResponseFormat: domain.JSONSchemaResponseFormat(intakeOutputSchemaKey.Name(), intakeOutputSchemaKey.Map()),
 		})
 		if err != nil {
 			lastErr = err
@@ -84,16 +84,21 @@ func (e *IntakeExtractor) Extract(ctx context.Context, userMessage string, histo
 	return domain.GoalIntake{}, pipelineStepError("goal intake", maxPlannerRetries+1, lastErr)
 }
 
+// intakeWireOutput is the wire shape goal_intake.json's ResponseFormat
+// constrains a provider to; parity between the two is checked by
+// TestSchemaStructParity in schemas_test.go.
+type intakeWireOutput struct {
+	Ready       bool                           `json:"ready"`
+	Purpose     string                         `json:"purpose"`
+	Goal        string                         `json:"goal"`
+	Constraints []string                       `json:"constraints"`
+	Questions   []domain.ClarificationQuestion `json:"questions"`
+}
+
 func parseGoalIntake(content string) (domain.GoalIntake, error) {
 	trimmed := stripJSONWrapper(content)
 
-	var raw struct {
-		Ready       bool                           `json:"ready"`
-		Purpose     string                         `json:"purpose"`
-		Goal        string                         `json:"goal"`
-		Constraints []string                       `json:"constraints"`
-		Questions   []domain.ClarificationQuestion `json:"questions"`
-	}
+	var raw intakeWireOutput
 	if err := parseLLMJSON(trimmed, &raw); err != nil {
 		return domain.GoalIntake{}, fmt.Errorf("invalid intake json: %w", err)
 	}

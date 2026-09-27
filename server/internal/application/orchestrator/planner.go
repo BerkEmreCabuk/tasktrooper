@@ -176,7 +176,7 @@ func (p *Planner) Generate(ctx context.Context, intake domain.GoalIntake, userMe
 			Messages:       messages,
 			Model:          model,
 			ProviderType:   opts.ProviderType,
-			ResponseFormat: domain.JSONSchemaResponseFormat("planner_output", plannerOutputSchema()),
+			ResponseFormat: domain.JSONSchemaResponseFormat(plannerOutputSchemaKey.Name(), plannerOutputSchemaKey.Map()),
 		})
 		if err != nil {
 			lastErr = err
@@ -240,28 +240,41 @@ func parseRepairPlanOutput(content string) (domain.PlannerOutput, error) {
 	return parsePlannerJSON(content, plannerParseOpts{assumeReady: true})
 }
 
+// plannerTaskWire is the wire shape a planner_output task takes; it doubles
+// as replan_output's task shape (repairTaskWire, an alias), which omits
+// "difficulty" from its own schema — the field just decodes to its zero
+// value there. See TestSchemaStructParity in schemas_test.go and this
+// package's WP9a looseness note on the shared type.
+type plannerTaskWire struct {
+	ID            string          `json:"id"`
+	Title         string          `json:"title"`
+	Description   string          `json:"description"`
+	AgentID       string          `json:"agent_id"`
+	SkillIDs      []string        `json:"skill_ids"`
+	ToolNames     json.RawMessage `json:"tool_names"`
+	SubtaskRules  []string        `json:"subtask_rules"`
+	DependsOn     []string        `json:"depends_on"`
+	Difficulty    string          `json:"difficulty"`
+	ParallelGroup int             `json:"parallel_group"`
+}
+
+// plannerOutputWire is the wire shape planner_output.json's ResponseFormat
+// constrains a provider to; parity is checked by TestSchemaStructParity in
+// schemas_test.go. It is reused, tolerantly, for replan_output (see
+// plannerTaskWire).
+type plannerOutputWire struct {
+	Ready     bool                           `json:"ready"`
+	Purpose   string                         `json:"purpose"`
+	Goal      string                         `json:"goal"`
+	Summary   goccyjson.RawMessage           `json:"summary"`
+	Questions []domain.ClarificationQuestion `json:"questions"`
+	Tasks     []plannerTaskWire              `json:"tasks"`
+}
+
 func parsePlannerJSON(content string, opts plannerParseOpts) (domain.PlannerOutput, error) {
 	trimmed := stripJSONWrapper(content)
 
-	var raw struct {
-		Ready     bool                           `json:"ready"`
-		Purpose   string                         `json:"purpose"`
-		Goal      string                         `json:"goal"`
-		Summary   goccyjson.RawMessage           `json:"summary"`
-		Questions []domain.ClarificationQuestion `json:"questions"`
-		Tasks     []struct {
-			ID            string          `json:"id"`
-			Title         string          `json:"title"`
-			Description   string          `json:"description"`
-			AgentID       string          `json:"agent_id"`
-			SkillIDs      []string        `json:"skill_ids"`
-			ToolNames     json.RawMessage `json:"tool_names"`
-			SubtaskRules  []string        `json:"subtask_rules"`
-			DependsOn     []string        `json:"depends_on"`
-			Difficulty    string          `json:"difficulty"`
-			ParallelGroup int             `json:"parallel_group"`
-		} `json:"tasks"`
-	}
+	var raw plannerOutputWire
 	if err := parseLLMJSON(trimmed, &raw); err != nil {
 		return domain.PlannerOutput{}, fmt.Errorf("invalid planner json: %w", err)
 	}

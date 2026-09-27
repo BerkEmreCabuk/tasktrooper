@@ -133,7 +133,7 @@ func (r *Replanner) Generate(
 			Messages:       messages,
 			Model:          plannerModel,
 			ProviderType:   opts.ProviderType,
-			ResponseFormat: domain.JSONSchemaResponseFormat("replan_output", replannerOutputSchema()),
+			ResponseFormat: domain.JSONSchemaResponseFormat(replannerOutputSchemaKey.Name(), replannerOutputSchemaKey.Map()),
 		})
 		if err != nil {
 			lastErr = err

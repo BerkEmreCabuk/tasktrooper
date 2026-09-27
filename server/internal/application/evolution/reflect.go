@@ -226,7 +226,7 @@ func (s *Service) runLLM(ctx context.Context, agentRec domain.Agent, evidence st
 		}
 		resp, err := s.llm.Chat(ctx, domain.AgentRequest{
 			Messages: msgs, ProviderType: provider, Model: model,
-			ResponseFormat: domain.JSONSchemaResponseFormat("agent_reflection", reflectionOutputSchema()),
+			ResponseFormat: domain.JSONSchemaResponseFormat(agentReflectionSchemaKey.Name(), agentReflectionSchemaKey.Map()),
 		})
 		if err != nil {
 			return "", err

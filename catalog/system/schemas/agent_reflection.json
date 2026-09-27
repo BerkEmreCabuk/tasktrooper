@@ -1,0 +1,78 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "self_assessment": { "type": "string" },
+    "skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string", "enum": ["create", "update", "delete"] },
+          "skill_id": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "category": { "type": "string" },
+          "content": { "type": "string" },
+          "source_urls": { "type": "array", "items": { "type": "string" } },
+          "reason": { "type": "string" }
+        },
+        "required": [
+          "action",
+          "skill_id",
+          "name",
+          "description",
+          "category",
+          "content",
+          "source_urls",
+          "reason"
+        ]
+      }
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string", "enum": ["create", "update", "delete"] },
+          "rule_id": { "type": "string" },
+          "name": { "type": "string" },
+          "content": { "type": "string" },
+          "priority": { "type": "integer" },
+          "reason": { "type": "string" }
+        },
+        "required": ["action", "rule_id", "name", "content", "priority", "reason"]
+      }
+    },
+    "memories": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "action": { "type": "string", "enum": ["create", "delete"] },
+          "memory_id": { "type": "string" },
+          "content": { "type": "string" },
+          "category": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["action", "memory_id", "content", "category", "reason"]
+      }
+    },
+    "reverts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "evolution_event_id": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "required": ["evolution_event_id", "reason"]
+      }
+    }
+  },
+  "required": ["self_assessment", "skills", "rules", "memories", "reverts"]
+}

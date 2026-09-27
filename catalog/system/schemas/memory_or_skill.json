@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "skill": { "type": "boolean" },
+    "name": { "type": "string" },
+    "description": { "type": "string" },
+    "category": { "type": "string" },
+    "content": { "type": "string" }
+  },
+  "required": ["skill", "name", "description", "category", "content"]
+}

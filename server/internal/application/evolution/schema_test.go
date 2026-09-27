@@ -3,7 +3,9 @@ package evolution
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -19,7 +21,7 @@ func assertStrictObjectSchema(t *testing.T, schema map[string]interface{}, path 
 			t.Errorf("%s: additionalProperties = %v, want literal false", path, schema["additionalProperties"])
 		}
 		props, _ := schema["properties"].(map[string]interface{})
-		required, _ := schema["required"].([]string)
+		required := schemaRequired(schema)
 		reqSet := make(map[string]bool, len(required))
 		for _, r := range required {
 			reqSet[r] = true
@@ -49,8 +51,28 @@ func assertStrictObjectSchema(t *testing.T, schema map[string]interface{}, path 
 	}
 }
 
+// schemaRequired reads "required" leniently: a schema built in Go carries it
+// as []string, but one loaded from catalog/system/schemas/*.json through
+// encoding/json carries it as []interface{} of strings.
+func schemaRequired(schema map[string]interface{}) []string {
+	switch v := schema["required"].(type) {
+	case []string:
+		return v
+	case []interface{}:
+		out := make([]string, 0, len(v))
+		for _, e := range v {
+			if s, ok := e.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
 func TestReflectionOutputSchema_MarshalsAndSatisfiesStrictMode(t *testing.T) {
-	schema := reflectionOutputSchema()
+	schema := agentReflectionSchemaKey.Map()
 
 	raw, err := json.Marshal(schema)
 	if err != nil {
@@ -72,7 +94,7 @@ func TestReflectionOutputSchema_MarshalsAndSatisfiesStrictMode(t *testing.T) {
 
 // Locks the contract that made the prompt-only instruction unenforceable: a CLI-path model has no schema, so parseReflectionOutput is the only enforcement there is; the HTTP-path schema still requires reason on every change kind so strict providers enforce it too.
 func TestReflectionOutputSchema_ChangesRequireReason(t *testing.T) {
-	schema := reflectionOutputSchema()
+	schema := agentReflectionSchemaKey.Map()
 	props, _ := schema["properties"].(map[string]interface{})
 
 	for _, key := range []string{"skills", "rules", "memories"} {
@@ -84,7 +106,7 @@ func TestReflectionOutputSchema_ChangesRequireReason(t *testing.T) {
 		if !ok {
 			t.Fatalf("%s: missing items schema", key)
 		}
-		required, _ := items["required"].([]string)
+		required := schemaRequired(items)
 		found := false
 		for _, r := range required {
 			if r == "reason" {
@@ -158,4 +180,139 @@ func TestRunLLM_RequestCarriesTheReflectionSchema(t *testing.T) {
 	if rf.Schema["type"] != "object" {
 		t.Errorf("schema type = %v, want object", rf.Schema["type"])
 	}
+}
+
+// ---- Schema/struct parity ----
+//
+// Checks each strict-mode schema's promise about the wire shape against the
+// Go struct the response actually decodes into, reflecting over its json
+// tags so the two cannot drift silently. See the orchestrator package's
+// schemas_test.go for the shared design and this package's WP9a report for
+// the known loosenesses (parseReflectionOutput's per-field, non-struct
+// decode chief among them — this parity check targets the shape it fills
+// domain.ReflectionOutput with, not its own permissive extraction).
+
+func schemaProperties(schema map[string]interface{}) map[string]map[string]interface{} {
+	props, _ := schema["properties"].(map[string]interface{})
+	out := make(map[string]map[string]interface{}, len(props))
+	for name, raw := range props {
+		if sub, ok := raw.(map[string]interface{}); ok {
+			out[name] = sub
+		}
+	}
+	return out
+}
+
+func schemaPropertyType(prop map[string]interface{}) string {
+	typ, _ := prop["type"].(string)
+	return typ
+}
+
+func arrayItemSchema(prop map[string]interface{}) map[string]interface{} {
+	items, _ := prop["items"].(map[string]interface{})
+	return items
+}
+
+func jsonKindOf(t reflect.Type) string {
+	for t.Kind() == reflect.Ptr {
+		t = t.Elem()
+	}
+	switch t.Kind() {
+	case reflect.String:
+		return "string"
+	case reflect.Bool:
+		return "boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "integer"
+	case reflect.Float32, reflect.Float64:
+		return "number"
+	case reflect.Slice, reflect.Array:
+		return "array"
+	case reflect.Struct, reflect.Map:
+		return "object"
+	default:
+		return ""
+	}
+}
+
+func structFieldTypes(t *testing.T, sample interface{}) map[string]string {
+	t.Helper()
+	rt := reflect.TypeOf(sample)
+	for rt.Kind() == reflect.Ptr {
+		rt = rt.Elem()
+	}
+	if rt.Kind() != reflect.Struct {
+		t.Fatalf("structFieldTypes: %v is not a struct", rt)
+	}
+	out := make(map[string]string, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		f := rt.Field(i)
+		tag := f.Tag.Get("json")
+		name, _, _ := strings.Cut(tag, ",")
+		if name == "" || name == "-" {
+			continue
+		}
+		out[name] = jsonKindOf(f.Type)
+	}
+	return out
+}
+
+func assertSchemaStructParity(t *testing.T, name string, schema map[string]interface{}, sample interface{}) {
+	t.Helper()
+	schemaProps := schemaProperties(schema)
+	required := schemaRequired(schema)
+	reqSet := make(map[string]bool, len(required))
+	for _, r := range required {
+		reqSet[r] = true
+	}
+	structFields := structFieldTypes(t, sample)
+
+	for propName, prop := range schemaProps {
+		if _, ok := structFields[propName]; !ok {
+			t.Errorf("%s: schema property %q has no matching struct field", name, propName)
+			continue
+		}
+		if !reqSet[propName] {
+			t.Errorf("%s: schema property %q not in required", name, propName)
+		}
+		wantType := schemaPropertyType(prop)
+		gotType := structFields[propName]
+		if wantType == "" || gotType == "" {
+			continue
+		}
+		if wantType != gotType {
+			t.Errorf("%s.%s: schema type %q, struct decodes as %q", name, propName, wantType, gotType)
+		}
+	}
+	for fieldName := range structFields {
+		if _, ok := schemaProps[fieldName]; !ok {
+			t.Errorf("%s: struct field %q has no matching schema property", name, fieldName)
+		}
+	}
+}
+
+func TestSchemaStructParity_AgentReflection(t *testing.T) {
+	schema := agentReflectionSchemaKey.Map()
+	assertSchemaStructParity(t, "agent_reflection", schema, domain.ReflectionOutput{})
+	props := schemaProperties(schema)
+	assertSchemaStructParity(t, "agent_reflection.skills[]", arrayItemSchema(props["skills"]), domain.ReflectionSkillChange{})
+	assertSchemaStructParity(t, "agent_reflection.rules[]", arrayItemSchema(props["rules"]), domain.ReflectionRuleChange{})
+	assertSchemaStructParity(t, "agent_reflection.memories[]", arrayItemSchema(props["memories"]), domain.ReflectionMemoryChange{})
+	assertSchemaStructParity(t, "agent_reflection.reverts[]", arrayItemSchema(props["reverts"]), domain.ReflectionRevert{})
+}
+
+func TestSchemaStructParity_GoldenGateVerdict(t *testing.T) {
+	assertSchemaStructParity(t, "golden_gate_verdict", goldenGateVerdictSchemaKey.Map(), gateVerdict{})
+}
+
+func TestSchemaStructParity_MemoryPromotion(t *testing.T) {
+	schema := memoryPromotionSchemaKey.Map()
+	assertSchemaStructParity(t, "memory_promotion", schema, promotionOutput{})
+	props := schemaProperties(schema)
+	assertSchemaStructParity(t, "memory_promotion.promotions[]", arrayItemSchema(props["promotions"]), promotionItem{})
+}
+
+func TestSchemaStructParity_MemoryOrSkill(t *testing.T) {
+	assertSchemaStructParity(t, "memory_or_skill", memoryOrSkillSchemaKey.Map(), saveClassification{})
 }

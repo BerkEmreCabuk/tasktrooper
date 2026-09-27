@@ -21,7 +21,7 @@ system/
   prompts/<area>/<name>.md   orchestrator/planner/board/etc. system prompts
   guards/<code>.md           guard rejection wording, keyed by the guard's code
   tools/<name>.md            tool descriptions shown to an LLM
-  schemas/<name>.json         JSON schemas referenced from a prompt's front matter
+  schemas/<name>.json         provider ResponseFormat JSON Schemas (prompt.DefineSchema), or referenced from a prompt's front matter
   partials/<name>.md          fragments included from other files with `partial`
 ```
 
@@ -135,3 +135,14 @@ array keyword reaching its item schema.)
 A `partials/*.md` file is loaded and parsed like any other template but is
 never required to have a corresponding `prompt.Define[T]` key in Go — it
 exists only to be pulled in with `partial "name" .` from other templates.
+
+## Schemas
+
+A `schemas/<name>.json` file is plain JSON — no front matter, not a
+template — parsed once at load time. Go code reaches it with
+`prompt.DefineSchema("<name>")`, which returns a `SchemaKey` whose `.Name()`
+and `.Map()` go straight into `domain.JSONSchemaResponseFormat(name, schema)`
+in place of a hand-written schema-builder function. Like `Define[T]`, a
+`DefineSchema` call is checked by the completeness test in
+`internal/platform/runtime`: every `schemas/*.json` file must have a matching
+`DefineSchema` call, and vice versa.

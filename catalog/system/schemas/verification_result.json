@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "passed": { "type": "boolean" },
+    "issues": { "type": "array", "items": { "type": "string" } },
+    "summary": { "type": "string" }
+  },
+  "required": ["passed", "issues", "summary"]
+}

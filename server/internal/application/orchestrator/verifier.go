@@ -57,7 +57,7 @@ func (v *Verifier) Evaluate(ctx context.Context, intake domain.GoalIntake, userM
 			},
 			Model:          model,
 			ProviderType:   providerType,
-			ResponseFormat: domain.JSONSchemaResponseFormat("verification_result", verifierOutputSchema()),
+			ResponseFormat: domain.JSONSchemaResponseFormat(verifierOutputSchemaKey.Name(), verifierOutputSchemaKey.Map()),
 		})
 		if err != nil {
 			lastErr = err
@@ -88,14 +88,19 @@ func buildVerifierSystemPrompt() string {
 	return prompt.Text(verifierSystemKey)
 }
 
+// verifierWireOutput is the wire shape verification_result.json's
+// ResponseFormat constrains a provider to; parity between the two is
+// checked by TestSchemaStructParity in schemas_test.go.
+type verifierWireOutput struct {
+	Passed  bool     `json:"passed"`
+	Issues  []string `json:"issues"`
+	Summary string   `json:"summary"`
+}
+
 func parseVerificationResult(content string) (domain.VerificationResult, error) {
 	trimmed := stripJSONWrapper(content)
 
-	var raw struct {
-		Passed  bool     `json:"passed"`
-		Issues  []string `json:"issues"`
-		Summary string   `json:"summary"`
-	}
+	var raw verifierWireOutput
 	if err := parseLLMJSON(trimmed, &raw); err != nil {
 		return domain.VerificationResult{}, fmt.Errorf("invalid verification json: %w", err)
 	}

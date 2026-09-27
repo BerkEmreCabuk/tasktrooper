@@ -180,7 +180,7 @@ func (s *Service) judgeGoldenGate(ctx context.Context, agentRec domain.Agent, be
 		},
 		ProviderType:   provider,
 		Model:          model,
-		ResponseFormat: domain.JSONSchemaResponseFormat("golden_gate_verdict", gateVerdictSchema()),
+		ResponseFormat: domain.JSONSchemaResponseFormat(goldenGateVerdictSchemaKey.Name(), goldenGateVerdictSchemaKey.Map()),
 	})
 	if err != nil {
 		// An unservable judge will never run, so "kept on non-regression" would become the standing verdict on every future change set — revert instead, the same treatment the suite gets: no grader, no keep.

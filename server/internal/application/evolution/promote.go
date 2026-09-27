@@ -59,7 +59,7 @@ func (s *Service) PlanSharedMemoryPromotion(ctx context.Context) (domain.MemoryP
 		teamPromotionSystemPrompt,
 		teamPromotionUserMessage(memories, agents),
 		model, provider,
-		"memory_promotion", promotionOutputSchema(), &output,
+		memoryPromotionSchemaKey.Name(), memoryPromotionSchemaKey.Map(), &output,
 	); err != nil {
 		return plan, fmt.Errorf("memory promotion llm call failed: %w", err)
 	}
@@ -239,7 +239,7 @@ func (s *Service) MaybePromoteMemory(ctx context.Context, agentID uuid.UUID, rep
 		saveClassifierSystemPrompt,
 		fmt.Sprintf("Scope: %s\nCategory: %s\nContent:\n%s", scopeNote, category, content),
 		model, provider,
-		"memory_or_skill", saveClassificationSchema(), &out,
+		memoryOrSkillSchemaKey.Name(), memoryOrSkillSchemaKey.Map(), &out,
 	); err != nil {
 		return false, "", err
 	}

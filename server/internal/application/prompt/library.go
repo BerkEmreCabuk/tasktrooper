@@ -7,6 +7,7 @@
 package prompt
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"path"
@@ -25,6 +26,7 @@ const (
 	kindGuard   entryKind = "guard"
 	kindTool    entryKind = "tool"
 	kindPartial entryKind = "partial"
+	kindSchema  entryKind = "schema"
 )
 
 type entry struct {
@@ -43,14 +45,26 @@ type entry struct {
 // LoadFS returns.
 type Library struct {
 	entries map[string]*entry
+	schemas map[string]*schemaEntry
 }
 
-// LoadFS parses every prompts/, guards/, tools/ and partials/ file under
-// fsys. README.md, schemas/** and dotfiles (e.g. a partials/.gitkeep
-// placeholder) are not templates and are skipped. Every error names the
-// file that caused it.
+// schemaEntry is one catalog/system/schemas/<name>.json file: a plain JSON
+// Schema object (no front matter, no template — see catalog/system/README.md),
+// used to build a domain.ResponseFormat for provider-constrained structured
+// output. raw is kept alongside parsed so a test can compare exact bytes
+// when it wants to; production code (Schema) only ever needs parsed.
+type schemaEntry struct {
+	key    string
+	raw    json.RawMessage
+	parsed map[string]interface{}
+}
+
+// LoadFS parses every prompts/, guards/, tools/, partials/ and schemas/ file
+// under fsys. README.md and dotfiles (e.g. a partials/.gitkeep placeholder)
+// are not templates and are skipped. Every error names the file that caused
+// it.
 func LoadFS(fsys fs.FS) (*Library, error) {
-	lib := &Library{entries: map[string]*entry{}}
+	lib := &Library{entries: map[string]*entry{}, schemas: map[string]*schemaEntry{}}
 	err := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -59,7 +73,20 @@ func LoadFS(fsys fs.FS) (*Library, error) {
 			return nil
 		}
 		base := path.Base(p)
-		if strings.HasPrefix(base, ".") || p == "README.md" || strings.HasPrefix(p, "schemas/") {
+		if strings.HasPrefix(base, ".") || p == "README.md" {
+			return nil
+		}
+		if strings.HasPrefix(p, "schemas/") {
+			if !strings.HasSuffix(p, ".json") {
+				return nil
+			}
+			raw, readErr := fs.ReadFile(fsys, p)
+			if readErr != nil {
+				return fmt.Errorf("prompt: read %s: %w", p, readErr)
+			}
+			if loadErr := lib.loadSchema(p, raw); loadErr != nil {
+				return fmt.Errorf("prompt: %s: %w", p, loadErr)
+			}
 			return nil
 		}
 		if !strings.HasSuffix(p, ".md") {
@@ -78,6 +105,47 @@ func LoadFS(fsys fs.FS) (*Library, error) {
 		return nil, err
 	}
 	return lib, nil
+}
+
+// deriveSchemaKey maps schemas/<name>.json to its lookup key, joining nested
+// path segments with "." like deriveKey does for prompts/ — flat today
+// (every schema lives directly under schemas/) but nesting is free if a
+// future schema wants a subdirectory.
+func deriveSchemaKey(relPath string) string {
+	rest := strings.TrimSuffix(strings.TrimPrefix(relPath, "schemas/"), ".json")
+	return strings.ReplaceAll(rest, "/", ".")
+}
+
+func (l *Library) loadSchema(relPath string, raw []byte) error {
+	var parsed map[string]interface{}
+	if err := json.Unmarshal(raw, &parsed); err != nil {
+		return fmt.Errorf("parse json: %w", err)
+	}
+	key := deriveSchemaKey(relPath)
+	l.schemas[key] = &schemaEntry{key: key, raw: json.RawMessage(raw), parsed: parsed}
+	return nil
+}
+
+// Schema returns the parsed JSON Schema object at catalog/system/schemas/<name>.json,
+// ready to hand to domain.JSONSchemaResponseFormat. Callers must not mutate
+// the returned map — it is the same one every caller gets, not a copy.
+func (l *Library) Schema(name string) (map[string]interface{}, error) {
+	e, ok := l.schemas[name]
+	if !ok {
+		return nil, fmt.Errorf("prompt: unknown schema %q", name)
+	}
+	return e.parsed, nil
+}
+
+// RawSchema returns the exact bytes of catalog/system/schemas/<name>.json —
+// for a parity test that wants byte-for-byte comparison rather than the
+// parsed map.
+func (l *Library) RawSchema(name string) (json.RawMessage, error) {
+	e, ok := l.schemas[name]
+	if !ok {
+		return nil, fmt.Errorf("prompt: unknown schema %q", name)
+	}
+	return e.raw, nil
 }
 
 type frontMatter struct {
@@ -217,9 +285,12 @@ type KeyInfo struct {
 // files with no corresponding Define — partials are intentionally not
 // required to have one, so callers filter by Kind.
 func (l *Library) Keys() []KeyInfo {
-	out := make([]KeyInfo, 0, len(l.entries))
+	out := make([]KeyInfo, 0, len(l.entries)+len(l.schemas))
 	for _, e := range l.entries {
 		out = append(out, KeyInfo{Name: e.key, Kind: string(e.kind)})
+	}
+	for _, e := range l.schemas {
+		out = append(out, KeyInfo{Name: e.key, Kind: string(kindSchema)})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
@@ -421,6 +492,52 @@ func (k Key[T]) Render(in T) string {
 // package scope to declare one.
 func Text(k Key[struct{}]) string {
 	return k.Render(struct{}{})
+}
+
+// SchemaKey is a typed handle to a catalog/system/schemas/<name>.json file,
+// used to build a domain.ResponseFormat for provider-constrained structured
+// output in place of a Go schema-builder function.
+type SchemaKey struct{ name string }
+
+// DefineSchema registers name (used by the completeness test in
+// internal/platform/runtime, and by nothing else at runtime) and returns a
+// typed handle. DefineSchema panics if name is already registered — shared
+// with Define's registry, so a schema and a prompt/guard/tool can never
+// collide on the same name either.
+func DefineSchema(name string) SchemaKey {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if _, exists := registry[name]; exists {
+		panic(fmt.Sprintf("prompt: key %q already defined", name))
+	}
+	registry[name] = DefinedKey{
+		Name: name,
+		RenderWith: func(lib *Library) (string, error) {
+			if _, err := lib.Schema(name); err != nil {
+				return "", err
+			}
+			return name, nil
+		},
+	}
+	return SchemaKey{name: name}
+}
+
+// Name returns the catalog key this handle resolves — also the identifier a
+// provider sees, so most callers hand both Name() and Map() straight to
+// domain.JSONSchemaResponseFormat.
+func (k SchemaKey) Name() string { return k.name }
+
+// Map resolves k against the process default library (Default(), or
+// whatever SetDefault last installed), panicking if the schema file is
+// missing or invalid — a missing or broken schema is a build defect, caught
+// by the completeness test in internal/platform/runtime, not something
+// calling code should have to handle.
+func (k SchemaKey) Map() map[string]interface{} {
+	m, err := Default().Schema(k.name)
+	if err != nil {
+		panic(err.Error())
+	}
+	return m
 }
 
 // DefinedKeys returns every key registered with Define, across every
