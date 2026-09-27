@@ -33,6 +33,7 @@ type entry struct {
 	version string
 	inputs  []string
 	schema  string
+	params  map[string]string
 	body    string
 	tmpl    *template.Template
 }
@@ -84,6 +85,10 @@ type frontMatter struct {
 	Version string   `yaml:"version"`
 	Inputs  []string `yaml:"inputs"`
 	Schema  string   `yaml:"schema"`
+	// Params is tools/ only: JSON path (see catalog/system/README.md, "Tool
+	// parameter paths") -> description text, filled into the tool's schema by
+	// application/registry.Register.
+	Params map[string]string `yaml:"params"`
 }
 
 func (l *Library) load(relPath, raw string) error {
@@ -102,6 +107,9 @@ func (l *Library) load(relPath, raw string) error {
 	if meta.Key != wantKey {
 		return fmt.Errorf("front matter key %q does not match path-derived key %q", meta.Key, wantKey)
 	}
+	if len(meta.Params) > 0 && kind != kindTool {
+		return fmt.Errorf("params is only valid on tools/ files")
+	}
 
 	body = stripSingleTrailingNewline(body)
 	tmpl, err := template.New(wantKey).Option("missingkey=error").Funcs(l.funcMap()).Parse(body)
@@ -114,6 +122,7 @@ func (l *Library) load(relPath, raw string) error {
 		version: meta.Version,
 		inputs:  meta.Inputs,
 		schema:  meta.Schema,
+		params:  meta.Params,
 		body:    body,
 		tmpl:    tmpl,
 	}
@@ -214,6 +223,32 @@ func (l *Library) Keys() []KeyInfo {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// ToolDoc is one tools/<name>.md entry, resolved for application/registry to
+// fill onto a port.ToolExecutor's domain.ToolDefinition: Description is the
+// rendered body (the function description an LLM sees); Params is the front
+// matter's path -> description text map, applied onto the JSON schema at each
+// path (see catalog/system/README.md, "Tool parameter paths"). ok is false
+// when no tools/<name>.md exists yet — the registry leaves an unmigrated
+// tool's own Definition() untouched in that case.
+type ToolDoc struct {
+	Description string
+	Params      map[string]string
+}
+
+// ToolDoc renders "tool."+name against no data (a tool description is static
+// prose, never per-call data) and returns its params map alongside it.
+func (l *Library) ToolDoc(name string) (ToolDoc, bool) {
+	e, ok := l.entries["tool."+name]
+	if !ok {
+		return ToolDoc{}, false
+	}
+	desc, err := l.Render(e.key, struct{}{})
+	if err != nil {
+		panic(fmt.Sprintf("prompt: tool doc %q: %s", e.key, err.Error()))
+	}
+	return ToolDoc{Description: desc, Params: e.params}, true
 }
 
 func (l *Library) renderPartial(name string, data any) (string, error) {

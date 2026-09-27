@@ -24,7 +24,7 @@ func New() port.ToolRegistry {
 func (r *toolRegistry) Register(executor port.ToolExecutor) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.tools[executor.Name()] = executor
+	r.tools[executor.Name()] = withCatalogDocs(executor)
 	log.Debug().Str("tool", executor.Name()).Msg("tool registered")
 }
 

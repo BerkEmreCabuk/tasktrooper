@@ -91,6 +91,45 @@ reproduces the original exactly. A body with no trailing newline in the
 original must be saved with no trailing newline in the file either, or that
 one newline is not there to strip and the round trip already matched.
 
+## Tool docs
+
+A `tools/<name>.md` file's front matter also carries `params`: a map from a
+JSON path identifying one property of the tool's JSON schema to that
+property's description text. `application/registry.Register` fills both the
+function description (the body) and every `params` entry onto the
+`port.ToolExecutor`'s `domain.ToolDefinition` — the Go-side `Definition()`
+keeps the schema *structure* (`type`, `enum`, `required`,
+`additionalProperties`, nesting) but its prose comes from here, so
+`Definition()` itself returns empty descriptions once a tool is migrated. A
+tool with no `tools/<name>.md` yet is left exactly as `Definition()` returned
+it — the mechanism tolerates a partially migrated tool package.
+
+A path is a dot-separated walk from the schema's top-level `properties` map:
+the first segment is a property name, and it is the target when the path
+stops there —
+
+```yaml
+params:
+  task_id: Board task UUID or its board key.
+```
+
+targets `parameters.properties.task_id.description`. A further segment is a
+literal key of whatever schema node the previous segment reached — `items` to
+reach an array property's item schema, `properties` to reach an object
+schema's own properties map, then a property name inside it — repeated as
+deep as the schema nests:
+
+```yaml
+params:
+  items: One {id, reply} per comment addressed.
+  items.items.properties.id: Annotation id from list_document_annotations.
+  items.items.properties.reply: One line, what changed and where.
+```
+
+(`items` here is itself a property named "items", an array of `{id, reply}`
+objects — the first `items` is that property; the second is the JSON Schema
+array keyword reaching its item schema.)
+
 ## Partials
 
 A `partials/*.md` file is loaded and parsed like any other template but is

@@ -1,32 +1,43 @@
 package registry
 
 import (
-	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 )
+
+type unknownToolData struct {
+	Called     string
+	Available  []string
+	Suggestion string
+}
+
+var unknownToolKey = prompt.Define("registry.unknown_tool", unknownToolData{
+	Called:     "example_tool",
+	Available:  []string{"list_board_tasks"},
+	Suggestion: "list_board_tasks",
+})
 
 // unknownToolMessage answers a call to a tool that does not exist with the tools
 // that do. A model that invents a name (delete_lines, apply_patch) will
 // otherwise guess again from memory, and the second guess is often a real tool
 // with the wrong blast radius — delete_file for "remove these lines". Naming the
 // nearest real tool, and listing the rest, turns a dead turn into a corrected
-// one.
+// one. Wording lives in catalog/system/prompts/registry/unknown_tool.md.
 func unknownToolMessage(called string, available []string) string {
-	if len(available) == 0 {
-		return fmt.Sprintf("unknown tool: %s. No tools are available for this run.", called)
-	}
-
 	names := append([]string(nil), available...)
 	sort.Strings(names)
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "unknown tool: %s. It does not exist — do not call it again.", called)
-	if best := nearestToolName(called, names); best != "" {
-		fmt.Fprintf(&b, " Did you mean %s?", best)
+	suggestion := ""
+	if len(names) > 0 {
+		suggestion = nearestToolName(called, names)
 	}
-	fmt.Fprintf(&b, " Available tools: %s.", strings.Join(names, ", "))
-	return b.String()
+	return unknownToolKey.Render(unknownToolData{
+		Called:     called,
+		Available:  names,
+		Suggestion: suggestion,
+	})
 }
 
 // nearestToolName picks the closest available name, or nothing when the guess
