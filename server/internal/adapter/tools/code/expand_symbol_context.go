@@ -49,27 +49,22 @@ func (t *expandSymbolContextTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        expandSymbolContextToolName,
-			Description: "Expand symbol context using the dependency graph and retrieve related code chunks.",
+			Name: expandSymbolContextToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"symbol_name": map[string]interface{}{
-						"type":        "string",
-						"description": "Symbol to expand from",
+						"type": "string",
 					},
 					"file_path": map[string]interface{}{
-						"type":        "string",
-						"description": "File containing the symbol (disambiguates homonymous symbols)",
+						"type": "string",
 					},
 					"depth": map[string]interface{}{
-						"type":        "integer",
-						"description": "Call-graph expansion depth",
+						"type": "integer",
 					},
 					"max_chunks": map[string]interface{}{
-						"type":        "integer",
-						"description": "Maximum number of chunks to return",
+						"type": "integer",
 					},
 				},
 				"required": []string{"symbol_name"},

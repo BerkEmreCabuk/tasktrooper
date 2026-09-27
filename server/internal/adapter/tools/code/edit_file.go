@@ -53,30 +53,21 @@ func (t *editFileTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: editFileToolName,
-			Description: "Replace an exact string in a workspace file. This is how you change code — not `sed -i` through the shell. " +
-				"The result says how many occurrences changed and on which lines, so you never need to grep afterwards to check whether the edit landed. " +
-				"Use replace_all to change every occurrence in the file in one call.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"path": map[string]interface{}{
-						"type":        "string",
-						"description": "Path of the file to edit, relative to the workspace root",
+						"type": "string",
 					},
 					"old_string": map[string]interface{}{
 						"type": "string",
-						"description": "Exact text to replace, copied from read_file output without the line-number prefix. " +
-							"Must match a single place in the file unless replace_all is set — include surrounding lines to make it unique.",
 					},
 					"new_string": map[string]interface{}{
-						"type":        "string",
-						"description": "Replacement text. Pass an empty string to delete the matched text.",
+						"type": "string",
 					},
 					"replace_all": map[string]interface{}{
 						"type": "boolean",
-						"description": "Replace every occurrence in the file rather than requiring a unique match. " +
-							"This is how you remove or rename a symbol across a file in one call instead of one edit per occurrence.",
 					},
 				},
 				"required": []string{"path", "old_string", "new_string"},

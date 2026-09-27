@@ -60,28 +60,18 @@ func (t *readFileTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: readFileToolName,
-			Description: fmt.Sprintf(
-				"Read a workspace file with line numbers. Returns up to %d lines per call and tells you the file's total line count, "+
-					"so one call is normally the whole file. Prefer this over reading files through the shell — "+
-					"`cat`, `sed -n`, `head` and `tail` cost an entire agent turn per window and lose the line numbers you need to edit by.",
-				defaultReadFileLines),
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"path": map[string]interface{}{
-						"type":        "string",
-						"description": "Path of the file to read, relative to the workspace root",
+						"type": "string",
 					},
 					"offset": map[string]interface{}{
-						"type":        "integer",
-						"description": "First line to return, 1-based (default 1). Only needed for a file too long to return in one call.",
+						"type": "integer",
 					},
 					"limit": map[string]interface{}{
 						"type": "integer",
-						"description": fmt.Sprintf(
-							"How many lines to return (default %d). Do not lower it to page through a file in small windows — read it in one call.",
-							defaultReadFileLines),
 					},
 				},
 				"required": []string{"path"},

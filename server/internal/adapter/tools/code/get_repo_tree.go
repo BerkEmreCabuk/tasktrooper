@@ -36,19 +36,16 @@ func (t *getRepoTreeTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        getRepoTreeToolName,
-			Description: "Return a lazy-expandable directory tree for the workspace, optionally scoped to a path prefix.",
+			Name: getRepoTreeToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"prefix": map[string]interface{}{
-						"type":        "string",
-						"description": "Directory prefix to expand (empty for repository root)",
+						"type": "string",
 					},
 					"max_depth": map[string]interface{}{
-						"type":        "integer",
-						"description": "Maximum directory depth to render",
+						"type": "integer",
 					},
 				},
 			},

@@ -52,31 +52,25 @@ func (t *grepCodeTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        grepCodeToolName,
-			Description: "Search workspace files with ripgrep using a regex pattern. Case-insensitive by default. Respects .gitignore via exclusion globs.",
+			Name: grepCodeToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"pattern": map[string]interface{}{
-						"type":        "string",
-						"description": "Regular expression pattern to search for",
+						"type": "string",
 					},
 					"path": map[string]interface{}{
-						"type":        "string",
-						"description": "Relative path within the workspace to search (default: workspace root)",
+						"type": "string",
 					},
 					"glob": map[string]interface{}{
-						"type":        "string",
-						"description": "Optional glob filter for file paths (e.g. *.go)",
+						"type": "string",
 					},
 					"max_results": map[string]interface{}{
-						"type":        "integer",
-						"description": "Maximum number of matching lines to return (default: 100)",
+						"type": "integer",
 					},
 					"case_sensitive": map[string]interface{}{
-						"type":        "boolean",
-						"description": "Match case exactly, for both pattern and glob. Default false: the search ignores case, so \"coming soon\" also finds \"Coming Soon\" and glob \"*.TSX\" still matches .tsx files.",
+						"type": "boolean",
 					},
 				},
 				"required": []string{"pattern"},

@@ -50,19 +50,16 @@ func (t *getSymbolSkeletonTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        getSymbolSkeletonToolName,
-			Description: "Return symbol skeletons for a file or a specific symbol from the mapper and index store.",
+			Name: getSymbolSkeletonToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"file_path": map[string]interface{}{
-						"type":        "string",
-						"description": "Relative file path within the workspace",
+						"type": "string",
 					},
 					"symbol_name": map[string]interface{}{
-						"type":        "string",
-						"description": "Optional symbol name to filter results",
+						"type": "string",
 					},
 				},
 			},

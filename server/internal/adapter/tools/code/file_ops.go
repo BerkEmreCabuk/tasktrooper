@@ -59,21 +59,15 @@ func (t *deleteFileTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: deleteFileToolName,
-			Description: "Delete a file, or an empty directory, inside the workspace. Pass recursive:true to remove a directory and everything in it. " +
-				"Use this instead of `rm` through the shell. " +
-				"This removes the ENTIRE file. To remove a function, a block or a range of lines from a file that must survive, " +
-				"use edit_lines with mode:delete — there is no delete_lines tool.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"path": map[string]interface{}{
-						"type":        "string",
-						"description": "Path to delete, relative to the workspace root",
+						"type": "string",
 					},
 					"recursive": map[string]interface{}{
-						"type":        "boolean",
-						"description": "Required to delete a directory that is not empty. Deletes everything inside it.",
+						"type": "boolean",
 					},
 				},
 				"required": []string{"path"},
@@ -144,23 +138,18 @@ func (t *moveFileTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: moveFileToolName,
-			Description: "Move or rename a file or directory inside the workspace. Missing parent directories of the destination are created. " +
-				"Use this instead of `mv` through the shell. Renaming a symbol's file does not update the code that imports it — grep_code for the old path afterwards.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"from": map[string]interface{}{
-						"type":        "string",
-						"description": "Current path, relative to the workspace root",
+						"type": "string",
 					},
 					"to": map[string]interface{}{
-						"type":        "string",
-						"description": "New path, relative to the workspace root",
+						"type": "string",
 					},
 					"overwrite": map[string]interface{}{
-						"type":        "boolean",
-						"description": "Replace the destination if it already exists. Without it, an existing destination is an error.",
+						"type": "boolean",
 					},
 				},
 				"required": []string{"from", "to"},

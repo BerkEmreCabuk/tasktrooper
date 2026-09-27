@@ -51,19 +51,16 @@ func (t *codebaseSearchTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        codebaseSearchToolName,
-			Description: "Semantic search over the indexed workspace codebase. Returns matching code chunks ranked by relevance.",
+			Name: codebaseSearchToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"query": map[string]interface{}{
-						"type":        "string",
-						"description": "Natural language or keyword query describing the code to find",
+						"type": "string",
 					},
 					"top_k": map[string]interface{}{
-						"type":        "integer",
-						"description": "Maximum number of results to return",
+						"type": "integer",
 					},
 				},
 				"required": []string{"query"},
