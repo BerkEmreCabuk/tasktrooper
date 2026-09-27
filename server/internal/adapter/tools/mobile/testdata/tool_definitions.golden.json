@@ -1,0 +1,281 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "mobile_launch_app",
+      "description": "Install (if needed) and open this repository's Android build on the shared test device, and take the device lease. Call this before any other mobile_* tool. The package and artifact come from the repository's deploy target — you cannot open an arbitrary app.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "env": {
+            "description": "Which environment's build to test (default: stage)",
+            "enum": [
+              "local",
+              "stage",
+              "preprod",
+              "prod"
+            ],
+            "type": "string"
+          },
+          "repository_id": {
+            "description": "Repository UUID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mobile_press_button",
+      "description": "Press a hardware or system button on the connected Android device.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "button": {
+            "description": "Button to press",
+            "enum": [
+              "home",
+              "recent_apps",
+              "enter",
+              "delete",
+              "back",
+              "volume_up",
+              "volume_down",
+              "power",
+              "search",
+              "menu"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "button"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mobile_read_ui",
+      "description": "Read the view hierarchy of the current screen as XML — the mobile equivalent of reading the DOM. Use it to find the resource-id or label to address with the other mobile_* tools, and to assert what is on screen.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "filter": {
+            "description": "Keep only lines containing this substring (case-insensitive). Use it on a busy screen to find one element.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mobile_release_device",
+      "description": "Hand the shared test device back when you are done with it, so a task waiting on it can start immediately instead of waiting out the idle timeout. Call this as the last mobile step of your run.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mobile_rotate",
+      "description": "Rotate the connected Android device, to check a layout in the other orientation.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "orientation": {
+            "description": "Target orientation",
+            "enum": [
+              "portrait",
+              "landscape"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "orientation"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mobile_screenshot",
+      "description": "Take a screenshot of the connected Android device and attach it to the result so you can see it.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mobile_swipe",
+      "description": "Swipe on the connected Android device — scroll a list, dismiss a sheet, page a carousel.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "direction": {
+            "description": "Direction the finger moves. \"up\" scrolls the content down the page.",
+            "enum": [
+              "up",
+              "down",
+              "left",
+              "right"
+            ],
+            "type": "string"
+          },
+          "distance": {
+            "description": "Fraction of the screen to travel, 0.1–0.9 (default: 0.6)",
+            "type": "number"
+          }
+        },
+        "required": [
+          "direction"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mobile_tap",
+      "description": "Tap an element on the connected Android device. Address it by text, resource_id or content_desc; x/y is a fallback for canvases and maps.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "content_desc": {
+            "description": "Accessibility label (content-desc) of the element",
+            "type": "string"
+          },
+          "resource_id": {
+            "description": "Android resource-id, with or without the package prefix (e.g. \"login_button\")",
+            "type": "string"
+          },
+          "text": {
+            "description": "Visible label of the element, matched exactly (e.g. \"Sign in\")",
+            "type": "string"
+          },
+          "x": {
+            "description": "Absolute x pixel; only with y, and only when no selector can address the target",
+            "type": "integer"
+          },
+          "xpath": {
+            "description": "XPath over the hierarchy from mobile_read_ui. Last resort — prefer the other three, they survive layout changes",
+            "type": "string"
+          },
+          "y": {
+            "description": "Absolute y pixel; only with x",
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mobile_type_text",
+      "description": "Type text into a field on the connected Android device.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "clear": {
+            "description": "Clear the field first (default: true)",
+            "type": "boolean"
+          },
+          "content_desc": {
+            "description": "Accessibility label (content-desc) of the element",
+            "type": "string"
+          },
+          "resource_id": {
+            "description": "Android resource-id, with or without the package prefix (e.g. \"login_button\")",
+            "type": "string"
+          },
+          "text": {
+            "description": "Visible label of the element, matched exactly (e.g. \"Sign in\")",
+            "type": "string"
+          },
+          "value": {
+            "description": "Text to type into the field",
+            "type": "string"
+          },
+          "xpath": {
+            "description": "XPath over the hierarchy from mobile_read_ui. Last resort — prefer the other three, they survive layout changes",
+            "type": "string"
+          }
+        },
+        "required": [
+          "value"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mobile_unlock_device",
+      "description": "Wake and unlock the connected Android device. The lease already unlocks it, so this is only needed when the screen locked itself mid-run (a long read, a slow build) and the app is hidden behind the lock screen.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "mobile_wait_for",
+      "description": "Wait until an element appears on the connected Android device. Use it after a tap that starts a load, instead of taking a screenshot and hoping the screen has settled.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "content_desc": {
+            "description": "Accessibility label (content-desc) of the element",
+            "type": "string"
+          },
+          "resource_id": {
+            "description": "Android resource-id, with or without the package prefix (e.g. \"login_button\")",
+            "type": "string"
+          },
+          "text": {
+            "description": "Visible label of the element, matched exactly (e.g. \"Sign in\")",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "description": "How long to wait (default: 10, max: 60)",
+            "type": "integer"
+          },
+          "xpath": {
+            "description": "XPath over the hierarchy from mobile_read_ui. Last resort — prefer the other three, they survive layout changes",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  }
+]

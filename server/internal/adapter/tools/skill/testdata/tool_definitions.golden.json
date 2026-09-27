@@ -1,0 +1,60 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "create_skill",
+      "description": "Create a new skill for yourself when no skill in your index covers the work at hand. Write the skill as durable, reusable instructions (not a log of this task) so future runs can load and follow it. The skill joins your index immediately.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "description": "Optional grouping label, e.g. backend, qa, devops",
+            "type": "string"
+          },
+          "content": {
+            "description": "Full step-by-step instructions in markdown, written to be followed verbatim on a future task",
+            "type": "string"
+          },
+          "description": {
+            "description": "One line stating when to apply the skill — this is what the index shows",
+            "type": "string"
+          },
+          "name": {
+            "description": "Short kebab-case skill name, e.g. terraform-state-recovery",
+            "type": "string"
+          },
+          "tech_stack": {
+            "description": "Optional: the exact name of one of your tech stacks, when the skill only applies inside that technology. Omit for a general skill that holds whatever the code is written in.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "content"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "load_skill",
+      "description": "Load the full instructions of one of your skills by name or id. Call this right before applying a skill listed in your skill index, then follow the returned instructions.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "skill": {
+            "description": "Skill name (from your skill index) or skill UUID",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill"
+        ],
+        "type": "object"
+      }
+    }
+  }
+]
