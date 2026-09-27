@@ -1,0 +1,25 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "web_search",
+      "description": "Search the web and return a list of relevant results with titles, URLs, and snippets. Use this to find current information, news, documentation, or anything that requires up-to-date knowledge.",
+      "parameters": {
+        "properties": {
+          "max_results": {
+            "description": "Maximum number of results to return (default: 5, max: 10)",
+            "type": "integer"
+          },
+          "query": {
+            "description": "The search query",
+            "type": "string"
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "type": "object"
+      }
+    }
+  }
+]

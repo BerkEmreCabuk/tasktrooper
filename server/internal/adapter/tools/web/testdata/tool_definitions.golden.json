@@ -1,0 +1,46 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "download_file",
+      "description": "Download a binary asset (image, font, icon, archive) from a URL and save it to a path inside the workspace. Use this — not fetch_url, not curl/wget — whenever the repository needs a real asset file: fetch_url returns text and corrupts binaries. The URL must point at the asset itself (ends in .png/.svg/.woff2/…), not at a page that shows it.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "description": "Destination file path, relative to the workspace root (e.g. public/images/google-play-badge.png)",
+            "type": "string"
+          },
+          "url": {
+            "description": "Direct URL of the asset to download (must start with http:// or https://)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "path"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "fetch_url",
+      "description": "Fetch the content of a URL via HTTP GET. Returns the response body as text. For HTML pages, returns extracted readable text.",
+      "parameters": {
+        "properties": {
+          "url": {
+            "description": "The full URL to fetch (must start with http:// or https://)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "type": "object"
+      }
+    }
+  }
+]
