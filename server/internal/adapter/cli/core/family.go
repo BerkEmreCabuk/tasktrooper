@@ -11,6 +11,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -255,9 +256,18 @@ func FlattenHistory(history []domain.Message) string {
 			continue
 		}
 		if msg.Role == domain.RoleAssistant {
-			content = "Earlier assistant turn:\n" + content
+			content = earlierAssistantTurnLabel() + "\n" + content
 		}
 		parts = append(parts, content)
 	}
 	return strings.Join(parts, "\n\n")
+}
+
+// earlierAssistantTurnLabel renders cli.claude_earlier_turn_label by key
+// rather than through a local prompt.Define: that key is already Defined in
+// adapter/cli/claudecode (Define panics on a second registration of the same
+// name), and the label text is identical across every role-CLI family, so
+// this package borrows the rendered string instead of duplicating it.
+func earlierAssistantTurnLabel() string {
+	return prompt.MustRender("cli.claude_earlier_turn_label", struct{}{})
 }
