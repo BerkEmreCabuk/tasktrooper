@@ -281,9 +281,11 @@ func coverageOverallWarning(percent, threshold float64) string {
 func overallCoverageNote(repo domain.Repository, subProjectPath string, percent float64) string {
 	threshold := coverageThreshold(repo, subProjectPath)
 	if repo.EffectiveCoverageGate(subProjectPath).Enabled {
-		return fmt.Sprintf("[coverage] overall %.1f%% (threshold %.0f%%, reported — not enforced)", percent, threshold)
+		return coverageOverallNoteAdvisoryKey.Render(coverageOverallNoteAdvisoryData{
+			Percent: fmt.Sprintf("%.1f", percent), Threshold: fmt.Sprintf("%.0f", threshold),
+		})
 	}
-	return fmt.Sprintf("[coverage] overall %.1f%% (reported only — this repository sets no overall bar)", percent)
+	return coverageOverallNoteUnsetKey.Render(coverageOverallNoteUnsetData{Percent: fmt.Sprintf("%.1f", percent)})
 }
 
 func runMutation(ctx context.Context, dir string, repo domain.Repository, subProjectPath string) string {

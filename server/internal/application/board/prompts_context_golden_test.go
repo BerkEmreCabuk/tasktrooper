@@ -188,6 +188,15 @@ func TestGolden_CoverageOverallWarning(t *testing.T) {
 		coverageOverallWarning(89.9, 90))
 }
 
+func TestGolden_OverallCoverageNote(t *testing.T) {
+	assert.Equal(t, "[coverage] overall 48.5% (threshold 80%, reported — not enforced)",
+		overallCoverageNote(domain.Repository{RequireOverallCoverage: true, CoverageThreshold: 80}, "", 48.5))
+	assert.Equal(t, "[coverage] overall 90.0% (threshold 90%, reported — not enforced)",
+		overallCoverageNote(domain.Repository{RequireOverallCoverage: true, CoverageThreshold: 90}, "", 90))
+	assert.Equal(t, "[coverage] overall 48.5% (reported only — this repository sets no overall bar)",
+		overallCoverageNote(domain.Repository{}, "", 48.5))
+}
+
 func TestGolden_MutationNoteWarningAndGateMet(t *testing.T) {
 	assert.Equal(t,
 		"[mutation] 72.3% of mutants killed. Coverage says which lines ran; this says whether a test would have "+

@@ -53,6 +53,16 @@ type coverageOverallWarningData struct{ Marker, Percent, Threshold string }
 var coverageOverallWarningKey = prompt.Define("board_context.coverage_overall_warning",
 	coverageOverallWarningData{Marker: coverageWarningMarker, Percent: "48.5", Threshold: "80"})
 
+type coverageOverallNoteAdvisoryData struct{ Percent, Threshold string }
+
+var coverageOverallNoteAdvisoryKey = prompt.Define("board_context.coverage_overall_note_advisory",
+	coverageOverallNoteAdvisoryData{Percent: "48.5", Threshold: "80"})
+
+type coverageOverallNoteUnsetData struct{ Percent string }
+
+var coverageOverallNoteUnsetKey = prompt.Define("board_context.coverage_overall_note_unset",
+	coverageOverallNoteUnsetData{Percent: "48.5"})
+
 type mutationNoteData struct{ Percent string }
 
 var mutationNoteKey = prompt.Define("board_context.mutation_note", mutationNoteData{Percent: "72.3"})
