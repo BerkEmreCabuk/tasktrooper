@@ -130,7 +130,7 @@ func (s *Service) assertTrigger(ctx context.Context, task domain.BoardTask, req 
 	status, err := s.statusForTask(ctx, task)
 	if err != nil {
 
-		return fmt.Errorf("deploy watch: could not confirm the deploy failed, refusing to roll back: %w", err)
+		return fmt.Errorf("%s: %w", prompt.Text(rollbackStatusUnconfirmedKey), err)
 	}
 	if status.State == domain.DeployWatchFailure {
 		return nil
@@ -149,7 +149,7 @@ func (s *Service) assertOwnsLiveRelease(ctx context.Context, repositoryID uuid.U
 	}
 	if err != nil {
 
-		return fmt.Errorf("deploy watch: reading the live deployment for %s failed, refusing to roll back on unknown state: %w", env, err)
+		return fmt.Errorf("%s: %w", rollbackLiveDeploymentUnreadableKey.Render(rollbackEnvInput{Env: env}), err)
 	}
 	live := strings.TrimSpace(latest.HeadSHA)
 	if live == "" || strings.EqualFold(live, mergeSHA) {

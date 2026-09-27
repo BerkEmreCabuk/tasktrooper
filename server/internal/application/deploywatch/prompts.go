@@ -9,6 +9,12 @@ type errorInput struct{ Error string }
 
 var rollbackFailedKey = prompt.Define[errorInput]("briefs.deploywatch.rollback_failed", errorInput{Error: "context deadline exceeded"})
 
+var rollbackStatusUnconfirmedKey = prompt.Define[struct{}]("briefs.deploywatch.rollback_status_unconfirmed", struct{}{})
+
+type rollbackEnvInput struct{ Env string }
+
+var rollbackLiveDeploymentUnreadableKey = prompt.Define[rollbackEnvInput]("briefs.deploywatch.rollback_live_deployment_unreadable", rollbackEnvInput{Env: "prod"})
+
 type rollbackDispatchedInput struct {
 	Env           string
 	WorkflowFile  string
