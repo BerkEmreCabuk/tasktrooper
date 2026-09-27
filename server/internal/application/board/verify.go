@@ -16,6 +16,7 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/activity"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/toolchain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/childenv"
@@ -164,17 +165,17 @@ func (r *Runner) reportPlanVerificationFailure(ctx context.Context, job RunJob, 
 
 func planVerificationFailureComment(verdict domain.VerificationResult) string {
 	var sb strings.Builder
-	sb.WriteString("Otomatik doğrulama başarısız: bu run'ın sonucu hedefi karşılamıyor, bu yüzden görev code_review'a devredilmedi.\n")
+	sb.WriteString(prompt.Text(planVerificationIntroKey))
 	if summary := strings.TrimSpace(verdict.Summary); summary != "" {
 		sb.WriteString("\n" + summary + "\n")
 	}
 	if len(verdict.Issues) > 0 {
-		sb.WriteString("\nAçık bulgular:\n")
+		sb.WriteString("\n" + prompt.Text(planVerificationIssuesHeaderKey))
 		for i, issue := range verdict.Issues {
 			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, strings.TrimSpace(issue)))
 		}
 	}
-	sb.WriteString("\nBir sonraki run bu maddeleri kapatmalı; kapanmadan görev ilerlemez.")
+	sb.WriteString("\n" + prompt.Text(planVerificationFooterKey))
 	return sb.String()
 }
 
@@ -204,7 +205,7 @@ func (r *Runner) reportVerificationFailure(ctx context.Context, job RunJob, fail
 }
 
 func verificationFailureComment(failReport string) string {
-	return "Automated verification failed — build/vet errors:\n\n```\n" + failReport + "\n```"
+	return verificationFailureCommentKey.Render(verificationFailureCommentInput{Report: failReport})
 }
 
 // requiredVerifyCommands resolves the components this run's verification

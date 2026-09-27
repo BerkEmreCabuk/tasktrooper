@@ -801,7 +801,7 @@ func (p *PipelineRunner) postDeployNotes(ctx context.Context, job pipelineJob) {
 }
 
 func postDeployNotesComment(after string) string {
-	return "Deploy sonrası yapılacaklar:\n" + after
+	return postDeployNotesKey.Render(postDeployNotesInput{After: after})
 }
 
 func (p *PipelineRunner) reportDeployIncident(ctx context.Context, job pipelineJob, pipeline domain.TaskPipeline) {
@@ -872,8 +872,7 @@ func (p *PipelineRunner) reportDeploySkip(ctx context.Context, job pipelineJob, 
 }
 
 func deploySkipComment(note string) string {
-	return "Released without a verified deploy: " + note + ", so nothing was actually built or shipped by CI for this task. " +
-		"Configure a deploy workflow mapping for this repository, or deploy and verify manually."
+	return deploySkipCommentKey.Render(deploySkipCommentInput{Note: note})
 }
 
 func (p *PipelineRunner) finishNoChecks(ctx context.Context, job pipelineJob, pipeline domain.TaskPipeline, note string) error {
@@ -903,7 +902,7 @@ func (p *PipelineRunner) finishNoWorkspace(ctx context.Context, job pipelineJob,
 }
 
 func pipelineCouldNotStartComment(note string) string {
-	return "Pipeline could not start: " + note
+	return pipelineCouldNotStartKey.Render(pipelineCouldNotStartInput{Note: note})
 }
 
 func (p *PipelineRunner) persistNoWorkspace(ctx context.Context, pipeline domain.TaskPipeline, note string) error {

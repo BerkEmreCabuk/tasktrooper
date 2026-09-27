@@ -2,7 +2,6 @@ package board
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -145,8 +144,11 @@ func (r *Runner) humanCommentedAfter(ctx context.Context, job RunJob, after time
 // diffSkipSummary is the run summary (and system comment) posted when a gate
 // is skipped because the diff exactly matches what it already approved.
 func diffSkipSummary(column domain.TaskColumn, shortPatchID string, approvedAt time.Time) string {
-	return fmt.Sprintf("Skipped %s: the diff is identical (patch-id %s) to the one approved at %s.",
-		column, shortPatchID, approvedAt.UTC().Format("2006-01-02 15:04Z"))
+	return diffSkipSummaryKey.Render(diffSkipSummaryInput{
+		Column:     string(column),
+		ShortID:    shortPatchID,
+		ApprovedAt: approvedAt.UTC().Format("2006-01-02 15:04Z"),
+	})
 }
 
 func (r *Runner) applyUnchangedDiffSkip(ctx context.Context, job RunJob, run domain.TaskAgentRun, target domain.TaskColumn, patchID string, approvedAt time.Time) bool {

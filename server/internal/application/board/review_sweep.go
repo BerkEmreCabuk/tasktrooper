@@ -67,9 +67,7 @@ func (r *Runner) missingVerdicts(ctx context.Context, job RunJob, role domain.Cr
 // stuckColumnComment tells a person the review ran but never moved the
 // card, so nudging it forward (or back to need_revision) needs a human hand.
 func stuckColumnComment(column, exit domain.TaskColumn, note string) string {
-	return "Review tamamlandı ama kart hâlâ `" + string(column) + "` kolonunda: değerlendirme sonrası " +
-		"`" + string(exit) + "` veya `need_revision` geçişi yapılmadı." + note +
-		" Kolonu elle taşımak gerekiyor."
+	return stuckColumnCommentKey.Render(stuckColumnCommentInput{Column: string(column), Exit: string(exit), Note: note})
 }
 
 func (r *Runner) stuckVerdictNote(ctx context.Context, job RunJob) string {
@@ -85,8 +83,7 @@ func (r *Runner) stuckVerdictNote(ctx context.Context, job RunJob) string {
 	for _, c := range missing {
 		texts = append(texts, c.Text)
 	}
-	return fmt.Sprintf(" Geçiş kapısı %d kabul kriterini %s verdict'i olmadan geçirmiyor: %s.",
-		len(missing), role, strings.Join(texts, "; "))
+	return stuckVerdictNoteKey.Render(stuckVerdictNoteInput{Count: len(missing), Role: string(role), Texts: strings.Join(texts, "; ")})
 }
 
 func (r *Runner) finalizeReviewVerdict(

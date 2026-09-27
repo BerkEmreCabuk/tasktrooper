@@ -116,8 +116,7 @@ func revisionPRCommentsHeader(url string) string {
 // reviewNoPRReason is why a code_review run refuses to start: the branch
 // has no pull request, and review happens on the PR.
 func reviewNoPRReason(cause error) string {
-	return "Code review did not start: the task branch has no pull request. " +
-		"A review is done on the PR, so the branch must be pushed and a PR opened before code_review. Details: " + cause.Error()
+	return reviewNoPRReasonKey.Render(reviewNoPRReasonInput{Cause: cause.Error()})
 }
 
 func (r *Runner) failRunNoPR(ctx context.Context, job RunJob, run domain.TaskAgentRun, cause error) error {

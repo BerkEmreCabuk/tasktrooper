@@ -1685,7 +1685,7 @@ var ErrUngroundedAnalysis = errors.New("analiz run produced no repository explor
 // rejection comment — it was never attached as the analysis, but a person
 // reviewing the rejection may still want to see what was produced.
 func rejectedDraftNote(summary string) string {
-	return "\n\nRejected draft (not attached as the analysis):\n\n" + summary
+	return "\n\n" + prompt.Text(rejectedDraftLabelKey) + "\n\n" + summary
 }
 
 func isUngroundedQA(wf domain.Workflow, task domain.BoardTask, resp domain.AgentResponse, usage *registry.ToolUsage) bool {
@@ -1721,7 +1721,7 @@ func (r *Runner) uiRepo(ctx context.Context, repositoryID uuid.UUID) bool {
 // rejectedRunReportReplanNote appends a rejected QA run's own report to the
 // rejection comment: told to execute it, not to re-plan around it.
 func rejectedRunReportReplanNote(summary string) string {
-	return "\n\nWhat the rejected run reported (execute this, do not re-plan it):\n\n" + summary
+	return "\n\n" + prompt.Text(rejectedRunReportReplanKey) + "\n\n" + summary
 }
 
 func (r *Runner) failRunUngroundedQA(ctx context.Context, job RunJob, run domain.TaskAgentRun, resp domain.AgentResponse, reason string) error {
@@ -1838,7 +1838,7 @@ func (r *Runner) taskTestCases(ctx context.Context, job RunJob) []domain.TaskTes
 // rejectedRunReportReapproveNote appends a rejected pm_uat run's own report
 // to the rejection comment: told to execute it, not to re-approve around it.
 func rejectedRunReportReapproveNote(summary string) string {
-	return "\n\nWhat the rejected run reported (execute this, do not re-approve it):\n\n" + summary
+	return "\n\n" + prompt.Text(rejectedRunReportReapproveKey) + "\n\n" + summary
 }
 
 func (r *Runner) failRunUngroundedPMUAT(ctx context.Context, job RunJob, run domain.TaskAgentRun, resp domain.AgentResponse, reason string) error {

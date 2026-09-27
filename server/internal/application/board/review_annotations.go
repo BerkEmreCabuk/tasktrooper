@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -122,7 +123,7 @@ func reviewEntry(n int, a domain.TaskDocumentAnnotation, title string) string {
 		fmt.Fprintf(&sb, " on %q", title)
 	}
 	sb.WriteString("\n")
-	fmt.Fprintf(&sb, "Passage: \"%s\"\n", quote)
-	fmt.Fprintf(&sb, "Comment: %s\n", strings.TrimSpace(a.Body))
+	fmt.Fprintf(&sb, "%s: \"%s\"\n", prompt.Text(reviewPassageLabelKey), quote)
+	fmt.Fprintf(&sb, "%s: %s\n", prompt.Text(reviewCommentLabelKey), strings.TrimSpace(a.Body))
 	return sb.String()
 }
