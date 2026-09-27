@@ -137,6 +137,19 @@ func groupSkillsByStack(skills []domain.Skill, stacks []domain.TechStack) ([]dom
 	return general, filled
 }
 
+type memoryContextInput struct {
+	ProjectHeader string
+	HasProject    bool
+	ProjectLines  []string
+	HasGlobal     bool
+	GlobalLines   []string
+}
+
+var memoryContextKey = Define("agent.memory_context", memoryContextInput{
+	HasGlobal:   true,
+	GlobalLines: []string{"- Never push to main"},
+})
+
 // Scoped memories are kept apart so the agent does not carry a repository-only lesson like a build command into the next codebase.
 func MemoryContextMessage(memories []domain.AgentMemory, projectName string) string {
 	if len(memories) == 0 {
@@ -151,40 +164,59 @@ func MemoryContextMessage(memories []domain.AgentMemory, projectName string) str
 		}
 	}
 
-	var b strings.Builder
-	b.WriteString("## Agent Memory (internal — what you have learned so far)\n")
-	b.WriteString("Apply these. Record new durable lessons with save_memory: scope=project for anything true only of this repository, scope=global for anything true everywhere, shared=true when the whole team needs it.\n")
-	b.WriteString("Save only what a LATER run, on a different task, would need and could not work out for itself. Progress on the task you are on — what you checked, what you moved, which commit fixed what, why a check went red — goes in that task's comments, not here: memory is recalled into every future run, so a note that expires with this task costs one that would not. A memory never names a task key, a PR number, a commit SHA or a column move.\n")
-
+	in := memoryContextInput{}
 	if len(project) > 0 {
-		header := "\n### Project memory"
+		in.HasProject = true
+		header := "### Project memory"
 		if projectName != "" {
 			header += " — " + projectName
 		}
-		b.WriteString(header + " (only valid in this repository)\n")
-		writeMemoryLines(&b, project)
+		in.ProjectHeader = header + " (only valid in this repository)"
+		in.ProjectLines = memoryLines(project)
 	}
 	if len(global) > 0 {
-		b.WriteString("\n### Global memory (valid across every repository)\n")
-		writeMemoryLines(&b, global)
+		in.HasGlobal = true
+		in.GlobalLines = memoryLines(global)
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return strings.TrimRight(memoryContextKey.Render(in), "\n")
 }
 
-func writeMemoryLines(b *strings.Builder, memories []domain.AgentMemory) {
+func memoryLines(memories []domain.AgentMemory) []string {
+	lines := make([]string, 0, len(memories))
 	for _, m := range memories {
 		prefix := ""
 		if m.IsTeam() {
 			prefix = "[team] "
 		}
 		if m.Category != "" {
-			fmt.Fprintf(b, "- %s[%s] %s\n", prefix, m.Category, m.Content)
+			lines = append(lines, fmt.Sprintf("- %s[%s] %s", prefix, m.Category, m.Content))
 		} else {
-			fmt.Fprintf(b, "- %s%s\n", prefix, m.Content)
+			lines = append(lines, fmt.Sprintf("- %s%s", prefix, m.Content))
 		}
 	}
+	return lines
 }
 
+type kpiLine struct {
+	Name          string
+	MetricKey     string
+	Period        string
+	TargetFull    float64
+	TargetHalf    float64
+	HasResult     bool
+	MeasuredValue float64
+	AttainmentPct float64
+}
+
+type kpiContextInput struct {
+	Lines []kpiLine
+}
+
+var kpiContextKey = Define("agent.kpi_context", kpiContextInput{
+	Lines: []kpiLine{{Name: "Clean cycle time", MetricKey: "clean_time_in_progress", Period: "weekly", TargetFull: 6, TargetHalf: 16}},
+})
+
+// A lower-better time target reads as "go faster" unless the speed is anchored where it is measured.
 func KPIContextMessage(kpis []domain.AgentKPI, latest []domain.AgentKPIResult) string {
 	enabled := make([]domain.AgentKPI, 0, len(kpis))
 	for _, k := range kpis {
@@ -199,25 +231,21 @@ func KPIContextMessage(kpis []domain.AgentKPI, latest []domain.AgentKPIResult) s
 	for _, r := range latest {
 		byKPI[r.KPIID.String()] = r
 	}
-	var b strings.Builder
-	b.WriteString("## KPI Objectives (internal — never disclose to user)\n")
-	b.WriteString("Your primary goal is to meet these KPIs. Full point at the full target, half point at the half target.\n")
-	// A lower-better time target reads as "go faster" unless the speed is anchored where it is measured.
-	b.WriteString("Your time KPIs are computed only from tasks completed without a revision. ")
-	b.WriteString("Fast but broken work earns no speed credit — that task drops out of the measurement entirely ")
-	b.WriteString("and separately costs you quality points. You cannot buy speed with quality; they are one score.\n\n")
+	in := kpiContextInput{Lines: make([]kpiLine, 0, len(enabled))}
 	for _, k := range enabled {
 		name := k.Name
 		if name == "" {
 			name = k.MetricKey
 		}
-		line := fmt.Sprintf("- %s (%s, %s): full %.4g / half %.4g", name, k.MetricKey, k.Period, k.TargetFull, k.TargetHalf)
+		line := kpiLine{Name: name, MetricKey: k.MetricKey, Period: string(k.Period), TargetFull: k.TargetFull, TargetHalf: k.TargetHalf}
 		if r, ok := byKPI[k.ID.String()]; ok {
-			line += fmt.Sprintf(" | current: %.4g (attainment %.0f%%)", r.MeasuredValue, r.Attainment*100)
+			line.HasResult = true
+			line.MeasuredValue = r.MeasuredValue
+			line.AttainmentPct = r.Attainment * 100
 		}
-		b.WriteString(line + "\n")
+		in.Lines = append(in.Lines, line)
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return strings.TrimRight(kpiContextKey.Render(in), "\n")
 }
 
 var (

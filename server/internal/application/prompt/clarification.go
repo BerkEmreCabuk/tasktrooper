@@ -185,10 +185,12 @@ func ClarificationAckMessage(lang string) string {
 	return ackKey.Render(ackInput{Lang: lang})
 }
 
+var fallbackMessageKey = Define[struct{}]("clarification.fallback_message", struct{}{})
+
 func BuildClarificationResponse(req domain.ClarificationRequest) domain.AgentResponse {
 	content := req.Context
 	if content == "" {
-		content = "I need a few details before I can continue."
+		content = Text(fallbackMessageKey)
 	}
 	reqCopy := req
 	return domain.AgentResponse{
