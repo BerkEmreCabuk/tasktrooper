@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -33,11 +34,9 @@ func (s *Service) MergeGate(ctx context.Context, repositoryID uuid.UUID, task do
 		// trigger nobody told the delivery profile about) — refuse rather
 		// than merge blind. OpenPending wakes this task once a human
 		// confirms the profile on the Deploy tab.
-		s.commentOnce(ctx, repositoryID, task.ID, "Waiting to merge: confirm the delivery profile on the Deploy tab first — "+
-			"until then nothing here knows whether merging this deploys it.")
-		return fmt.Errorf("%w: %s's delivery profile is not confirmed. Nothing was merged. "+
-			"Do not retry — you will be woken when a human confirms it: confirm the delivery profile on the Deploy tab first",
-			domain.ErrDeliveryUnconfirmed, name)
+		s.commentOnce(ctx, repositoryID, task.ID, prompt.Text(deliveryUnconfirmedCommentKey))
+		return fmt.Errorf("%w: %s", domain.ErrDeliveryUnconfirmed,
+			deliveryUnconfirmedKey.Render(releaseNameInput{Name: name}))
 	}
 	if profile.Mode != domain.DeliveryOnMerge {
 		return nil
@@ -50,12 +49,10 @@ func (s *Service) MergeGate(ctx context.Context, repositoryID uuid.UUID, task do
 		return nil
 	}
 	steps := strings.TrimSpace(*task.BeforeDeploy)
-	s.commentOnce(ctx, repositoryID, task.ID, "Waiting to merge: "+name+" deploys on merge, and this task has before-deploy steps "+
-		"a human must perform first. Do them, then press \"Confirm before-deploy steps\" on the task:\n\n"+steps)
-	return fmt.Errorf("%w: %s deploys on merge, and this task's before-deploy steps are not confirmed — "+
-		"a human must perform them and press \"Confirm before-deploy steps\" on the task before it can merge. "+
-		"Nothing was merged. Do not retry — you will be woken when a human confirms:\n\n%s",
-		domain.ErrBeforeDeployPending, name, steps)
+	s.commentOnce(ctx, repositoryID, task.ID,
+		beforeDeployPendingMergeCommentKey.Render(releaseNameStepsInput{Name: name, Steps: steps}))
+	return fmt.Errorf("%w: %s", domain.ErrBeforeDeployPending,
+		beforeDeployPendingMergeKey.Render(releaseNameStepsInput{Name: name, Steps: steps}))
 }
 
 // WakeTask wakes the release engineer on a task sitting in `done` — used by
@@ -103,8 +100,7 @@ func pendingBeforeDeployTasks(tasks []domain.ReleaseTaskRef) []domain.ReleaseTas
 
 func pendingBeforeDeployMessage(pending []domain.ReleaseTaskRef) string {
 	var sb strings.Builder
-	sb.WriteString("a human must perform these before-deploy steps and press \"Confirm before-deploy steps\" " +
-		"on each task before this release can deploy")
+	sb.WriteString(prompt.Text(beforeDeployPendingIntroKey))
 	for _, t := range pending {
 		fmt.Fprintf(&sb, "\n- %s: %s", taskLabel(t), strings.TrimSpace(t.BeforeDeploy))
 	}
@@ -116,8 +112,7 @@ func (s *Service) commentPendingBeforeDeploy(ctx context.Context, r domain.Relea
 		return
 	}
 	newest := r.Tasks[len(r.Tasks)-1]
-	content := "Deploy refused: " + pendingBeforeDeployMessage(pending) +
-		"\n\nNothing was deployed. Do not retry — you will be woken when a human confirms."
+	content := beforeDeployPendingDeployCommentKey.Render(releaseMessageInput{Message: pendingBeforeDeployMessage(pending)})
 	if _, err := s.tasks.AddComment(ctx, r.RepositoryID, newest.ID, domain.CreateTaskCommentRequest{
 		AuthorType: "system",
 		Content:    content,

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -19,31 +20,31 @@ func (s *Service) rollbackAllowed(ctx context.Context, r domain.Release) (bool, 
 		// A newer release already shipped over this one: undoing this one now
 		// would redeploy past it.
 		if last, err := s.store.LastReleased(ctx, r.RepositoryID, r.ComponentID, s.now()); err == nil && last.CreatedAt.After(r.CreatedAt) {
-			return false, fmt.Sprintf("a newer release (%s) has since shipped for this component", last.Version)
+			return false, rollbackNotAllowedReasonKey.Render(rollbackNotAllowedReasonInput{Case: "newer_shipped", Version: last.Version})
 		}
 	case domain.ReleaseReleased:
 		if r.FinishedAt == nil || s.now().Sub(*r.FinishedAt) > 24*time.Hour {
-			return false, "this release finished more than 24 hours ago"
+			return false, rollbackNotAllowedReasonKey.Render(rollbackNotAllowedReasonInput{Case: "too_old"})
 		}
 		last, err := s.store.LastReleased(ctx, r.RepositoryID, r.ComponentID, s.now())
 		if err != nil {
 			if errors.Is(err, domain.ErrReleaseNotFound) {
-				return false, "no released release was found for this component"
+				return false, rollbackNotAllowedReasonKey.Render(rollbackNotAllowedReasonInput{Case: "no_released"})
 			}
-			return false, "the component's newest released release could not be resolved: " + err.Error()
+			return false, rollbackNotAllowedReasonKey.Render(rollbackNotAllowedReasonInput{Case: "unresolved", Err: err.Error()})
 		}
 		if last.ID != r.ID {
-			return false, fmt.Sprintf("a newer release (%s) has since shipped for this component", last.Version)
+			return false, rollbackNotAllowedReasonKey.Render(rollbackNotAllowedReasonInput{Case: "newer_shipped", Version: last.Version})
 		}
 	default:
-		return false, fmt.Sprintf("this release is %s", r.Status)
+		return false, rollbackNotAllowedReasonKey.Render(rollbackNotAllowedReasonInput{Case: "wrong_status", Status: string(r.Status)})
 	}
 	// A failed/awaiting_verdict release is neither Open() nor Terminal(), so
 	// OpenForMerge's take-over-an-open-release logic never supersedes it —
 	// a later merge can open its own release right beside it. Rolling this
 	// one back now would fight that newer release for the branch/tag.
 	if version, ok := s.newerOpenRelease(ctx, r); ok {
-		return false, fmt.Sprintf("the component has a newer open release (%s) — resolve that one first", version)
+		return false, rollbackNotAllowedReasonKey.Render(rollbackNotAllowedReasonInput{Case: "newer_open", Version: version})
 	}
 	return true, ""
 }
@@ -83,17 +84,16 @@ func (s *Service) Rollback(ctx context.Context, releaseID uuid.UUID, actor domai
 		return domain.Release{}, err
 	}
 	if ok, why := s.rollbackAllowed(ctx, r); !ok {
-		return domain.Release{}, fmt.Errorf("%w: rollback_release only applies to a failed or awaiting-verdict release, or one released within the last 24h that is still its component's newest (%s)",
-			domain.ErrReleaseWrongStatus, why)
+		return domain.Release{}, fmt.Errorf("%w: %s", domain.ErrReleaseWrongStatus,
+			rollbackNotAllowedKey.Render(rollbackNotAllowedInput{Why: why}))
 	}
 	if !reason.Valid() {
-		return domain.Release{}, fmt.Errorf("invalid rollback reason %q — must be deploy_failed, verify_failed, health_incident or manual", reason)
+		return domain.Release{}, errors.New(rollbackInvalidReasonKey.Render(rollbackInvalidReasonInput{Reason: fmt.Sprintf("%q", reason)}))
 	}
 
 	if !r.Profile.AutoRollback && actor == domain.ReleaseActorAgent {
 		s.writeRollbackProposal(ctx, r, reason, note)
-		return domain.Release{}, fmt.Errorf("%w: the proposal was written as a comment on the newest task for a human to confirm",
-			domain.ErrRollbackNeedsHuman)
+		return domain.Release{}, fmt.Errorf("%w: %s", domain.ErrRollbackNeedsHuman, prompt.Text(rollbackNeedsHumanKey))
 	}
 
 	expect := r.Status
@@ -102,7 +102,7 @@ func (s *Service) Rollback(ctx context.Context, releaseID uuid.UUID, actor domai
 		return domain.Release{}, err
 	}
 	if s.reverter == nil {
-		return domain.Release{}, fmt.Errorf("no git reverter is configured on this deployment")
+		return domain.Release{}, errors.New(prompt.Text(rollbackNotConfiguredKey))
 	}
 
 	// A retry: the previous attempt already landed a revert (its sha
