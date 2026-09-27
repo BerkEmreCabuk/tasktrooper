@@ -267,18 +267,6 @@ func (s *Service) judgeRouting(agentRec domain.Agent) (string, domain.LLMProvide
 	return model, provider
 }
 
-func gateVerdictSchema() map[string]interface{} {
-	return map[string]interface{}{
-		"type":                 "object",
-		"additionalProperties": false,
-		"properties": map[string]interface{}{
-			"keep":   map[string]interface{}{"type": "boolean"},
-			"reason": map[string]interface{}{"type": "string"},
-		},
-		"required": []string{"keep", "reason"},
-	}
-}
-
 func parseGateVerdict(raw string) (gateVerdict, error) {
 	cleaned := strings.TrimSpace(raw)
 	cleaned = strings.ReplaceAll(cleaned, "```json", "")
