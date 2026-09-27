@@ -105,3 +105,9 @@ var releaseNextUnknownKey = prompt.Define("tool_results.board_release_next_unkno
 var deployReleaseNextKey = prompt.Define("tool_results.board_deploy_release_next", struct{}{})
 var finishReleaseDoneKey = prompt.Define("tool_results.board_finish_release_done", struct{}{})
 var rollbackReleaseNextKey = prompt.Define("tool_results.board_rollback_release_next", struct{}{})
+
+var criterionRuleCardMoveKey = prompt.Define("guard.board_criterion_rule_card_move", struct{}{})
+var criterionRuleCardWaitingKey = prompt.Define("guard.board_criterion_rule_card_waiting", struct{}{})
+var criterionRuleNextTasksKey = prompt.Define("guard.board_criterion_rule_next_tasks", struct{}{})
+var criterionRuleToolMechanicsKey = prompt.Define("guard.board_criterion_rule_tool_mechanics", struct{}{})
+var criterionRuleHandoffKey = prompt.Define("guard.board_criterion_rule_handoff", struct{}{})

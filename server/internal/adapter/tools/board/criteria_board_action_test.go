@@ -65,3 +65,18 @@ func TestCriteriaInputsSplitsAndPositions(t *testing.T) {
 		t.Error("dropped criterion carries no reason")
 	}
 }
+
+func TestBoardActionReasonsRenderTheirOriginalWording(t *testing.T) {
+	cases := map[string]string{
+		"Move the card to ready_for_qa":                           "moving the card between columns is board workflow, not something the deliverable does",
+		"The spec sits in analiz_review for approval":             "where the card waits and who approves it is board workflow, not an observable property of the deliverable",
+		"Implementation tasks are created for each unit":          "opening the next tasks happens after this one is approved — it cannot be a condition for finishing it",
+		"The plan is attached with add_task_document":             "naming the board tool that records the work describes the mechanics, not the result — state what the artefact must contain instead",
+		"The task is assigned to the system-architect for review": "who picks the work up next is board workflow, not something the deliverable does",
+	}
+	for text, want := range cases {
+		if got := boardActionReason(text); got != want {
+			t.Errorf("boardActionReason(%q) = %q, want %q", text, got, want)
+		}
+	}
+}

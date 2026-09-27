@@ -3,6 +3,8 @@ package board
 import (
 	"regexp"
 	"strings"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 )
 
 // An acceptance criterion states what the DELIVERABLE does once the work is
@@ -37,7 +39,7 @@ type droppedCriterion struct {
 
 type criterionRule struct {
 	pattern *regexp.Regexp
-	reason  string
+	reason  prompt.Key[struct{}]
 }
 
 // Column names are matched as words so "the done column" and "ready_for_qa"
@@ -48,32 +50,32 @@ var criterionRules = []criterionRule{
 	{
 		// "…is moved to ready_for_qa", "advance the card into done column"
 		pattern: regexp.MustCompile(`(?i)\b(?:move[sd]?|moving|transition(?:s|ed)?|advance[sd]?|promote[sd]?|place[sd]?|put)\b[^.;]{0,40}?\b(?:to|into)\b\s+(?:the\s+)?(?:` + columnAlternatives + `\b|[a-z_ ]{0,20}\bcolumn\b)`),
-		reason:  "moving the card between columns is board workflow, not something the deliverable does",
+		reason:  criterionRuleCardMoveKey,
 	},
 	{
 		// "…sits in analiz_review for approval", "left in the done column"
 		pattern: regexp.MustCompile(`(?i)\b(?:sits?|sitting|left|waits?|waiting|stays?|remains?|presented|submitted|handed)\b[^.;]{0,40}?\b(?:in|to|for)\b[^.;]{0,30}?(?:\b` + columnAlternatives + `\b|\bcolumn\b|\b(?:human\s+)?approval\b)`),
-		reason:  "where the card waits and who approves it is board workflow, not an observable property of the deliverable",
+		reason:  criterionRuleCardWaitingKey,
 	},
 	{
 		// "implementation tasks are created", "sub-tasks opened for each unit"
 		pattern: regexp.MustCompile(`(?i)\b(?:implementation|follow[- ]?up|child|sub[- ]?|new)\s*tasks?\b[^.;]{0,40}?\b(?:created|opened|raised|filed|split)\b`),
-		reason:  "opening the next tasks happens after this one is approved — it cannot be a condition for finishing it",
+		reason:  criterionRuleNextTasksKey,
 	},
 	{
 		// "create implementation tasks for each unit"
 		pattern: regexp.MustCompile(`(?i)\b(?:creates?|created|opens?|opened|raises?|files?)\b[^.;]{0,20}?\b(?:implementation|follow[- ]?up|child|sub[- ]?)\s*tasks?\b`),
-		reason:  "opening the next tasks happens after this one is approved — it cannot be a condition for finishing it",
+		reason:  criterionRuleNextTasksKey,
 	},
 	{
 		// "…attached with add_task_document", "recorded via add_task_comment"
 		pattern: regexp.MustCompile(`(?i)\b(?:with|via|using|through|by(?:\s+calling)?)\s+(?:the\s+)?(?:create_board_task|update_board_task|move_board_task|claim_board_task|delete_board_task|add_task_comment|add_task_document|update_task_document|attach_task_file|set_criterion_completed|review_criterion|list_acceptance_criteria|trigger_release|commit_task_changes|comment_on_pull_request)\b`),
-		reason:  "naming the board tool that records the work describes the mechanics, not the result — state what the artefact must contain instead",
+		reason:  criterionRuleToolMechanicsKey,
 	},
 	{
 		// "the task is assigned to the system-architect"
 		pattern: regexp.MustCompile(`(?i)\b(?:assigned|reassigned|handed\s+off|dispatched)\b[^.;]{0,20}?\bto\b\s+(?:the\s+)?(?:system-architect|product-manager|qa-agent|architect|developer|implementer|agent|human|stakeholder)\b`),
-		reason:  "who picks the work up next is board workflow, not something the deliverable does",
+		reason:  criterionRuleHandoffKey,
 	},
 }
 
@@ -98,7 +100,7 @@ func boardActionReason(text string) string {
 	}
 	for _, rule := range criterionRules {
 		if rule.pattern.MatchString(trimmed) {
-			return rule.reason
+			return prompt.Text(rule.reason)
 		}
 	}
 	return ""
