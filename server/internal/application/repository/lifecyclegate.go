@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -74,21 +75,22 @@ func (s *Service) reviewChainGate(ctx context.Context, repo domain.Repository, t
 	if err != nil {
 
 		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("review-chain gate could not read the task's workflow")
-		return fmt.Errorf("%w: its workflow could not be read (%v) — retry the move", domain.ErrReviewChainIncomplete, err)
+		return fmt.Errorf("%w: %s", domain.ErrReviewChainIncomplete,
+			reviewChainWorkflowUnreadableKey.Render(reviewChainErrInput{Err: err.Error()}))
 	}
 	stages := wf.ReviewChain()
 	if len(stages) == 0 {
 		return nil
 	}
 	if s.spans == nil {
-		return fmt.Errorf("%w: the column-span ledger is not available, so its review history cannot be read. "+
-			"Fix the control plane's span store", domain.ErrReviewChainIncomplete)
+		return fmt.Errorf("%w: %s", domain.ErrReviewChainIncomplete, prompt.Text(reviewChainNoSpanStoreKey))
 	}
 	verdicts, err := s.spans.LatestVerdicts(ctx, task.ID)
 	if err != nil {
 
 		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("review-chain gate could not read span history")
-		return fmt.Errorf("%w: its stage history could not be read (%v) — retry the move", domain.ErrReviewChainIncomplete, err)
+		return fmt.Errorf("%w: %s", domain.ErrReviewChainIncomplete,
+			reviewChainHistoryUnreadableKey.Render(reviewChainErrInput{Err: err.Error()}))
 	}
 
 	var missing, rejected []string
@@ -107,12 +109,16 @@ func (s *Service) reviewChainGate(ctx context.Context, repo domain.Repository, t
 	}
 
 	if len(rejected) > 0 {
-		return fmt.Errorf("%w — cannot move %s to %s. Rejected at: %s",
-			domain.ErrReviewStageRejected, taskLabel(task), target, strings.Join(rejected, "; "))
+		return fmt.Errorf("%w — %s", domain.ErrReviewStageRejected,
+			reviewChainStageRejectedKey.Render(reviewChainStageRejectedInput{
+				Task: taskLabel(task), Target: string(target), Rejected: strings.Join(rejected, "; "),
+			}))
 	}
 	if len(missing) > 0 {
-		return fmt.Errorf("%w — cannot move %s to %s. Missing: %s",
-			domain.ErrReviewChainIncomplete, taskLabel(task), target, strings.Join(missing, "; "))
+		return fmt.Errorf("%w — %s", domain.ErrReviewChainIncomplete,
+			reviewChainMissingStagesKey.Render(reviewChainMissingStagesInput{
+				Task: taskLabel(task), Target: string(target), Missing: strings.Join(missing, "; "),
+			}))
 	}
 	return nil
 }

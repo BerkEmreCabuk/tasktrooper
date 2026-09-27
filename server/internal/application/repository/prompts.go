@@ -78,6 +78,41 @@ type stageNotConfiguredInput struct{ TaskType, Column string }
 
 var stageNotConfiguredKey = prompt.Define("guard.stage_not_configured", stageNotConfiguredInput{TaskType: "backend", Column: "in_progress"})
 
+type workOrderCycleInput struct{ Task, Blocker, Path string }
+
+var workOrderCycleKey = prompt.Define("guard.work_order_cycle", workOrderCycleInput{Task: "T-1", Blocker: "T-2", Path: "T-1 → T-2"})
+
+type deployOrderCycleInput struct{ Dependency, Task, Path string }
+
+var deployOrderCycleKey = prompt.Define("guard.deploy_order_cycle", deployOrderCycleInput{Dependency: "T-1", Task: "T-2", Path: "T-1 → T-2"})
+
+type testCaseDuplicateTitleInput struct{ Title string }
+
+var testCaseDuplicateTitleKey = prompt.Define("guard.test_case_duplicate_title", testCaseDuplicateTitleInput{Title: `"logs in"`})
+
+type testCaseCriterionNotOnTaskInput struct{ CriterionID string }
+
+var testCaseCriterionNotOnTaskKey = prompt.Define("guard.test_case_criterion_not_on_task", testCaseCriterionNotOnTaskInput{CriterionID: "11111111-1111-1111-1111-111111111111"})
+
+type reviewChainErrInput struct{ Err string }
+
+var reviewChainWorkflowUnreadableKey = prompt.Define("guard.review_chain_workflow_unreadable", reviewChainErrInput{Err: "no workflow configured"})
+var reviewChainHistoryUnreadableKey = prompt.Define("guard.review_chain_history_unreadable", reviewChainErrInput{Err: "db down"})
+
+var reviewChainNoSpanStoreKey = prompt.Define("guard.review_chain_no_span_store", struct{}{})
+
+type reviewChainStageRejectedInput struct{ Task, Target, Rejected string }
+
+var reviewChainStageRejectedKey = prompt.Define("guard.review_chain_stage_rejected", reviewChainStageRejectedInput{
+	Task: "T-1", Target: "done", Rejected: "QA (in_qa) — send back to need_revision",
+})
+
+type reviewChainMissingStagesInput struct{ Task, Target, Missing string }
+
+var reviewChainMissingStagesKey = prompt.Define("guard.review_chain_missing_stages", reviewChainMissingStagesInput{
+	Task: "T-1", Target: "done", Missing: "QA (in_qa) — needs a verdict",
+})
+
 type workflowSetupTaskBriefInput struct{ Kind string }
 
 var workflowSetupTaskBriefKey = prompt.Define("repository.workflow_setup_task_brief", workflowSetupTaskBriefInput{Kind: "backend"})

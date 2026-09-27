@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -125,7 +126,7 @@ func normalizeTestCases(items []domain.TaskTestCaseInput) ([]domain.TaskTestCase
 
 		key := strings.ToLower(normalized.Title)
 		if _, dup := seen[key]; dup {
-			return nil, fmt.Errorf("two test cases share the title %q; titles identify a case, so give them distinct ones", normalized.Title)
+			return nil, errors.New(testCaseDuplicateTitleKey.Render(testCaseDuplicateTitleInput{Title: fmt.Sprintf("%q", normalized.Title)}))
 		}
 		seen[key] = struct{}{}
 		if normalized.Position == 0 {
@@ -163,7 +164,7 @@ func (s *Service) validateCriterionLinks(ctx context.Context, taskID uuid.UUID, 
 			continue
 		}
 		if _, ok := own[*item.CriterionID]; !ok {
-			return fmt.Errorf("criterion %s is not on this task; leave criterion_id empty for a case no criterion states", *item.CriterionID)
+			return errors.New(testCaseCriterionNotOnTaskKey.Render(testCaseCriterionNotOnTaskInput{CriterionID: item.CriterionID.String()}))
 		}
 	}
 	return nil

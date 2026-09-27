@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -61,8 +62,9 @@ func (s *Service) guardWorkOrderCycle(ctx context.Context, taskID, blockerID uui
 	if len(path) == 0 {
 		return nil
 	}
-	return fmt.Errorf("work-order cycle refused: %s already has to be finished before %s (%s), so it cannot also wait for it",
-		s.taskLabelByID(ctx, taskID), s.taskLabelByID(ctx, blockerID), strings.Join(path, " → "))
+	return errors.New(workOrderCycleKey.Render(workOrderCycleInput{
+		Task: s.taskLabelByID(ctx, taskID), Blocker: s.taskLabelByID(ctx, blockerID), Path: strings.Join(path, " → "),
+	}))
 }
 
 func (s *Service) guardDeployOrderCycle(ctx context.Context, taskID, dependencyID uuid.UUID) error {
@@ -73,8 +75,9 @@ func (s *Service) guardDeployOrderCycle(ctx context.Context, taskID, dependencyI
 	if len(path) == 0 {
 		return nil
 	}
-	return fmt.Errorf("deploy-order cycle refused: %s already ships after %s (%s), so it cannot also ship before it",
-		s.taskLabelByID(ctx, dependencyID), s.taskLabelByID(ctx, taskID), strings.Join(path, " → "))
+	return errors.New(deployOrderCycleKey.Render(deployOrderCycleInput{
+		Dependency: s.taskLabelByID(ctx, dependencyID), Task: s.taskLabelByID(ctx, taskID), Path: strings.Join(path, " → "),
+	}))
 }
 
 func (s *Service) relationPath(ctx context.Context, from, to uuid.UUID, relType domain.TaskRelationType) ([]string, error) {
