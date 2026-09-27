@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/rs/zerolog/log"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 )
 
 // 90 not 100: every diff carries lines no test can reach, and demanding them teaches the agent to delete the branch.
@@ -337,28 +339,38 @@ func newCodeCoverageReport(ctx context.Context, dir string, hits lineHits) strin
 // its own.
 func renderNewCodeCoverage(res NewCodeCoverage) string {
 	if res.Total < newCodeMinLines {
-		return fmt.Sprintf("[new-code coverage] %d of %d changed lines covered — too few to read anything into.",
-			res.Covered, res.Total)
+		return newCodeCoverageTooFewKey.Render(newCodeCoverageTooFewData{Covered: res.Covered, Total: res.Total})
 	}
 	if res.Percent+0.005 >= NewCodeCoverageThreshold {
-		return fmt.Sprintf("[new-code coverage] %.1f%% (%d/%d changed lines, threshold %.0f%%)",
-			res.Percent, res.Covered, res.Total, NewCodeCoverageThreshold)
+		return newCodeCoverageOKKey.Render(newCodeCoverageOKData{
+			Percent:   fmt.Sprintf("%.1f", res.Percent),
+			Covered:   res.Covered,
+			Total:     res.Total,
+			Threshold: fmt.Sprintf("%.0f", NewCodeCoverageThreshold),
+		})
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, coverageWarningMarker+" new-code coverage %.1f%% (%d/%d changed lines) is below the %.0f%% this change should leave behind.\n",
-		res.Percent, res.Covered, res.Total, NewCodeCoverageThreshold)
-	sb.WriteString("This is the coverage of the lines YOUR diff added or changed, not the repository's overall figure — " +
-		"it is about your change alone, and no amount of pre-existing untested code affects it.\n")
+	sb.WriteString(newCodeCoverageWarningHeaderKey.Render(newCodeCoverageWarningHeaderData{
+		Marker:    coverageWarningMarker,
+		Percent:   fmt.Sprintf("%.1f", res.Percent),
+		Covered:   res.Covered,
+		Total:     res.Total,
+		Threshold: fmt.Sprintf("%.0f", NewCodeCoverageThreshold),
+	}))
+	sb.WriteString("\n")
+	sb.WriteString(prompt.Text(newCodeCoverageScopeNoteKey))
+	sb.WriteString("\n")
 	if len(res.Uncovered) > 0 {
-		sb.WriteString("Uncovered lines you wrote:\n")
+		sb.WriteString(prompt.Text(newCodeCoverageUncoveredLabelKey))
+		sb.WriteString("\n")
 		for _, u := range res.Uncovered {
 			sb.WriteString("  " + u + "\n")
 		}
 		if missing := res.Total - res.Covered - len(res.Uncovered); missing > 0 {
-			fmt.Fprintf(&sb, "  …and %d more.\n", missing)
+			sb.WriteString(newCodeCoverageMoreKey.Render(newCodeCoverageMoreData{Missing: missing}))
+			sb.WriteString("\n")
 		}
 	}
-	sb.WriteString("Tests that execute them — the error and edge-case branches, not more assertions on the happy path — " +
-		"are worth adding while the code is still fresh. This is a warning only: the task moves on either way.")
+	sb.WriteString(prompt.Text(newCodeCoverageClosingKey))
 	return strings.TrimSpace(sb.String())
 }

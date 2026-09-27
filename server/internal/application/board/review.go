@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/rs/zerolog/log"
 )
@@ -66,9 +67,7 @@ func (r *Runner) reviewPRContext(ctx context.Context, workspace string, taskID u
 // reviewPRContextMessage points the reviewer at the PR the diff below came
 // from and scopes what "review" means: this PR, not the whole repository.
 func reviewPRContextMessage(url string) string {
-	return "## Pull request under review: " + url + "\n" +
-		"The diff below is exactly what this PR changes. Review those changes — read the rest of the repository " +
-		"whenever you need it to judge them, but never review files the PR does not touch."
+	return reviewPRContextKey.Render(reviewPRContextData{URL: url})
 }
 
 func (r *Runner) revisionPRComments(ctx context.Context, job RunJob) string {
@@ -111,9 +110,7 @@ func (r *Runner) revisionPRComments(ctx context.Context, job RunJob) string {
 // revisionPRCommentsHeader frames the PR's own review thread as revision
 // feedback, not a separate conversation to be read and set aside.
 func revisionPRCommentsHeader(url string) string {
-	return "## Pull request review comments (" + url + ")\n" +
-		"These are the reviewer's notes on the PR itself — they are part of the revision feedback, not a separate topic. " +
-		"Fix what they point at in this run, and answer anything you disagree with using comment_on_pull_request.\n"
+	return reviewPRCommentsHeaderKey.Render(reviewPRCommentsHeaderData{URL: url}) + "\n"
 }
 
 func (r *Runner) failRunNoPR(ctx context.Context, job RunJob, run domain.TaskAgentRun, cause error) error {
@@ -148,10 +145,10 @@ func (r *Runner) failRunNoPR(ctx context.Context, job RunJob, run domain.TaskAge
 
 func reviewDiffMessage(wf domain.Workflow, column domain.TaskColumn, diff string) string {
 	limit := 8000
-	heading := "## Task branch diff (changes made for this task so far)"
+	heading := prompt.Text(reviewDiffHeadingBranchKey)
 	if isReviewColumn(wf, column) {
 		limit = reviewDiffLimit
-		heading = "## Pull request diff — the complete change you are reviewing (task branch vs its base)"
+		heading = prompt.Text(reviewDiffHeadingPRKey)
 	}
 	if len(diff) > limit {
 		diff = domain.TruncateHead(diff, limit) + "\n…(truncated)"

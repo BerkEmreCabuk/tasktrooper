@@ -271,13 +271,11 @@ func coverageReport(ctx context.Context, dir string, repo domain.Repository, sub
 // coverageOverallWarning is advisory-only: the caller never holds the task
 // on it, so it just says what is missing and why it does not matter here.
 func coverageOverallWarning(percent, threshold float64) string {
-	return fmt.Sprintf(
-		coverageWarningMarker+" overall %.1f%% is below the %.0f%% this repository asks for.\n"+
-			"What is missing is coverage of code this task did not touch, so treat it as a note for whoever "+
-			"reads this run: if untested paths sit next to your change — the branches that handle errors and "+
-			"edge cases — covering them is worth a few minutes. "+
-			"It does not hold the task: the hand-off proceeds either way.",
-		percent, threshold)
+	return coverageOverallWarningKey.Render(coverageOverallWarningData{
+		Marker:    coverageWarningMarker,
+		Percent:   fmt.Sprintf("%.1f", percent),
+		Threshold: fmt.Sprintf("%.0f", threshold),
+	})
 }
 
 func overallCoverageNote(repo domain.Repository, subProjectPath string, percent float64) string {
@@ -310,21 +308,19 @@ func runMutation(ctx context.Context, dir string, repo domain.Repository, subPro
 }
 
 func mutationGateMet(threshold float64) string {
-	return fmt.Sprintf(" (threshold %.0f%%, met)", threshold)
+	return mutationGateMetKey.Render(mutationGateMetData{Threshold: fmt.Sprintf("%.0f", threshold)})
 }
 
 // mutationNote always runs — reported score, not a verdict.
 func mutationNote(percent float64) string {
-	return fmt.Sprintf(
-		"[mutation] %.1f%% of mutants killed. Coverage says which lines ran; this says whether a test would have "+
-			"noticed them behaving differently. A low score with high coverage means assertions are missing, not lines.",
-		percent)
+	return mutationNoteKey.Render(mutationNoteData{Percent: fmt.Sprintf("%.1f", percent)})
 }
 
 // mutationWarning is advisory-only, same as coverageOverallWarning.
 func mutationWarning(percent, threshold float64) string {
-	return fmt.Sprintf(
-		"\n"+mutationWarningMarker+" %.1f%% is below the %.0f%% this repository asks for. "+
-			"Say so in your hand-off; it does not hold the task.",
-		percent, threshold)
+	return mutationWarningKey.Render(mutationWarningData{
+		Marker:    mutationWarningMarker,
+		Percent:   fmt.Sprintf("%.1f", percent),
+		Threshold: fmt.Sprintf("%.0f", threshold),
+	})
 }

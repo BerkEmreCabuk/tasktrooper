@@ -8,6 +8,7 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -15,13 +16,6 @@ import (
 const commitSubjectMaxChars = 72
 
 const commitMessageMaxTokens = 512
-
-const commitMessagePrompt = "You write git commit messages for an automated engineering agent.\n" +
-	"Reply with the commit message and nothing else: no code fences, no quotes, no commentary.\n" +
-	"ALWAYS write in English, even when the task and the summary are in another language — translate them.\n" +
-	"First line: Conventional Commits (`type(scope): summary`), imperative mood, lowercase after the colon, at most 72 characters.\n" +
-	"Then, only if it adds something the subject does not, a blank line and at most three short body lines saying what changed and why.\n" +
-	"Describe only what the input says was done. Never invent changes, files or reasons."
 
 type commitDetails struct {
 	TaskKey   string
@@ -66,7 +60,7 @@ func englishCommitBody(ctx context.Context, llm port.LLMClient, d commitDetails)
 		ProviderType: d.Writer.Provider,
 		Model:        d.Writer.Model,
 		Messages: []domain.Message{
-			{Role: domain.RoleSystem, Content: commitMessagePrompt},
+			{Role: domain.RoleSystem, Content: prompt.Text(commitMessageSystemKey)},
 			{Role: domain.RoleUser, Content: input},
 		},
 		MaxTokens: commitMessageMaxTokens,
@@ -89,11 +83,10 @@ func englishCommitBody(ctx context.Context, llm port.LLMClient, d commitDetails)
 // the task title, and — when the run left one — its own summary, already
 // trimmed and truncated by the caller.
 func commitMessageUserInput(title, summary string) string {
-	input := "Task title: " + title
 	if summary != "" {
-		input += "\n\nWhat the agent reports it did:\n" + truncateHead(summary, 2000)
+		summary = truncateHead(summary, 2000)
 	}
-	return input
+	return commitMessageUserInputKey.Render(commitMessageUserInputData{Title: title, Summary: summary})
 }
 
 func sanitizeCommitMessage(raw string) string {

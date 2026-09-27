@@ -9,6 +9,7 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/activity"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -96,25 +97,20 @@ func (r *Runner) sweepOpenCriteria(
 func criteriaSweepPrompt(open []domain.AcceptanceCriterion, round int) string {
 	var sb strings.Builder
 	if round == 1 {
-		sb.WriteString("Before this run is closed, settle its acceptance criteria. These are still open:\n")
+		sb.WriteString(prompt.Text(criteriaSweepOpenFirstKey))
 	} else {
-		sb.WriteString(fmt.Sprintf("These acceptance criteria are STILL open after round %d of this check:\n", round-1))
+		sb.WriteString(criteriaSweepOpenRepeatKey.Render(criteriaSweepOpenRepeatData{Round: round - 1}))
 	}
+	sb.WriteString("\n")
 	for _, c := range open {
 		sb.WriteString(fmt.Sprintf("- [%s] %s\n", c.ID, c.Text))
 	}
-	sb.WriteString("\nFor EACH id above, do exactly one of three things now:\n" +
-		"1. You implemented it in this run → call set_criterion_completed with that id.\n" +
-		"2. It is deliberately NOT being done (out of scope, superseded, impossible as written) → call cancel_criterion with that id and a concrete reason. " +
-		"That reason is stored on the criterion and posted as a task comment, so say it in a sentence a person can act on.\n" +
-		"3. You overlooked it, or ran out of time → DO THE WORK NOW, in this run, then tick it with set_criterion_completed.\n")
+	sb.WriteString(prompt.Text(criteriaSweepInstructionsKey))
+	sb.WriteString("\n")
 	if round == 1 {
-		sb.WriteString("Do not tick anything you did not implement. " +
-			"The hand-off to code_review is refused while any criterion is open, so a criterion you silently skip parks your finished work in this column.")
+		sb.WriteString(prompt.Text(criteriaSweepClosingFirstKey))
 	} else {
-		sb.WriteString("Answer 3 is the expected one at this point: you have already had a round to say the criterion was out of scope, " +
-			"and you did not. Implement what is missing and tick it, or cancel it with a reason — an unanswered criterion parks this task " +
-			"and a human has to come and find out why. Do not reply with a summary of what you would do; make the change.")
+		sb.WriteString(prompt.Text(criteriaSweepClosingRepeatKey))
 	}
 	return sb.String()
 }

@@ -6,6 +6,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -27,7 +28,7 @@ func TestGolden_CommitMessageSystemPrompt(t *testing.T) {
 			"First line: Conventional Commits (`type(scope): summary`), imperative mood, lowercase after the colon, at most 72 characters.\n"+
 			"Then, only if it adds something the subject does not, a blank line and at most three short body lines saying what changed and why.\n"+
 			"Describe only what the input says was done. Never invent changes, files or reasons.",
-		commitMessagePrompt)
+		prompt.Text(commitMessageSystemKey))
 }
 
 func TestGolden_CommitMessageUserInput(t *testing.T) {

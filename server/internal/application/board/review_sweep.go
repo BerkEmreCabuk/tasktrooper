@@ -9,6 +9,7 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/activity"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -154,35 +155,29 @@ func (r *Runner) finalizeReviewVerdict(
 // unruled — role is only read when missing is non-empty.
 func reviewVerdictSweepPrompt(column, exit domain.TaskColumn, role domain.CriterionReviewRole, missing []domain.AcceptanceCriterion) string {
 	var sb strings.Builder
-	sb.WriteString("Your review is finished but the task is still in `" + string(column) + "` — you did not record where it goes, " +
-		"so the board shows it as still under review and nobody picks it up.\n")
+	sb.WriteString(reviewVerdictSweepIntroKey.Render(reviewVerdictSweepIntroData{Column: string(column)}))
+	sb.WriteString("\n")
 
 	if len(missing) > 0 {
-		sb.WriteString("\nFirst, the acceptance criteria you have not ruled on. The forward move is REFUSED while any of these " +
-			"lacks your " + string(role) + " verdict — that refusal is what you hit if you already tried to move the task:\n")
+		sb.WriteString("\n")
+		sb.WriteString(reviewVerdictSweepMissingIntroKey.Render(reviewVerdictSweepMissingIntroData{Role: string(role)}))
+		sb.WriteString("\n")
 		for _, c := range missing {
 			sb.WriteString(fmt.Sprintf("- [%s] %s\n", c.ID, c.Text))
 		}
-		sb.WriteString("For EACH id above call review_criterion now, from what you executed in this run: approve it when your " +
-			"own run covered it, reject it with an expected-vs-actual note when it failed or you could not exercise it. " +
-			"Do not approve anything you did not observe.\n")
+		sb.WriteString(prompt.Text(reviewVerdictSweepMissingFooterKey))
+		sb.WriteString("\n")
 	}
 
-	sb.WriteString("\nThen leave the column, based on the verdict you just gave:\n" +
-		"1. Everything you required is satisfied → call move_board_task to `" + string(exit) + "`.\n" +
-		"2. Anything you flagged still needs work → call move_board_task to `need_revision`, and make sure your findings are on the task as a numbered comment.\n" +
-		"If the move is refused, read the error: it names exactly what is missing, and fixing that and retrying the move is part of this run. " +
-		"Do not re-review, do not start new testing, and do not change your verdict.")
+	sb.WriteString("\n")
+	sb.WriteString(reviewVerdictSweepClosingKey.Render(reviewVerdictSweepClosingData{Exit: string(exit)}))
 	return sb.String()
 }
 
 // reviewVerdictAskPrompt is the one-word verdict question asked right after
 // a reviewer's own review turn; the answer is parsed back by verdictColumn.
 func reviewVerdictAskPrompt(exit domain.TaskColumn) string {
-	return "Answer with ONE word and nothing else — no explanation, no tool call.\n" +
-		"Based on the review you just completed: `APPROVE` if everything you required is satisfied and the work should move on to `" +
-		string(exit) + "`, `REVISE` if anything you flagged still needs work.\n" +
-		"This answer is recorded as your verdict and the board move is made from it, so it must match the review you wrote above."
+	return reviewVerdictAskKey.Render(reviewVerdictAskData{Exit: string(exit)})
 }
 
 func verdictColumn(answer string, exit domain.TaskColumn) (domain.TaskColumn, bool) {

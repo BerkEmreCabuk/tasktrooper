@@ -92,25 +92,23 @@ func renderReviewAnnotations(task domain.BoardTask, items []domain.TaskDocumentA
 // follow: read the current document, revise it in place, then resolve every
 // comment below — before any per-comment entry is appended.
 func renderReviewAnnotationsHeader(count int, docIDs []string, taskRef string) string {
-	var head strings.Builder
-	head.WriteString("## Review comments on your analysis document\n")
-	fmt.Fprintf(&head, "The human reviewed your analysis and sent back %d comment(s), each anchored to a passage of the document. "+
-		"This review IS the revision request: address EVERY comment at its root, in the SAME document (document_id %s) — never attach a second document.\n",
-		count, strings.Join(docIDs, ", "))
-	fmt.Fprintf(&head, "1. Read the current source: list_task_documents with task_id %s, document_id, raw: true (follow next_offset until you have all of it).\n", taskRef)
-	head.WriteString("2. Revise it with update_task_document on that document_id — `edits` for targeted passages, `content` for a full rewrite. Keep the report's structure, section ids and styling; re-read the code where a comment questions a fact.\n")
-	head.WriteString("3. Then call resolve_document_annotations ONCE with {id, reply} for every comment below — the reply is one line saying what changed and where, or why you deliberately kept it.\n")
-	head.WriteString("When this run ends with the document revised, the system moves the task back to analiz_review — do not move it yourself.\n")
-	return head.String()
+	rendered := reviewAnnotationsHeaderKey.Render(reviewAnnotationsHeaderData{
+		Count:   count,
+		DocIDs:  strings.Join(docIDs, ", "),
+		TaskRef: taskRef,
+	})
+	return rendered + "\n"
 }
 
 // reviewAnnotationsOmittedNote tells the run how many comments the byte cap
 // left out and how to fetch the rest — a silently shortened list would read
 // as the complete one.
 func reviewAnnotationsOmittedNote(omitted int, taskRef string) string {
-	return fmt.Sprintf("\n…%d more comment(s) are not shown here because this message is capped at %d bytes. "+
-		"Call list_document_annotations with task_id %s and status \"submitted\" to read ALL of them before you revise — every one needs an answer.\n",
-		omitted, reviewAnnotationsLimit, taskRef)
+	return reviewAnnotationsOmittedKey.Render(reviewAnnotationsOmittedData{
+		Omitted: omitted,
+		Limit:   reviewAnnotationsLimit,
+		TaskRef: taskRef,
+	})
 }
 
 func reviewEntry(n int, a domain.TaskDocumentAnnotation, title string) string {

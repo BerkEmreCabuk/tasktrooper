@@ -947,7 +947,7 @@ func pipelineFailureReport(p domain.TaskPipeline) string {
 // pipelineFailureComment is the ordinary case: the pipeline failed and the
 // task is (elsewhere) bounced back to need_revision to fix it.
 func pipelineFailureComment(stage, report string) string {
-	return fmt.Sprintf("Pipeline failed — %s:\n\n```\n%s\n```", stage, report)
+	return pipelineFailureCommentKey.Render(pipelineFailureCommentData{Stage: stage, Report: report})
 }
 
 // pipelineFailureBlockedCIComment is the deploy-only exception: GitHub
@@ -955,9 +955,7 @@ func pipelineFailureComment(stage, report string) string {
 // the task is deliberately NOT bounced to need_revision — reportPipelineFailure
 // reads blockedCI to skip that move.
 func pipelineFailureBlockedCIComment(stage, report string) string {
-	return fmt.Sprintf("Deploy could not run — %s:\n\n```\n%s\n```\n\n"+
-		"GitHub Actions is unavailable for this repository (billing, spending limit or Actions disabled), so this is not a code problem and the task is NOT being sent back to need_revision. "+
-		"Deploy it the way this repository documents doing it locally, or move the task to `blocked` if it has no local deploy path.", stage, report)
+	return pipelineFailureBlockedCICommentKey.Render(pipelineFailureCommentData{Stage: stage, Report: report})
 }
 
 func (p *PipelineRunner) reportPipelineFailure(ctx context.Context, job pipelineJob, pipeline domain.TaskPipeline) {
