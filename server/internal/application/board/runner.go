@@ -1468,9 +1468,7 @@ func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, wf domain.
 			Msg("hand-off: run wrote a diff but never executed a command, staying in the working column")
 		if _, cErr := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
-			Content: "Otomatik code_review geçişi yapılmadı: bu run kod yazdı ama hiçbir komut çalıştırmadı " +
-				"(run_terminal ile build/test kaydı yok). Değişiklik branch'te duruyor. " +
-				"Bir sonraki run projenin build ve test komutlarını çalıştırıp çıktıyı okumalı, kırmızıysa bu run içinde düzeltmeli.",
+			Content:    prompt.Text(handoffUnverifiedRunKey),
 		}); cErr != nil {
 			log.Warn().Err(cErr).Str("task_id", job.Task.ID.String()).Msg("hand-off: unverified-run comment failed")
 		}
@@ -1487,12 +1485,7 @@ func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, wf domain.
 				Msg("hand-off: UI change never observed, staying in the working column")
 			if _, cErr := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 				AuthorType: "system",
-				Content: "Otomatik code_review geçişi yapılmadı: bu run arayüzü değiştirdi ama ekrana hiç bakmadı " +
-					"(browser_screenshot / browser_read_dom / mobile_screenshot / mobile_read_ui kaydı yok). " +
-					"Yeşil build ekranın doğru göründüğünü söylemez — eksik ikon \"?\" olarak render edilir, taşan bir " +
-					"öğe telefonda yatay kaydırma yapar, ikisi de derlenir. Bir sonraki run dev server'ı arka planda " +
-					"başlatıp değişen sayfayı açmalı, masaüstü ve mobil boyutta ekran görüntüsü almalı ve eklediği " +
-					"öğenin DOM'da olduğunu doğrulamalı.",
+				Content:    prompt.Text(handoffUnseenUIKey),
 			}); cErr != nil {
 				log.Warn().Err(cErr).Str("task_id", job.Task.ID.String()).Msg("hand-off: unseen-UI comment failed")
 			}
@@ -1520,7 +1513,7 @@ func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, wf domain.
 		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("hand-off: automatic move to code_review failed")
 		if _, cErr := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
-			Content:    "Otomatik code_review geçişi reddedildi: " + err.Error(),
+			Content:    handoffCodeReviewRefusedKey.Render(handoffReasonInput{Reason: err.Error()}),
 		}); cErr != nil {
 			log.Warn().Err(cErr).Str("task_id", job.Task.ID.String()).Msg("hand-off: refusal comment failed")
 		}
@@ -1565,7 +1558,7 @@ func (r *Runner) advanceToAnalizReview(ctx context.Context, job RunJob, wf domai
 		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("hand-off: automatic move to analiz_review failed")
 		if _, cErr := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
-			Content:    "Otomatik analiz_review geçişi reddedildi: " + err.Error(),
+			Content:    handoffAnalizReviewRefusedKey.Render(handoffReasonInput{Reason: err.Error()}),
 		}); cErr != nil {
 			log.Warn().Err(cErr).Str("task_id", job.Task.ID.String()).Msg("hand-off: refusal comment failed")
 		}
@@ -1623,9 +1616,7 @@ func previousRunFailuresMessage(runs []domain.TaskAgentRun, currentRunID uuid.UU
 		if prev.Status != domain.TaskAgentRunStatusFailed {
 			continue
 		}
-		return "## Previous run on this task\n\nIts tools kept failing: " + prev.ErrorPattern +
-			".\nDo not open with the same calls. Read the current state of the files first, and if a tool " +
-			"rejected that run repeatedly, reach the same goal another way."
+		return previousRunFailuresKey.Render(previousRunFailuresInput{ErrorPattern: prev.ErrorPattern})
 	}
 	return ""
 }
@@ -1655,12 +1646,8 @@ func isUngroundedAnalysis(wf domain.Workflow, task domain.BoardTask, resp domain
 	return !usage.UsedAny(domain.CodeExplorationTools...)
 }
 
-const ungroundedAnalysisReason = "Analysis rejected: the run never read the repository " +
-	"(no codebase_search / grep_code / get_repo_tree / get_symbol_skeleton / expand_symbol_context call succeeded). " +
-	"An analiz answer must name real files and interfaces from the code, not assumed ones."
-
 func (r *Runner) failRunUngrounded(ctx context.Context, job RunJob, run domain.TaskAgentRun, resp domain.AgentResponse) error {
-	const reason = ungroundedAnalysisReason
+	reason := ungroundedAnalysisReason
 
 	if r.taskUpdater != nil {
 		content := reason
@@ -1723,18 +1710,6 @@ func (r *Runner) uiRepo(ctx context.Context, repositoryID uuid.UUID) bool {
 	}
 	return domain.RepoHasUI(repo)
 }
-
-const ungroundedQAReason = "QA round rejected: this run never ran the product " +
-	"(no run_terminal, browser_* or mobile_* call succeeded). A scenario plan, a summary of the diff, or a criterion " +
-	"verdict is not a test — boot the task branch (or the stage target from get_deploy_target) and execute the " +
-	"scenarios, then record each criterion with review_criterion citing the command you ran and what you observed."
-
-const noUIEvidenceReason = "QA round rejected: this repository has a user interface and the run never looked at it " +
-	"(no browser_screenshot / browser_read_dom / mobile_screenshot / mobile_read_ui call succeeded). Build and test " +
-	"commands cannot see what the user sees — a button that renders as a bare \"?\", a section that did not disappear, " +
-	"a layout that overflows on a phone all pass every command and fail on screen. Open the changed screens, capture a " +
-	"screenshot at desktop and at phone size, read the DOM/UI where a picture is not enough, and cite that evidence on " +
-	"each criterion you approve."
 
 func (r *Runner) failRunUngroundedQA(ctx context.Context, job RunJob, run domain.TaskAgentRun, resp domain.AgentResponse, reason string) error {
 	if r.taskUpdater != nil {
@@ -1847,16 +1822,6 @@ func (r *Runner) taskTestCases(ctx context.Context, job RunJob) []domain.TaskTes
 	return items
 }
 
-const ungroundedPMUATReason = "pm_uat rejected: this run never checked the product itself " +
-	"(no browser_* or mobile_* call succeeded). Approving from QA's notes, the board or the diff is not verification — " +
-	"open the changed screens (or run the mobile flow) yourself, then record each criterion with review_criterion " +
-	"citing what you observed."
-
-const pmUncoveredCriterionReason = "pm_uat rejected: this run approved a criterion QA's own recorded test round never " +
-	"proves (no passed TaskTestCase links to it) without checking it yourself " +
-	"(no browser_* or mobile_* call succeeded). Trusting QA's review_criterion note is not enough when nothing in " +
-	"list_test_cases actually backs it — walk that criterion's flow yourself before approving it."
-
 func (r *Runner) failRunUngroundedPMUAT(ctx context.Context, job RunJob, run domain.TaskAgentRun, resp domain.AgentResponse, reason string) error {
 	if r.taskUpdater != nil {
 		content := reason
@@ -1916,14 +1881,16 @@ func (r *Runner) failRunOutOfBudget(
 	}
 
 	if r.taskUpdater != nil {
-		kept := "Work completed so far is committed to the task branch; the next run continues from there."
+		kept := prompt.Text(outOfBudgetKeptPublishedKey)
 		if !published {
-			kept = "Work completed so far stays in the local task workspace; the next run continues from there."
+			kept = prompt.Text(outOfBudgetKeptLocalKey)
 		}
-		content := "Run stopped before finishing — " + budgetErr.Error() + "\n\n" + kept
-		if budgetErr.Partial != "" {
-			content += "\n\nAgent's own summary:\n\n" + budgetErr.Partial
-		}
+		content := outOfBudgetCommentKey.Render(outOfBudgetCommentInput{
+			ErrorMessage: budgetErr.Error(),
+			Kept:         kept,
+			HasPartial:   budgetErr.Partial != "",
+			Partial:      budgetErr.Partial,
+		})
 		if _, err := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
 			Content:    truncateHead(content, 3000),
@@ -1977,7 +1944,7 @@ func revisionCommentsMessage(comments []domain.TaskComment) string {
 		feedback = feedback[len(feedback)-5:]
 	}
 	var sb strings.Builder
-	sb.WriteString("## Task comments (the revision feedback is here — act on it, do not ask the human to repeat it)\n")
+	sb.WriteString(prompt.Text(revisionCommentsHeaderKey))
 	for _, c := range feedback {
 		content := c.Content
 		if len(content) > 2000 {
@@ -2017,29 +1984,23 @@ func (r *Runner) analysisContext(ctx context.Context, job RunJob) string {
 		return ""
 	}
 	var sb strings.Builder
-	sb.WriteString("## The analysis this task came out of\n")
-	sb.WriteString("This task was opened from the analysis below, and these documents are its specification — " +
-		"they are attached to that analiz task, NOT committed anywhere in the repository, so this is where the spec and the plan live. " +
-		"Implement what they say; where they and the task description disagree, the task description is the narrower scope and wins for THIS task. " +
-		"list_task_documents re-reads any of them at any time.\n")
+	sb.WriteString(prompt.Text(analysisContextIntroKey))
 	for _, ref := range refs {
 		label := domain.RelationLabel(ref.Key, ref.Title, ref.TaskID)
 		if len(ref.Documents) == 0 {
-			sb.WriteString(fmt.Sprintf("\n### %s — no documents attached\n"+
-				"The analysis this task names has nothing attached to it. Say so in a comment rather than inventing the missing spec.\n", label))
+			sb.WriteString(analysisContextNoDocsKey.Render(analysisContextNoDocsInput{Label: label}))
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("\n### %s (analiz task — read it with list_task_documents %s)\n", label, ref.Key))
+		sb.WriteString(analysisContextRefHeaderKey.Render(analysisContextRefHeaderInput{Label: label, Key: ref.Key}))
 		for _, doc := range ref.Documents {
 			content, limit := doc.Content, analysisContextLimit
 			if doc.Format == domain.DocumentFormatHTML {
 				content, limit = htmldoc.Text(doc.Content), htmlAnalysisContextLimit
 			}
 			if len(content) > limit {
-				content = truncateHead(content, limit) +
-					"\n…[truncated — call list_task_documents with task_id " + ref.Key + " to read the whole document]"
+				content = truncateHead(content, limit) + analysisContextTruncNoteKey.Render(analysisContextTruncNoteInput{Key: ref.Key})
 			}
-			sb.WriteString(fmt.Sprintf("\n#### %s\n%s\n", doc.Title, content))
+			sb.WriteString(analysisContextDocKey.Render(analysisContextDocInput{Title: doc.Title, Content: content}))
 		}
 	}
 	return sb.String()
@@ -2111,36 +2072,26 @@ func listsEveryCriterion(wf domain.Workflow, task domain.BoardTask) bool {
 }
 
 func reviewCriteriaHeader(column domain.TaskColumn) string {
-	const carryOver = " A verdict already on an id survives a revision round — it is not asked again from zero. " +
-		"Where a line below names files changed since that verdict, re-verify and call review_criterion again only if one of those files could plausibly affect that specific criterion; leave the rest as they are. " +
-		"An id with no verdict yet still needs one.\n"
 	switch column {
 	case domain.TaskColumnReadyForQA, domain.TaskColumnInQA:
-		return "\nAcceptance criteria — record YOUR verdict on EACH id below with review_criterion. " +
-			"The forward move is refused while any id lacks your verdict on repositories that require criteria. " +
-			"Never move the task to need_revision just to look for these ids: they are here.\n" + carryOver
+		return prompt.Text(reviewCriteriaHeaderQAPMKey)
 	case domain.TaskColumnPMUAT:
-		return "\nAcceptance criteria — record YOUR OWN PM verdict on EACH id below with review_criterion " +
-			"(approve only what you verified yourself by running the product; reject naming the gap). " +
-			"The developer's checkmark and QA's check are not your verdict. " +
-			"The forward move is refused while any id lacks your verdict on repositories that require criteria. " +
-			"Never move the task to need_revision just to look for these ids: they are here.\n" + carryOver
+		return prompt.Text(reviewCriteriaHeaderPMUATKey)
 	case domain.TaskColumnCodeReview:
-		return "\nAcceptance criteria the diff must satisfy (ids for reference):\n"
+		return prompt.Text(reviewCriteriaHeaderCodeReviewKey)
 	default:
-		return "\nAcceptance criteria of this task (ids for reference):\n"
+		return prompt.Text(reviewCriteriaHeaderDefaultKey)
 	}
 }
 
 func criterionStateLine(c domain.AcceptanceCriterion, changedSince map[string][]string) string {
-	implementer := "not ticked"
-	if c.Completed {
-		implementer = "ticked"
-	}
-	return fmt.Sprintf("- [%s] %s — implementer: %s; qa: %s; pm: %s\n",
-		c.ID, c.Text, implementer,
-		criterionVerdictLabel(c, domain.CriterionReviewRoleQA, changedSince),
-		criterionVerdictLabel(c, domain.CriterionReviewRolePM, changedSince))
+	return criterionLineKey.Render(criterionLineInput{
+		ID:          c.ID.String(),
+		Text:        c.Text,
+		Implementer: criterionImplementerLabelKey.Render(criterionImplementerInput{Completed: c.Completed}),
+		QA:          criterionVerdictLabel(c, domain.CriterionReviewRoleQA, changedSince),
+		PM:          criterionVerdictLabel(c, domain.CriterionReviewRolePM, changedSince),
+	})
 }
 
 func criterionVerdictLabel(c domain.AcceptanceCriterion, role domain.CriterionReviewRole, changedSince map[string][]string) string {
@@ -2150,35 +2101,40 @@ func criterionVerdictLabel(c domain.AcceptanceCriterion, role domain.CriterionRe
 			continue
 		}
 		if check.Approved {
-			return "approved" + changedSinceNote(check.VerifiedSHA, changedSince)
+			hasSHA, hasFiles, sha, files, more := changedSinceFields(check.VerifiedSHA, changedSince)
+			return criterionVerdictKey.Render(criterionVerdictInput{
+				Found: true, Approved: true,
+				HasSHA: hasSHA, HasFiles: hasFiles, SHA: sha, Files: files, More: more,
+			})
 		}
-		if note := strings.TrimSpace(check.Note); note != "" {
-			return "rejected (" + note + ")"
-		}
-		return "rejected"
+		return criterionVerdictKey.Render(criterionVerdictInput{Found: true, Approved: false, Note: strings.TrimSpace(check.Note)})
 	}
-	return "—"
+	return criterionVerdictKey.Render(criterionVerdictInput{Found: false})
 }
 
 const maxChangedFilesNoted = 15
 
-func changedSinceNote(sha string, changedSince map[string][]string) string {
+// changedSinceFields turns a verified SHA and the changed-files-since map
+// into the facts board.criterion_verdict needs — no SHA on record, or the
+// SHA missing from the map, means no note at all (HasSHA false), not an
+// empty one.
+func changedSinceFields(sha string, changedSince map[string][]string) (hasSHA, hasFiles bool, shortSHA string, files []string, more int) {
 	if sha == "" {
-		return ""
+		return false, false, "", nil, 0
 	}
-	files, ok := changedSince[sha]
+	fs, ok := changedSince[sha]
 	if !ok {
-		return ""
+		return false, false, "", nil, 0
 	}
-	if len(files) == 0 {
-		return fmt.Sprintf(" (as of %s, nothing changed since)", domain.ShortSHA(sha))
+	if len(fs) == 0 {
+		return true, false, domain.ShortSHA(sha), nil, 0
 	}
-	shown, suffix := files, ""
+	shown := fs
 	if len(shown) > maxChangedFilesNoted {
+		more = len(fs) - maxChangedFilesNoted
 		shown = shown[:maxChangedFilesNoted]
-		suffix = fmt.Sprintf(" +%d more", len(files)-maxChangedFilesNoted)
 	}
-	return fmt.Sprintf(" (as of %s, changed since: %s%s)", domain.ShortSHA(sha), strings.Join(shown, ", "), suffix)
+	return true, true, domain.ShortSHA(sha), shown, more
 }
 
 func criteriaMessage(wf domain.Workflow, task domain.BoardTask, criteria []domain.AcceptanceCriterion, changedSince map[string][]string) string {
@@ -2193,9 +2149,9 @@ func criteriaMessage(wf domain.Workflow, task domain.BoardTask, criteria []domai
 		}
 		return sb.String()
 	}
-	sb.WriteString("\nOpen acceptance criteria (these define \"done\" for this task):\n")
+	sb.WriteString(prompt.Text(criteriaOpenHeaderKey))
 	for _, c := range criteria {
-		sb.WriteString(fmt.Sprintf("- [%s] %s\n", c.ID, c.Text))
+		sb.WriteString(criterionOpenLineKey.Render(criterionOpenLineInput{ID: c.ID.String(), Text: c.Text}))
 	}
 	return sb.String()
 }
@@ -2214,26 +2170,21 @@ func buildTriggerMessage(job RunJob, wf domain.Workflow, criteria []domain.Accep
 	})
 	runIns := runInstruction(wf, job)
 	if job.ColumnInstruction != "" {
-		runIns += "\n\nColumn-specific instructions for you, for a task that arrives in this column:\n" + job.ColumnInstruction
+		runIns += "\n\n" + prompt.Text(columnSpecificNoteKey) + "\n" + job.ColumnInstruction
 	}
-	return fmt.Sprintf(`A kanban board event occurred. Evaluate the task and take action using board tools when appropriate.
-
-%s
-
-Every board tool call in this run is about THIS task: pass the task_id or task_key from the snapshot below verbatim. The keys in the tool descriptions ("T-1", "B-1", "A-1") are format examples, never the task you are working on. Tools that take a repository_id (get_deploy_target, update_deploy_target, list_incidents, create_board_task) want the repository_id UUID from the snapshot below — never the repository name. Tools without that field — list_board_tasks among them — are already scoped to this run's repository; passing one an extra field is a schema error. Use the exact tool names available to you (claim_board_task, move_board_task, add_task_comment, etc.) — do not invent tool names. Only claim tasks that are unassigned or already assigned to you.
-
-%s
-
-Task snapshot:
-%s
-%s`, runIns, closingStep(wf, job), string(taskJSON), criteriaMessage(wf, job.Task, criteria, changedSince))
+	return triggerMessageKey.Render(triggerMessageInput{
+		RunInstruction:  runIns,
+		ClosingStep:     closingStep(wf, job),
+		TaskJSON:        string(taskJSON),
+		CriteriaMessage: criteriaMessage(wf, job.Task, criteria, changedSince),
+	})
 }
 
 func closingStep(wf domain.Workflow, job RunJob) string {
 	if !wf.Has(job.Task.Column, domain.BehaviourBuildVerify) {
-		return "Close with an add_task_comment stating what you changed and the command output that verified it."
+		return prompt.Text(closingStepDefaultKey)
 	}
-	return "Close with your final message, not a card comment: the system re-runs build verification after you stop and publishes that result to the card itself once the gate passes."
+	return prompt.Text(closingStepBuildVerifyKey)
 }
 
 func runInstruction(wf domain.Workflow, job RunJob) string {
@@ -2257,91 +2208,50 @@ func columnInstruction(wf domain.Workflow, task domain.BoardTask) string {
 	switch task.Column {
 	case domain.TaskColumnTodo:
 		if analiz {
-			return "This is an analiz task in `todo`. Claiming it and moving it to `in_progress` is the opening action of the step that starts the analysis, never a step of its own. Finishing with a document attached moves it to `analiz_review` automatically."
+			return prompt.Text(columnTodoAnalizKey)
 		}
-		return "This task is in `todo`. If it is not relevant to your role, take no action. " +
-			"If it is: claim it, move it to in_progress as the opening action of the step that does the work (never a step of its own), " +
-			"and implement the work IN THIS SAME RUN. A green build with a real diff moves it to code_review automatically; " +
-			"that move is refused while an acceptance criterion is still open."
+		return prompt.Text(columnTodoKey)
 	case domain.TaskColumnInProgress:
 		if analiz {
-			return "This is an analiz task ALREADY claimed and ALREADY in `in_progress` — the move you might be tempted to plan first has happened. " +
-				"Attaching your spec and plan moves it to `analiz_review` automatically."
+			return prompt.Text(columnInProgressAnalizKey)
 		}
-		return "This task is ALREADY claimed and ALREADY in `in_progress` — the move you might be tempted to plan first has happened. " +
-			"Continue the implementation from where it stands (the task branch and its diff are in your context) and finish it in this run. " +
-			"A green build with a real diff moves it to code_review automatically; that move is refused while an acceptance criterion is still open."
+		return prompt.Text(columnInProgressKey)
 	case domain.TaskColumnNeedRevision:
 		if analiz {
-			return "This is an analiz task in `need_revision`: the human rejected the spec/plan in `analiz_review`. " +
-				"Revising and reattaching the documents moves it back to `analiz_review` automatically."
+			return prompt.Text(columnNeedRevisionAnalizKey)
 		}
-		return "This task came back from review. The feedback is in your context: the task comments, and — when the review happened on a pull request — " +
-			"the PR review comments. A green build with a real diff moves it back to code_review automatically."
+		return prompt.Text(columnNeedRevisionKey)
 	case domain.TaskColumnCodeReview:
-		return "This task is in `code_review` with the pull request, its diff and the pipeline result (get_pipeline_status) already in your context. " +
-			"A clean review with a green pipeline moves it to ready_for_qa; a finding or a red pipeline moves it to need_revision."
+		return prompt.Text(columnCodeReviewKey)
 	case domain.TaskColumnReadyForQA:
 		// Only reachable when the automatic ready_for_qa -> in_qa move was refused; in_qa is where testing is evidenced.
-		return "This task is still in `ready_for_qa`: the automatic move into in_qa did not go through, " +
-			"so testing has NOT started and the board does not show this task as under test. " +
-			"Move it to in_qa yourself as the opening action of your first testing step (not as a step of its own), then test in this same run. " +
-			"Every acceptance criterion passing moves it to " + passTo + "; any failure moves it to need_revision."
+		return columnReadyForQAKey.Render(columnPassToInput{PassTo: passTo})
 	case domain.TaskColumnInQA:
-		return "This task is ALREADY in `in_qa` — testing is under way and the move you might plan first has happened. Continue and finish the scenarios in this run. " +
-			"Every acceptance criterion passing moves it to " + passTo + "; any failure moves it to need_revision. Never leave a task parked in in_qa."
+		return columnInQAKey.Render(columnPassToInput{PassTo: passTo})
 	case domain.TaskColumnPMUAT:
-		return "This task is in `pm_uat`: acceptance control. Follow your pm_uat column instructions — verify by running the product, never by reading code."
+		return prompt.Text(columnPMUATKey)
 	case domain.TaskColumnDone:
 		if analiz {
-			return "This is an analiz task in `done` — the human's move here is the approval of your spec and plan; decompose it into implementation tasks to move it to `released`."
+			return prompt.Text(columnDoneAnalizKey)
 		}
 		// Reachable only through the merge wake or a release hand-back: a done card with an unmerged PR, or a
 		// release the sweeper just settled, dispatched to the release engineer and nobody else.
 		// done must never read the default: its "move on to the next column" sentence is how done tasks drifted into released with no deploy.
-		return "This task is in `done`: the board has signed it off and its work is finished. " +
-			"You are here to LAND the change, ship it, and verify production — nothing else. " +
-			"1) If the pull request is not merged yet: read it (get_task_pull_request) and the pipeline result (get_pipeline_status) — the checks must be green and " +
-			"the PR must still be at the commit that was verified — then call merge_task_pull_request, which squash-merges it, deletes the task branch, and opens (or joins) a release. " +
-			"Do NOT retry a refusal and do NOT work around it, and do not comment that the merge worked when it did: the merge commit is recorded on the card by the tool itself. " +
-			"A refusal that names a CONFLICT with the base branch (`dirty`) or a branch the base has moved past (`behind`) is the developer's to fix, not yours: " +
-			"move the task to need_revision with that reason and stop. Any other refusal (a closed PR, a head commit that is not the verified one, an incomplete review chain) " +
-			"means the change is not the change that was approved: put the reason on the task with add_task_comment and stop, because only a human or a new round of review can settle it. " +
-			"2) Read the merge result's `release` field for what happens next: mode `none` (or `unconfirmed: true`) → nothing to do, stop. A merge refused because the delivery profile is unconfirmed, a deploy dependency is not released, or before-deploy steps are unconfirmed is already commented on the card — stop, you are woken when it clears. " +
-			"Mode `batch` → the merge joined the component's draft release; nothing to do, stop — a human cuts it later on the Deploy tab. " +
-			"Mode `on_merge` → call watch_release. Mode `dispatch` → call deploy_release, then watch_release. " +
-			"watch_release parks this task while a system sweeper watches the deploy and the post-deploy soak window — do not poll or wait, you are woken when there is something to decide. " +
-			"3) When woken with `pending` and mode `batch`: a human just cut this release — call deploy_release (it creates the tag, runs the local command, or starts the store build, per the component's executor), then watch_release. " +
-			"4) When woken with `awaiting_verdict`: get_release, then read query_runtime_logs (since deployed_at) and list_runtime_errors WHEREVER the component has a bound runtime environment — a release is never finished on a green deploy alone. " +
-			"A batch release with no bound runtime environment (most desktop/mobile components) has no logs to read: its evidence is the build/publish result (the workflow run, local_run, or store_builds) plus any smoke checks — say explicitly in the finish note that no runtime environment is bound rather than treating the gap as a pass. " +
-			"Clean evidence → finish_release with a note stating what you checked. A failed smoke check, a failing health sample, a failed build/publish, or new runtime error groups tied to the change → rollback_release " +
-			"(reason and a note stating the evidence), then report every step under `rollback.manual_steps` and call watch_release again to follow the redeploy. " +
-			"For a batch release, rollback_release only reverts the default branch — nothing is redeployed, because a published desktop build or a store build cannot be unpublished by a revert; `rollback.manual_steps` leads with unpublishing or halting that artifact, and you must perform or report that step first. " +
-			"When woken with `failed`: get_release; for a batch local run read local_run.tail (and its log path), for github_actions call get_deploy_logs if a job failed; then rollback_release (reason deploy_failed) if the bad code is live or on the default branch; otherwise report what failed and stop. " +
-			"Do not test anything here (that happened in in_qa), do not edit or commit code, and do NOT move this task to `released` yourself: " +
-			"only finish_release does that, and moving the card there by hand would announce a release that was never verified."
+		return prompt.Text(columnDoneKey)
 	case domain.TaskColumnReleased:
 		// Reachable only through a release hand-back for a health incident inside the release's window: released
 		// dispatches the release engineer for nothing else.
 		// released has no next column: the generic default must never fire here, or a card is handed to nobody.
-		return "This task is in `released`: its change is in production. You have been woken for a health incident inside this release's window and for nothing else. " +
-			"get_release for the release this task belongs to, then query_runtime_logs and list_runtime_errors since deployed_at, then get_incident or list_incidents for what actually opened. " +
-			"If the incident is genuinely this release's doing — new error groups or a health failure tied to the change, inside the window — call rollback_release with reason health_incident and a note stating the evidence, " +
-			"then report EVERY step it returns under `rollback.manual_steps` — a migration, a feature flag, anything with a human on the other end — and call watch_release to follow the redeploy. " +
-			"A rollback reported as complete when half of it was not is worse than one that says what it could not do. " +
-			"If rollback_release returns `proposed: true`, auto_rollback is off for this component: post the proposal, say a human must confirm it, and stop. " +
-			"If the incident predates this release or is unrelated to what it changed, say so in one comment and leave the release alone. " +
-			"Do not edit or commit code, do not move this task anywhere, and do not start any other work here."
+		return prompt.Text(columnReleasedKey)
 	default:
-		return fmt.Sprintf("This task is in `%s`. Do the work that column asks of your role in this run, then move the task on to the next column. "+
-			"It is already in that column, so do not plan a move into it.", task.Column)
+		return columnDefaultKey.Render(columnDefaultInput{Column: string(task.Column)})
 	}
 }
 
 func prependProjectContext(history []domain.Message, desc, toolsNote string) []domain.Message {
 	var note string
 	if desc != "" {
-		note = "Project context: " + desc
+		note = projectContextNoteKey.Render(projectContextInput{Description: desc})
 	}
 	if toolsNote != "" {
 		if note != "" {

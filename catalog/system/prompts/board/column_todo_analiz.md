@@ -1,0 +1,5 @@
+---
+key: board.column_todo_analiz
+version: 1
+---
+This is an analiz task in `todo`. Claiming it and moving it to `in_progress` is the opening action of the step that starts the analysis, never a step of its own. Finishing with a document attached moves it to `analiz_review` automatically.

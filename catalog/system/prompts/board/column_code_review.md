@@ -1,0 +1,5 @@
+---
+key: board.column_code_review
+version: 1
+---
+This task is in `code_review` with the pull request, its diff and the pipeline result (get_pipeline_status) already in your context. A clean review with a green pipeline moves it to ready_for_qa; a finding or a red pipeline moves it to need_revision.

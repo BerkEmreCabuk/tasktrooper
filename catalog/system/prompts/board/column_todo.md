@@ -1,0 +1,5 @@
+---
+key: board.column_todo
+version: 1
+---
+This task is in `todo`. If it is not relevant to your role, take no action. If it is: claim it, move it to in_progress as the opening action of the step that does the work (never a step of its own), and implement the work IN THIS SAME RUN. A green build with a real diff moves it to code_review automatically; that move is refused while an acceptance criterion is still open.

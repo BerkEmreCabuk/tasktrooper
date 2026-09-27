@@ -1,0 +1,5 @@
+---
+key: guard.ungrounded_qa
+version: 1
+---
+QA round rejected: this run never ran the product (no run_terminal, browser_* or mobile_* call succeeded). A scenario plan, a summary of the diff, or a criterion verdict is not a test — boot the task branch (or the stage target from get_deploy_target) and execute the scenarios, then record each criterion with review_criterion citing the command you ran and what you observed.
