@@ -518,19 +518,6 @@ func workflowSetupTaskBrief(kind string) string {
 	return workflowSetupTaskBriefKey.Render(workflowSetupTaskBriefInput{Kind: kind})
 }
 
-func buildHintForKind(kind string) string {
-	switch kind {
-	case domain.RepoKindFrontend:
-		return "e.g. npm/pnpm build"
-	case domain.RepoKindMobile:
-		return "e.g. xcodebuild/fastlane — do not use docker"
-	case domain.RepoKindMonorepo:
-		return "a separate build per subproject (backend/frontend/mobile/worker)"
-	default:
-		return "e.g. go build / docker build"
-	}
-}
-
 func (s *Service) List(ctx context.Context) ([]domain.Repository, error) {
 	repos, err := s.repos.List(ctx)
 	if err != nil {
