@@ -2,9 +2,11 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/taskkey"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -126,7 +128,7 @@ func (s *Service) ValidateTransition(ctx context.Context, from, to string) error
 		}
 	}
 	if hasOutgoing {
-		return fmt.Errorf("moving from this column to the target column is not allowed (workflow)")
+		return errors.New(prompt.Text(transitionNotAllowedKey))
 	}
 	return nil
 }
