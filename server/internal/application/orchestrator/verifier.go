@@ -48,19 +48,27 @@ func (v *Verifier) Evaluate(ctx context.Context, intake domain.GoalIntake, userM
 		UserMessage: userMessage, Purpose: intake.Purpose, Goal: intake.Goal, TaskResultsBlock: resultsSB.String(),
 	})
 
+	baseMessages := []domain.Message{
+		{Role: domain.RoleSystem, Content: systemPrompt},
+		{Role: domain.RoleUser, Content: userContent},
+	}
+
 	var lastErr error
+	var corrections []domain.Message
 	for attempt := range maxPlannerRetries + 1 {
+		messages := make([]domain.Message, 0, len(baseMessages)+len(corrections))
+		messages = append(messages, baseMessages...)
+		messages = append(messages, corrections...)
+
 		resp, err := v.llm.Chat(ctx, domain.AgentRequest{
-			Messages: []domain.Message{
-				{Role: domain.RoleSystem, Content: systemPrompt},
-				{Role: domain.RoleUser, Content: userContent},
-			},
+			Messages:       messages,
 			Model:          model,
 			ProviderType:   providerType,
 			ResponseFormat: domain.JSONSchemaResponseFormat(verifierOutputSchemaKey.Name(), verifierOutputSchemaKey.Map()),
 		})
 		if err != nil {
 			lastErr = err
+			corrections = nil
 			log.Warn().Err(err).Int("attempt", attempt+1).Msg("verifier llm call failed")
 			if giveUp := llmretry.Await(ctx, err, attempt, maxPlannerRetries); giveUp != nil {
 				return domain.VerificationResult{}, pipelineStepError("verification", attempt+1, giveUp)
@@ -72,6 +80,7 @@ func (v *Verifier) Evaluate(ctx context.Context, intake domain.GoalIntake, userM
 		if err != nil {
 			lastErr = err
 			log.Warn().Err(err).Int("attempt", attempt+1).Msg("verifier parse failed")
+			corrections = pipelineCorrection(resp.Message.Content, err)
 			continue
 		}
 
