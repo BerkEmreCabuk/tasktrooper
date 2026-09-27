@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops/pipeline"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
@@ -319,7 +320,7 @@ func subProjectCovers(mobilePlatform, storePlatform string) bool {
 	return false
 }
 
-const blockedReleaseRemedy = "Enable GitHub Actions for this repository (or settle its billing), or pair a Mac as a local runner, then start the release again."
+func blockedReleaseRemedy() string { return prompt.Text(blockedReleaseRemedyKey) }
 
 func (s *Service) parkNoEngine(ctx context.Context, repo domain.Repository, app domain.MobileStoreApp, cause error) error {
 	detail := cause.Error() + " (" + app.Platform + ")"
@@ -337,7 +338,7 @@ func (s *Service) parkNoEngine(ctx context.Context, repo domain.Repository, app 
 	if s.comments != nil {
 
 		if _, err := s.comments.AddComment(ctx, repo.ID, taskID, domain.CreateTaskCommentRequest{
-			Content:    "Release blocked: " + detail + "\n\n" + blockedReleaseRemedy,
+			Content:    "Release blocked: " + detail + "\n\n" + blockedReleaseRemedy(),
 			AuthorType: "system",
 		}); err != nil {
 			log.Warn().Err(err).Str("repository_id", repo.ID.String()).
@@ -358,7 +359,7 @@ func (s *Service) blockedReleaseTask(ctx context.Context, repo domain.Repository
 	}
 	task, err := s.tasks.CreateTask(ctx, repo.ID, domain.CreateBoardTaskRequest{
 		Title:       fmt.Sprintf("Release blocked: %s (%s)", app.Identifier, app.Platform),
-		Description: detail + "\n\n" + blockedReleaseRemedy,
+		Description: detail + "\n\n" + blockedReleaseRemedy(),
 		Priority:    domain.TaskPriorityHigh,
 		Column:      domain.TaskColumnTodo,
 		CreatedBy:   "system",

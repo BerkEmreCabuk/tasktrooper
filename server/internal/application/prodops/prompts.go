@@ -109,3 +109,20 @@ var remediationTaskKey = prompt.Define[remediationTaskInput]("briefs.prodops.rem
 	Title: "prod health check failing", RemedyKind: "unknown", Confidence: 25,
 	RemedyText: "No known signature matched.", IncidentID: "00000000-0000-0000-0000-000000000000",
 })
+
+var incidentRecoveredCommentKey = prompt.Define[struct{}]("briefs.prodops.incident_recovered_comment", struct{}{})
+
+type releaseAttributionNoteInput struct {
+	TaskKey, Title, MergeSHA, Env, Gap, Window string
+	AutoRollback                               bool
+}
+
+var releaseAttributionNoteKey = prompt.Define("briefs.prodops.release_attribution_note", releaseAttributionNoteInput{
+	TaskKey: "TT-42", Title: "Add the export", MergeSHA: "abc1234", Env: "prod", Gap: "5m", Window: "30m",
+})
+
+type releaseAttributionCommentInput struct{ Note, Title, Env, Severity, Detail string }
+
+var releaseAttributionCommentKey = prompt.Define("briefs.prodops.release_attribution_comment", releaseAttributionCommentInput{
+	Note: "x", Title: "y", Env: "prod", Severity: "high", Detail: "z",
+})

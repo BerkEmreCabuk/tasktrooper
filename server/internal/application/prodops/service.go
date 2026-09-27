@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deploy"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -207,7 +208,7 @@ func (s *Service) recover(ctx context.Context, in domain.IncidentInput) (domain.
 	if resolved.TaskID != nil && s.tasks != nil {
 		if _, err := s.tasks.AddComment(ctx, resolved.RepositoryID, *resolved.TaskID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
-			Content:    "Production recovered — the incident stopped firing. Confirm the root cause is actually fixed before closing this task.",
+			Content:    prompt.Text(incidentRecoveredCommentKey),
 		}); err != nil {
 			log.Warn().Err(err).Msg("incident recovery comment failed")
 		}

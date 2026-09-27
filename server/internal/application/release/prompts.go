@@ -37,3 +37,7 @@ var manualStepLabeledKey = prompt.Define[manualStepLabeledInput]("briefs.release
 	Label:   "T-1",
 	Runbook: domain.RollbackRunbook{Plan: "Turn off the `new_pricing` flag."},
 })
+
+type afterDeployCommentInput struct{ Steps string }
+
+var afterDeployCommentKey = prompt.Define("briefs.release.after_deploy_comment", afterDeployCommentInput{Steps: "Enable the new_pricing flag for 100% of traffic."})

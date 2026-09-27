@@ -58,7 +58,7 @@ func (s *Service) postAfterDeployComments(ctx context.Context, r domain.Release)
 		}
 		if _, err := s.tasks.AddComment(ctx, r.RepositoryID, t.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
-			Content:    fmt.Sprintf("Released — do these after-deploy steps now: %s", text),
+			Content:    afterDeployCommentKey.Render(afterDeployCommentInput{Steps: text}),
 		}); err != nil {
 			log.Warn().Err(err).Str("task_id", t.ID.String()).Msg("release: posting an after-deploy comment failed")
 		}

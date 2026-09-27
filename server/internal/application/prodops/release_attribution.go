@@ -2,7 +2,6 @@ package prodops
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -45,9 +44,13 @@ func (s *Service) attributeAndMaybeRollBack(ctx context.Context, incident domain
 	if s.tasks != nil {
 		if _, err := s.tasks.AddComment(ctx, incident.RepositoryID, attribution.TaskID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
-			Content: fmt.Sprintf("Production incident inside this release's health window.\n\n%s\n\nIncident: %s (%s, %s)\n%s",
-				releaseAttributionNote(attribution, s.attributor.HealthWindow(), autoRollback),
-				incident.Title, incident.Env, incident.Severity, strings.TrimSpace(incident.Detail)),
+			Content: releaseAttributionCommentKey.Render(releaseAttributionCommentInput{
+				Note:     releaseAttributionNote(attribution, s.attributor.HealthWindow(), autoRollback),
+				Title:    incident.Title,
+				Env:      incident.Env,
+				Severity: string(incident.Severity),
+				Detail:   strings.TrimSpace(incident.Detail),
+			}),
 		}); err != nil {
 			log.Warn().Err(err).Str("task_id", attribution.TaskID.String()).Msg("release attribution comment failed")
 		}
@@ -65,10 +68,8 @@ func (s *Service) attributeAndMaybeRollBack(ctx context.Context, incident domain
 
 func releaseAttributionNote(a domain.ReleaseAttribution, window time.Duration, autoRollback bool) string {
 	gap := time.Since(a.DeployedAt).Round(time.Minute)
-	note := fmt.Sprintf("Attributed to release %s (%s): its merge commit %s is what %s is running, deployed %s ago — inside the %s post-release window.",
-		a.TaskKey, a.Title, domain.ShortSHA(a.MergeSHA), a.Env, humanDuration(gap), humanDuration(window))
-	if autoRollback {
-		return note + " auto_rollback is ON in this release's delivery profile: the rollback is being executed."
-	}
-	return note + " auto_rollback is OFF in this release's delivery profile: the rollback is proposed and needs a human to confirm it."
+	return releaseAttributionNoteKey.Render(releaseAttributionNoteInput{
+		TaskKey: a.TaskKey, Title: a.Title, MergeSHA: domain.ShortSHA(a.MergeSHA), Env: a.Env,
+		Gap: humanDuration(gap), Window: humanDuration(window), AutoRollback: autoRollback,
+	})
 }
