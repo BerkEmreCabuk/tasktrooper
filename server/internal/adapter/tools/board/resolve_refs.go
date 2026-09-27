@@ -2,6 +2,7 @@ package board
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -69,7 +70,7 @@ func (kit *ToolKit) resolveTaskRef(ctx context.Context, ref string) (uuid.UUID, 
 			return t.ID, nil
 		}
 	}
-	return uuid.Nil, fmt.Errorf("unknown task %q; pass the task UUID or its board key (e.g. T-1, B-1, A-1) — list_board_tasks shows both", ref)
+	return uuid.Nil, errors.New(unknownTaskRefKey.Render(refInput{Ref: ref}))
 }
 
 // resolveDeployDependencies turns a list of task references (UUIDs or board
@@ -130,7 +131,7 @@ func (kit *ToolKit) resolveProjectRef(ctx context.Context, ref string) (uuid.UUI
 		names = append(names, p.Name)
 	}
 	if len(names) == 0 {
-		return uuid.Nil, fmt.Errorf("unknown project %q; no projects exist yet — create one with create_project", ref)
+		return uuid.Nil, errors.New(unknownProjectRefEmptyKey.Render(refInput{Ref: ref}))
 	}
 	return uuid.Nil, fmt.Errorf("unknown project %q; existing projects: %s", ref, strings.Join(names, ", "))
 }

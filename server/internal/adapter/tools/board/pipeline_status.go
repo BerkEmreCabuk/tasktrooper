@@ -106,7 +106,7 @@ func (t *getPipelineStatusTool) Execute(ctx context.Context, arguments string) d
 	// means so it does not read it as a failure to retry or a green build to
 	// trust.
 	if pipeline.Status == domain.PipelineStatusSkipped {
-		out["hint"] = "No CI checks are configured for this repository, so nothing was built or tested. The task was allowed through the gate, but this run is NOT evidence that the code compiles or passes tests — verify the work yourself."
+		out["hint"] = pipelineSkippedHintKey.Render(struct{}{})
 	}
 	return toolJSON(getPipelineStatusToolName, out)
 }

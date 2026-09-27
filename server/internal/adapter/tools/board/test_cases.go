@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -126,7 +127,7 @@ func (a testCaseArg) toInput() (domain.TaskTestCaseInput, error) {
 	}
 	id, err := uuid.Parse(strings.TrimSpace(a.CriterionID))
 	if err != nil {
-		return in, fmt.Errorf("case %q has an invalid criterion_id %q; use an id from list_acceptance_criteria, or leave it empty", a.Title, a.CriterionID)
+		return in, errors.New(testCaseInvalidCriterionIDKey.Render(testCaseInvalidCriterionIDInput{Title: a.Title, RawID: a.CriterionID}))
 	}
 	in.CriterionID = &id
 	return in, nil

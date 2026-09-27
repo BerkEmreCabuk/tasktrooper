@@ -83,7 +83,7 @@ func (t *getTaskPreviewTool) Execute(ctx context.Context, arguments string) doma
 func taskPreviewOutput(in domain.TaskPreviews) taskPreviewResult {
 	out := taskPreviewResult{Branch: in.Branch, PRHeadSHA: in.HeadSHA, Previews: make([]taskPreviewView, 0, len(in.Previews))}
 	if len(in.Previews) == 0 {
-		out.Note = "No component of this repository has a per-branch preview environment (a `preview` environment bound to a Vercel project). Test locally or on stage."
+		out.Note = taskPreviewNoneKey.Render(struct{}{})
 	}
 	for _, p := range in.Previews {
 		out.Previews = append(out.Previews, previewView(p, in))
@@ -95,18 +95,21 @@ func previewView(p domain.TaskPreview, in domain.TaskPreviews) taskPreviewView {
 	v := taskPreviewView{TaskPreview: p}
 	switch p.Status {
 	case domain.TaskPreviewNone:
-		v.Notes = append(v.Notes, fmt.Sprintf("Vercel has no deployment of branch %q yet; it builds one when the branch is pushed. Call again later, or test locally.", in.Branch))
+		v.Notes = append(v.Notes, taskPreviewNotBuiltKey.Render(branchInput{Branch: in.Branch}))
 		return v
 	case domain.TaskPreviewBuilding:
-		v.Notes = append(v.Notes, "Still building: call get_task_preview again before testing on it.")
+		v.Notes = append(v.Notes, taskPreviewBuildingKey.Render(struct{}{}))
 	case domain.TaskPreviewError, domain.TaskPreviewCanceled:
-		v.Notes = append(v.Notes, "This build did not finish; inspect_url shows why. Do not test on it.")
+		v.Notes = append(v.Notes, taskPreviewFailedKey.Render(struct{}{}))
 	}
 	if in.HeadSHA != "" {
 		built := domain.SameCommit(p.CommitSHA, in.HeadSHA)
 		v.BuiltFromPRHead = &built
 		if !built {
-			v.Notes = append(v.Notes, fmt.Sprintf("Built from %s, not the pull request head %s: the head's build has not appeared yet.", domain.ShortSHA(p.CommitSHA), domain.ShortSHA(in.HeadSHA)))
+			v.Notes = append(v.Notes, taskPreviewStaleBuildKey.Render(staleBuildInput{
+				Built: domain.ShortSHA(p.CommitSHA),
+				Head:  domain.ShortSHA(in.HeadSHA),
+			}))
 		}
 	}
 
@@ -122,8 +125,7 @@ func previewView(p domain.TaskPreview, in domain.TaskPreviews) taskPreviewView {
 		v.OpenURL = bypassURL(base, p.BypassSecret)
 		v.RequestHeaders = map[string]string{domain.VercelProtectionBypassHeader: p.BypassSecret}
 	default:
-		v.Notes = append(v.Notes, "This preview is behind Vercel Deployment Protection and the project has no Protection Bypass for Automation, so every automated request gets a login page. "+
-			"Ask the human to create one in the Vercel project (Settings → Deployment Protection → Protection Bypass for Automation), then call get_task_preview again.")
+		v.Notes = append(v.Notes, taskPreviewProtectedKey.Render(struct{}{}))
 	}
 	return v
 }

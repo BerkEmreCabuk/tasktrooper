@@ -120,12 +120,12 @@ func localPreviewOutput(p domain.LocalPreview) localPreviewResult {
 	switch {
 	case p.Status == domain.LocalPreviewFailed:
 		out.LogTail = tailLines(p.LogTail, startTaskPreviewLogTailLines)
-		out.Note = "The preview failed to start — report the detail and log tail on the task; do not approve without executing."
+		out.Note = localPreviewFailedKey.Render(struct{}{})
 	case p.URL != "":
-		out.Note = "Open url with browser_navigate; this is the task branch running locally, not production."
+		out.Note = localPreviewReadyKey.Render(struct{}{})
 	default:
 		out.LogTail = tailLines(p.LogTail, startTaskPreviewLogTailLines)
-		out.Note = "No URL yet — call start_task_preview again; it will not restart a preview that is already starting."
+		out.Note = localPreviewPendingKey.Render(struct{}{})
 	}
 	return out
 }

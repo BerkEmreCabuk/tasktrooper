@@ -119,8 +119,7 @@ func (t *addDocumentTool) Execute(ctx context.Context, arguments string) domain.
 			if uerr != nil {
 				return toolError(addTaskDocumentToolName, uerr.Error())
 			}
-			return toolJSON(addTaskDocumentToolName, documentResult(updated,
-				"A document with this title was already on the task, so it was rewritten in place instead of duplicated. Use update_task_document for revisions."))
+			return toolJSON(addTaskDocumentToolName, documentResult(updated, documentRewrittenInPlaceKey.Render(struct{}{})))
 		}
 	}
 	doc, err := t.kit.Tasks.AddDocument(ctx, repositoryID, taskID, domain.CreateTaskDocumentRequest{

@@ -57,7 +57,7 @@ func (kit *ToolKit) resolveRelease(ctx context.Context, tool, taskRef string) (d
 	if err != nil {
 		msg := err.Error()
 		if errors.Is(err, domain.ErrReleaseNotFound) {
-			msg += " — nothing has opened a release for this task: it may not have merged yet, its component's delivery mode may be none/batch (nothing to watch), or its delivery profile is not confirmed. get_task_pull_request or the card's release field says which."
+			msg += releaseNoReleaseHintKey.Render(struct{}{})
 		}
 		out := toolError(tool, msg)
 		return domain.Release{}, &out
@@ -71,28 +71,28 @@ func (kit *ToolKit) resolveRelease(ctx context.Context, tool, taskRef string) (d
 func releaseNextStep(r domain.Release) string {
 	switch r.Status {
 	case domain.ReleaseDraft:
-		return "Nothing to do — a human cuts this release when they are ready."
+		return releaseNextDraftKey.Render(struct{}{})
 	case domain.ReleaseAwaitingVerdict:
 		if r.Mode == domain.DeliveryBatch {
-			return "Read get_release for the build/publish evidence (workflow run, local_run, or store_builds) and any smoke checks, then call finish_release or rollback_release. Read query_runtime_logs and list_runtime_errors too when the component has a bound runtime environment; when it does not, say so explicitly in the finish note instead of treating the gap as a pass."
+			return releaseNextAwaitingVerdictBatchKey.Render(struct{}{})
 		}
-		return "Read query_runtime_logs and list_runtime_errors since deployed_at, then call finish_release or rollback_release."
+		return releaseNextAwaitingVerdictKey.Render(struct{}{})
 	case domain.ReleaseFailed:
 		if r.Mode == domain.DeliveryBatch {
-			return "Read get_release: for a local run, its local_run.tail (and local_run.log_path); for github_actions, call get_deploy_logs. Then call rollback_release if the bad code is live or sitting on the default branch — or, if nothing can be done from here, report that on the task."
+			return releaseNextFailedBatchKey.Render(struct{}{})
 		}
-		return "Read get_deploy_logs if there is a failed job, then call rollback_release — or, if nothing can be done from here, report that on the task."
+		return releaseNextFailedKey.Render(struct{}{})
 	case domain.ReleasePending:
 		if r.Mode == domain.DeliveryBatch {
-			return "A human has cut this release — call deploy_release."
+			return releaseNextPendingBatchKey.Render(struct{}{})
 		}
-		return "Call deploy_release."
+		return releaseNextPendingKey.Render(struct{}{})
 	case domain.ReleaseDeploying, domain.ReleaseVerifying, domain.ReleaseRollingBack:
-		return "Call watch_release."
+		return releaseNextWatchKey.Render(struct{}{})
 	case domain.ReleaseReleased, domain.ReleaseRolledBack, domain.ReleaseSuperseded:
-		return "Nothing to do."
+		return releaseNextDoneKey.Render(struct{}{})
 	default:
-		return "No instruction for status " + string(r.Status) + " — report it as-is."
+		return releaseNextUnknownKey.Render(releaseNextUnknownInput{Status: string(r.Status)})
 	}
 }
 
@@ -178,12 +178,11 @@ func (t *deployReleaseTool) Execute(ctx context.Context, arguments string) domai
 	updated, err := t.kit.Releases.Deploy(ctx, rel.ID, domain.ReleaseActorAgent)
 	if err != nil {
 		if errors.Is(err, domain.ErrReleaseWrongStatus) || errors.Is(err, domain.ErrReleaseNoDeploy) {
-			return toolError(deployReleaseToolName, err.Error()+
-				"\n\nNothing was deployed. Do not retry deploy_release — it will refuse again until the release's status or delivery mode changes.")
+			return toolError(deployReleaseToolName, err.Error()+deployReleaseRefusedKey.Render(struct{}{}))
 		}
 		return toolError(deployReleaseToolName, err.Error())
 	}
-	return toolJSON(deployReleaseToolName, map[string]any{"release": updated, "next": "call watch_release"})
+	return toolJSON(deployReleaseToolName, map[string]any{"release": updated, "next": deployReleaseNextKey.Render(struct{}{})})
 }
 
 // ---------------------------------------------------------------- watch_release
@@ -234,8 +233,12 @@ func (t *watchReleaseTool) Execute(ctx context.Context, arguments string) domain
 		// shape get_task_deploy_status used for domain.ResourceDeployWatch.
 		return domain.ToolResult{
 			Name: watchReleaseToolName,
-			Content: fmt.Sprintf("Release %s (%s/%s) is still %s. This task is parked until it settles and will be picked up again then — nothing further to do in this run.",
-				updated.Version, updated.Mode, updated.Executor, updated.Status),
+			Content: watchReleaseParkedKey.Render(watchReleaseParkedInput{
+				Version:  string(updated.Version),
+				Mode:     string(updated.Mode),
+				Executor: string(updated.Executor),
+				Status:   string(updated.Status),
+			}),
 			ResourceBlock: block,
 		}
 	}
@@ -344,12 +347,11 @@ func (t *finishReleaseTool) Execute(ctx context.Context, arguments string) domai
 	updated, err := t.kit.Releases.Finish(ctx, rel.ID, domain.ReleaseActorAgent, note)
 	if err != nil {
 		if errors.Is(err, domain.ErrReleaseWrongStatus) {
-			return toolError(finishReleaseToolName, err.Error()+
-				"\n\nNothing was finished. Do not retry finish_release as an agent — it refuses again until the release reaches awaiting_verdict, or a human overrides a failed one.")
+			return toolError(finishReleaseToolName, err.Error()+finishReleaseRefusedKey.Render(struct{}{}))
 		}
 		return toolError(finishReleaseToolName, err.Error())
 	}
-	return toolJSON(finishReleaseToolName, map[string]any{"release": updated, "next": "Nothing to do — the task(s) are released."})
+	return toolJSON(finishReleaseToolName, map[string]any{"release": updated, "next": finishReleaseDoneKey.Render(struct{}{})})
 }
 
 // ------------------------------------------------------------- rollback_release
@@ -422,13 +424,12 @@ func (t *rollbackReleaseTool) Execute(ctx context.Context, arguments string) dom
 			})
 		}
 		if errors.Is(err, domain.ErrReleaseWrongStatus) {
-			return toolError(rollbackReleaseToolName, err.Error()+
-				"\n\nNothing was rolled back. Do not retry rollback_release — it will refuse again until the release's status changes.")
+			return toolError(rollbackReleaseToolName, err.Error()+rollbackReleaseRefusedKey.Render(struct{}{}))
 		}
 		return toolError(rollbackReleaseToolName, err.Error())
 	}
 	return toolJSON(rollbackReleaseToolName, map[string]any{
 		"release": updated,
-		"next":    "Perform or report EVERY manual step, then call watch_release.",
+		"next":    rollbackReleaseNextKey.Render(struct{}{}),
 	})
 }

@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -170,9 +171,9 @@ func applyDocumentEdits(content string, edits []documentEdit) (string, error) {
 		case 1:
 			content = strings.Replace(content, e.OldText, e.NewText, 1)
 		case 0:
-			return "", fmt.Errorf("edits[%d]: old_text not found in the document as edited so far; nothing was saved — re-read the source with list_task_documents raw: true and copy the passage exactly", i)
+			return "", errors.New(documentEditNotFoundKey.Render(indexInput{Index: i}))
 		default:
-			return "", fmt.Errorf("edits[%d]: old_text occurs %d times — include more surrounding text so it matches exactly once; nothing was saved", i, n)
+			return "", errors.New(documentEditAmbiguousKey.Render(indexCountInput{Index: i, Count: n}))
 		}
 	}
 	return content, nil
@@ -224,7 +225,7 @@ func (kit *ToolKit) findDocument(ctx context.Context, repositoryID, taskID uuid.
 		return domain.TaskDocument{}, err
 	}
 	if len(docs) == 0 {
-		return domain.TaskDocument{}, fmt.Errorf("this task has no documents yet — use add_task_document to write the first one")
+		return domain.TaskDocument{}, errors.New(documentNoneYetKey.Render(struct{}{}))
 	}
 	if id := strings.TrimSpace(docID); id != "" {
 		parsed, err := uuid.Parse(id)

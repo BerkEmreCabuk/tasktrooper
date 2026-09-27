@@ -297,11 +297,20 @@ func (kit *ToolKit) resolveTaskRepositoryID(ctx context.Context, taskID uuid.UUI
 	// board-wide lookup.
 	taskRepositoryID, err := kit.Tasks.FindTaskRepositoryID(ctx, taskID)
 	if err == nil && taskRepositoryID != uuid.Nil && taskRepositoryID != contextRepositoryID {
-		return uuid.Nil, fmt.Errorf(
-			"%w: board task %s is not in repository %s, which this run is bound to; cross-repository actions are refused — leave a comment on your own task naming the other task instead",
-			domain.ErrTaskOutsideRepository, taskID, contextRepositoryID)
+		return uuid.Nil, fmt.Errorf("%w: %s", domain.ErrTaskOutsideRepository, crossRepositoryTaskMessage(taskID, contextRepositoryID))
 	}
 	return contextRepositoryID, nil
+}
+
+// crossRepositoryTaskMessage is the wording behind domain.ErrTaskOutsideRepository
+// — see catalog/system/guards/board_cross_repository_task.md. Reused with a
+// dummy contextRepositoryID by no other caller today, kept as its own
+// function so it is one thing to pin and re-render.
+func crossRepositoryTaskMessage(taskID, repositoryID uuid.UUID) string {
+	return crossRepositoryTaskKey.Render(crossRepositoryTaskInput{
+		TaskID:       taskID.String(),
+		RepositoryID: repositoryID.String(),
+	})
 }
 
 // findTask returns the task by id, or ok=false when it cannot be resolved.

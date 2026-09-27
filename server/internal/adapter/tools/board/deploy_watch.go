@@ -134,9 +134,7 @@ func (t *deployLogsTool) Execute(ctx context.Context, arguments string) domain.T
 			return toolError(deployLogsToolName, err.Error())
 		}
 		if status.FailedJob == nil || status.FailedJob.ID == 0 {
-			return toolError(deployLogsToolName,
-				"this task has no failing GitHub Actions job to read: its release (if it has one) names none, and the legacy deploy watch reports "+string(status.State)+
-					". If the repository deploys on push there is no CI log at all — try source=logs_url, or read the provider's own link in get_release.")
+			return toolError(deployLogsToolName, deployLogsNoFailedJobKey.Render(stateInput{State: string(status.State)}))
 		}
 		jobID = status.FailedJob.ID
 	}

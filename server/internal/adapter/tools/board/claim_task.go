@@ -90,9 +90,9 @@ func claimRefusal(ref string, err error) string {
 	ref = strings.TrimSpace(ref)
 	switch {
 	case errors.Is(err, domain.ErrTaskAlreadyClaimed):
-		return fmt.Sprintf("task %s is already assigned to another agent; only unassigned tasks or tasks assigned to you can be claimed", ref)
+		return claimAlreadyAssignedKey.Render(refInput{Ref: ref})
 	case errors.Is(err, domain.ErrBoardTaskNotFound):
-		return fmt.Sprintf("task %s was not found in this repository; list_board_tasks shows the tasks that exist here", ref)
+		return claimTaskNotFoundKey.Render(refInput{Ref: ref})
 	default:
 		return err.Error()
 	}

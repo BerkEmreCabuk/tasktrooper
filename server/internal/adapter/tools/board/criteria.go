@@ -45,7 +45,7 @@ func criteriaInputs(texts []string) ([]domain.AcceptanceCriterionInput, []droppe
 // echoing the value the agent actually sent — the raw "invalid criterion_id"
 // gave it nothing to compare against its own tool call.
 func invalidCriterionIDResult(toolName, rawID string) domain.ToolResult {
-	return toolError(toolName, fmt.Sprintf("invalid criterion_id %q: expected a UUID from list_acceptance_criteria", rawID))
+	return toolError(toolName, invalidCriterionIDKey.Render(rawIDInput{RawID: rawID}))
 }
 
 // criterionErrorResult turns a criteria-store error into tool output. A
@@ -55,10 +55,7 @@ func invalidCriterionIDResult(toolName, rawID string) domain.ToolResult {
 // surfacing the driver's bare "no rows in result set".
 func criterionErrorResult(toolName, rawID string, err error) domain.ToolResult {
 	if errors.Is(err, domain.ErrCriterionNotFound) {
-		return toolError(toolName, fmt.Sprintf(
-			"criterion %s was not found — acceptance criteria were replaced since you last listed them (their ids changed); call list_acceptance_criteria to get the current ids and retry",
-			rawID,
-		))
+		return toolError(toolName, criterionNotFoundStaleKey.Render(rawIDInput{RawID: rawID}))
 	}
 	return toolError(toolName, err.Error())
 }

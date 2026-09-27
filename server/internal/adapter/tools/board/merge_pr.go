@@ -84,8 +84,7 @@ func (t *mergeTaskPullRequestTool) Execute(ctx context.Context, arguments string
 		// one of these blocks is a state that only a board action can change.
 		// Same shape as deploy_release/rollback_release's identity blocks.
 		if isMergeRefusal(err) {
-			return toolError(mergeTaskPullRequestToolName, err.Error()+
-				"\n\nNothing was merged. Do not retry merge_task_pull_request — it will refuse again until the state above changes. Report this on the task instead.")
+			return toolError(mergeTaskPullRequestToolName, err.Error()+mergeTaskRefusedKey.Render(struct{}{}))
 		}
 		return toolError(mergeTaskPullRequestToolName, err.Error())
 	}

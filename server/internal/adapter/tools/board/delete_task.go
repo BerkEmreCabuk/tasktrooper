@@ -92,8 +92,7 @@ func (t *deleteTaskTool) Execute(ctx context.Context, arguments string) domain.T
 			"deleted": false,
 			"reason":  fmt.Sprintf("task is in %s, not a planning column", task.Column),
 			"task":    task,
-			"hint": "Work has already started on this task, and deleting it would erase its branch history, comments and criteria. " +
-				"Move it to a terminal column with move_board_task instead, or call this again with force=true if the user specifically asked for THIS task to be deleted.",
+			"hint":    deleteTaskBlockedHintKey.Render(struct{}{}),
 		})
 	}
 	if err := t.kit.Tasks.DeleteTask(ctx, repositoryID, taskID); err != nil {
