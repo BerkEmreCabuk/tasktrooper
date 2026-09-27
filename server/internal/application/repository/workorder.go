@@ -140,7 +140,7 @@ func (s *Service) syncOrderNote(ctx context.Context, task domain.BoardTask) doma
 		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("order note: reading relations failed")
 		return task
 	}
-	note := domain.OrderNote(deployAfter, workAfter)
+	note := renderOrderNote(deployAfter, workAfter)
 	updatedText := domain.ApplyOrderNote(trimmedPtr(task.BeforeDeploy), note)
 	if updatedText == trimmedPtr(task.BeforeDeploy) {
 		return task

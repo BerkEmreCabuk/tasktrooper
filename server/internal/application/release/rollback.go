@@ -341,11 +341,12 @@ func (s *Service) writeRollbackProposal(ctx context.Context, r domain.Release, r
 		return
 	}
 	newest := r.Tasks[len(r.Tasks)-1]
-	msg := fmt.Sprintf("Rollback PROPOSED, not executed — auto_rollback is off for this component.\n\n"+
-		"Reason: %s. %s\n\n"+
-		"What would happen: revert %s's merge commit(s) on the default branch, then %s.\n\n"+
-		"A human has to confirm it (POST the rollback endpoint with the repository name as the confirmation phrase).",
-		reason, firstNonEmptyStr(note, "no further detail given"), r.Version, dispatchDescription(r))
+	msg := rollbackProposedKey.Render(rollbackProposedInput{
+		Reason:     string(reason),
+		Note:       firstNonEmptyStr(note, "no further detail given"),
+		Version:    r.Version,
+		IsDispatch: r.Mode == domain.DeliveryDispatch,
+	})
 	if _, err := s.tasks.AddComment(ctx, r.RepositoryID, newest.ID, domain.CreateTaskCommentRequest{
 		AuthorType: "system",
 		Content:    msg,
@@ -411,12 +412,12 @@ func (s *Service) manualStepsFor(ctx context.Context, r domain.Release) []string
 			log.Warn().Err(err).Str("task_id", t.ID.String()).Msg("release: loading a task for its rollback runbook failed")
 			continue
 		}
-		if runbook := domain.TaskRollbackRunbook(task); runbook != "" {
+		if runbook := domain.TaskRollbackRunbookFields(task); !runbook.Empty() {
 			label := t.Key
 			if label == "" {
 				label = t.ID.String()
 			}
-			steps = append(steps, label+": "+runbook)
+			steps = append(steps, manualStepLabeledKey.Render(manualStepLabeledInput{Label: label, Runbook: runbook}))
 		}
 	}
 	return steps
@@ -480,18 +481,13 @@ func (s *Service) shouldMoveReopenedTask(ctx context.Context, repositoryID, task
 }
 
 func rollbackReopenComment(r domain.Release) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "Release %s was rolled back (%s).", r.Version, r.Rollback.Reason)
-	if note := strings.TrimSpace(r.Rollback.Note); note != "" {
-		sb.WriteString(" " + note)
-	}
-	if r.Checks.EarlyStop != "" {
-		fmt.Fprintf(&sb, " Evidence: %s.", r.Checks.EarlyStop)
-	}
-	fmt.Fprintf(&sb, "\n\nYour change was reverted on the default branch as %s. "+
-		"Re-apply your change on the task branch (git revert %s), fix it, and send it through review again.",
-		domain.ShortSHA(r.Rollback.RevertSHA), domain.ShortSHA(r.Rollback.RevertSHA))
-	return sb.String()
+	return rollbackReopenCommentKey.Render(rollbackReopenCommentInput{
+		Version:   r.Version,
+		Reason:    string(r.Rollback.Reason),
+		Note:      strings.TrimSpace(r.Rollback.Note),
+		EarlyStop: r.Checks.EarlyStop,
+		RevertSHA: domain.ShortSHA(r.Rollback.RevertSHA),
+	})
 }
 
 // rollbackClaimGrace is how long a rolling_back release may sit with

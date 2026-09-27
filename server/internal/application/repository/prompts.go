@@ -1,6 +1,9 @@
 package repository
 
-import "github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
+import (
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+)
 
 // This file registers every LLM-facing string the repository gates render —
 // see catalog/system/guards/** and catalog/system/prompts/repository/**.
@@ -68,3 +71,23 @@ var criterionVerdictWrongColumnKey = prompt.Define("guard.criterion_verdict_wron
 type workflowSetupTaskBriefInput struct{ Kind string }
 
 var workflowSetupTaskBriefKey = prompt.Define("repository.workflow_setup_task_brief", workflowSetupTaskBriefInput{Kind: "backend"})
+
+type orderNoteInput struct {
+	DeployAfter []string
+	WorkAfter   []string
+}
+
+var orderNoteKey = prompt.Define[orderNoteInput]("briefs.repository.order_note", orderNoteInput{
+	DeployAfter: []string{"T-12"},
+})
+
+// renderOrderNote is WP7's application-consumer render of domain's
+// order-note data (domain must not import application, so the generated
+// block's prose lives in catalog/system and renders here, wrapped in the
+// domain-owned fence markers).
+func renderOrderNote(deployAfter, workAfter []string) string {
+	if domain.OrderNoteEmpty(deployAfter, workAfter) {
+		return ""
+	}
+	return domain.OrderNoteOpen + "\n" + orderNoteKey.Render(orderNoteInput{DeployAfter: deployAfter, WorkAfter: workAfter}) + domain.OrderNoteClose
+}

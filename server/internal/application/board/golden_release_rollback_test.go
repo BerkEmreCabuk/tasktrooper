@@ -8,9 +8,20 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/board"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow/workflowtest"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
+
+// mustRenderRollbackRunbook renders partial.rollback_runbook directly, so
+// the golden fixture below composes the same way releaseRollbackRunbook
+// does, without duplicating its wording.
+func mustRenderRollbackRunbook(t *testing.T, data domain.RollbackRunbook) string {
+	t.Helper()
+	out, err := prompt.Default().Render("partial.rollback_runbook", data)
+	require.NoError(t, err)
+	return out
+}
 
 // TestGoldenReleaseRollbackRunbook pins releaseRollbackRunbook's exact
 // wording, byte-for-byte, before it moves into
@@ -61,7 +72,7 @@ func TestGoldenReleaseRollbackRunbook(t *testing.T) {
 			"Incident: checkout errors spiking (prod, severity critical)\n" +
 			"5xx rate above 10%\n" +
 			"Released commit: " + domain.ShortSHA(task.MergeCommitSHA) + "\n\n" +
-			domain.TaskRollbackRunbook(task) + "\n\n" +
+			mustRenderRollbackRunbook(t, domain.TaskRollbackRunbookFields(task)) + "\n\n" +
 			"auto_rollback is OFF in this release's delivery profile: call rollback_release with reason=health_incident anyway — it will execute NOTHING and return the written-up proposal (`proposed: true`). " +
 			"That is the correct outcome here. Post what it returns on this task, say plainly that a human has to confirm it, and stop. Do not look for another way to roll production back. " +
 			"Then work through the plan above yourself and report every step you performed AND every step you could not — a schema change, a feature flag, anything with a human on the other end. " +

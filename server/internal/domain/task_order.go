@@ -21,27 +21,17 @@ const (
 	OrderNoteClose = "<!-- /tt:order -->"
 )
 
-// OrderNote renders the generated block for a task, or "" when the task
-// declares no ordering at all. deployAfter names the tasks that must be live in
-// production first (deploy_depends_on); workAfter names the tasks that must be
-// finished before this one may be worked on (the `blocks` rows pointing at it).
-// Both are rendered because both answer the same question — which task goes
-// first — at two moments.
-func OrderNote(deployAfter, workAfter []string) string {
-	var lines []string
-	if len(deployAfter) > 0 {
-		lines = append(lines, "- Ships after: "+strings.Join(deployAfter, ", ")+
-			". Each one must be live in production before this task is released; the release is refused otherwise.")
-	}
-	if len(workAfter) > 0 {
-		lines = append(lines, "- Built after: "+strings.Join(workAfter, ", ")+
-			". Work on this task does not start until those are done.")
-	}
-	if len(lines) == 0 {
-		return ""
-	}
-	return OrderNoteOpen + "\n**Release order (generated from this task's relations — do not edit by hand):**\n" +
-		strings.Join(lines, "\n") + "\n" + OrderNoteClose
+// OrderNoteEmpty reports whether a task declares no ordering at all —
+// deployAfter and workAfter are both empty, so OrderNote's generated block
+// renders as "". deployAfter names the tasks that must be live in production
+// first (deploy_depends_on); workAfter names the tasks that must be finished
+// before this one may be worked on (the `blocks` rows pointing at it). Both
+// are rendered because both answer the same question — which task goes
+// first — at two moments. Rendering the two lists into the generated block's
+// sentences happens at the application consumer (briefs.repository.order_note
+// in catalog/system), since domain must not import application.
+func OrderNoteEmpty(deployAfter, workAfter []string) bool {
+	return len(deployAfter) == 0 && len(workAfter) == 0
 }
 
 // StripOrderNote removes a previously generated block, leaving everything a

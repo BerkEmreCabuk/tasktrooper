@@ -167,61 +167,35 @@ func (s *Service) assignee(ctx context.Context, role domain.ComponentRole) *uuid
 }
 
 func bootstrapDescription(name string, role domain.ComponentRole, req domain.NewRepositoryRequest, docs []string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Set up the brand-new repository %s. It was just created empty — an initial commit and nothing else — so there is no existing code to read or follow: what this task writes sets the conventions for everything after it.\n\n", name)
-
-	b.WriteString("## What the person asked for\n\n")
-	b.WriteString("Their answers, verbatim:\n\n")
-	writeAnswer(&b, "Description", req.Description)
-	writeAnswer(&b, "Role", string(role))
-	writeAnswer(&b, "Stack", req.Stack)
-	writeAnswer(&b, "Notes", req.Notes)
-	if strings.TrimSpace(req.Stack) == "" {
-		fmt.Fprintf(&b, "No stack was named: choose a mainstream, well-supported stack for a %s project that fits the description, and state the choice and the reason in the README.\n\n", role)
-	}
-
-	b.WriteString("## What to deliver\n\n")
-	b.WriteString("Do ALL of it on a single branch, in exactly one pull request. Do not open a pull request per item and do not stop after the first one — the task is finished when every item below exists and is correct.\n\n")
+	var items []bootstrapItem
 	n := 0
-	item := func(text string) {
+	nextItem := func(kind, path, kindLabel string) {
 		n++
-		fmt.Fprintf(&b, "%d. %s\n", n, text)
+		items = append(items, bootstrapItem{Number: n, Kind: kind, Path: path, KindLabel: kindLabel})
 	}
 	if req.Scaffold {
-		item("the initial project skeleton in the repository root")
+		nextItem("skeleton", "", "")
 	}
 	for _, kind := range docs {
-		item(fmt.Sprintf("`%s` — %s", domain.DefaultRepoDocPath(kind), repodocs.DocKindLabel(kind)))
+		nextItem("doc", domain.DefaultRepoDocPath(kind), repodocs.DocKindLabel(kind))
 	}
-	item("`CLAUDE.md` and `AGENTS.md` at the repository root")
+	nextItem("claude", "", "")
 
-	if req.Scaffold {
-		b.WriteString("\n---\n\n## The project skeleton\n\n")
-		b.WriteString("Create the initial project skeleton for this stack in the repository root: minimal but runnable — it installs, builds and starts (a library: builds and runs its tests) with the stack's standard commands — plus a README that says what the project is and how to install, run and test it. Nothing beyond what proves it runs.\n")
-		b.WriteString("Before writing it by hand, call search_boilerplate_catalog with the stack and the role; when a starter there fits, build on it instead of starting from scratch, and say in the pull request which one you used.\n")
-		if len(docs) > 0 {
-			b.WriteString("The skeleton must already follow every convention the documents below prescribe.\n")
-		}
-	}
-	for _, kind := range docs {
+	bootstrapDocs := make([]bootstrapDoc, len(docs))
+	for i, kind := range docs {
 		path := domain.DefaultRepoDocPath(kind)
-		fmt.Fprintf(&b, "\n---\n\n## `%s`\n\n", path)
-		b.WriteString(repodocs.NewRepoDocInstructions(kind, path))
+		bootstrapDocs[i] = bootstrapDoc{Path: path, Instructions: repodocs.NewRepoDocInstructions(kind, path)}
 	}
 
-	b.WriteString("\n---\n\n## `CLAUDE.md` and `AGENTS.md`\n\n")
-	b.WriteString("Create both at the repository root, or refresh them if the skeleton already produced one: a one-paragraph summary of what this project is, then a short docs index linking every document written in this pull request")
-	if req.Scaffold {
-		b.WriteString(" and the README")
-	}
-	b.WriteString(", so every agent that opens this repository finds them. Keep the two files' content the same.\n")
-	return b.String()
-}
-
-func writeAnswer(b *strings.Builder, label, value string) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		value = "(not given)"
-	}
-	fmt.Fprintf(b, "**%s**\n%s\n\n", label, value)
+	return bootstrapDescriptionKey.Render(bootstrapDescriptionInput{
+		Name:        name,
+		Role:        string(role),
+		Description: strings.TrimSpace(req.Description),
+		Stack:       strings.TrimSpace(req.Stack),
+		Notes:       strings.TrimSpace(req.Notes),
+		Scaffold:    req.Scaffold,
+		HasDocs:     len(docs) > 0,
+		Items:       items,
+		Docs:        bootstrapDocs,
+	})
 }

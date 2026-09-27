@@ -410,14 +410,14 @@ func TestAnalysisReferencesIgnoresOrderingRelations(t *testing.T) {
 }
 
 func TestOrderNoteFenceRoundTrips(t *testing.T) {
-	note := domain.OrderNote([]string{"T-1 (API)"}, nil)
+	note := renderOrderNote([]string{"T-1 (API)"}, nil)
 	require.NotEmpty(t, note)
 
 	body := "Flip the feature flag.\nWarm the cache."
 	combined := domain.ApplyOrderNote(body, note)
 	assert.Equal(t, body, domain.StripOrderNote(combined), "stripping the block gives the agent's text back exactly")
 
-	again := domain.ApplyOrderNote(combined, domain.OrderNote([]string{"T-9 (other)"}, nil))
+	again := domain.ApplyOrderNote(combined, renderOrderNote([]string{"T-9 (other)"}, nil))
 	assert.Equal(t, 1, strings.Count(again, domain.OrderNoteOpen))
 	assert.Contains(t, again, "T-9")
 	assert.NotContains(t, again, "T-1 (API)")
@@ -426,7 +426,7 @@ func TestOrderNoteFenceRoundTrips(t *testing.T) {
 
 func TestOrderNoteFenceSurvivesATruncatedBlock(t *testing.T) {
 	broken := "Flip the flag.\n" + domain.OrderNoteOpen + "\n- Ships after: T-1"
-	out := domain.ApplyOrderNote(broken, domain.OrderNote([]string{"T-9 (other)"}, nil))
+	out := domain.ApplyOrderNote(broken, renderOrderNote([]string{"T-9 (other)"}, nil))
 	assert.Equal(t, 1, strings.Count(out, domain.OrderNoteOpen))
 	assert.Contains(t, out, "Flip the flag.")
 }

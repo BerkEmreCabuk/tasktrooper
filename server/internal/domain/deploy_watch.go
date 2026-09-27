@@ -217,30 +217,36 @@ func ReleaseTagForCommit(sha string) string {
 	return "release/" + ShortSHA(strings.TrimSpace(sha))
 }
 
-// TaskRollbackRunbook renders the task's own rollback instructions — the
-// rollback_plan, before_deploy and after_deploy fields a developer wrote — as
-// the text a rollback run must follow. This is the half of a rollback no
-// mechanism can perform: `git revert` undoes code, not migrations, feature
-// flags, CDN purges or manual switches, and the developer was the only one who
-// knew which applied. Empty when the task recorded none, so a rollback of a
-// task with no plan says so rather than pretending one was followed.
-func TaskRollbackRunbook(task BoardTask) string {
-	var sections []string
-	if plan := trimmedTaskField(task.RollbackPlan); plan != "" {
-		sections = append(sections, "Rollback plan recorded on this task (FOLLOW IT — it is the developer's own instruction):\n"+plan)
+// RollbackRunbook is a task's own rollback instructions — the rollback_plan,
+// before_deploy and after_deploy fields a developer wrote — as data, not
+// text: this is the half of a rollback no mechanism can perform (`git
+// revert` undoes code, not migrations, feature flags, CDN purges or manual
+// switches, and the developer was the only one who knew which applied), and
+// domain must not import application, so rendering these fields into the
+// text a rollback run must follow happens at the application consumer
+// (partial.rollback_runbook in catalog/system).
+type RollbackRunbook struct {
+	Plan   string
+	Before string
+	After  string
+}
+
+// Empty reports whether the task recorded no rollback instructions at all.
+func (r RollbackRunbook) Empty() bool { return r.Plan == "" && r.Before == "" && r.After == "" }
+
+// TaskRollbackRunbookFields reads a task's rollback_plan, before_deploy and
+// after_deploy fields, trimmed.
+func TaskRollbackRunbookFields(task BoardTask) RollbackRunbook {
+	return RollbackRunbook{
+		Plan:   trimmedTaskField(task.RollbackPlan),
+		Before: trimmedTaskField(task.BeforeDeploy),
+		After:  trimmedTaskField(task.AfterDeploy),
 	}
-	if before := trimmedTaskField(task.BeforeDeploy); before != "" {
-		sections = append(sections, "What had to happen BEFORE this was deployed (each of these may need undoing, in reverse order):\n"+before)
-	}
-	if after := trimmedTaskField(task.AfterDeploy); after != "" {
-		sections = append(sections, "What was done AFTER the deploy (undo anything here that is now pointing at code that no longer exists):\n"+after)
-	}
-	return strings.Join(sections, "\n\n")
 }
 
 // HasRollbackRunbook reports whether the task carries any rollback instructions
 // at all.
-func HasRollbackRunbook(task BoardTask) bool { return TaskRollbackRunbook(task) != "" }
+func HasRollbackRunbook(task BoardTask) bool { return !TaskRollbackRunbookFields(task).Empty() }
 
 func trimmedTaskField(p *string) string {
 	if p == nil {

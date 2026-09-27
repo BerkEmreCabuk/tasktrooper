@@ -449,23 +449,18 @@ func (s *Service) CreateSetupTask(ctx context.Context, repositoryID uuid.UUID, e
 		}
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "Author the %s deploy for this repository using the %s template.\n\n", env, tpl.Name)
-	fmt.Fprintf(&b, "Target: provider=%s, env=%s, workflow file=.github/workflows/%s\n",
-		target.Provider, env, tpl.WorkflowFile)
-	if missing := tpl.MissingVars(target.Vars); len(missing) > 0 {
-		fmt.Fprintf(&b, "\nMissing variables (ask before guessing): %s\n", strings.Join(missing, ", "))
-	}
-	b.WriteString("\nDefinition of done:\n")
-	b.WriteString("- the workflow file exists, is workflow_dispatch-triggerable and passes a manual run\n")
-	b.WriteString("- the deploy verifies itself (smoke check) and rolls back on failure\n")
-	fmt.Fprintf(&b, "- the pipeline mapping for category %s points at %s\n", domain.DeployEnvCategory(env), tpl.WorkflowFile)
-	b.WriteString("\n---\n\n")
-	b.WriteString(Render(tpl, target))
+	description := setupTaskKey.Render(setupTaskInput{
+		Env:          env,
+		TemplateName: tpl.Name,
+		Provider:     target.Provider,
+		WorkflowFile: tpl.WorkflowFile,
+		EnvCategory:  domain.DeployEnvCategory(env),
+		MissingVars:  tpl.MissingVars(target.Vars),
+	}) + Render(tpl, target)
 
 	return s.tasks.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
 		Title:           fmt.Sprintf("Set up %s deploy (%s)", env, tpl.Name),
-		Description:     b.String(),
+		Description:     description,
 		Priority:        domain.TaskPriorityHigh,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
@@ -506,27 +501,11 @@ func (s *Service) CreateLocalSetupTask(ctx context.Context, repositoryID uuid.UU
 
 	scriptPath := dir + "scripts/dev.sh"
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "Write %s: a COMPLETE, executable bootstrap script that gets this %s running on a developer's own machine. A script, not a markdown guide — do not write one.\n\n", scriptPath, kind)
-	b.WriteString("Definition of done — running it once on a fresh machine leaves the project running, with no other step:\n")
-	b.WriteString("- installs every dependency and toolchain the project needs (checks first, installs only what is missing)\n")
-	b.WriteString("- prepares env/config: creates the .env (or equivalent) from the example with local defaults, runs the migrations and seeds a first run needs\n")
-	b.WriteString("- starts every service the project needs to actually work — the app plus its database, cache, queue or emulator — not just the app process\n")
-	b.WriteString("- idempotent: a second run is safe and duplicates nothing\n")
-	b.WriteString("- executable (`chmod +x`), `#!/usr/bin/env bash`, `set -euo pipefail`\n")
-	b.WriteString("- a short usage header comment at the top: what it does, how to run it, and the port/URL it comes up on\n")
-	fmt.Fprintf(&b, "- accepts an optional port argument (`%s [port]`) overriding the default, so it can be rerun when the default port is taken\n", scriptPath)
-	b.WriteString("- matches what the repo actually needs today (its real package manager, build tool, ports) — not a generic template\n")
-	switch kind {
-	case domain.RepoKindMobile:
-		b.WriteString("- covers both iOS (simulator) and Android (emulator) if the repo ships both platforms\n")
-	case domain.RepoKindWorker:
-		b.WriteString("- starts any queue/broker the worker needs locally (or configures a fake/in-memory mode when there is none to start)\n")
-	}
+	description := localSetupTaskKey.Render(localSetupTaskInput{ScriptPath: scriptPath, Kind: kind})
 
 	return s.tasks.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
 		Title:           fmt.Sprintf("Write the local bootstrap script (%s)", kind),
-		Description:     b.String(),
+		Description:     description,
 		Priority:        domain.TaskPriorityMedium,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 )
@@ -63,30 +64,28 @@ func rollbackRemedy(c RemedyContext) (domain.Remedy, bool) {
 		return domain.Remedy{}, false
 	}
 
-	gap := onset.Sub(suspect.FinishedAt).Round(time.Minute)
+	gap := humanDuration(onset.Sub(suspect.FinishedAt).Round(time.Minute))
 	confidence := 70
-	summary := fmt.Sprintf("A deploy to %s finished %s before this incident started — treat it as the cause and roll back first, diagnose after.",
-		c.Incident.Env, humanDuration(gap))
+	summary := rollbackSummaryRecent.Render(envGapInput{Env: c.Incident.Env, Gap: gap})
 	if suspect.Status == domain.PipelineStatusFailed {
 		confidence = 85
-		summary = fmt.Sprintf("The %s deploy %s before this incident FAILED — production is likely running a half-applied release. Roll back to the last good revision.",
-			c.Incident.Env, humanDuration(gap))
+		summary = rollbackSummaryFailed.Render(envGapInput{Env: c.Incident.Env, Gap: gap})
 	}
 	steps := []string{}
 	if c.Rollback != "" {
-		steps = append(steps, "Roll back: "+c.Rollback)
+		steps = append(steps, rollbackStepHint.Render(hintInput{Hint: c.Rollback}))
 	} else {
-		steps = append(steps, "Roll back the last release of this environment (redeploy the previously running revision/image).")
+		steps = append(steps, prompt.Text(rollbackStepGeneric))
 	}
 	steps = append(steps,
-		"Confirm recovery against the environment health URL before touching code.",
-		"Then diff the released commits and reproduce the failure locally or in stage.")
+		prompt.Text(rollbackStepConfirm),
+		prompt.Text(rollbackStepDiff))
 	if !c.Target.AutoRollback {
-		steps = append(steps, "Auto-rollback is off for this target — the rollback has to be dispatched by hand.")
+		steps = append(steps, prompt.Text(rollbackStepAutoOff))
 	}
-	evidence := []string{fmt.Sprintf("deploy status=%s, finished %s before onset", suspect.Status, humanDuration(gap))}
+	evidence := []string{rollbackEvidenceDeploy.Render(statusGapInput{Status: string(suspect.Status), Gap: gap})}
 	if suspect.TaskKey != "" {
-		evidence = append(evidence, "released task: "+suspect.TaskKey)
+		evidence = append(evidence, rollbackEvidenceTask.Render(taskKeyInput{TaskKey: suspect.TaskKey}))
 	}
 	return domain.Remedy{
 		Kind:       domain.RemedyKindRollback,
@@ -113,14 +112,14 @@ func repeatRemedy(c RemedyContext) (domain.Remedy, bool) {
 		}
 		return domain.Remedy{
 			Kind:    kind,
-			Summary: fmt.Sprintf("This exact failure was seen and resolved before (%s). Apply the fix that worked, then decide whether it needs to be made permanent.", when),
+			Summary: repeatSummary.Render(whenInput{When: when}),
 			Steps: []string{
-				"Previous fix:\n" + strings.TrimSpace(past.Remedy),
-				"If this is the third time or more, the recurrence itself is the bug — open a follow-up task for the permanent fix.",
+				repeatStepFix.Render(fixInput{Fix: strings.TrimSpace(past.Remedy)}),
+				prompt.Text(repeatStepFollowup),
 			},
 			Confidence: 65,
 			Evidence: []string{
-				fmt.Sprintf("same fingerprint resolved %s (%d occurrences then)", when, past.Occurrences),
+				repeatEvidence.Render(whenOccurrencesInput{When: when, Occurrences: past.Occurrences}),
 			},
 		}, true
 	}
@@ -128,53 +127,45 @@ func repeatRemedy(c RemedyContext) (domain.Remedy, bool) {
 }
 
 type signatureClass struct {
-	kind     string
-	keywords []string
-	summary  string
-	steps    []string
+	kind       string
+	keywords   []string
+	summaryKey prompt.Key[struct{}]
+	stepKeys   []prompt.Key[struct{}]
 }
 
 var signatures = []signatureClass{
 	{
-		kind:     domain.RemedyKindConfig,
-		keywords: []string{"permission denied", "unauthorized", "forbidden", "401", "403", "invalid credential", "missing env", "secret", "no such file or directory: /etc", "config", "certificate", "x509"},
-		summary:  "The signature points at configuration or credentials, not at code: something the environment provides is missing, expired or wrong.",
-		steps: []string{
-			"Compare the failing environment's env vars/secrets against a working environment.",
-			"Check for a recently rotated key, expired certificate or renamed config entry.",
-			"Fix the configuration first; only change code if the config is provably correct.",
-		},
+		kind:       domain.RemedyKindConfig,
+		keywords:   []string{"permission denied", "unauthorized", "forbidden", "401", "403", "invalid credential", "missing env", "secret", "no such file or directory: /etc", "config", "certificate", "x509"},
+		summaryKey: signatureConfigSummary,
+		stepKeys:   []prompt.Key[struct{}]{signatureConfigStep1, signatureConfigStep2, signatureConfigStep3},
 	},
 	{
-		kind:     domain.RemedyKindDependency,
-		keywords: []string{"connection refused", "connection reset", "dial tcp", "no such host", "timeout", "timed out", "upstream", "502", "503", "504", "unreachable", "database is not available", "too many connections", "deadlock"},
-		summary:  "The signature points at a dependency: a downstream service, database or network path is not answering.",
-		steps: []string{
-			"Check the dependency's own health/status before touching this service.",
-			"Verify connection limits, pool exhaustion and network policy/firewall changes.",
-			"If the dependency is healthy, look for a client-side change: timeouts, retries, connection pooling.",
-		},
+		kind:       domain.RemedyKindDependency,
+		keywords:   []string{"connection refused", "connection reset", "dial tcp", "no such host", "timeout", "timed out", "upstream", "502", "503", "504", "unreachable", "database is not available", "too many connections", "deadlock"},
+		summaryKey: signatureDependencySummary,
+		stepKeys:   []prompt.Key[struct{}]{signatureDependencyStep1, signatureDependencyStep2, signatureDependencyStep3},
 	},
 	{
-		kind:     domain.RemedyKindCapacity,
-		keywords: []string{"oom", "out of memory", "memory limit", "cpu throttl", "429", "rate limit", "quota", "disk full", "no space left", "evicted", "backoff", "crashloop", "scale"},
-		summary:  "The signature points at capacity: the workload is being starved, throttled or evicted rather than failing logically.",
-		steps: []string{
-			"Check memory/CPU limits and the recent request rate against them.",
-			"Scale (replicas or limits) to stop the bleeding, then find what changed the resource profile.",
-			"If it is a rate limit or quota, confirm whether traffic grew or a retry loop is amplifying it.",
-		},
+		kind:       domain.RemedyKindCapacity,
+		keywords:   []string{"oom", "out of memory", "memory limit", "cpu throttl", "429", "rate limit", "quota", "disk full", "no space left", "evicted", "backoff", "crashloop", "scale"},
+		summaryKey: signatureCapacitySummary,
+		stepKeys:   []prompt.Key[struct{}]{signatureCapacityStep1, signatureCapacityStep2, signatureCapacityStep3},
 	},
 	{
-		kind:     domain.RemedyKindCodeFix,
-		keywords: []string{"panic", "nil pointer", "segmentation fault", "unhandled exception", "stack trace", "nullpointerexception", "index out of range", "500", "internal server error"},
-		summary:  "The signature points at a code defect reaching production traffic.",
-		steps: []string{
-			"Reproduce with a failing test that matches the stack trace before changing anything.",
-			"Fix the root cause (not the symptom) and keep the reproducing test as a regression guard.",
-			"Ship through the normal pipeline — a hotfix that skips tests is how the next incident starts.",
-		},
+		kind:       domain.RemedyKindCodeFix,
+		keywords:   []string{"panic", "nil pointer", "segmentation fault", "unhandled exception", "stack trace", "nullpointerexception", "index out of range", "500", "internal server error"},
+		summaryKey: signatureCodeFixSummary,
+		stepKeys:   []prompt.Key[struct{}]{signatureCodeFixStep1, signatureCodeFixStep2, signatureCodeFixStep3},
 	},
+}
+
+func renderTexts(keys []prompt.Key[struct{}]) []string {
+	out := make([]string, len(keys))
+	for i, k := range keys {
+		out[i] = prompt.Text(k)
+	}
+	return out
 }
 
 func signatureRemedy(c RemedyContext) domain.Remedy {
@@ -190,28 +181,28 @@ func signatureRemedy(c RemedyContext) domain.Remedy {
 			}
 			return domain.Remedy{
 				Kind:       sig.kind,
-				Summary:    sig.summary,
-				Steps:      sig.steps,
+				Summary:    prompt.Text(sig.summaryKey),
+				Steps:      renderTexts(sig.stepKeys),
 				Confidence: confidence,
-				Evidence:   []string{fmt.Sprintf("matched signature %q in the alert text", kw)},
+				Evidence:   []string{signatureEvidence.Render(keywordInput{Keyword: kw})},
 			}
 		}
 	}
 	steps := []string{
-		"Read the last 15 minutes of logs for this service around the first occurrence.",
-		"Check whether anything was deployed, scaled or reconfigured today.",
-		"Compare the failing environment against the last environment where it worked.",
+		prompt.Text(fallbackStep1),
+		prompt.Text(fallbackStep2),
+		prompt.Text(fallbackStep3),
 	}
 	if c.Target.HealthURL != "" {
 
-		steps = append(steps, "Probe the health endpoint directly: "+urlguard.LogRaw(c.Target.HealthURL))
+		steps = append(steps, fallbackStepProbe.Render(urlInput{URL: urlguard.LogRaw(c.Target.HealthURL)}))
 	}
 	return domain.Remedy{
 		Kind:       domain.RemedyKindUnknown,
-		Summary:    "No known signature matched — this needs diagnosis before a fix can be proposed.",
+		Summary:    prompt.Text(fallbackSummary),
 		Steps:      steps,
 		Confidence: 25,
-		Evidence:   []string{fmt.Sprintf("%d occurrence(s), severity %s, source %s", c.Incident.Occurrences, c.Incident.Severity, c.Incident.Source)},
+		Evidence:   []string{fallbackEvidence.Render(occurrencesSeveritySourceInput{Occurrences: c.Incident.Occurrences, Severity: string(c.Incident.Severity), Source: string(c.Incident.Source)})},
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deployops"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -108,8 +109,7 @@ func (s *Service) Rollback(ctx context.Context, req RollbackRequest) (domain.Tas
 		AgentName: req.AgentName,
 	})
 	if err != nil {
-		s.reportRollback(ctx, task, env, "Rollback FAILED: "+err.Error()+
-			"\n\nProduction is still running this release. Escalate to a human now.", req)
+		s.reportRollback(ctx, task, env, rollbackFailedKey.Render(errorInput{Error: err.Error()}), req)
 		return result, err
 	}
 	result.RolledBack = true
@@ -199,8 +199,9 @@ func (s *Service) executeRollback(ctx context.Context, task domain.BoardTask, rc
 				Mechanism:    domain.RollbackMechanismWorkflow,
 				Ref:          dispatch.Ref,
 				RolledBackTo: dispatch.RollbackOfSHA,
-				Message: fmt.Sprintf("Rolled back %s by dispatching %s at %s (tag %s), returning production to %s.",
-					rc.Env, dispatch.WorkflowFile, domain.ShortSHA(dispatch.RollbackOfSHA), dispatch.Ref, domain.ShortSHA(dispatch.RollbackOfSHA)),
+				Message: rollbackDispatchedKey.Render(rollbackDispatchedInput{
+					Env: rc.Env, WorkflowFile: dispatch.WorkflowFile, RollbackOfSHA: domain.ShortSHA(dispatch.RollbackOfSHA), Ref: dispatch.Ref,
+				}),
 			}, nil
 		case errors.Is(err, deployops.ErrNoWorkflowMapping):
 
@@ -233,40 +234,36 @@ func (s *Service) revertRollback(ctx context.Context, task domain.BoardTask, rc 
 		Mechanism: domain.RollbackMechanismRevert,
 		Ref:       revertSHA,
 		RevertSHA: revertSHA,
-		Message: fmt.Sprintf("Rolled back %s by reverting %s on the default branch and pushing (%s). "+
-			"This repository has no deploy workflow — it deploys on push, so the revert commit IS the rollback deploy.",
-			rc.Env, domain.ShortSHA(rc.MergeSHA), domain.ShortSHA(revertSHA)),
+		Message: rollbackRevertedKey.Render(rollbackRevertedInput{
+			Env: rc.Env, MergeSHA: domain.ShortSHA(rc.MergeSHA), RevertSHA: domain.ShortSHA(revertSHA),
+		}),
 	}, nil
 }
 
 func manualRollbackSteps(task domain.BoardTask) []string {
 	var steps []string
 	if task.HasMigration {
-		steps = append(steps, "This task changed the DATABASE SCHEMA. Reverting the code does NOT reverse the migration — "+
-			"the schema is still whatever the release left it as. Say so explicitly on the task and name who has to reverse it; do not report the rollback as complete.")
+		steps = append(steps, prompt.Text(manualStepSchema))
 	}
-	if runbook := domain.TaskRollbackRunbook(task); runbook != "" {
-		steps = append(steps, "The task recorded its own rollback instructions. Perform each of them yourself and report what you did, "+
-			"or say clearly which ones you could not:\n"+runbook)
+	runbook := domain.TaskRollbackRunbookFields(task)
+	if !runbook.Empty() {
+		steps = append(steps, manualStepRunbookKey.Render(runbookInput{Runbook: runbook}))
 	} else {
-		steps = append(steps, "No rollback plan was recorded on this task, so nothing beyond the code revert has been undone. "+
-			"Check by hand whether this change had a config, flag or data step, and say on the task that no plan existed.")
+		steps = append(steps, prompt.Text(manualStepNoPlan))
 	}
 	return steps
 }
 
 func (s *Service) proposeRollback(ctx context.Context, task domain.BoardTask, target domain.DeployTarget, env, mergeSHA string, req RollbackRequest) string {
-	msg := fmt.Sprintf("Rollback PROPOSED, not executed — auto_rollback is off for %s.\n\n"+
-		"What went wrong: %s (%s).\n"+
-		"What is live: %s, merged from %s.\n"+
-		"Proposed action: roll %s back off this commit.\n\n"+
-		"A human has to confirm it: POST /v1/repositories/%s/deploy/%s/rollback with the repository name as the confirmation phrase. "+
-		"Turning on auto_rollback for this target is what would let this be done automatically next time.",
-		env, firstNonEmpty(req.Note, "the release failed"), req.Trigger,
-		domain.ShortSHA(mergeSHA), task.Key, env, task.RepositoryID, env)
-	if steps := manualRollbackSteps(task); len(steps) > 0 {
-		msg += "\n\nEven once the code is rolled back, these are not automatic:\n- " + strings.Join(steps, "\n- ")
-	}
+	msg := rollbackProposedKey.Render(rollbackProposedInput{
+		Env:          env,
+		Reason:       firstNonEmpty(req.Note, "the release failed"),
+		Trigger:      req.Trigger,
+		MergeSHA:     domain.ShortSHA(mergeSHA),
+		TaskKey:      task.Key,
+		RepositoryID: task.RepositoryID.String(),
+		Steps:        manualRollbackSteps(task),
+	})
 	s.reportRollback(ctx, task, env, msg, req)
 	_ = target
 	return msg
@@ -310,17 +307,11 @@ func (s *Service) reportRollback(ctx context.Context, task domain.BoardTask, env
 }
 
 func rollbackReport(result domain.TaskRollbackResult, task domain.BoardTask) string {
-	var sb strings.Builder
-	sb.WriteString(result.Message)
-	sb.WriteString("\n\nThis is the MECHANICAL half only. ")
-	if len(result.ManualSteps) > 0 {
-		sb.WriteString("The following were NOT undone by it:\n- ")
-		sb.WriteString(strings.Join(result.ManualSteps, "\n- "))
-	}
-	if after := domain.TaskRollbackRunbook(task); after == "" {
-		sb.WriteString("\n\n(The task recorded no rollback plan, which is itself worth fixing before the next release.)")
-	}
-	return sb.String()
+	return rollbackReportKey.Render(rollbackReportInput{
+		Message:     result.Message,
+		ManualSteps: result.ManualSteps,
+		NoRunbook:   domain.TaskRollbackRunbookFields(task).Empty(),
+	})
 }
 
 func firstNonEmpty(values ...string) string {

@@ -74,18 +74,11 @@ func (s *Service) CreateDocTask(ctx context.Context, repositoryID uuid.UUID, sub
 		return domain.BoardTask{}, err
 	}
 
-	var b strings.Builder
-	if doc.kind == domain.RepoDocLocalRun {
-		fmt.Fprintf(&b, "Write or refresh %s for this %s repository.\n\n", doc.fullPath, doc.kindLabel)
-	} else {
-		fmt.Fprintf(&b, "Write or refresh %s for this %s repository. If it already exists, read it first and update whatever is stale or wrong against the current codebase rather than starting over; otherwise write it from scratch.\n\n", doc.fullPath, doc.kindLabel)
-	}
-	b.WriteString(docInstructions(doc))
-	b.WriteString("\nAlso make sure the agent instructions file at the repository root (CLAUDE.md, AGENTS.md or the equivalent the agents on this repo read) has a short docs index; create a minimal one if it's missing, and add (or update) a line linking to this file so agents find it.\n")
+	description := docTaskKey.Render(docTaskInput{Kind: doc.kind, FullPath: doc.fullPath, KindLabel: doc.kindLabel})
 
 	return s.tasks.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
 		Title:           fmt.Sprintf("Write %s (%s)", doc.fullPath, doc.kindLabel),
-		Description:     b.String(),
+		Description:     description,
 		Priority:        domain.TaskPriorityMedium,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
@@ -174,51 +167,11 @@ func (s *Service) resolveDoc(ctx context.Context, repo domain.Repository, item D
 	return out, nil
 }
 
-func docInstructions(doc resolvedDoc) string {
-	switch doc.kind {
-	case domain.RepoDocCodingStandards:
-		return "Cover: the formatting/lint tooling actually configured, naming and file-layout conventions, error-handling style, and anything this codebase does differently from a generic style guide. Read the existing code before writing — describe what it does, don't prescribe a generic standard.\n"
-	case domain.RepoDocTestStandards:
-		return "Cover: the test runner and how to invoke it, the testing pyramid this repo actually follows (unit/integration/e2e — only the layers that exist), coverage expectations if any, and how a new feature's tests should be structured here.\n"
-	case domain.RepoDocArchitecture:
-		return "Cover: the major components/layers and how they depend on each other, the data flow for a typical request or task, and the boundaries that must not be crossed (e.g. hexagonal layering, module isolation).\n"
-	case domain.RepoDocLocalRun:
-		return localRunScriptRequirements(doc.fullPath) +
-			"Everything in it must match what this repository actually needs today — its real package manager, build tool and ports — not a generic template. Do not write a markdown guide instead of, or alongside, the script.\n"
-	}
-	return ""
-}
-
-func localRunScriptRequirements(fullPath string) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "This one is NOT a markdown guide: %s must be a COMPLETE, executable local bootstrap script.\n", fullPath)
-	b.WriteString("Running it on a fresh machine must leave the project running, with no other step:\n")
-	b.WriteString("- install every dependency and toolchain the project needs (check first, install only what is missing)\n")
-	b.WriteString("- prepare env/config: create the .env (or equivalent) from the example, fill in the local defaults, run whatever migrations and seeds a first run needs\n")
-	b.WriteString("- start every service the project needs to actually work — the app plus its database, cache, queue or emulator — not just the app process\n")
-	b.WriteString("- idempotent: running it a second time must be safe and must not duplicate anything\n")
-	b.WriteString("- executable (`chmod +x`), with a `#!/usr/bin/env bash` shebang and `set -euo pipefail`\n")
-	b.WriteString("- a short usage header comment at the top: what it does, how to run it, and the port/URL it comes up on\n")
-	fmt.Fprintf(&b, "- accepts an optional port argument (`%s [port]`) overriding the default, so it can be rerun when the default port is already in use\n", fullPath)
-	return b.String()
-}
-
-// NewRepoDocInstructions is docInstructions for a repository with no code yet:
-// there is nothing to describe, so each doc PRESCRIBES the conventions the
-// first commit and every later change must follow.
+// NewRepoDocInstructions is the doc_task brief for a repository with no code
+// yet: there is nothing to describe, so each doc PRESCRIBES the conventions
+// the first commit and every later change must follow.
 func NewRepoDocInstructions(kind, fullPath string) string {
-	switch kind {
-	case domain.RepoDocCodingStandards:
-		return "Prescribe the conventions for the chosen stack: the formatter and linter to use (add their config files to the repository so they actually run), naming and file-layout conventions, the error-handling style, and the few rules that matter most for this kind of project. Keep it short and concrete — rules, not a tutorial.\n"
-	case domain.RepoDocTestStandards:
-		return "Prescribe how this project is tested: the test runner and the exact command to run it (wire it up, with at least one passing example test if there is code to test), which layers to use (unit/integration/e2e — pick what fits this stack), where test files live and how they are named, and how a new feature's tests should be structured.\n"
-	case domain.RepoDocArchitecture:
-		return "Prescribe the architecture: the layers or modules and the direction of dependencies between them, where each kind of code goes in the directory layout, the data flow for a typical request or job, and the boundaries that must not be crossed.\n"
-	case domain.RepoDocLocalRun:
-		return localRunScriptRequirements(fullPath) +
-			"Everything in it must match the chosen stack and what this pull request adds — the real package manager, build tool and ports — not a generic template. Do not write a markdown guide instead of, or alongside, the script.\n"
-	}
-	return ""
+	return newRepoDocInstructionsKey.Render(newRepoDocInstructionsInput{Kind: kind, FullPath: fullPath})
 }
 
 func (s *Service) CreateDocsBundleTask(ctx context.Context, repositoryID uuid.UUID, items []DocItem) (domain.BoardTask, error) {
@@ -280,21 +233,17 @@ func (s *Service) CreateDocsBundleTask(ctx context.Context, repositoryID uuid.UU
 }
 
 func bundleDescription(repo domain.Repository, docs []resolvedDoc) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "Author the reference docs listed below for this %s repository, ALL of them in a single branch so exactly one pull request contains every file.\n\n", repo.Kind)
-	b.WriteString("Do not open a pull request per document, and do not stop after the first one — the task is finished when every path below exists and is correct.\n\n")
+	bundleDocs := make([]bundleDocInput, len(docs))
 	for i, doc := range docs {
-		fmt.Fprintf(&b, "%d. `%s` — %s for %s\n", i+1, doc.fullPath, DocKindLabel(doc.kind), docScopeLabel(doc))
-	}
-	for _, doc := range docs {
-		fmt.Fprintf(&b, "\n---\n\n## `%s`\n\n", doc.fullPath)
-		if doc.kind != domain.RepoDocLocalRun {
-			b.WriteString("If it already exists, read it first and update whatever is stale or wrong against the current codebase rather than starting over; otherwise write it from scratch.\n")
+		bundleDocs[i] = bundleDocInput{
+			Number:     i + 1,
+			FullPath:   doc.fullPath,
+			KindLabel:  DocKindLabel(doc.kind),
+			ScopeLabel: docScopeLabel(doc),
+			Kind:       doc.kind,
 		}
-		b.WriteString(docInstructions(doc))
 	}
-	b.WriteString("\n---\n\nAlso make sure the agent instructions file at the repository root (CLAUDE.md, AGENTS.md or the equivalent the agents on this repo read) has a short docs index, and that it links to every file above so agents find them; create a minimal one if it is missing.\n")
-	return b.String()
+	return docsBundleKey.Render(docsBundleInput{RepoKind: repo.Kind, Docs: bundleDocs})
 }
 
 func DocKindLabel(kind string) string {

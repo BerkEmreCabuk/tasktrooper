@@ -275,26 +275,27 @@ func (s *Service) openRemediationTask(ctx context.Context, incident domain.Incid
 		priority = domain.TaskPriorityCritical
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "Production incident on **%s** (severity: %s, source: %s, occurrences: %d).\n\n",
-		incident.Env, incident.Severity, incident.Source, incident.Occurrences)
-	fmt.Fprintf(&b, "**Symptom:** %s\n", incident.Title)
-	if strings.TrimSpace(incident.Detail) != "" {
-		fmt.Fprintf(&b, "\n```\n%s\n```\n", truncate(incident.Detail, 2000))
+	detail := strings.TrimSpace(incident.Detail)
+	if detail != "" {
+		detail = truncate(detail, 2000)
 	}
-	fmt.Fprintf(&b, "\n**First-pass hypothesis (%s, confidence %d):**\n%s\n", remedy.Kind, remedy.Confidence, remedy.Text())
-	fmt.Fprintf(&b, "\nIncident id: `%s` — call `get_incident` for the full payload and timeline.\n", incident.ID)
-	if policy == domain.IncidentPolicyAutoFix {
-		b.WriteString("\n**Policy: auto_fix.** Diagnose, then implement the fix and take it through the normal pipeline. " +
-			"Record what you concluded with `propose_incident_remedy` before you start changing code.\n")
-	} else {
-		b.WriteString("\n**Policy: suggest.** Do NOT change production code. Diagnose only, then call " +
-			"`propose_incident_remedy` with the concrete fix (commands, files, config) and move the task to human_uat for the decision.\n")
-	}
+	description := remediationTaskKey.Render(remediationTaskInput{
+		Env:         incident.Env,
+		Severity:    string(incident.Severity),
+		Source:      string(incident.Source),
+		Occurrences: incident.Occurrences,
+		Title:       incident.Title,
+		Detail:      detail,
+		RemedyKind:  remedy.Kind,
+		Confidence:  remedy.Confidence,
+		RemedyText:  remedy.Text(),
+		IncidentID:  incident.ID.String(),
+		AutoFix:     policy == domain.IncidentPolicyAutoFix,
+	})
 
 	task, err := s.tasks.CreateTask(ctx, incident.RepositoryID, domain.CreateBoardTaskRequest{
 		Title:           "Incident: " + truncate(incident.Title, 120),
-		Description:     b.String(),
+		Description:     description,
 		TaskType:        s.defectTaskType(ctx),
 		Priority:        priority,
 		Column:          domain.TaskColumnTodo,
