@@ -262,6 +262,9 @@ func TestStartEmulatorLaunchesHeadlessAndWaitsForIt(t *testing.T) {
 	// The fake appends this to adb-devices.txt when launched, which is how a
 	// real emulator becomes visible: some time after the process starts.
 	writeFixture(t, dir, "booting.txt", "emulator-5554\tdevice\n")
+	// This one succeeds, so a generous wait costs nothing; 3s failed under a
+	// loaded `go test ./...` before the detached fake emulator got scheduled.
+	host.bootTimeout = 20 * time.Second
 
 	serial, err := host.StartEmulator(context.Background(), "Pixel_7_API_34")
 	require.NoError(t, err)
