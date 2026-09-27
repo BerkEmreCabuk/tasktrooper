@@ -34,7 +34,7 @@ func Render(spec Spec) ([]Artifact, error) {
 	case domain.MobileStorePlatformAndroid:
 		script, workflow = androidScript(spec), androidWorkflow(spec)
 	default:
-		return nil, fmt.Errorf("pipeline: %q is not a store platform this generator ships", spec.Platform)
+		return nil, fmt.Errorf("pipeline: %s", unsupportedPlatformKey.Render(pipelinePlatformInput{Platform: fmt.Sprintf("%q", spec.Platform)}))
 	}
 
 	return []Artifact{
@@ -53,11 +53,11 @@ func (s Spec) normalize() (Spec, error) {
 	s.SubProjectPath = strings.Trim(strings.TrimSpace(s.SubProjectPath), "/")
 
 	if !identifierRe.MatchString(s.Identifier) {
-		return Spec{}, fmt.Errorf("pipeline: %q is not a bundle id or package name (it reaches a shell word and a concurrency group)", s.Identifier)
+		return Spec{}, fmt.Errorf("pipeline: %s", invalidIdentifierKey.Render(pipelineIdentifierInput{Identifier: fmt.Sprintf("%q", s.Identifier)}))
 	}
 	if s.SubProjectPath != "" {
 		if !subPathRe.MatchString(s.SubProjectPath) || strings.Contains(s.SubProjectPath, "..") {
-			return Spec{}, fmt.Errorf("pipeline: %q is not a path inside the repository", s.SubProjectPath)
+			return Spec{}, fmt.Errorf("pipeline: %s", invalidSubPathKey.Render(pipelinePathInput{Path: fmt.Sprintf("%q", s.SubProjectPath)}))
 		}
 	}
 	if s.AppName == "" {
@@ -67,11 +67,11 @@ func (s Spec) normalize() (Spec, error) {
 	switch s.Platform {
 	case domain.MobileStorePlatformIOS:
 		if !targetRe.MatchString(s.Scheme) {
-			return Spec{}, fmt.Errorf("pipeline: iOS needs an Xcode scheme to archive, got %q", s.Scheme)
+			return Spec{}, fmt.Errorf("pipeline: %s", iosSchemeRequiredKey.Render(pipelineSchemeInput{Scheme: fmt.Sprintf("%q", s.Scheme)}))
 		}
 	case domain.MobileStorePlatformAndroid:
 		if !moduleRe.MatchString(s.Module) {
-			return Spec{}, fmt.Errorf("pipeline: Android needs the Gradle module that produces the bundle, got %q", s.Module)
+			return Spec{}, fmt.Errorf("pipeline: %s", androidModuleRequiredKey.Render(pipelineModuleInput{Module: fmt.Sprintf("%q", s.Module)}))
 		}
 	}
 	return s, nil

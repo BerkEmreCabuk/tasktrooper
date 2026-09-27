@@ -298,11 +298,11 @@ func buildTargetRemedy(spec pipeline.Spec) string {
 	switch spec.Platform {
 	case domain.MobileStorePlatformIOS:
 		if strings.TrimSpace(spec.Scheme) == "" {
-			return "no shared Xcode scheme was found in the working copy: share the app's scheme in Xcode (Product › Scheme › Manage Schemes, tick Shared), commit the .xcscheme file it writes under xcshareddata/xcschemes, and re-import the repository"
+			return prompt.Text(buildTargetIOSSchemeKey)
 		}
 	case domain.MobileStorePlatformAndroid:
 		if strings.TrimSpace(spec.Module) == "" {
-			return "no Gradle module applying com.android.application was found in the working copy: make sure settings.gradle includes the app module and that its build.gradle applies that plugin, then re-import the repository"
+			return prompt.Text(buildTargetAndroidModuleKey)
 		}
 	}
 	return ""
