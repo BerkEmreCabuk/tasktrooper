@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	appmemory "github.com/makifbaysal/tasktrooper/server/internal/application/memory"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -133,35 +134,23 @@ func (t *saveMemoryTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: saveMemoryToolName,
-			Description: "Save a fact a LATER run — on a different task, weeks from now — will need and could not work out for itself. " +
-				"Before saving, apply that test: if the note stops being true once this task is finished, it is not a memory. " +
-				"Progress on the card you are on, what you verified, which commit fixed what, why a check went red, what you moved where: that is the task's story and belongs in its comments (add_task_comment), which is where people and later runs look for it. " +
-				"A memory never names a task key, a PR number, a commit SHA or a column move — the durable version of the same lesson is that sentence with the card taken out of it. " +
-				"Reusable know-how (a procedure you would follow again) is a skill, not a memory; this tool routes those to the skill catalog for you. " +
-				"Two independent choices decide where it lands: scope (project = only valid inside the repository you are working in, e.g. its build command, its architecture quirks; global = valid everywhere, e.g. a user preference or a habit you want to keep) and shared (false = your own memory, true = team memory every agent reads). " +
-				"Default to scope=project while working on a repository — a lesson learned in one codebase is usually wrong in another. " +
-				"Team memory (shared=true) is read by every agent on every run, so it holds only what the whole team would act on: raise the bar there, do not narrate.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"content"},
 				"properties": map[string]interface{}{
 					"content": map[string]interface{}{
-						"type":        "string",
-						"description": "One concise, self-contained fact or lesson, stated so it still reads true a month from now: no task key, no PR number, no commit SHA, no \"this task\", no column move. A note that fails that is rejected with the reason.",
+						"type": "string",
 					},
 					"category": map[string]interface{}{
-						"type":        "string",
-						"description": "Optional category (e.g. preference, lesson, convention, feedback)",
+						"type": "string",
 					},
 					"scope": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{"project", "global"},
-						"description": "project = bound to the current repository (default when one is in play); global = valid across every repository",
+						"type": "string",
+						"enum": []string{"project", "global"},
 					},
 					"shared": map[string]interface{}{
-						"type":        "boolean",
-						"description": "true = team memory visible to all agents; false (default) = your own memory",
+						"type": "boolean",
 					},
 				},
 			},
@@ -190,8 +179,8 @@ func (t *saveMemoryTool) Execute(ctx context.Context, arguments string) domain.T
 	// A run log is not a memory. Refused rather than filed: the note is not
 	// lost (its home is the task's comments) and a rejection with the reason is
 	// what teaches the difference — a silent drop would not.
-	if reason := domain.MemoryRunLogReason(args.Content); reason != "" {
-		return toolError(saveMemoryToolName, fmt.Sprintf("not saved: %s. %s", reason, domain.MemoryRunLogHint))
+	if code := domain.MemoryRunLogCode(args.Content); code != "" {
+		return toolError(saveMemoryToolName, fmt.Sprintf("not saved: %s. %s", prompt.MemoryRunLogReasonText(code), prompt.MemoryRunLogHintText()))
 	}
 
 	repoID := repositoryFromContext(ctx)
@@ -270,29 +259,23 @@ func (t *searchMemoryTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: searchMemoryToolName,
-			Description: "Search the memories you can read: your own plus the team's, from this repository plus the global ones. " +
-				"Empty query returns the most recent. Use scope to narrow to project or global memories, and owner to look only at your own or only at the team's.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"query": map[string]interface{}{
-						"type":        "string",
-						"description": "Optional semantic search query",
+						"type": "string",
 					},
 					"scope": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{"all", "project", "global"},
-						"description": "all (default) = this repository's memories plus the global ones; project = only this repository; global = only repository-independent",
+						"type": "string",
+						"enum": []string{"all", "project", "global"},
 					},
 					"owner": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{"all", "self", "team"},
-						"description": "all (default) = your memories plus the team's; self = only yours; team = only the team's",
+						"type": "string",
+						"enum": []string{"all", "self", "team"},
 					},
 					"top_k": map[string]interface{}{
-						"type":        "integer",
-						"description": "Max results (default 5)",
+						"type": "integer",
 					},
 				},
 			},
@@ -370,16 +353,14 @@ func (t *deleteMemoryTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        deleteMemoryToolName,
-			Description: "Delete one of your own memories by id (when it is outdated or wrong).",
+			Name: deleteMemoryToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"memory_id"},
 				"properties": map[string]interface{}{
 					"memory_id": map[string]interface{}{
-						"type":        "string",
-						"description": "UUID of the memory to delete",
+						"type": "string",
 					},
 				},
 			},

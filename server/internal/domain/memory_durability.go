@@ -28,37 +28,42 @@ var (
 	}
 )
 
+// memoryDurabilityRule.code is a stable, short identifier — not prose: the
+// adapter renders the actual reason an agent (or a human reviewing a
+// reflection outcome) sees from catalog/system/guards/memory_run_log_reason.md,
+// keyed by this code, so the phrasing lives in one place instead of being
+// duplicated across every caller.
 type memoryDurabilityRule struct {
 	pattern *regexp.Regexp
-	reason  string
+	code    string
 }
 
 var memoryDurabilityRules = []memoryDurabilityRule{
 	{
 		// "PR #8", "pull request #12"
 		pattern: regexp.MustCompile(`(?i)\b(?:pr|pull request)\s*#\s*\d+`),
-		reason:  "it is pinned to one pull request",
+		code:    "pinned_pr",
 	},
 	{
 		// A commit SHA: hex, long enough not to be a word, mixed enough not to
 		// be a plain number or a version.
 		pattern: regexp.MustCompile(`\b(?:[0-9a-f]{7,40})\b`),
-		reason:  "it quotes a commit SHA",
+		code:    "commit_sha",
 	},
 	{
 		// "moved code_review→ready_for_qa", "bounced in_qa -> need_revision"
 		pattern: regexp.MustCompile(`(?i)\b(?:backlog|todo|in_progress|code_review|ready_for_qa|in_qa|pm_uat|analiz_review|need_revision|blocked|done|released)\b\s*(?:→|->|to)\s*\b(?:backlog|todo|in_progress|code_review|ready_for_qa|in_qa|pm_uat|analiz_review|need_revision|blocked|done|released)\b`),
-		reason:  "it records one card's column move",
+		code:    "column_move",
 	},
 	{
 		// "this task", "this run", "the task I am on"
 		pattern: regexp.MustCompile(`(?i)\bthis (?:task|run|card|ticket|pr|review round)\b`),
-		reason:  "it is about the run you are in, not about anything a later run can reuse",
+		code:    "current_run",
 	},
 	{
 		// "feature/t-28", "tt-123"
 		pattern: regexp.MustCompile(`(?i)\b(?:feature/|branch\s+)?tt?-\d{1,6}\b`),
-		reason:  "it names one task's branch",
+		code:    "task_branch",
 	},
 }
 
@@ -90,36 +95,36 @@ func memoryMentionsTaskKey(text string) bool {
 	return false
 }
 
-// MemoryRunLogReason reports why this content is a run log rather than a
-// memory, or "" when it is worth keeping.
-func MemoryRunLogReason(content string) string {
+// MemoryRunLogCode reports the stable code for why this content is a run
+// log rather than a memory, or "" when it is worth keeping. The code is not
+// prose — see memoryDurabilityRule's doc comment — the adapter renders it
+// for whichever audience needs it (an agent's tool result, a human's
+// reflection-outcome detail) from
+// catalog/system/guards/memory_run_log_reason.md.
+func MemoryRunLogCode(content string) string {
 	text := strings.TrimSpace(content)
 	if text == "" {
 		return ""
 	}
 	if memoryMentionsTaskKey(text) {
-		return "it names a specific board task"
+		return "task_key"
 	}
 	for _, rule := range memoryDurabilityRules {
 		if rule.pattern == nil {
 			continue
 		}
-		if rule.reason == "it quotes a commit SHA" {
+		if rule.code == "commit_sha" {
 			if memoryLooksLikeSHA(text) {
-				return rule.reason
+				return rule.code
 			}
 			continue
 		}
 		if rule.pattern.MatchString(text) {
-			return rule.reason
+			return rule.code
 		}
 	}
 	return ""
 }
-
-const MemoryRunLogHint = "Memory is for what a DIFFERENT task will need, months from now. " +
-	"What happened on the card you are working — what you verified, what you moved, which commit fixed it — belongs in that task's comments (add_task_comment), where it is already recorded and where people look for it. " +
-	"If there is a durable fact underneath, save that instead, with the card taken out of it: not \"T-28's checks failed on billing\" but \"this org's GitHub Actions billing is blocked: check runs fail within seconds with a billing annotation and only a human can clear it\"."
 
 // memoryTokenSet reduces a memory to the words that carry its meaning, so two
 // notes that say the same thing in a slightly different order are recognisably

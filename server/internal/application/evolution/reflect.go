@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/catalog"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/rs/zerolog/log"
 )
@@ -349,7 +350,8 @@ func (s *Service) applyOutput(
 				continue
 			}
 			// Same bar as save_memory: a note tied to one card is a run log and the card already holds it. Skipped rather than failed — the rest of the reflection is still worth applying.
-			if reason := domain.MemoryRunLogReason(mc.Content); reason != "" {
+			if code := domain.MemoryRunLogCode(mc.Content); code != "" {
+				reason := prompt.MemoryRunLogReasonText(code)
 				log.Info().Str("agent", agentRec.Name).Str("reason", reason).
 					Str("content", truncate(mc.Content, 80)).Msg("reflection memory skipped: run log, not a durable lesson")
 				recordOutcome(domain.ReflectionChangeOutcome{

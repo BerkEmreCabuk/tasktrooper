@@ -10,7 +10,7 @@ import (
 // status notes. The kept set is the durable form of the same knowledge plus
 // ordinary engineering facts that contain hyphenated names and numbers, which
 // the task-key rule must not mistake for board keys.
-func TestMemoryRunLogReason(t *testing.T) {
+func TestMemoryRunLogCode(t *testing.T) {
 	rejected := []string{
 		"T-28 PR #8 head b06f146 fixed the gap I flagged in the prior code_review round",
 		"B-3 (PR #6, head 667b896) hit the same org GitHub Actions billing block",
@@ -21,7 +21,7 @@ func TestMemoryRunLogReason(t *testing.T) {
 		"The merge for PR #7 was refused because GitHub reported the PR state unstable",
 	}
 	for _, text := range rejected {
-		if MemoryRunLogReason(text) == "" {
+		if MemoryRunLogCode(text) == "" {
 			t.Errorf("expected rejection, accepted: %q", text)
 		}
 	}
@@ -35,8 +35,8 @@ func TestMemoryRunLogReason(t *testing.T) {
 		"The QA agent needs a seeded database: run make seed before the first scenario.",
 	}
 	for _, text := range kept {
-		if reason := MemoryRunLogReason(text); reason != "" {
-			t.Errorf("expected keep, rejected %q: %s", text, reason)
+		if code := MemoryRunLogCode(text); code != "" {
+			t.Errorf("expected keep, rejected %q: %s", text, code)
 		}
 	}
 }
