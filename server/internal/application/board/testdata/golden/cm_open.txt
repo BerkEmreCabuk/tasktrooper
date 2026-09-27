@@ -1,0 +1,4 @@
+
+Open acceptance criteria (these define "done" for this task):
+- [00000000-0000-0000-0000-000000000001] User can log in
+- [00000000-0000-0000-0000-000000000002] User can log out

@@ -1,0 +1,3 @@
+Project context: TaskTrooper backend
+
+Tools note here.

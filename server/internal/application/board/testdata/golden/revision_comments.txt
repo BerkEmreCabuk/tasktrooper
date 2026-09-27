@@ -1,0 +1,3 @@
+## Task comments (the revision feedback is here — act on it, do not ask the human to repeat it)
+- [architect] 1. Missing null check
+2. No test added

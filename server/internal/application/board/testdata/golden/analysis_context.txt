@@ -1,0 +1,10 @@
+## The analysis this task came out of
+This task was opened from the analysis below, and these documents are its specification — they are attached to that analiz task, NOT committed anywhere in the repository, so this is where the spec and the plan live. Implement what they say; where they and the task description disagree, the task description is the narrower scope and wins for THIS task. list_task_documents re-reads any of them at any time.
+
+### A-1 (Login analysis) (analiz task — read it with list_task_documents A-1)
+
+#### Spec
+The login flow must support email and password.
+
+### A-2 (Empty analysis) — no documents attached
+The analysis this task names has nothing attached to it. Say so in a comment rather than inventing the missing spec.

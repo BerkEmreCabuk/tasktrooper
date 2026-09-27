@@ -1,0 +1,1 @@
+This is an analiz task in `done` — the human's move here is the approval of your spec and plan; decompose it into implementation tasks to move it to `released`.

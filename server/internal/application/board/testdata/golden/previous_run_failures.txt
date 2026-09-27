@@ -1,0 +1,4 @@
+## Previous run on this task
+
+Its tools kept failing: run_terminal failed 3×, edit_file failed 2×.
+Do not open with the same calls. Read the current state of the files first, and if a tool rejected that run repeatedly, reach the same goal another way.
