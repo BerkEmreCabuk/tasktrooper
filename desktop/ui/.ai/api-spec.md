@@ -193,6 +193,15 @@ Reloads config file and reconnects MCP servers. Does not restart the HTTP server
 
 No auth. Returns bridge and LM Studio status.
 
+## GET /v1/releases
+
+Every repository's releases, newest first — the Operations → Deployments
+history. Query: `repository_id`, `component_id`, `status` (comma list of
+release statuses), `before` (RFC3339 `created_at` of the last row already
+shown, for paging) and `limit` (≤ 100, default 20). Answers
+`{"releases": [...]}`, never `null`; a bad id, status or timestamp is 400.
+`GET /v1/repositories/:id/releases` stays for one repository's page.
+
 ## GET /v1/usage?days=30&tz=Europe/Istanbul
 
 Token usage for Settings → Usage, from the `llm_usage` ledger. Every model

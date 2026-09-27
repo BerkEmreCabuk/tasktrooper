@@ -274,7 +274,10 @@ type ReleaseListFilter struct {
 	ComponentID  *uuid.UUID
 	TaskID       *uuid.UUID
 	Statuses     []ReleaseStatus
-	Limit        int
+	// Before pages a newest-first list: only releases created strictly
+	// earlier than the last row the caller already has.
+	Before *time.Time
+	Limit  int
 }
 
 var (

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -51,6 +52,7 @@ func (h *Handler) registerReleaseRoutes(app fiber.Router) {
 		return
 	}
 	app.Get("/v1/repositories/:id/releases", h.ListReleases)
+	app.Get("/v1/releases", h.ListAllReleases)
 	app.Get("/v1/releases/:releaseId", h.GetRelease)
 	app.Get("/v1/releases/:releaseId/cut-preview", h.GetReleaseCutPreview)
 	app.Post("/v1/releases/:releaseId/cut", h.CutRelease)
@@ -124,6 +126,52 @@ func (h *Handler) ListReleases(c *fiber.Ctx) error {
 			return badRequest(c, "invalid task id")
 		}
 		filter.TaskID = &taskID
+	}
+
+	releases, err := h.releaseSvc.List(h.enrichContext(c), filter)
+	if err != nil {
+		return releaseErr(c, err)
+	}
+	if releases == nil {
+		releases = []domain.Release{}
+	}
+	return c.JSON(fiber.Map{"releases": releases})
+}
+
+// ListAllReleases — GET /v1/releases?repository_id=&component_id=&status=a,b&before=&limit=
+// Every repository's releases newest first, for the operations page's deploy
+// history. before is the created_at (RFC3339) of the last row already shown.
+func (h *Handler) ListAllReleases(c *fiber.Ctx) error {
+	filter := domain.ReleaseListFilter{Limit: min(c.QueryInt("limit", 0), maxReleasePage)}
+	for _, q := range []struct {
+		name string
+		dst  **uuid.UUID
+	}{{"repository_id", &filter.RepositoryID}, {"component_id", &filter.ComponentID}} {
+		raw := c.Query(q.name)
+		if raw == "" {
+			continue
+		}
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return badRequest(c, "invalid "+q.name)
+		}
+		*q.dst = &id
+	}
+	if raw := c.Query("status"); raw != "" {
+		for _, part := range strings.Split(raw, ",") {
+			status := domain.ReleaseStatus(strings.TrimSpace(part))
+			if !status.Valid() {
+				return badRequest(c, "invalid status "+string(status))
+			}
+			filter.Statuses = append(filter.Statuses, status)
+		}
+	}
+	if raw := c.Query("before"); raw != "" {
+		before, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return badRequest(c, "invalid before timestamp")
+		}
+		filter.Before = &before
 	}
 
 	releases, err := h.releaseSvc.List(h.enrichContext(c), filter)

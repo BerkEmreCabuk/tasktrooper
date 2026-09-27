@@ -310,6 +310,10 @@ func (s *ReleaseStore) List(ctx context.Context, f domain.ReleaseListFilter) ([]
 		args = append(args, statuses)
 		conds = append(conds, fmt.Sprintf("status = ANY($%d)", len(args)))
 	}
+	if f.Before != nil {
+		args = append(args, *f.Before)
+		conds = append(conds, fmt.Sprintf("created_at < $%d", len(args)))
+	}
 	where := ""
 	if len(conds) > 0 {
 		where = "WHERE " + strings.Join(conds, " AND ")

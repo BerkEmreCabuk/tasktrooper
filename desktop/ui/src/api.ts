@@ -4927,6 +4927,19 @@ export const api = {
     return request<{ releases: Release[] }>(`/v1/repositories/${repositoryId}/releases${suffix ? `?${suffix}` : ""}`);
   },
 
+  listAllReleases: (
+    opts: { repositoryId?: string; componentId?: string; statuses?: ReleaseStatus[]; before?: string; limit?: number } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    if (opts.repositoryId) qs.set("repository_id", opts.repositoryId);
+    if (opts.componentId) qs.set("component_id", opts.componentId);
+    if (opts.statuses?.length) qs.set("status", opts.statuses.join(","));
+    if (opts.before) qs.set("before", opts.before);
+    if (opts.limit) qs.set("limit", String(opts.limit));
+    const suffix = qs.toString();
+    return request<{ releases: Release[] }>(`/v1/releases${suffix ? `?${suffix}` : ""}`);
+  },
+
   getRelease: (releaseId: string) => request<Release>(`/v1/releases/${releaseId}`),
 
   getReleaseCutPreview: (releaseId: string) => request<ReleaseCutPreview>(`/v1/releases/${releaseId}/cut-preview`),

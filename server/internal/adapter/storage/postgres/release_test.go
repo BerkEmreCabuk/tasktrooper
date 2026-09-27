@@ -318,6 +318,11 @@ func (s *ReleaseStoreSuite) TestListFilters() {
 	s.Require().NoError(err)
 	s.Require().Len(limited, 1)
 	s.Equal(rel2.ID, limited[0].ID)
+
+	nextPage, err := s.store.List(s.ctx, domain.ReleaseListFilter{RepositoryID: &s.repoID, Before: &limited[0].CreatedAt})
+	s.Require().NoError(err)
+	s.Require().Len(nextPage, 1, "before pages past the rows already shown")
+	s.Equal(rel1.ID, nextPage[0].ID)
 }
 
 // LastReleased is what a rollback redeploys: the newest `released` release of

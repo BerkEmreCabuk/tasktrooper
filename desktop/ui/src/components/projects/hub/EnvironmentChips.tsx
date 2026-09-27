@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { useI18n } from "@/hooks/useI18n";
 import { cn } from "@/lib/utils";
 
-const HEALTH_DOT: Record<CloudResourceStatus, string> = {
+export const HEALTH_DOT: Record<CloudResourceStatus, string> = {
   healthy: "bg-success",
   deploying: "bg-info",
   degraded: "bg-warning",

@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"io"
 	"net/http/httptest"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -69,6 +72,12 @@ func (f *fakeReleaseService) List(_ context.Context, filter domain.ReleaseListFi
 			continue
 		}
 		if filter.ComponentID != nil && (r.ComponentID == nil || *r.ComponentID != *filter.ComponentID) {
+			continue
+		}
+		if len(filter.Statuses) > 0 && !slices.Contains(filter.Statuses, r.Status) {
+			continue
+		}
+		if filter.Before != nil && !r.CreatedAt.Before(*filter.Before) {
 			continue
 		}
 		out = append(out, r)
@@ -592,4 +601,44 @@ func TestTestComponentSmokeChecksUnknownComponentIs404(t *testing.T) {
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusNotFound, resp.StatusCode)
+}
+
+func TestListAllReleasesSpansRepositoriesAndFilters(t *testing.T) {
+	otherRepo := uuid.New()
+	t0 := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	released := domain.Release{ID: uuid.New(), Version: "a", Status: domain.ReleaseReleased, CreatedAt: t0}
+	failed := domain.Release{ID: uuid.New(), Version: "b", Status: domain.ReleaseFailed, CreatedAt: t0.Add(time.Hour), RepositoryID: otherRepo}
+	app, repoID, _ := newReleaseTestApp(t, released, failed)
+
+	list := func(query string) []domain.Release {
+		t.Helper()
+		resp, err := app.Test(httptest.NewRequest("GET", "/v1/releases"+query, nil))
+		require.NoError(t, err)
+		require.Equal(t, fiber.StatusOK, resp.StatusCode)
+		var body struct {
+			Releases []domain.Release `json:"releases"`
+		}
+		require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+		return body.Releases
+	}
+
+	assert.Len(t, list(""), 2, "no repository filter lists every repository's releases")
+	byRepo := list("?repository_id=" + repoID.String())
+	require.Len(t, byRepo, 1)
+	assert.Equal(t, released.ID, byRepo[0].ID)
+	byStatus := list("?status=failed,rolled_back")
+	require.Len(t, byStatus, 1)
+	assert.Equal(t, failed.ID, byStatus[0].ID)
+	before := list("?before=" + url.QueryEscape(t0.Add(time.Minute).Format(time.RFC3339Nano)))
+	require.Len(t, before, 1)
+	assert.Equal(t, released.ID, before[0].ID)
+}
+
+func TestListAllReleasesRejectsBadFilters(t *testing.T) {
+	app, _, _ := newReleaseTestApp(t)
+	for _, query := range []string{"?repository_id=x", "?component_id=x", "?status=shipped", "?before=yesterday"} {
+		resp, err := app.Test(httptest.NewRequest("GET", "/v1/releases"+query, nil))
+		require.NoError(t, err)
+		assert.Equal(t, fiber.StatusBadRequest, resp.StatusCode, query)
+	}
 }

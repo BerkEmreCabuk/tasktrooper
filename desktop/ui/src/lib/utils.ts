@@ -54,6 +54,33 @@ export function formatRelativeDate(iso: string): string {
   return formatDate(iso);
 }
 
+const RELATIVE_STEPS: [Intl.RelativeTimeFormatUnit, number][] = [
+  ["second", 60],
+  ["minute", 60],
+  ["hour", 24],
+  ["day", 7],
+];
+
+// formatRelativeDate's words are English only; this one speaks the UI language.
+export function formatRelativeTime(iso: string, lang: string, now: number = Date.now()): string {
+  let value = (Date.parse(iso) - now) / 1000;
+  const rtf = new Intl.RelativeTimeFormat(lang === "tr" ? "tr-TR" : "en-US", { numeric: "auto" });
+  for (const [unit, size] of RELATIVE_STEPS) {
+    if (Math.abs(value) < size) return rtf.format(Math.round(value), unit);
+    value /= size;
+  }
+  return new Date(iso).toLocaleDateString(lang === "tr" ? "tr-TR" : "en-US", { day: "numeric", month: "short", year: "numeric" });
+}
+
+export function formatDuration(ms: number, lang: string): string {
+  const [s, m, h] = lang === "tr" ? ["sn", "dk", "sa"] : ["s", "m", "h"];
+  const total = Math.round(ms / 1000);
+  if (total < 60) return `${total}${s}`;
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return `${minutes}${m} ${total % 60}${s}`;
+  return `${Math.floor(minutes / 60)}${h} ${minutes % 60}${m}`;
+}
+
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
