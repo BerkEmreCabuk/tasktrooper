@@ -245,20 +245,33 @@ func evidenceCurrentPerformance(score string, runsPassed, runsRevised int) strin
 	return evidenceCurrentPerformanceKey.Render(evidenceCurrentPerformanceInput{Score: score, RunsPassed: runsPassed, RunsRevised: runsRevised})
 }
 
+// evidenceKPILine is one enabled KPI's raw attainment data; the template
+// renders its row (including the "full X / half Y" / "measured M →
+// attainment A%" wording), not this package.
+type evidenceKPILine struct {
+	Name, MetricKey, Period      string
+	TargetFull, TargetHalf       float64
+	HasResult                    bool
+	MeasuredValue, AttainmentPct float64
+}
+
 type evidenceKPIInput struct {
-	Lines     []string
+	Lines     []evidenceKPILine
 	Composite string
 }
 
 var evidenceKPIKey = prompt.Define("evolution.evidence_kpi", evidenceKPIInput{
-	Lines:     []string{"- PR cycle time (cycle_time, weekly): full 24 / half 48 | measured 30 → attainment 80%"},
+	Lines: []evidenceKPILine{{
+		Name: "PR cycle time", MetricKey: "cycle_time", Period: "weekly",
+		TargetFull: 24, TargetHalf: 48, HasResult: true, MeasuredValue: 30, AttainmentPct: 80,
+	}},
 	Composite: "80.0",
 })
 
 // evidenceKPISection reports KPI attainment; see
-// catalog/system/prompts/evolution/evidence_kpi.md. lines are already
-// formatted per-KPI rows; composite is pre-formatted (e.g. "82.0").
-func evidenceKPISection(lines []string, composite string) string {
+// catalog/system/prompts/evolution/evidence_kpi.md. composite is
+// pre-formatted (e.g. "82.0").
+func evidenceKPISection(lines []evidenceKPILine, composite string) string {
 	return evidenceKPIKey.Render(evidenceKPIInput{Lines: lines, Composite: composite})
 }
 
@@ -331,14 +344,16 @@ func (s *Service) gatherEvidence(
 			for _, r := range results {
 				byKPI[r.KPIID] = r
 			}
-			var lines []string
+			var lines []evidenceKPILine
 			for _, k := range kpis {
 				if !k.Enabled {
 					continue
 				}
-				line := fmt.Sprintf("- %s (%s, %s): full %.4g / half %.4g", k.Name, k.MetricKey, k.Period, k.TargetFull, k.TargetHalf)
+				line := evidenceKPILine{Name: k.Name, MetricKey: k.MetricKey, Period: k.Period, TargetFull: k.TargetFull, TargetHalf: k.TargetHalf}
 				if r, ok := byKPI[k.ID]; ok {
-					line += fmt.Sprintf(" | measured %.4g → attainment %.0f%%", r.MeasuredValue, r.Attainment*100)
+					line.HasResult = true
+					line.MeasuredValue = r.MeasuredValue
+					line.AttainmentPct = r.Attainment * 100
 				}
 				lines = append(lines, line)
 			}

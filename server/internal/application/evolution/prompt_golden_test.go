@@ -188,8 +188,8 @@ func TestEvidenceCurrentPerformanceGolden(t *testing.T) {
 }
 
 func TestEvidenceKPISectionGolden(t *testing.T) {
-	got := evidenceKPISection([]string{
-		"- PR cycle time (cycle_time, weekly): full 24 / half 48 | measured 30 → attainment 80%",
+	got := evidenceKPISection([]evidenceKPILine{
+		{Name: "PR cycle time", MetricKey: "cycle_time", Period: "weekly", TargetFull: 24, TargetHalf: 48, HasResult: true, MeasuredValue: 30, AttainmentPct: 80},
 	}, "80.0")
 	want := "## KPI attainment (your objectives)\n" +
 		"- PR cycle time (cycle_time, weekly): full 24 / half 48 | measured 30 → attainment 80%\n" +
@@ -197,6 +197,18 @@ func TestEvidenceKPISectionGolden(t *testing.T) {
 	if got != want {
 		t.Fatalf("evidenceKPISection =\n%q\nwant\n%q", got, want)
 	}
+
+	t.Run("no measured result yet", func(t *testing.T) {
+		got := evidenceKPISection([]evidenceKPILine{
+			{Name: "PR cycle time", MetricKey: "cycle_time", Period: "weekly", TargetFull: 24, TargetHalf: 48},
+		}, "0.0")
+		want := "## KPI attainment (your objectives)\n" +
+			"- PR cycle time (cycle_time, weekly): full 24 / half 48\n" +
+			"Composite KPI score: 0.0/100\n\n"
+		if got != want {
+			t.Fatalf("evidenceKPISection (no result) =\n%q\nwant\n%q", got, want)
+		}
+	})
 }
 
 func TestEvidenceLinesBlockGolden(t *testing.T) {
