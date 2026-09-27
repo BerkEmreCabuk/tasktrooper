@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/web"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 )
 
@@ -36,11 +38,22 @@ func (s *WebToolSuite) TestName() {
 }
 
 func (s *WebToolSuite) TestDefinition() {
-	tool := web.New(1048576)
-	def := tool.Definition()
-	s.Equal("function", def.Type)
-	s.Equal("fetch_url", def.Function.Name)
-	s.NotEmpty(def.Function.Description)
+	// The description is now filled by application/registry.Register from
+	// catalog/system/tools/fetch_url.md, not Definition() itself — see
+	// board's golden_tool_definitions_test.go (WP8a) for the same shift.
+	reg := registry.New()
+	reg.Register(web.New(1048576))
+	var found *domain.ToolDefinition
+	for _, d := range reg.Definitions() {
+		if d.Function.Name == "fetch_url" {
+			d := d
+			found = &d
+		}
+	}
+	s.Require().NotNil(found)
+	s.Equal("function", found.Type)
+	s.Equal("fetch_url", found.Function.Name)
+	s.NotEmpty(found.Function.Description)
 }
 
 func (s *WebToolSuite) TestExecuteSuccess() {

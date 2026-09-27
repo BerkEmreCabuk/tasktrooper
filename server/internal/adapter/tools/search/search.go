@@ -95,18 +95,15 @@ func (s *searchTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        ToolName,
-			Description: "Search the web and return a list of relevant results with titles, URLs, and snippets. Use this to find current information, news, documentation, or anything that requires up-to-date knowledge.",
+			Name: ToolName,
 			Parameters: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"query": map[string]interface{}{
-						"type":        "string",
-						"description": "The search query",
+						"type": "string",
 					},
 					"max_results": map[string]interface{}{
-						"type":        "integer",
-						"description": "Maximum number of results to return (default: 5, max: 10)",
+						"type": "integer",
 					},
 				},
 				"required": []string{"query"},

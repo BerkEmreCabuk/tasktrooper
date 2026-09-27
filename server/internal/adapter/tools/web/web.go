@@ -64,14 +64,12 @@ func (w *webTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        ToolName,
-			Description: "Fetch the content of a URL via HTTP GET. Returns the response body as text. For HTML pages, returns extracted readable text.",
+			Name: ToolName,
 			Parameters: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
 					"url": map[string]interface{}{
-						"type":        "string",
-						"description": "The full URL to fetch (must start with http:// or https://)",
+						"type": "string",
 					},
 				},
 				"required": []string{"url"},
