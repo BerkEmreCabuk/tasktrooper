@@ -505,7 +505,20 @@ func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid
 			assignee = agent
 		}
 	}
-	desc := fmt.Sprintf(`Create and push GitHub Actions CI/CD workflows for this repository (kind: %s).
+	desc := workflowSetupTaskBrief(repo.Kind)
+
+	return s.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
+		Title:           "Set up GitHub Actions CI/CD workflows",
+		Description:     desc,
+		Priority:        domain.TaskPriorityHigh,
+		Column:          domain.TaskColumnTodo,
+		CreatedBy:       "system",
+		AssigneeAgentID: assignee,
+	})
+}
+
+func workflowSetupTaskBrief(kind string) string {
+	return fmt.Sprintf(`Create and push GitHub Actions CI/CD workflows for this repository (kind: %s).
 
 Required jobs (under .github/workflows):
 - validate: lint / static analysis / type checking
@@ -516,16 +529,7 @@ Required jobs (under .github/workflows):
 - prod_deploy: a workflow_dispatch-triggerable workflow that deploys to production
 
 Once each workflow exists, save the job/workflow mapping under Repository Settings > Pipeline so the QA gate and release steps run through GitHub Actions.`,
-		repo.Kind, buildHintForKind(repo.Kind))
-
-	return s.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
-		Title:           "Set up GitHub Actions CI/CD workflows",
-		Description:     desc,
-		Priority:        domain.TaskPriorityHigh,
-		Column:          domain.TaskColumnTodo,
-		CreatedBy:       "system",
-		AssigneeAgentID: assignee,
-	})
+		kind, buildHintForKind(kind))
 }
 
 func buildHintForKind(kind string) string {
