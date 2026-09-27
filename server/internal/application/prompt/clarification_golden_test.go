@@ -105,6 +105,14 @@ func TestGoldenAnsweredClarificationsMessage(t *testing.T) {
 	assertGolden(t, "answered_clarifications_truncated", prompt.AnsweredClarificationsMessage(truncated))
 }
 
+func TestGoldenBuildClarificationResponse(t *testing.T) {
+	withContext := prompt.BuildClarificationResponse(domain.ClarificationRequest{Context: "Need to confirm the deploy target."})
+	assertGolden(t, "build_clarification_response_with_context", withContext.Message.Content)
+
+	fallback := prompt.BuildClarificationResponse(domain.ClarificationRequest{})
+	assertGolden(t, "build_clarification_response_fallback", fallback.Message.Content)
+}
+
 func TestGoldenClarificationAckMessage(t *testing.T) {
 	assertGolden(t, "clarification_ack_en", prompt.ClarificationAckMessage("en"))
 	assertGolden(t, "clarification_ack_tr", prompt.ClarificationAckMessage("tr"))
