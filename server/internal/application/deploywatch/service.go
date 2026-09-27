@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -152,7 +153,7 @@ func (s *Service) StatusForCommit(ctx context.Context, repositoryID uuid.UUID, s
 		}
 	}
 	if sha == "" {
-		out.Detail = "No commit sha was given to watch."
+		out.Detail = prompt.Text(statusNoSHA)
 		return out, nil
 	}
 
@@ -188,7 +189,7 @@ func (s *Service) StatusForCommitSince(ctx context.Context, repositoryID uuid.UU
 	}
 	if sha == "" {
 		out.State = domain.DeployWatchUnknown
-		out.Detail = "No commit sha was given to watch."
+		out.Detail = prompt.Text(statusNoSHA)
 		return out, nil
 	}
 
@@ -209,7 +210,7 @@ func (s *Service) StatusForCommitSince(ctx context.Context, repositoryID uuid.UU
 		return domain.DeployWatchStatus{}, err
 	}
 	if !ok {
-		out.Detail = fmt.Sprintf("No Actions run for %s has started since the rollback began.", domain.ShortSHA(sha))
+		out.Detail = statusNoRunSinceRollbackKey.Render(shaInput{SHA: domain.ShortSHA(sha)})
 		return out, nil
 	}
 	return s.finish(mergeStatus(out, resolved)), nil
@@ -238,7 +239,7 @@ func (s *Service) statusForTask(ctx context.Context, task domain.BoardTask) (dom
 	}
 
 	if out.MergeSHA == "" {
-		out.Detail = "This task has no merge commit recorded — its pull request has not been merged, so nothing of it can be in production yet."
+		out.Detail = prompt.Text(statusNoMergeCommit)
 		return out, nil
 	}
 
@@ -281,8 +282,7 @@ func (s *Service) resolveForCommit(ctx context.Context, repositoryID uuid.UUID, 
 	if signal.Kind == "" {
 		out.State = domain.DeployWatchNoSignal
 		out.Signal = domain.DeploySignalNone
-		out.Detail = fmt.Sprintf("Nothing reports a deploy of %s: no Actions run carries a deploy job for it, and no commit status or GitHub Deployment was written against it. "+
-			"This repository does not deploy on merge (or its deploy has not started yet and has left no trace).", domain.ShortSHA(sha))
+		out.Detail = statusNothingReportsDeployKey.Render(shaInput{SHA: domain.ShortSHA(sha)})
 		return out, nil
 	}
 	out.Signal = signal.Kind
@@ -334,7 +334,7 @@ func (s *Service) actionsSignal(ctx context.Context, repositoryID uuid.UUID, own
 			out.State = domain.DeployWatchPending
 			out.RunID = run.ID
 			out.RunURL = run.HTMLURL
-			out.Detail = "could not read the run's jobs"
+			out.Detail = prompt.Text(statusJobsUnreadable)
 			return out, true, nil
 		}
 		matchedJob := false
@@ -360,7 +360,7 @@ func (s *Service) actionsSignal(ctx context.Context, repositoryID uuid.UUID, own
 				}
 				out.State = domain.DeployWatchFailure
 				out.FailedJob = &failed
-				out.Detail = fmt.Sprintf("The deploy job %q of %s concluded %q.", job.Name, domain.ShortSHA(sha), job.Conclusion)
+				out.Detail = statusJobConcludedKey.Render(jobConcludedInput{JobName: job.Name, SHA: domain.ShortSHA(sha), Conclusion: job.Conclusion})
 				return out, true, nil
 			}
 		}
@@ -380,7 +380,7 @@ func (s *Service) actionsSignal(ctx context.Context, repositoryID uuid.UUID, own
 
 		default:
 			out.State = domain.DeployWatchFailure
-			out.Detail = fmt.Sprintf("The run for %s concluded %q.", domain.ShortSHA(sha), run.Conclusion)
+			out.Detail = statusRunConcludedKey.Render(runConcludedInput{SHA: domain.ShortSHA(sha), Conclusion: run.Conclusion})
 			return out, true, nil
 		}
 	}
@@ -389,11 +389,11 @@ func (s *Service) actionsSignal(ctx context.Context, repositoryID uuid.UUID, own
 	}
 	if pending {
 		out.State = domain.DeployWatchPending
-		out.Detail = fmt.Sprintf("The deploy of %s is still running.", domain.ShortSHA(sha))
+		out.Detail = statusStillRunningKey.Render(shaInput{SHA: domain.ShortSHA(sha)})
 		return out, true, nil
 	}
 	out.State = domain.DeployWatchSuccess
-	out.Detail = fmt.Sprintf("The deploy job for %s finished successfully.", domain.ShortSHA(sha))
+	out.Detail = statusJobFinishedKey.Render(shaInput{SHA: domain.ShortSHA(sha)})
 	return out, true, nil
 }
 
@@ -524,15 +524,15 @@ func (s *Service) finish(status domain.DeployWatchStatus) domain.DeployWatchStat
 	}
 	until := s.now().Add(s.healthWindow)
 	status.HealthWindowUntil = &until
-	status.Detail = strings.TrimSpace(status.Detail + fmt.Sprintf(
-		" Production is now running this task's code; watch %s until %s — an incident opened before then is this release's.",
-		healthLabel(status.HealthURL), until.Format(time.RFC3339)))
+	status.Detail = strings.TrimSpace(status.Detail + statusHealthWindowNoteKey.Render(healthWindowNoteInput{
+		HealthLabel: healthLabel(status.HealthURL), Until: until.Format(time.RFC3339),
+	}))
 	return status
 }
 
 func healthLabel(healthURL string) string {
 	if strings.TrimSpace(healthURL) == "" {
-		return "the environment (no health_url is recorded — record one with update_deploy_target)"
+		return prompt.Text(statusNoHealthURL)
 	}
 	return urlguard.LogRaw(healthURL)
 }
@@ -545,19 +545,9 @@ func describeCommitSignal(signal port.CommitDeploySignal, sha string) string {
 	if who == "" {
 		who = "the deploy provider"
 	}
-	verb := map[string]string{
-		"success": "reported this deploy successful",
-		"failure": "reported this deploy FAILED",
-	}[signal.State]
-	if verb == "" {
-		verb = "has not finished this deploy yet"
-	}
-	out := fmt.Sprintf("%s %s for %s (no Actions deploy job exists — this repository deploys on push).",
-		who, verb, domain.ShortSHA(sha))
-	if d := strings.TrimSpace(signal.Description); d != "" {
-		out += " " + d
-	}
-	return out
+	return statusCommitSignalKey.Render(commitSignalInput{
+		Who: who, State: signal.State, SHA: domain.ShortSHA(sha), Description: strings.TrimSpace(signal.Description),
+	})
 }
 
 const (
@@ -610,7 +600,7 @@ func (s *Service) EndpointLogs(ctx context.Context, repositoryID uuid.UUID, env 
 	}
 	raw := strings.TrimSpace(target.LogsURL)
 	if raw == "" {
-		return LogResult{}, fmt.Errorf("no logs_url is recorded for %s — record one with update_deploy_target if this application exposes a log endpoint", env)
+		return LogResult{}, errors.New(logsNoLogsURLKey.Render(logsEnvInput{Env: env}))
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, logFetchTimeout)
