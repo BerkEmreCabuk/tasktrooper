@@ -17,6 +17,54 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+type taskIDData struct{ TaskID string }
+type taskAgentData struct{ TaskID, AgentID string }
+type taskSkillData struct{ TaskID, SkillID string }
+type taskSkillAgentData struct{ TaskID, SkillID, AgentID string }
+type taskDepData struct{ TaskID, DepID string }
+type maxTasksData struct{ MaxTasks int }
+type duplicateTitlePriorData struct{ TaskID, PriorID, QuotedTitle string }
+type duplicateDescriptionPriorData struct{ TaskID, PriorID string }
+type duplicateDescriptionTurnData struct{ OtherID, TaskID string }
+type disjointWritesData struct {
+	Group, Count int
+	Writers      string
+}
+type bookkeepingOnlyData struct{ TaskID, QuotedTitle, Tools string }
+type multipleCreatorsData struct {
+	Count int
+	IDs   string
+	Tool  string
+}
+
+var (
+	plannerMissingSummaryKey      = prompt.Define[struct{}]("guard.planner_missing_summary", struct{}{})
+	plannerNoTasksKey             = prompt.Define[struct{}]("guard.planner_no_tasks", struct{}{})
+	plannerTooManyTasksKey        = prompt.Define("guard.planner_too_many_tasks", maxTasksData{MaxTasks: 10})
+	plannerTaskMissingIDKey       = prompt.Define[struct{}]("guard.planner_task_missing_id", struct{}{})
+	plannerTaskMissingTitle       = prompt.Define("guard.planner_task_missing_title", taskIDData{TaskID: "t1"})
+	plannerTaskMissingDesc        = prompt.Define("guard.planner_task_missing_description", taskIDData{TaskID: "t1"})
+	plannerTaskMissingAgent       = prompt.Define("guard.planner_task_missing_agent", taskIDData{TaskID: "t1"})
+	plannerUnknownAgentKey        = prompt.Define("guard.planner_unknown_agent", taskAgentData{TaskID: "t1", AgentID: "a1"})
+	plannerDuplicateTaskIDKey     = prompt.Define("guard.planner_duplicate_task_id", taskIDData{TaskID: "t1"})
+	plannerReusedPriorIDKey       = prompt.Define("guard.planner_reused_prior_id", taskIDData{TaskID: "t1"})
+	plannerDuplicateTitlePriorKey = prompt.Define("guard.planner_duplicate_title_prior",
+		duplicateTitlePriorData{TaskID: "t1", PriorID: "t0", QuotedTitle: `"sample"`})
+	plannerDuplicateDescriptionPriorKey = prompt.Define("guard.planner_duplicate_description_prior",
+		duplicateDescriptionPriorData{TaskID: "t1", PriorID: "t0"})
+	plannerDuplicateDescriptionTurnKey = prompt.Define("guard.planner_duplicate_description_turn",
+		duplicateDescriptionTurnData{OtherID: "t1", TaskID: "t2"})
+	plannerInvalidSkillIDKey    = prompt.Define("guard.planner_invalid_skill_id", taskSkillData{TaskID: "t1", SkillID: "s1"})
+	plannerSkillNotOwnedKey     = prompt.Define("guard.planner_skill_not_owned", taskSkillAgentData{TaskID: "t1", SkillID: "s1", AgentID: "a1"})
+	plannerUnknownDependencyKey = prompt.Define("guard.planner_unknown_dependency", taskDepData{TaskID: "t1", DepID: "t9"})
+	plannerDisjointWritesKey    = prompt.Define("guard.planner_disjoint_writes",
+		disjointWritesData{Group: 0, Count: 2, Writers: "t1(create_board_task), t2(move_board_task)"})
+	plannerBookkeepingOnlyKey = prompt.Define("guard.planner_bookkeeping_only",
+		bookkeepingOnlyData{TaskID: "t1", QuotedTitle: `"sample"`, Tools: "move_board_task"})
+	plannerMultipleCreatorsKey = prompt.Define("guard.planner_multiple_creators",
+		multipleCreatorsData{Count: 2, IDs: "t1, t2", Tool: createBoardTaskTool})
+)
+
 // One retry budget shared by intake, planner, replanner and verifier, for provider and parse failures alike.
 const maxPlannerRetries = 2
 
@@ -279,13 +327,13 @@ func normalizeDifficulty(v string) string {
 // Checks a planning turn; priorTasks are this run's already-planned subtasks.
 func validatePlannerOutput(output domain.PlannerOutput, agents []domain.Agent, skillOwnership map[string]map[string]bool, maxTasks int, priorTasks []domain.PlannerTask) error {
 	if output.Summary == "" {
-		return fmt.Errorf("planner output missing summary")
+		return errors.New(prompt.Text(plannerMissingSummaryKey))
 	}
 	if len(output.Tasks) == 0 {
-		return fmt.Errorf("planner output has no tasks")
+		return errors.New(prompt.Text(plannerNoTasksKey))
 	}
 	if len(output.Tasks) > maxTasks {
-		return fmt.Errorf("planner output exceeds max tasks (%d)", maxTasks)
+		return errors.New(plannerTooManyTasksKey.Render(maxTasksData{MaxTasks: maxTasks}))
 	}
 
 	agentIDs := make(map[string]bool)
@@ -316,42 +364,38 @@ func validatePlannerOutput(output domain.PlannerOutput, agents []domain.Agent, s
 	seen := make(map[string]bool)
 	for _, t := range output.Tasks {
 		if t.ID == "" {
-			return fmt.Errorf("task missing id")
+			return errors.New(prompt.Text(plannerTaskMissingIDKey))
 		}
 		if t.Title == "" {
-			return fmt.Errorf("task %s missing title", t.ID)
+			return errors.New(plannerTaskMissingTitle.Render(taskIDData{TaskID: t.ID}))
 		}
 		if t.Description == "" {
-			return fmt.Errorf("task %s missing description", t.ID)
+			return errors.New(plannerTaskMissingDesc.Render(taskIDData{TaskID: t.ID}))
 		}
 		if t.AgentID == "" {
-			return fmt.Errorf("task %s missing agent_id", t.ID)
+			return errors.New(plannerTaskMissingAgent.Render(taskIDData{TaskID: t.ID}))
 		}
 		if !agentIDs[t.AgentID] {
-			return fmt.Errorf("task %s references unknown agent_id %s", t.ID, t.AgentID)
+			return errors.New(plannerUnknownAgentKey.Render(taskAgentData{TaskID: t.ID, AgentID: t.AgentID}))
 		}
 		if seen[t.ID] {
-			return fmt.Errorf("duplicate task id %s", t.ID)
+			return errors.New(plannerDuplicateTaskIDKey.Render(taskIDData{TaskID: t.ID}))
 		}
 		if priorIDs[t.ID] {
-			return fmt.Errorf("task %s reuses an id from the prior plan; repair tasks need new unique ids and may only reference the prior ones in depends_on", t.ID)
+			return errors.New(plannerReusedPriorIDKey.Render(taskIDData{TaskID: t.ID}))
 		}
 		if priorID, clash := priorTitles[normalizeTitle(t.Title)]; clash {
-			return fmt.Errorf(
-				"task %s repeats the title of task %s, which this run already ran (%q). A subtask that restates finished work runs it a second time and the board shows the same step twice. Repair by describing what is still MISSING, with its own distinct title, and reference the finished task in depends_on",
-				t.ID, priorID, t.Title)
+			return errors.New(plannerDuplicateTitlePriorKey.Render(duplicateTitlePriorData{
+				TaskID: t.ID, PriorID: priorID, QuotedTitle: fmt.Sprintf("%q", t.Title),
+			}))
 		}
 		// Long enough to be an instruction, not a stub.
 		if key := normalizeTitle(t.Description); len(key) >= duplicateDescriptionMinLen {
 			if priorID, clash := priorDescriptions[key]; clash {
-				return fmt.Errorf(
-					"task %s repeats the description of task %s, which this run already ran. Renaming a finished instruction does not make it a new one — it runs the same work again and the board shows the round twice. Describe what is still MISSING instead, and reference the finished task in depends_on",
-					t.ID, priorID)
+				return errors.New(plannerDuplicateDescriptionPriorKey.Render(duplicateDescriptionPriorData{TaskID: t.ID, PriorID: priorID}))
 			}
 			if otherID, clash := seenDescriptions[key]; clash {
-				return fmt.Errorf(
-					"tasks %s and %s carry the same description under different titles. That is one piece of work planned twice: it executes twice, comments twice and doubles the cost. Merge them, or give each a description of the distinct work it actually does",
-					otherID, t.ID)
+				return errors.New(plannerDuplicateDescriptionTurnKey.Render(duplicateDescriptionTurnData{OtherID: otherID, TaskID: t.ID}))
 			}
 			seenDescriptions[key] = t.ID
 		}
@@ -359,10 +403,10 @@ func validatePlannerOutput(output domain.PlannerOutput, agents []domain.Agent, s
 		owned := skillOwnership[t.AgentID]
 		for _, sid := range t.SkillIDs {
 			if _, err := uuid.Parse(sid); err != nil {
-				return fmt.Errorf("task %s has invalid skill_id %s", t.ID, sid)
+				return errors.New(plannerInvalidSkillIDKey.Render(taskSkillData{TaskID: t.ID, SkillID: sid}))
 			}
 			if owned != nil && !owned[sid] {
-				return fmt.Errorf("task %s skill_id %s does not belong to agent %s", t.ID, sid, t.AgentID)
+				return errors.New(plannerSkillNotOwnedKey.Render(taskSkillAgentData{TaskID: t.ID, SkillID: sid, AgentID: t.AgentID}))
 			}
 		}
 	}
@@ -371,7 +415,7 @@ func validatePlannerOutput(output domain.PlannerOutput, agents []domain.Agent, s
 	for _, t := range output.Tasks {
 		for _, dep := range t.DependsOn {
 			if !seen[dep] && !priorIDs[dep] {
-				return fmt.Errorf("task %s depends on unknown task %s", t.ID, dep)
+				return errors.New(plannerUnknownDependencyKey.Render(taskDepData{TaskID: t.ID, DepID: dep}))
 			}
 		}
 	}
@@ -418,9 +462,9 @@ func validateNoBookkeepingOnlySubtasks(tasks, priorTasks []domain.PlannerTask) e
 		if !isBookkeepingOnlySubtask(t) {
 			continue
 		}
-		return fmt.Errorf(
-			"subtask %s (%q) declares nothing but board bookkeeping (%s). Moving a task between columns is not a deliverable: it takes one tool call, nothing verifies it, and the system performs the move to code_review itself when the implementing run finishes. Drop this subtask and name the move in the implementing subtask's description instead",
-			t.ID, t.Title, strings.Join(t.ToolNames, ", "))
+		return errors.New(plannerBookkeepingOnlyKey.Render(bookkeepingOnlyData{
+			TaskID: t.ID, QuotedTitle: fmt.Sprintf("%q", t.Title), Tools: strings.Join(t.ToolNames, ", "),
+		}))
 	}
 	return nil
 }
@@ -454,9 +498,9 @@ func validateSingleTaskCreator(tasks []domain.PlannerTask, policies map[string]d
 		return nil
 	}
 	sort.Strings(creators)
-	return fmt.Errorf(
-		"%d subtasks can create board tasks (%s), but at most one subtask in a plan may. Give every board task this request needs to ONE subtask — it can open several in a single run — and for the others either drop them or list tool_names without %s, which is what marks a subtask as not creating records (a subtask with no tool_names inherits its agent's whole toolset and counts as a creator)",
-		len(creators), strings.Join(creators, ", "), createBoardTaskTool)
+	return errors.New(plannerMultipleCreatorsKey.Render(multipleCreatorsData{
+		Count: len(creators), IDs: strings.Join(creators, ", "), Tool: createBoardTaskTool,
+	}))
 }
 
 // Declared tool_names win; an empty declaration falls back to what the agent is allowed.
@@ -503,117 +547,75 @@ func validateDisjointWrites(tasks []domain.PlannerTask) error {
 			ids = append(ids, fmt.Sprintf("%s(%s)", w.taskID, w.tool))
 		}
 		sort.Strings(ids)
-		return fmt.Errorf(
-			"parallel_group %d has %d subtasks that write to the board (%s); they run concurrently and cannot see each other, so they would create duplicate records. Give the board write to exactly one subtask and chain the others with depends_on",
-			group, len(writers), strings.Join(ids, ", "))
+		return errors.New(plannerDisjointWritesKey.Render(disjointWritesData{
+			Group: group, Count: len(writers), Writers: strings.Join(ids, ", "),
+		}))
 	}
 	return nil
 }
 
-// Ordering and boundary live in the description; lifecycle steps are the control plane's.
-const subtaskDescriptionShape = `Shape of a subtask description (implementation work):
-Write the description as ordered phases the agent works top to bottom, and state the boundary explicitly. Phases are prose inside ONE subtask — never separate subtasks, never separate parallel_groups:
-1. Scope — the change to make, named concretely: which files, endpoints, screens or components. If the exact location must be discovered, say which tools find it.
-2. Out of scope — what this subtask must NOT touch, stated as plainly as the scope. Name the neighbouring code, the unrelated bugs, the refactors and the dependency or config changes it must leave alone. A subtask with no boundary is how a small change becomes a diff nobody can review.
-3. Verify — the build and test commands to run before finishing, and what output counts as passing. Never "test it": name the commands, or say the agent must find them in package.json / Makefile / go.mod / the README. Red output is fixed inside this same subtask.
-4. Close — tick every acceptance criterion the verified change satisfies, leave the rest open with a reason, and report what changed plus the command output that proved it.
-Do NOT plan phases for pulling the repository, creating the branch, claiming the task, moving columns or opening the pull request: the system does all of those around the run. The agent's phases start at the code and end at the evidence.`
+type plannerAgentSkillData struct{ ID, Name, Category, Description string }
+type plannerAgentRuleData struct{ Name, Content string }
+type plannerAgentData struct {
+	ID, Name, Type, Description string
+	HasSkills                   bool
+	Skills                      []plannerAgentSkillData
+	Rules                       []plannerAgentRuleData
+}
+type plannerRelevantSkillData struct{ ID, AgentID, Name, Category, Description string }
 
-// A split plan ends with one read-only subtask that verifies the merged result alone.
-const verificationSubtaskRule = `Final verification subtask (mandatory when the plan has MORE THAN ONE subtask that changes code in the same repository):
-- Add exactly one last subtask that depends_on every implementing subtask and sits alone in the last parallel_group. It changes nothing by default: it is the pass that judges the merged result.
-- Its description states, in this order: (1) build and test the repository as a whole and read the output; (2) read the complete branch diff and judge it against the original request — a subtask that ran earlier could not see what the later ones wrote, so this is the only pass that can catch one change breaking or deleting another's work; (3) check every acceptance criterion against what the build/test output and the diff actually show; (4) tick each criterion that holds with set_criterion_completed, leave the rest open, and report findings with add_task_comment.
-- Out of scope for it: new features, refactors, and anything the request did not ask for. A regression it finds is either a small, named repair inside this subtask or a reported finding — never a redesign.
-- It ticks the criteria that the implementers therefore must NOT tick: say so in their descriptions. One pass owns the verdict, and it is the pass that saw everything.
-- Do not give it move_board_task and do not plan the column move: when the run ends verified, with the criteria ticked and a real diff on the branch, the system moves the task to code_review and opens the pull request itself. A subtask whose deliverable is that move is rejected before the plan runs.
-- A single-subtask plan needs no verification subtask: its own Verify phase is the same pass, done by the agent that has the whole context.`
+type plannerSystemData struct {
+	Purpose, Goal      string
+	Workspace          string
+	SoloMode           bool
+	ConstrainedAgentID string
+	LanguageRule       string
+	Agents             []plannerAgentData
+	RelevantSkills     []plannerRelevantSkillData
+}
+
+var plannerSystemKey = prompt.Define("orchestrator.planner_system", plannerSystemData{
+	Purpose: "p", Goal: "g", LanguageRule: "lang",
+	Agents: []plannerAgentData{{ID: "a1", Name: "n", Type: "t", Description: "d", HasSkills: true,
+		Skills: []plannerAgentSkillData{{ID: "s1", Name: "n", Category: "c", Description: "d"}},
+		Rules:  []plannerAgentRuleData{{Name: "n", Content: "c"}}}},
+})
 
 func buildPlannerSystemPrompt(intake domain.GoalIntake, catalogs []agentCatalogEntry, relevantSkills []domain.Skill, opts PlannerOptions) string {
-	var sb strings.Builder
-	sb.WriteString(`You are an orchestration planner. Decompose the user request into a structured execution plan.
-
-Respond with a single JSON object matching the provided schema.
-
-Rules:
-- Read the full conversation thread in the messages. Prior turns may include clarification questions and user answers.
-- If the conversation already answers open questions, set ready to true and plan from the combined context. Do not ask again for information the user already provided in this thread.
-- Clarification answers appear as user messages ("prompt: answer"). Never repeat those questions in a new ask_user or ready=false plan.
-- Never create a task whose only purpose is to ask the user questions. Set ready to false and use the questions array instead.
-- A subtask must produce a CHANGE, not a decision or a fact. "Determine where the link goes", "decide the visual style", "figure out the site structure", "get access to the repository" are not subtasks. Resolve them instead:
-  - Only the stakeholder can answer (product preference, priority, deadline, content) → set ready to false and put it in questions.
-  - The answer is discoverable — in the repository, on the board, in the workspace snapshot, or on the live site → the implementing subtask looks it up itself with its own tools. Say so in that subtask's description; do not give the lookup its own subtask and never open a board task for it.
-- A system message may list the records this conversation already created (board tasks, projects, comments) with their ids. When the request is about one of those records — move it, advance it, update it, chase it — plan exactly ONE subtask that acts on that id with move_board_task / update_board_task / add_task_comment. Never plan a create for work that already has a record; a second record for the same work is the failure this rule exists to prevent.
-- HARD CONSTRAINT, machine-checked before the plan runs: AT MOST ONE subtask in the whole plan may create board tasks. One agent opening every task sees them all and can size them against each other; several agents each opening "their" task produce one board record per planning step for a single piece of work.
-- A subtask with an EMPTY tool_names inherits its assigned agent's entire toolset, so if that agent may create board tasks the subtask counts as a creator. List tool_names explicitly on every subtask that must not open records — that is the only way to declare it.
-- tool_names governs BOARD WRITES only (create_board_task, move_board_task, update_board_task): listing them grants them, leaving them out withholds them. Everything else the assigned agent is configured for — reading and changing code, the shell, the web, its skills — it keeps on every subtask regardless of what you list, so a short list can never leave an implementer unable to look at the repository. Still list the tools the description actually needs: the list is what the subtask is FOR, and one that declares only claim_board_task / move_board_task / add_task_comment is read as pure bookkeeping.
-- Never assume missing information. If you still cannot decompose the work without guessing, set ready to false and ask only for what remains unanswered (follow ask_user tool schema per question; choice mode must end with id other; set allow_multiple true when multiple selections are valid).
-- Never ask the user for state the system already stores — repository/codebase access, which repos or projects exist, board contents, team members. The workspace state section below is authoritative; plan a task to look it up instead of asking.
-- When ready is true: questions must be an empty array; provide summary and tasks.
-- When ready is false: tasks must be an empty array; provide questions only.
-- Every task must have a unique id, title, description, and agent_id from the available agents list.
-- Every task must include tool_names (array of tool name strings, may be empty). Never put tool names in skill_ids.
-- skill_ids must be UUIDs from that task's agent skills only (may be empty).
-- For a simple single-shot request, return exactly ONE task.
-- depends_on lists task ids that must complete before this task starts.
-- parallel_group is an integer grouping tasks that can run in parallel (same group = parallelizable).
-- Subtasks in one parallel_group run CONCURRENTLY and cannot see each other's work. Give them disjoint deliverables. A board write — creating, moving or updating a task — belongs to exactly ONE subtask. Never let two subtasks produce the same record; two agents told to open the same task will open it twice, each with its own wording.
-- HARD CONSTRAINT, machine-checked before the plan runs: within one parallel_group AT MOST ONE subtask may list a board-write tool (create_board_task, move_board_task, update_board_task) in tool_names. A second one rejects the entire plan. Before returning, count the board writers per parallel_group yourself; if any group has two, move the extras into later groups with depends_on.
-- HARD CONSTRAINT, machine-checked: board bookkeeping is never a subtask of its own. Claiming a task, moving it between columns and announcing that work has started take one tool call and produce nothing; they belong INSIDE the subtask that does the work. A subtask titled "move the task to in_progress", "claim the task", "move the task to code_review", "hand off to review" — or any subtask whose tool_names are only claim_board_task / move_board_task / add_task_comment / ask_user — is rejected. Fold it into the implementing subtask's description.
-- The hand-off move at the END of implementation work is the system's, not a step you plan. When an implementing run finishes with a green build and a real diff, the control plane moves the task to code_review itself. Plan the work; never plan the move.
-- Never plan a move into a column the task is already in. The conversation states the task's current column; a move to that same column is a no-op, and the subtask planned for it has nothing left to do but invent work.
-- Do not plan one subtask per delivery lifecycle stage. Analysis, implementation, QA verification, PM/UAT review and stakeholder approval are board COLUMNS a single task moves through as the assigned agents work it — not planning subtasks. Planning them as subtasks opens one board record per stage for what is one piece of work.
-- Return the smallest plan that satisfies the request. Work that ends up as one board task is ONE subtask, not a chain of one subtask per stage. Only split when the subtasks have genuinely different deliverables.
-- HARD CONSTRAINT, machine-checked: no two subtasks may carry the same description, and no subtask may repeat the title or the description of a task that already ran in this conversation. Two names for one instruction is one piece of work planned twice — it executes twice, comments twice and doubles the cost. When earlier work left something unfinished, describe only what is still MISSING, in its own words, and reference the finished task in depends_on.
-- If a subtask needs a record another subtask produces, put it in depends_on rather than the same parallel_group. Waves are barriers: a dependent subtask starts only after its dependencies finish, and receives their results.
-- When a subtask creates a board record other subtasks act on, its description must say to report the created task's key/id in its result, so the dependents can address it instead of re-creating it.
-- difficulty rates the subtask: "hard" for complex/ambiguous/high-risk work (architecture, tricky debugging, security-sensitive), "easy" for routine/mechanical work. Executors run "hard" subtasks on a stronger model when the assigned agent has one configured.
-- Do not include any text outside the JSON object.
-
-`)
-	sb.WriteString(subtaskDescriptionShape)
-	sb.WriteString("\n\n")
-	sb.WriteString(verificationSubtaskRule)
-	sb.WriteString("\n\n")
-
-	sb.WriteString(fmt.Sprintf("Purpose: %s\nGoal: %s\n\n", intake.Purpose, intake.Goal))
-	if opts.Workspace != "" {
-		sb.WriteString(opts.Workspace)
-		sb.WriteString("\n\n")
+	data := plannerSystemData{
+		Purpose:      intake.Purpose,
+		Goal:         intake.Goal,
+		Workspace:    opts.Workspace,
+		LanguageRule: prompt.UserFacingLanguageRule(opts.Lang),
 	}
 	if opts.ConstrainedAgentID != nil {
-		sb.WriteString(fmt.Sprintf("Solo mode: all tasks must use agent_id=%s only. Decompose according to that agent's rules and skills listed below.\n\n", opts.ConstrainedAgentID.String()))
+		data.SoloMode = true
+		data.ConstrainedAgentID = opts.ConstrainedAgentID.String()
 	}
-	sb.WriteString(prompt.UserFacingLanguageRule(opts.Lang))
-	sb.WriteString("\n\n")
-	sb.WriteString(`Available agents (each with scoped skills and rules):
-`)
 	for _, entry := range catalogs {
 		a := entry.Agent
-		sb.WriteString(fmt.Sprintf("\n## Agent id=%s name=%s type=%s description=%s\n", a.ID, a.Name, a.SubagentType, a.Description))
-		if len(entry.Skills) > 0 {
-			sb.WriteString("Skills:\n")
-			for _, sk := range entry.Skills {
-				if sk.Enabled {
-					sb.WriteString(fmt.Sprintf("- id=%s name=%s category=%s description=%s\n", sk.ID, sk.Name, sk.Category, sk.Description))
-				}
-			}
+		ad := plannerAgentData{
+			ID: a.ID.String(), Name: a.Name, Type: a.SubagentType, Description: a.Description,
+			HasSkills: len(entry.Skills) > 0,
 		}
-		if len(entry.Rules) > 0 {
-			sb.WriteString("Rules:\n")
-			for _, r := range entry.Rules {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", r.Name, r.Content))
-			}
-		}
-	}
-	if len(relevantSkills) > 0 {
-		sb.WriteString("\nRelevant skills (semantic matches — metadata only):\n")
-		for _, sk := range relevantSkills {
+		for _, sk := range entry.Skills {
 			if sk.Enabled {
-				sb.WriteString(fmt.Sprintf("- id=%s agent_id=%s name=%s category=%s description=%s\n", sk.ID, sk.AgentID, sk.Name, sk.Category, sk.Description))
+				ad.Skills = append(ad.Skills, plannerAgentSkillData{ID: sk.ID.String(), Name: sk.Name, Category: sk.Category, Description: sk.Description})
 			}
 		}
+		for _, r := range entry.Rules {
+			ad.Rules = append(ad.Rules, plannerAgentRuleData{Name: r.Name, Content: r.Content})
+		}
+		data.Agents = append(data.Agents, ad)
 	}
-	return sb.String()
+	for _, sk := range relevantSkills {
+		if sk.Enabled {
+			data.RelevantSkills = append(data.RelevantSkills, plannerRelevantSkillData{
+				ID: sk.ID.String(), AgentID: sk.AgentID.String(), Name: sk.Name, Category: sk.Category, Description: sk.Description,
+			})
+		}
+	}
+	return plannerSystemKey.Render(data)
 }
 
 func filterEnabledAgents(agents []domain.Agent) []domain.Agent {

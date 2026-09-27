@@ -6,8 +6,17 @@ import (
 	"strings"
 
 	goccyjson "github.com/goccy/go-json"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/rs/zerolog/log"
+)
+
+type pipelineCorrectionData struct{ ErrorText, Where string }
+type pipelineRejectionData struct{ ErrorText string }
+
+var (
+	pipelineCorrectionKey = prompt.Define("orchestrator.pipeline_correction", pipelineCorrectionData{ErrorText: "err", Where: ""})
+	pipelineRejectionKey  = prompt.Define("orchestrator.pipeline_rejection", pipelineRejectionData{ErrorText: "err"})
 )
 
 // System messages dropped for the toolless stages — except the action ledger, the only record of opened board tasks.
@@ -177,12 +186,10 @@ func extractFirstJSONObject(s string) string {
 
 // Feeds the parse failure back with the offending spot quoted, not just the raw error.
 func pipelineCorrection(badResponse string, err error) []domain.Message {
-	instruction := "Your response could not be parsed: " + err.Error() + "."
-	if where := jsonErrorContext(badResponse, err); where != "" {
-		instruction += "\n" + where
-	}
-	instruction += "\nFix that exact spot. Common causes: a comma before a closing } or ], two commas in a row, an empty array element like [,], a missing value, or an unescaped quote inside a string."
-	instruction += "\nReturn ONLY corrected valid JSON matching the schema, with no other text."
+	instruction := pipelineCorrectionKey.Render(pipelineCorrectionData{
+		ErrorText: err.Error(),
+		Where:     jsonErrorContext(badResponse, err),
+	})
 	return append(correctionEcho(badResponse), domain.Message{Role: domain.RoleUser, Content: instruction})
 }
 
@@ -222,7 +229,7 @@ func jsonErrorContext(raw string, err error) string {
 func pipelineRejection(badResponse string, err error) []domain.Message {
 	return append(correctionEcho(badResponse), domain.Message{
 		Role:    domain.RoleUser,
-		Content: "Your plan was rejected: " + err.Error() + ". Fix exactly that problem, keep the rest of the plan as it is, and return ONLY the corrected valid JSON matching the schema, with no other text.",
+		Content: pipelineRejectionKey.Render(pipelineRejectionData{ErrorText: err.Error()}),
 	})
 }
 

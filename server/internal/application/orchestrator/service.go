@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/activity"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -453,16 +454,19 @@ func marshalStoredPlan(output domain.PlannerOutput, verification *domain.Verific
 	return goccyjson.Marshal(doc)
 }
 
+type synthesizeUserData struct{ UserMessage, Summary, FullResults string }
+
+var (
+	synthesizeSystemKey = prompt.Define[struct{}]("orchestrator.synthesize_system", struct{}{})
+	synthesizeUserKey   = prompt.Define("orchestrator.synthesize_user", synthesizeUserData{UserMessage: "req", Summary: "sum", FullResults: "res"})
+)
+
 func synthesizeSystemPrompt() string {
-	return "Summarize the orchestration results concisely for the user. Preserve key outcomes and file paths. Respond in the same language as the user request."
+	return prompt.Text(synthesizeSystemKey)
 }
 
 func synthesizeUserContent(userMessage, summary, fullResults string) string {
-	return strings.Join([]string{
-		"User request: " + userMessage,
-		"Plan summary: " + summary,
-		"Task results:\n" + fullResults,
-	}, "\n\n")
+	return synthesizeUserKey.Render(synthesizeUserData{UserMessage: userMessage, Summary: summary, FullResults: fullResults})
 }
 
 func (s *Service) synthesize(ctx context.Context, userMessage, summary, fullResults, model string, providerType domain.LLMProviderType) (string, error) {

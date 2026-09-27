@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -103,6 +104,27 @@ func MarkTaskBlockedForTest(ctx context.Context, catalog port.CatalogStore, plan
 
 func BuildReplannerSystemPromptForTest() string {
 	return buildReplannerSystemPrompt(nil, nil)
+}
+
+func VerifierUserContentForTest(userMessage, purpose, goal, taskResultsBlock string) string {
+	return verifierUserKey.Render(verifierUserData{UserMessage: userMessage, Purpose: purpose, Goal: goal, TaskResultsBlock: taskResultsBlock})
+}
+
+func BuildPlannerPMSoloReplannerPromptForTest(soloID uuid.UUID) string {
+	catalogs := []agentCatalogEntry{{
+		Agent: domain.Agent{ID: soloID, Name: "product-manager", SubagentType: "generalPurpose"},
+		Skills: []domain.Skill{{
+			ID: uuid.MustParse("77777777-7777-7777-7777-777777777777"), AgentID: soloID, Name: "task-decomposition", Enabled: true,
+		}},
+	}}
+	return buildReplannerSystemPrompt(catalogs, &soloID)
+}
+
+func ReplannerUserContentForTest(userMessage, purpose, goal string, issues []string, existingPlanJSON, taskResultsBlock string) string {
+	return replannerUserKey.Render(replannerUserData{
+		UserMessage: userMessage, Purpose: purpose, Goal: goal,
+		IssuesJoined: strings.Join(issues, "\n- "), ExistingPlanJSON: existingPlanJSON, TaskResultsBlock: taskResultsBlock,
+	})
 }
 
 func PipelineCorrectionForTest(badResponse string, err error) []domain.Message {

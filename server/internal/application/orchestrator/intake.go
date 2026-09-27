@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/activity"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/llmretry"
@@ -140,67 +139,39 @@ func BuildIntakeSystemPromptForTest(opts IntakeOptions) string {
 	return buildIntakeSystemPrompt(opts)
 }
 
+type intakeRuleData struct{ Name, Content string }
+type intakeSkillData struct{ Name, Description string }
+
+type intakeSystemData struct {
+	Workspace            string
+	SoloAgentName        string
+	SoloAgentDescription string
+	SoloAgentRules       []intakeRuleData
+	EnabledSkills        []intakeSkillData
+	LanguageRule         string
+}
+
+var intakeSystemKey = prompt.Define("orchestrator.intake_system", intakeSystemData{
+	Workspace: "", SoloAgentName: "", SoloAgentDescription: "",
+	SoloAgentRules: []intakeRuleData{{Name: "r", Content: "c"}},
+	EnabledSkills:  []intakeSkillData{{Name: "s", Description: "d"}},
+	LanguageRule:   "lang",
+})
+
 func buildIntakeSystemPrompt(opts IntakeOptions) string {
-	var sb strings.Builder
-	sb.WriteString(`You extract the user's purpose and measurable goal from their message.
-
-Respond with a single JSON object matching the provided schema.
-
-Rules:
-- Read the full conversation thread in the messages. Prior turns may include clarification questions and user answers.
-- If the conversation already answers open questions, set ready to true and fold those answers into purpose, goal, and constraints. Do not ask again for information the user already provided in this thread.
-- Clarification card answers arrive as user messages in the form "question prompt: answer". Treat those as answered — never re-ask the same topic.
-- Never assume missing product information. If scope, requirements, targets, or constraints are still unclear after reading the thread, set ready to false and ask only for what remains unanswered.
-- A system message may list the records this conversation already created (board tasks, projects, comments) with their ids. When the user's message is about one of those records — move it, advance it, update it, chase it — the goal is an action on THAT record: name it and its id in the goal, and set ready to true. It is not a new piece of work and it is not a question.
-- When ready is true: purpose (why), goal (measurable outcome), and constraints (empty array if none) are required; questions must be an empty array.
-- When ready is false: questions must have at least one item; each question must follow the ask_user tool schema (text mode or choice mode; choice mode must end with id other; set allow_multiple true when multiple selections are valid); purpose and goal may be partial.
-- Only set ready to true when you can proceed without guessing.
-- Do not include any text outside the JSON object.
-
-## local-llm software team context
-The system delivers software through AI agents: backend-developer, frontend-developer, mobile-developer, qa-agent, product-manager.
-The human is the product stakeholder — not the implementer. Engineers on the team build the product.
-
-When the request involves creating tasks, planning features, websites, apps, or any software delivery:
-- Do NOT ask about the stakeholder's personal coding skills, self-learning plans, DIY builders (WordPress/Wix/Webflow), or which platform they will personally use.
-- DO ask about product goals, target users, must-have capabilities, business deadlines, content constraints, integrations, and success criteria.
-- Assume the agent team will implement using the project repository stack unless the stakeholder specifies otherwise.
-- Never ask the stakeholder for information the system already stores or the team can look up — repository/codebase access, which repos or projects exist, board state, or team members. Read those from the workspace state below.
-`)
-	if opts.Workspace != "" {
-		sb.WriteString("\n")
-		sb.WriteString(opts.Workspace)
-		sb.WriteString("\n")
+	data := intakeSystemData{
+		Workspace:            opts.Workspace,
+		SoloAgentName:        opts.SoloAgentName,
+		SoloAgentDescription: opts.SoloAgentDescription,
+		LanguageRule:         prompt.UserFacingLanguageRule(opts.Lang),
 	}
-	if opts.SoloAgentName != "" {
-		sb.WriteString(fmt.Sprintf("\n## Active agent: %s\n", opts.SoloAgentName))
-		if opts.SoloAgentDescription != "" {
-			sb.WriteString(opts.SoloAgentDescription)
-			sb.WriteString("\n")
-		}
-		// Each section claims to exist only when it is really there.
-		if len(opts.SoloAgentRules) > 0 {
-			sb.WriteString("This agent's own rules follow. A question any of them forbids must not be asked — drop it and set ready to true, or route it the way the rule says.\n")
-			for _, r := range opts.SoloAgentRules {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", r.Name, r.Content))
-			}
-		}
-		enabledSkills := make([]domain.Skill, 0, len(opts.SoloAgentSkills))
-		for _, sk := range opts.SoloAgentSkills {
-			if sk.Enabled {
-				enabledSkills = append(enabledSkills, sk)
-			}
-		}
-		if len(enabledSkills) > 0 {
-			// Metadata only — the executor loads the skill bodies when the task runs.
-			sb.WriteString("\nSkills this agent already has (never ask the stakeholder for what these cover):\n")
-			for _, sk := range enabledSkills {
-				sb.WriteString(fmt.Sprintf("- %s: %s\n", sk.Name, sk.Description))
-			}
+	for _, r := range opts.SoloAgentRules {
+		data.SoloAgentRules = append(data.SoloAgentRules, intakeRuleData{Name: r.Name, Content: r.Content})
+	}
+	for _, sk := range opts.SoloAgentSkills {
+		if sk.Enabled {
+			data.EnabledSkills = append(data.EnabledSkills, intakeSkillData{Name: sk.Name, Description: sk.Description})
 		}
 	}
-	sb.WriteString("\n")
-	sb.WriteString(prompt.UserFacingLanguageRule(opts.Lang))
-	sb.WriteString("\n")
-	return sb.String()
+	return intakeSystemKey.Render(data)
 }

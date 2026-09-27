@@ -92,11 +92,26 @@ func TestGolden_ReplannerSystemPrompt(t *testing.T) {
 		p := orchestrator.BuildReplannerSystemPromptForTest()
 		assertGolden(t, "replanner_system_minimal", p)
 	})
+	t.Run("rich_solo_agent", func(t *testing.T) {
+		soloID := uuid.MustParse("66666666-6666-6666-6666-666666666666")
+		p := orchestrator.BuildPlannerPMSoloReplannerPromptForTest(soloID)
+		assertGolden(t, "replanner_system_rich_solo", p)
+	})
+}
+
+func TestGolden_ReplannerUserContent(t *testing.T) {
+	got := orchestrator.ReplannerUserContentForTest("Ship the login page", "Ship it", "Users can log in", []string{"missing tests"}, "{}", "## t1\ndone\n\n")
+	assertGolden(t, "replanner_user_content", got)
 }
 
 func TestGolden_VerifierSystemPrompt(t *testing.T) {
 	p := orchestrator.BuildVerifierSystemPromptForTest()
 	assertGolden(t, "verifier_system", p)
+}
+
+func TestGolden_VerifierUserContent(t *testing.T) {
+	got := orchestrator.VerifierUserContentForTest("Ship the login page", "Ship it", "Users can log in", "## Task t1\ndone\n\n")
+	assertGolden(t, "verifier_user_content", got)
 }
 
 func TestGolden_SynthesizePrompts(t *testing.T) {
@@ -313,32 +328,18 @@ func TestGolden_ClarificationValidationGuards(t *testing.T) {
 				{ID: "other", Label: "Other"},
 			}}},
 		},
+		{
+			name: "text_mode_extra_option",
+			questions: []domain.ClarificationQuestion{{ID: "q1", Prompt: "Which repo?", Options: []domain.ClarificationOption{
+				{ID: "free_text", Label: "Free text"}, {ID: "extra", Label: "Extra"},
+			}}},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := orchestrator.ValidateClarificationQuestionsForTest(tc.questions)
 			require.Error(t, err)
 			assertGolden(t, "clarification_guard_"+tc.name, err.Error())
-		})
-	}
-}
-
-func TestGolden_DomainClarificationValidationGuards(t *testing.T) {
-	cases := []struct {
-		name string
-		q    domain.ClarificationQuestion
-	}{
-		{name: "domain_too_few_options", q: domain.ClarificationQuestion{ID: "q1", Options: []domain.ClarificationOption{{ID: "a", Label: "A"}}}},
-		{name: "domain_text_mode_extra_option", q: domain.ClarificationQuestion{ID: "q1", Options: []domain.ClarificationOption{{ID: "free_text", Label: "Free text"}, {ID: "extra", Label: "Extra"}}}},
-		{name: "domain_choice_missing_other", q: domain.ClarificationQuestion{ID: "q1", Options: []domain.ClarificationOption{{ID: "a", Label: "A"}, {ID: "b", Label: "B"}}}},
-		{name: "domain_choice_reserved_before_other", q: domain.ClarificationQuestion{ID: "q1", Options: []domain.ClarificationOption{{ID: "a", Label: "A"}, {ID: "skip", Label: "Skip"}, {ID: "other", Label: "Other"}}}},
-		{name: "domain_choice_needs_concrete", q: domain.ClarificationQuestion{ID: "q1", Options: []domain.ClarificationOption{{ID: "other", Label: "Other"}}}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			err := domain.ValidateClarificationQuestion(tc.q)
-			require.Error(t, err)
-			assertGolden(t, tc.name, err.Error())
 		})
 	}
 }

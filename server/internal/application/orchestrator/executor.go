@@ -32,6 +32,25 @@ func persistCtx(ctx context.Context) (context.Context, context.CancelFunc) {
 
 const dependencyTruncateNote = "\n[truncated — use run_terminal to read full output]"
 
+type boardWriteNotLandedReasonData struct{ Declared string }
+type plannedSkillFocusData struct{ Names string }
+type priorAttemptNoteData struct{ ErrorText, Digest, WorkDone, FailurePattern string }
+type taskPromptHeaderData struct {
+	HasPurpose                        bool
+	Purpose, Goal, Title, Description string
+	SkillFocus                        string
+}
+type dependencyResultLabelData struct{ DepID string }
+
+var (
+	startedNotFinishedReasonKey  = prompt.Define[struct{}]("orchestrator.started_not_finished_reason", struct{}{})
+	boardWriteNotLandedReasonKey = prompt.Define("orchestrator.board_write_not_landed_reason", boardWriteNotLandedReasonData{Declared: "create_board_task"})
+	plannedSkillFocusKey         = prompt.Define("orchestrator.planned_skill_focus", plannedSkillFocusData{Names: "sample-skill"})
+	priorAttemptNoteKey          = prompt.Define("orchestrator.prior_attempt_note", priorAttemptNoteData{ErrorText: "err"})
+	taskPromptHeaderKey          = prompt.Define("orchestrator.task_prompt_header", taskPromptHeaderData{Title: "t", Description: "d"})
+	dependencyResultLabelKey     = prompt.Define("orchestrator.dependency_result_label", dependencyResultLabelData{DepID: "t1"})
+)
+
 type SessionActionReader interface {
 	ListActions(ctx context.Context, sessionID uuid.UUID) ([]domain.SessionAction, error)
 }
@@ -349,15 +368,19 @@ func (e *Executor) markTaskBlocked(ctx context.Context, planTask domain.PlanTask
 	}
 }
 
+type clarificationBlockedReasonData struct{ Detail string }
+
+var clarificationBlockedReasonKey = prompt.Define("orchestrator.clarification_blocked_reason", clarificationBlockedReasonData{Detail: ""})
+
 func clarificationBlockedReason(req domain.ClarificationRequest) string {
 	detail := req.Context
 	if len(req.Questions) > 0 && req.Questions[0].Prompt != "" {
 		detail = req.Questions[0].Prompt
 	}
 	if strings.TrimSpace(detail) == "" {
-		return "waiting for an answer from the stakeholder"
+		detail = ""
 	}
-	return "waiting for an answer: " + detail
+	return clarificationBlockedReasonKey.Render(clarificationBlockedReasonData{Detail: detail})
 }
 
 // Only empty-ledger and board-only declared subtasks pass; a subtask that claimed and moved stops short.
@@ -373,9 +396,7 @@ func startedNotFinishedReason(delta map[string]int, effectiveTools []string) str
 	if !hasWorkTool(effectiveTools) {
 		return ""
 	}
-	return "This attempt only claimed the task and moved it to another column — no work was produced. " +
-		"Moving a task to in_progress announces that you started; it does not complete the subtask. " +
-		"Do the work the subtask describes with the tools you have, then report what you changed."
+	return prompt.Text(startedNotFinishedReasonKey)
 }
 
 // A pure-bookkeeping subtask whose declared board write never landed is not finished.
@@ -397,9 +418,7 @@ func boardWriteNotLandedReason(delta map[string]int, effectiveTools []string) st
 			return ""
 		}
 	}
-	return "This subtask's whole deliverable is the board write it declares (" + strings.Join(declared, ", ") +
-		"), and no such call succeeded — either it was never made or the board rejected it. " +
-		"Make the call, read what it returns, and if it is rejected say so with the exact error instead of reporting the work as done."
+	return boardWriteNotLandedReasonKey.Render(boardWriteNotLandedReasonData{Declared: strings.Join(declared, ", ")})
 }
 
 // Planner picks are a hint, never a cap on the agent's other skills.
@@ -420,8 +439,7 @@ func plannedSkillFocus(skillIDs []string, skills []domain.Skill) string {
 	if len(names) == 0 {
 		return ""
 	}
-	return "The plan flagged these of your skills as most relevant here: " + strings.Join(names, ", ") +
-		". Load them with load_skill before you apply them; your other skills still apply when the work calls for them."
+	return plannedSkillFocusKey.Render(plannedSkillFocusData{Names: strings.Join(names, ", ")})
 }
 
 func hasWorkTool(effectiveTools []string) bool {
@@ -449,25 +467,12 @@ func (p priorAttempt) note() string {
 	if p.Number == 0 || p.Err == nil {
 		return ""
 	}
-	var b strings.Builder
-	b.WriteString("\n\nPrevious attempt failed: ")
-	b.WriteString(p.Err.Error())
-
-	if p.Digest != "" {
-		b.WriteString("\n\n")
-		b.WriteString(p.Digest)
-	}
-	if did := p.workDone(); did != "" {
-		b.WriteString("\n\nWhat that attempt already did — continue from it, do not repeat it:\n")
-		b.WriteString(did)
-	}
-	if pattern := p.Stats.FailurePattern(); pattern != "" {
-		b.WriteString("\nTools that kept failing: ")
-		b.WriteString(pattern)
-		b.WriteString(". Use a different approach for those rather than the same call with new arguments.")
-	}
-	b.WriteString("\nPlease fix the issue and complete the task.")
-	return b.String()
+	return priorAttemptNoteKey.Render(priorAttemptNoteData{
+		ErrorText:      p.Err.Error(),
+		Digest:         p.Digest,
+		WorkDone:       p.workDone(),
+		FailurePattern: p.Stats.FailurePattern(),
+	})
 }
 
 func (p priorAttempt) workDone() string {
@@ -503,22 +508,14 @@ func (e *Executor) buildTaskMessages(ctx context.Context, sessionID uuid.UUID, h
 	systemContent := prompt.BuildSystemPrompt(agentRec, skills, stacks, tc.plannerTask.SubtaskRules, lang)
 
 	var taskPrompt strings.Builder
-	if tc.intake.Purpose != "" || tc.intake.Goal != "" {
-		taskPrompt.WriteString("Purpose: ")
-		taskPrompt.WriteString(tc.intake.Purpose)
-		taskPrompt.WriteString("\nGoal: ")
-		taskPrompt.WriteString(tc.intake.Goal)
-		taskPrompt.WriteString("\n\n")
-	}
-	taskPrompt.WriteString("Task: ")
-	taskPrompt.WriteString(tc.plannerTask.Title)
-	taskPrompt.WriteString("\n\n")
-	taskPrompt.WriteString(tc.plannerTask.Description)
-	taskPrompt.WriteString("\n\n")
-	if focus := plannedSkillFocus(tc.plannerTask.SkillIDs, skills); focus != "" {
-		taskPrompt.WriteString(focus)
-		taskPrompt.WriteString("\n\n")
-	}
+	taskPrompt.WriteString(taskPromptHeaderKey.Render(taskPromptHeaderData{
+		HasPurpose:  tc.intake.Purpose != "" || tc.intake.Goal != "",
+		Purpose:     tc.intake.Purpose,
+		Goal:        tc.intake.Goal,
+		Title:       tc.plannerTask.Title,
+		Description: tc.plannerTask.Description,
+		SkillFocus:  plannedSkillFocus(tc.plannerTask.SkillIDs, skills),
+	}))
 	taskPrompt.WriteString(prompt.AskUserTaskGuidance())
 	if subtaskWorkspace != "" {
 		taskPrompt.WriteString(prompt.SubtaskWorkspaceNote(subtaskWorkspace))
@@ -534,9 +531,7 @@ func (e *Executor) buildTaskMessages(ctx context.Context, sessionID uuid.UUID, h
 					continue
 				}
 			}
-			taskPrompt.WriteString("\n\nResult from dependency ")
-			taskPrompt.WriteString(dep)
-			taskPrompt.WriteString(":\n")
+			taskPrompt.WriteString(dependencyResultLabelKey.Render(dependencyResultLabelData{DepID: dep}))
 			taskPrompt.WriteString(truncateDependencyOutput(r, e.cfg.DependencyOutputMaxChars))
 		}
 	}
