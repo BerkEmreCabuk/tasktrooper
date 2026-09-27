@@ -1,0 +1,1350 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "add_task_comment",
+      "description": "Add a comment to a board task as the current agent. Comment when something needs a person or the next agent to ACT: a rejection and why, a failure with its expected-vs-actual, a blocker, a question you cannot answer yourself, work you did not do. Do NOT comment to report that things went well — a passed review, a green build, a successful merge or deploy, a criterion you approved, \"moving to X\". The column, the criteria, the pull request, the pipeline result and the task history already carry all of that, and a thread of confirmations buries the one comment that mattered. Never paste the pull request link or number either: it is a field on the task and the board renders it.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Comment text",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "content"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "add_task_document",
+      "description": "Add a NEW document to a board task as the current agent — markdown by default, or a self-contained HTML page with `format: \"html\"` (an analysis report). HTML is sanitized on save: scripts, iframes, forms, event handlers and javascript: URLs are removed; inline \u003cstyle\u003e, inline SVG and data:/https images are kept. Limit 1 MB. Revising something already attached to the task is update_task_document's job, not this one — never write \"Spec v2\" next to \"Spec\". Writing a title that already exists on the task rewrites that document in place rather than duplicating it.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "Document content: markdown, or a full HTML document when format is html",
+            "type": "string"
+          },
+          "format": {
+            "description": "markdown (default) or html",
+            "enum": [
+              "markdown",
+              "html"
+            ],
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis).",
+            "type": "string"
+          },
+          "title": {
+            "description": "Document title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "title"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "ask_user",
+      "description": "Ask the user structured clarifying questions. Work stops until answers are submitted via the clarification UI. Never write questions as markdown in your message — use this tool only.\n\nBefore calling: read the conversation thread AND the \"Clarifications already answered on this task\" section of your context. Everything there is settled — act on it. Do not repeat a question that has an answer (including prior clarification replies formatted as \"prompt: answer\"); ask only about what is still genuinely unknown.\n\nNever ask what the workspace can tell you. The repository is checked out in your working directory — file layout, where a page or component lives, routing, existing config and dependencies are all things you find with codebase_search / grep_code / get_repo_tree / get_symbol_skeleton / expand_symbol_context, and asking the human for them parks the task for hours on an answer you were five seconds away from. Ask only for what the code cannot contain: product decisions, priorities, external URLs and credentials, or a choice between designs that are all valid.\n\nEach question uses exactly one mode (never mix on the same question):\n\nTEXT mode — open-ended answers (URL, description, free text):\n- Use when the user should type a custom answer.\n- options must be exactly: [{\"id\":\"free_text\",\"label\":\"...\"},{\"id\":\"skip\",\"label\":\"...\"}]\n- allow_multiple must be false or omitted.\n- UI shows a single text area (+ optional skip).\n\nCHOICE mode — pick from alternatives:\n- Use when concrete options exist.\n- options: 1–4 concrete choices, then {\"id\":\"other\",\"label\":\"...\"} as the LAST option (label in user-facing language).\n- allow_multiple: true when the user may select more than one option (e.g. which sections, features, or platforms apply). false when exactly one answer is required.\n- UI shows toggle buttons; selecting other reveals a text field for a custom answer.\n- Never include free_text in choice mode.\n- other is mandatory on every choice question so the user can always provide a custom answer.\n\nLimits: up to 5 questions per call. context, prompt, and option labels in the user-facing language.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "context": {
+            "description": "Brief explanation shown above the question form (user-facing language)",
+            "type": "string"
+          },
+          "questions": {
+            "description": "Questions to ask. Each question: id, prompt, allow_multiple (choice mode), options (see ask_user tool description for text vs choice mode).",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "allow_multiple": {
+                  "description": "Choice mode only: true when the user may select multiple options; false for single-select.",
+                  "type": "boolean"
+                },
+                "id": {
+                  "description": "Unique stable id for this question (snake_case)",
+                  "type": "string"
+                },
+                "options": {
+                  "description": "Answer choices (min 2). TEXT mode: only free_text and skip. CHOICE mode: concrete options then other as last entry.",
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "id": {
+                        "description": "Option id: free_text | skip | other | or a concrete snake_case id",
+                        "type": "string"
+                      },
+                      "label": {
+                        "description": "Option label shown on the button (user-facing language)",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "label"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 6,
+                  "minItems": 2,
+                  "type": "array"
+                },
+                "prompt": {
+                  "description": "Question text shown to the user (user-facing language)",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "prompt",
+                "options"
+              ],
+              "type": "object"
+            },
+            "maxItems": 5,
+            "type": "array"
+          }
+        },
+        "required": [
+          "context",
+          "questions"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "attach_task_file",
+      "description": "Attach an already-uploaded file (image/document) to a board task. Use when the conversation/task context references an uploaded file that belongs on the task.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "attachment_id": {
+            "description": "UUID of the already-uploaded attachment.",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "attachment_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "cancel_criterion",
+      "description": "Drop ONE acceptance criterion from this task's scope, with the reason. Use it only for a criterion that is deliberately not being done — out of scope, superseded by another decision, impossible as written, moved to another task. It is NOT a way past a criterion you simply have not implemented: if the work is missing, do the work and call set_criterion_completed. The reason is stored on the criterion and posted as a task comment, so the decision is visible to the humans reading the card.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "canceled": {
+            "description": "Defaults to true. Pass false to put a cancelled criterion back in scope.",
+            "type": "boolean"
+          },
+          "criterion_id": {
+            "description": "Criterion UUID (from list_acceptance_criteria)",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why this criterion is not being done. One or two sentences, concrete.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "criterion_id",
+          "reason"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "claim_board_task",
+      "description": "Claim an unassigned board task or confirm assignment when already assigned to you.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "comment_on_pull_request",
+      "description": "Post a comment on the task's pull request, or answer one review comment inside its own thread by passing that comment's id. Reply in-thread whenever you are responding to a reviewer — a new top-level comment leaves their thread unanswered. Get the ids from get_task_pull_request.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "description": "Comment text (markdown). Say what you changed and where, not that you will change it.",
+            "type": "string"
+          },
+          "reply_to_comment_id": {
+            "description": "Id of the review comment to answer, from get_task_pull_request's review_comments. Omit to start a new PR conversation comment.",
+            "type": "integer"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "commit_task_changes",
+      "description": "Commit everything you changed in the task's working copy, push it to the task branch, make sure the pull request exists, and return the branch, commit and PR. This is the ONLY way an edit you made reaches the pull request — describing a change or writing the file is not enough. Call it once the change is complete and builds. If the working copy has no changes, it says so instead of creating an empty commit.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "description": "Commit message describing what changed and why, in the imperative (\"fix the null check on the deploy target lookup\"). A reviewer reads this next to the diff. Always English, whatever language the conversation is in — the repository history is English even when the chat is not.",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_board_task",
+      "description": "Create a new task on the board. Always set repository (which codebase the work touches) and project (which initiative it belongs to) when you can tell — call list_repositories / list_projects to find them rather than asking the user. Leaving repository unset falls back to the active repository context, or to the default repository, which may well be the wrong one. When you are splitting work that has an order, put it in the ARGUMENTS and not only in prose — blocked_by (nobody starts this task until those are done) and deploy_depends_on (this task ships AFTER those) are both enforced, a sentence in the description is not. When you open this task out of an analysis, set derived_from to that analiz task: the agent that picks this up is then handed that analysis's documents to work from. Inside a task run, the task you create here is linked back to the task you are working on as discovered_from automatically — there is no argument for it, and you do not need to (or need to try to) set it yourself. Anything that has to happen around the deploy belongs in before_deploy / after_deploy / rollback_plan, not in a comment: those fields are posted automatically when the release is dispatched and when it lands.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptance_criteria": {
+            "description": "Acceptance criteria, one observable Given/When/Then per array item, in order. This is the ONLY place criteria belong — they become the checklist QA executes and pm_uat verifies. Writing them into description instead leaves the task with an empty checklist.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "after_deploy": {
+            "description": "Post-deploy steps (markdown): cache warms, flag flips, smoke checks. Posted on the task automatically when the production deploy succeeds.",
+            "type": "string"
+          },
+          "allow_duplicate": {
+            "description": "Set true only when an open task with an almost identical title is genuinely different work. Creation is otherwise refused and the existing task is returned, so parallel agents cannot open the same task twice.",
+            "type": "boolean"
+          },
+          "assignee": {
+            "description": "Who handles this task: the responsible agent's name (e.g. \"system-architect\", \"backend-developer\") or its UUID. Set this so the assignee is dispatched automatically. Use list_team to see valid names.",
+            "type": "string"
+          },
+          "assignee_role": {
+            "description": "Assign by ROLE instead of by agent name: the role key (e.g. \"developer\", \"qa\") whose agent for this task's repository area should be assigned. Ignored when assignee is also set — assignee wins. Use list_team to see role keys and which areas they cover.",
+            "type": "string"
+          },
+          "before_deploy": {
+            "description": "Pre-deploy checklist (markdown): what must be true or done before this ships. Posted on the task automatically when the release is dispatched — do not write it as a comment.",
+            "type": "string"
+          },
+          "blocked_by": {
+            "description": "Work ordering: task UUIDs or board keys (e.g. [\"T-1\"]) that must be FINISHED (done or released) before anyone starts this task. THIS task waits for the ones you list — same direction as deploy_depends_on. Enforced: while any of them is open this task is parked in `blocked` instead of being dispatched, and it is picked up automatically the moment the last one lands. Use it when one task's code has to exist before the next can be written; use deploy_depends_on when the order is about shipping, and both when it is both. A cycle is refused at creation.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "column": {
+            "description": "Board column (default: backlog)",
+            "type": "string"
+          },
+          "component": {
+            "description": "For a monorepo: which component this task belongs to, by its repository-relative path (e.g. \"services/api\"); \".\" means the repository root. Scopes the task's required checks and brief to that component instead of the whole repository. Omit for a single-purpose repository, or when you are not sure — use list_repositories/the repository's model to see valid component paths.",
+            "type": "string"
+          },
+          "deploy_depends_on": {
+            "description": "Deploy ordering: task UUIDs or board keys (e.g. [\"T-1\"]) that must be LIVE IN PRODUCTION before this task may be released. THIS task ships AFTER the ones you list. Enforced — releasing this task is refused while any of them is unreleased, and the ordering is written into this task's before_deploy runbook automatically. Use it for real shipping order (the API before the client that calls it); use blocked_by for who writes the code first.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "derived_from": {
+            "description": "The analiz task this implementation task was opened out of (board key, e.g. [\"A-12\"], or UUID). Set it on EVERY task you create from an approved analysis. It is how the developer reaches the spec: the analiz task's documents are read into that task's run context automatically, and list_task_documents re-reads them at any time. The analysis lives on that task as documents — never as a file committed to the repository — so a task without this reference is a task whose specification the implementer cannot find.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "description": "Product-level description (markdown): the user story, context and out-of-scope notes. Do NOT paste acceptance criteria or technical detail here — they have their own fields (acceptance_criteria, technical_description) and repeating them makes the task drift out of sync.",
+            "type": "string"
+          },
+          "initiative_project_id": {
+            "description": "Deprecated alias for project (UUID only).",
+            "type": "string"
+          },
+          "priority": {
+            "description": "Task priority",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "project": {
+            "description": "Which initiative this task belongs to: project name or its UUID. Use list_projects to see valid names, or create_project when the initiative does not exist yet.",
+            "type": "string"
+          },
+          "repository": {
+            "description": "Which codebase this task touches: repository name (e.g. \"acme-web\") or its UUID. Use list_repositories to see valid names. Omit only when the task genuinely touches no repository.",
+            "type": "string"
+          },
+          "repository_id": {
+            "description": "Deprecated alias for repository (UUID only).",
+            "type": "string"
+          },
+          "rollback_plan": {
+            "description": "How to undo this change if production breaks (markdown). Posted alongside the pre-deploy checklist when the release is dispatched.",
+            "type": "string"
+          },
+          "task_type": {
+            "description": "Task type key (see list_team or GET /v1/task-types for the configured types — e.g. \"task\", \"analiz\", \"bug\"). Omit to use the workspace default type.",
+            "type": "string"
+          },
+          "technical_description": {
+            "description": "Technical detail (markdown): affected endpoints/files/schema, approach, constraints. This is the ONLY place technical detail belongs — do not repeat it in description.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Task title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "create_project",
+      "description": "Create a new initiative project on the board (name + optional description). Use to organize repositories and tasks under a product initiative.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "Optional project description",
+            "type": "string"
+          },
+          "name": {
+            "description": "Project name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "delete_board_task",
+      "description": "Delete a board task permanently, with everything on it: comments, acceptance criteria, documents and relations. There is no undo. Use it when the user asks for a task to be removed — a duplicate, a task opened by mistake, or work that was merged into another task. When several tasks are being merged into one, delete the ones that were merged away instead of leaving them open. A task that has left backlog/todo is refused unless force=true: past those columns it carries a branch and a work history, and cancelled work belongs in a terminal column, not erased.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "force": {
+            "description": "Delete a task that is no longer in backlog or todo. Only set this after the user has asked for that specific task to be deleted.",
+            "type": "boolean"
+          },
+          "reason": {
+            "description": "Why this task is being deleted (e.g. \"merged into DE-4\"). Recorded in the run trace — the task itself is gone, so this is the only trace left.",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "deploy_release",
+      "description": "Dispatch the deploy for this task's release. Meaningful for a `dispatch`-mode component — the merge itself did not deploy, so this is what tells the workflow to run at the release's tag — and for a `batch` release once a human has cut it (its status is `pending`; you never cut a batch release yourself). For a cut batch release the executor decides what happens: github_actions creates the release tag at the cut commit and the repository's own tag-triggered workflow builds and publishes — the tag already existing is a REAL failure here (unlike dispatch, a batch version is never re-used, so do not retry with the same version); local runs the profile's command in a detached worktree of the cut commit and logs it; store starts a store build for every platform with a linked app. Refused, dispatching nothing, when the release is not `pending`, or its mode is neither `dispatch` nor a cut `batch` (an `on_merge` release already started deploying on its own; call watch_release for it instead); a `dispatch` release also refuses while any of its tasks carries before-deploy steps a human has not confirmed — the system comments the pending steps on the newest task and you are woken once a human presses Confirm before-deploy steps — retrying will not change any of this until the state itself does. On success call watch_release next; do not poll get_release waiting for the deploy to finish.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "finish_release",
+      "description": "Confirm this release as shipped: moves every task it carries to `released`. This is the ONLY way a task may reach `released` — never move the card there yourself. Call it only while the release is `awaiting_verdict`, and only after you have actually read the evidence in THIS run: query_runtime_logs and list_runtime_errors since deployed_at, and the release's own health/smoke checks (get_release). A `failed` release can only be finished by a human overriding it (\"ship it anyway\") — an agent call is refused. `note` is required and must say what you actually checked (the log window, the error groups, the smoke results), not just \"looks fine\".",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "description": "What you checked before confirming: the log window you read, the error groups (or their absence), the smoke results. Goes on the release as its verdict.",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_board_summary",
+      "description": "Get an aggregated status snapshot of the board: total task count and counts grouped by column, type, and priority. Use to report status without listing every task.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_deploy_logs",
+      "description": "Read the log behind a deploy. Two sources: `actions_job` (default) fetches the failing GitHub Actions deploy job's log — pass the `job_id` get_release reported under `release.deploy.failed_job`, or omit it and the failing job of this task's release is used (falling back to the legacy per-task deploy watch when the task has no release); `logs_url` fetches the environment's own log endpoint, if one is recorded on the deploy target. The result is a SUMMARY, not a dump: the error-looking lines are lifted out first and the tail follows them, so paste the relevant part into your comment rather than the whole thing. Use it on a failed deploy before rolling back, and on a successful one whose environment then went unhealthy.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "env": {
+            "description": "Which environment's logs_url to read. Defaults to prod. Only used with source=logs_url.",
+            "enum": [
+              "local",
+              "stage",
+              "preprod",
+              "prod"
+            ],
+            "type": "string"
+          },
+          "job_id": {
+            "description": "Actions job id, from get_release's release.deploy.failed_job. Omit to use this task's failing deploy job.",
+            "type": "integer"
+          },
+          "source": {
+            "description": "actions_job (the deploy job's CI log, default) or logs_url (the application's own log endpoint)",
+            "enum": [
+              "actions_job",
+              "logs_url"
+            ],
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_pipeline_status",
+      "description": "Get the most recent QA-gate pipeline run for a board task: overall status, trigger, and per-job results (failed jobs include tail-truncated output). Use this to see why a task landed back in need_revision.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_release",
+      "description": "Read the release covering this task: status, mode/executor, commit and tag, deploy result (including a batch release's local_run or store_builds), the health/smoke/runtime-error evidence gathered so far, verdict and rollback (if any), and what to do next. It changes nothing and never parks the run — call it any time you want the current picture, including right after a merge and again whenever you are unsure what state the release is in. For a `batch` component (mobile and other human-cut releases) it may return a `draft` release still collecting merged tasks — there is nothing to do until a human cuts it. If nothing has opened a release for this task, it says why instead of a bare not-found (never merged, the component does not deploy on merge, or its delivery profile is unconfirmed).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_task_preview",
+      "description": "Find the task branch's per-branch preview deployment (Vercel builds every pushed branch / pull request as its own preview). Per component: status (ready, building, error, canceled, none), the stable branch_url and this build's url, the commit it was built from and built_from_pr_head, and — for a preview behind Vercel Deployment Protection — open_url (for the browser; it sets a bypass cookie) and request_headers (send them on every HTTP request). A preview is the task's own code only when status is ready AND built_from_pr_head is true. Read-only; it never deploys anything.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_task_pull_request",
+      "description": "Read the pull request opened for a board task: its state (open/draft/merged/mergeable), head and base branch, the changed-file list, the review comments and PR conversation, and — unless you turn it off — a size-capped diff. Use it before answering any question about \"the PR\" and before changing code a reviewer commented on. If the task has no PR yet, the result says so instead of failing.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "include_diff": {
+            "description": "Include the unified diff (default true). Set false when you only need the state, files or comments — the diff is by far the largest part of the result.",
+            "type": "boolean"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_acceptance_criteria",
+      "description": "List the acceptance criteria of a board task with their completion state. Complete every criterion before moving a task to ready_for_qa or done.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_board_tasks",
+      "description": "List board tasks for the current repository or team context.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "column": {
+            "description": "Optional column filter",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_document_annotations",
+      "description": "READ the review comments a human anchored to passages of a task's documents — the feedback on an analysis report. Each comment has the quoted passage (`quote`, with a little `prefix`/`suffix` of the text around it), the human's `comment`, and a `status`: `submitted` comments are the ones sent back with the latest review and are waiting for you; `resolved` ones you already answered; `open` ones are drafts the human has not sent. Address every submitted comment in the document itself, then answer each with resolve_document_annotations.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "status": {
+            "description": "Only comments in this status. Omit for all of them.",
+            "enum": [
+              "open",
+              "submitted",
+              "resolved"
+            ],
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_projects",
+      "description": "List the projects on the board (id, name, description). Use to answer how many projects exist or what they are.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_ready_tasks",
+      "description": "List the unblocked queue: backlog and todo tasks with no unfinished blocked_by blocker, sorted by priority (critical first) then age. Use this instead of scanning list_board_tasks to decide what to pick up next — a task listed here can be claimed with claim_board_task and moved to in_progress. Tasks parked in the blocked column, or waiting on an unfinished blocker, never appear.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "assigned_to_me": {
+            "description": "Only return tasks already assigned to the calling agent.",
+            "type": "boolean"
+          },
+          "column": {
+            "description": "Optional column filter. Defaults to both backlog and todo.",
+            "enum": [
+              "backlog",
+              "todo"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_repositories",
+      "description": "List the code repositories on the board (id, name, description, root_path, kind, remote_url, which projects they belong to). Use to answer what repositories exist and where a repository's code lives — never ask the user for a repository path or URL before calling this.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_task_comments",
+      "description": "READ the comments on a board task — the reviewer's revision feedback, the human's answers and every earlier agent's notes, oldest first. Use it before starting work on a task that came back from review, and whenever you are about to say \"let me check the comments\". This tool only reads; add_task_comment is what writes one. Reviewer notes left on the PULL REQUEST are not here — get_task_pull_request returns those.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "How many of the most recent comments to return (default 20).",
+            "type": "integer"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_task_documents",
+      "description": "READ the documents attached to a board task, in order. This is where an analysis lives: the analysis report an analiz task produced is a document on THAT task, never a file in the repository, so pass the analiz task's key (e.g. \"A-12\") to read it. Your own task's `relations` name it with relation_type \"derived_from\" — and the same documents are already in your run context, so use this to re-read a long plan or to look at an analysis you were not handed. An html document (`format: \"html\"`) comes back as readable TEXT by default; pass `raw: true` to get its HTML source — which is what you need before revising it with update_task_document. Raw HTML is returned in windows of `limit` characters (default 12000): when `next_offset` is present, call again with that `offset` and the same `document_id` for the rest. This tool only reads; add_task_document is what writes one.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "document_id": {
+            "description": "Only this document (UUID). Required with `offset` when a task has more than one document.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum characters of content per document. Defaults to 12000 for raw html, unlimited otherwise; at most 100000.",
+            "type": "integer"
+          },
+          "offset": {
+            "description": "Character offset to start the returned content at (from a previous call's next_offset).",
+            "type": "integer"
+          },
+          "raw": {
+            "description": "Return html documents as their HTML source instead of the text rendition. Needed to revise one.",
+            "type": "boolean"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_team",
+      "description": "List the orchestration team: each agent's name, role description, whether it is enabled, which roles it holds (with the repo areas each covers), and which board columns it is subscribed to. Use to see who is on the team and which role handles which kind of work before assigning or decomposing.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_test_cases",
+      "description": "List the test cases recorded on a board task with their status, expectation and evidence. This is the round the task was actually given — read it before re-testing, and before judging whether a change was verified.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "merge_task_pull_request",
+      "description": "Merge the task's pull request into its base branch with a SQUASH commit and delete the task branch. This is how a finished task's code actually lands, and it is IRREVERSIBLE — call it only for a task in the `done` column whose checks you have read and found green (get_task_pull_request, get_pipeline_status). It refuses, without merging anything, when: the task is not in `done`; the PR is already merged or was closed unmerged; the checks are not green (GitHub reports anything but a clean mergeable state, or the task's last pipeline failed); the repository requires the full review chain and a stage is missing; the PR's head commit is no longer the commit the task was verified at — which means someone pushed after sign-off and the change must go back through review; or, on an `on_merge` component, the task carries before-deploy steps a human has not confirmed yet (the merge IS the deploy for this mode) — the system comments the steps on the task and you are woken once a human presses Confirm before-deploy steps, so do not chase it further. Retrying a refusal changes nothing: act on what it said instead — a refusal naming a CONFLICT with the base branch (`dirty`) or an out-of-date branch (`behind`) is the developer's to resolve, so move the task to need_revision with that reason. On success it records the merge commit on the task and the card shows it: do NOT write a comment saying the merge happened. The result's `release` field says what the merge set in motion for the component, and what to do next — read it, do not guess: (the merge itself is refused — nothing merged — while the component's delivery profile is unconfirmed, while a deploy dependency is not released, and, for an on_merge component, while the task's before-deploy steps are unconfirmed; each refusal is already commented on the card and you are woken when it clears, so stop and do not retry) `unconfirmed: true` means the profile was unconfirmed for a task merged some other way — stop; otherwise mode `none` means the merge already released the task (nothing left to do); `on_merge` means the deploy is already running, call watch_release; `dispatch` means call deploy_release, then watch_release; `batch` means the merge joined the component's draft release (created if there was none) — the task waits in done and nothing to do now, a human cuts that release later and you are woken with a `pending` release to deploy_release/watch_release when they do.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "move_board_task",
+      "description": "Move a board task to another column.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "column": {
+            "description": "Target column slug",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "column"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "record_test_cases",
+      "description": "Write the task's test cases onto the card — the whole matrix, not only the acceptance criteria. Derive the cases from what was ASKED FOR and what the request IMPLIES: happy path, boundaries, invalid input, auth, empty state, async/worker side effects, visual states, and regression of adjacent behaviour. Record them BEFORE executing (status=planned), then call this again (or set_test_case_result) with each verdict. Cases are matched by title, so re-sending a title updates that case. Record the cases you considered and rejected too, as status=invalid with the reason in notes — a case that was thought about and dismissed is part of the evidence, not noise.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "cases": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "actual": {
+                  "description": "Required for failed: what actually happened.",
+                  "type": "string"
+                },
+                "category": {
+                  "description": "Which dimension this case covers.",
+                  "enum": [
+                    "happy_path",
+                    "boundary",
+                    "negative",
+                    "auth",
+                    "empty_state",
+                    "regression",
+                    "visual",
+                    "async",
+                    "other"
+                  ],
+                  "type": "string"
+                },
+                "criterion_id": {
+                  "description": "Optional: the acceptance criterion this case exercises. Leave empty for a case no criterion states — those are the ones worth writing down.",
+                  "type": "string"
+                },
+                "evidence": {
+                  "description": "Command + output, request/response, or screenshot path.",
+                  "type": "string"
+                },
+                "expected": {
+                  "description": "The observable result the request implies.",
+                  "type": "string"
+                },
+                "notes": {
+                  "description": "Required for skipped (what blocked it) and invalid (why it is not a valid case).",
+                  "type": "string"
+                },
+                "status": {
+                  "description": "planned before you run it; then passed | failed | skipped | invalid.",
+                  "enum": [
+                    "planned",
+                    "passed",
+                    "failed",
+                    "skipped",
+                    "invalid"
+                  ],
+                  "type": "string"
+                },
+                "title": {
+                  "description": "What the case does, in one line. This is the case's identity — re-sending the same title updates it.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "title"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\").",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "cases"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "resolve_document_annotations",
+      "description": "Mark review comments on a task document as RESOLVED, each with a one-line reply the human reads next to their comment. Call it AFTER the document itself is revised (update_task_document): the reply says what changed and where (\"Replaced the queue with a cron job — see §4 Proposed design\"), or, when you deliberately kept something, why. Resolve every submitted comment in one call; an id that fails does not stop the others.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "description": "Annotation id from list_document_annotations or the run context.",
+                  "type": "string"
+                },
+                "reply": {
+                  "description": "One line: what changed and where, or why nothing did.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "reply"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "review_criterion",
+      "description": "Record YOUR verdict on one acceptance criterion after actually verifying it — QA while the task is in ready_for_qa/in_qa, PM while it is in pm_uat. The implementer's checkmark is a claim, not proof: every criterion needs your own approved=true before the task can leave your review phase. A rejection (approved=false) requires a note saying exactly what failed and how you observed it; that note is shown on the task and read by the developer in need_revision.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "approved": {
+            "description": "true only after you verified the criterion yourself",
+            "type": "boolean"
+          },
+          "criterion_id": {
+            "description": "Criterion UUID (from list_acceptance_criteria)",
+            "type": "string"
+          },
+          "note": {
+            "description": "Required when approved=false: what failed, expected vs actual, how to reproduce. Optional evidence summary when approving.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "criterion_id",
+          "approved"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "rollback_release",
+      "description": "Roll this release back off production: reverts its merge commits on the default branch, then redeploys the previous good release (dispatch mode) or lets the revert push itself redeploy (on_merge mode). For a `batch` release (desktop, mobile) it only reverts the default branch — nothing is redeployed, because a published desktop build or a store build cannot be unpublished by a revert; `rollback.manual_steps` then leads with unpublishing or halting the artifact itself (the GitHub Release/update feed for a tag, or the store rollout) before the tasks' own steps, and you must perform or report that first. Call it only on EVIDENCE — `deploy_failed` (the deploy itself failed), `verify_failed` (the soak window found a real problem: failing smoke, health down, new error groups tied to this change), or `health_incident` (a production incident inside this release's window) — never on a hunch, and never for a noisy but PRE-EXISTING error; say in `note` why this evidence is new. If the component's delivery profile has auto_rollback OFF, nothing is executed: the proposal is written on the task for a human to confirm and the result carries `proposed: true` — stop there when you see it, do not look for another way to force the rollback through. On an actual rollback the result carries `rollback.manual_steps` — perform or explicitly report EVERY one of them (a migration, a feature flag, anything code cannot undo) — then call watch_release to follow the rollback deploy. Refused (nothing reverted, nothing redeployed) when the release is not in a status this applies to; retrying will not change that until the release's status does. `note` is required and must say what you actually observed.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "note": {
+            "description": "One or two sentences on what you actually observed — the failing step, the error, the health check that went red. It goes on the release and, when auto_rollback is off, in the proposal a human reads.",
+            "type": "string"
+          },
+          "reason": {
+            "description": "Why: deploy_failed (the deploy itself failed), verify_failed (the soak window found a real problem), or health_incident (a production incident inside this release's window).",
+            "enum": [
+              "deploy_failed",
+              "verify_failed",
+              "health_incident"
+            ],
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "note"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "run_smoke_checks",
+      "description": "Run this release's frozen smoke checks (GET/HEAD only, read-only) against its verify target right now and report each result plus a one-line pass/fail summary. Use it to double-check before finish_release, or to see what the automatic soak window already found — it does not change the release's status, and it does not replace reading query_runtime_logs/list_runtime_errors. A release with no smoke checks configured returns an empty result — that is not a failure, it means the component's delivery profile has none.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "set_criterion_completed",
+      "description": "Mark one acceptance criterion completed (or not). Only mark a criterion completed after you have actually verified it.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "completed": {
+            "type": "boolean"
+          },
+          "criterion_id": {
+            "description": "Criterion UUID (from list_acceptance_criteria)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "criterion_id",
+          "completed"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "set_repository_projects",
+      "description": "Set which initiative projects a code repository belongs to. Replaces the repository's project links with the provided list (empty list unlinks all).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "project_ids": {
+            "description": "Project UUIDs the repository should belong to (replaces existing links)",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "repository_id": {
+            "description": "Repository UUID (from list_repositories)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_id",
+          "project_ids"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "set_test_case_result",
+      "description": "Record the verdict on ONE test case you just executed: passed, failed (with what you actually observed), skipped (with what blocked it) or invalid (with why it is not a valid case). Fields you leave empty keep their stored value.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "actual": {
+            "description": "Required for failed: what you observed instead of the expectation.",
+            "type": "string"
+          },
+          "evidence": {
+            "description": "The command and its output, the request/response, or the screenshot path that proves this verdict.",
+            "type": "string"
+          },
+          "notes": {
+            "description": "Required for skipped (what blocked it) and invalid (why it is not a valid case).",
+            "type": "string"
+          },
+          "status": {
+            "description": "passed | failed | skipped | invalid",
+            "enum": [
+              "planned",
+              "passed",
+              "failed",
+              "skipped",
+              "invalid"
+            ],
+            "type": "string"
+          },
+          "test_case_id": {
+            "description": "Test case UUID (from list_test_cases or record_test_cases)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "test_case_id",
+          "status"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "start_task_preview",
+      "description": "Start (or reuse) the task branch's local preview — the product built from this task's branch, running on this machine, never production. Checks out the branch, detects how to run it, starts it, and returns its http://localhost URL once the dev server has printed one, for the browser tools. Needs no shell.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_board_task",
+      "description": "Update a board task. Deploy ordering goes in deploy_depends_on (this task ships AFTER those), and anything that has to happen around the deploy goes in before_deploy / after_deploy / rollback_plan — not in a comment. Those fields are read back and posted automatically when the release is dispatched and when it lands, so a checklist written as a comment is one nobody will see at deploy time.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptance_criteria": {
+            "description": "Replaces the task's acceptance-criteria checklist with this list, one observable Given/When/Then per item. Send the FULL list — anything omitted is deleted and completion state is reset. Omit the argument entirely to leave criteria untouched.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "after_deploy": {
+            "description": "Post-deploy steps (markdown): cache warms, flag flips, smoke checks. Posted on the task automatically when the production deploy succeeds.",
+            "type": "string"
+          },
+          "before_deploy": {
+            "description": "Pre-deploy checklist (markdown): what must be true or done before this ships. Posted on the task automatically when the release is dispatched — do not write it as a comment.",
+            "type": "string"
+          },
+          "blocked_by": {
+            "description": "Work ordering: task UUIDs or board keys that must be FINISHED (done or released) before anyone starts this task — THIS task waits for them. ADDS to the task's existing blockers rather than replacing them, so send only the ones you are adding. Enforced: while any blocker is open the task is parked in `blocked` instead of being dispatched, and it is picked up automatically when the last one lands. A cycle is refused.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "column": {
+            "type": "string"
+          },
+          "component": {
+            "description": "For a monorepo: re-scope this task to a different component, by its repository-relative path (e.g. \"services/api\"); \".\" means the repository root. Omit to leave the task's current component alone.",
+            "type": "string"
+          },
+          "deploy_depends_on": {
+            "description": "Deploy ordering: task UUIDs or board keys (e.g. [\"T-1\"]) that must be LIVE IN PRODUCTION before this task may be released — THIS task ships AFTER them. Replaces the task's existing deploy dependencies — send the FULL list; [] clears them, omitting the argument leaves them untouched. This is enforced: releasing this task is refused while any of them is unreleased, and the ordering is regenerated into this task's before_deploy runbook. Use it for real shipping order (the API before the client that calls it), not for who codes first — that is blocked_by. A cycle is refused.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "description": {
+            "description": "Product-level description (markdown): user story, context, out-of-scope. Acceptance criteria and technical detail have their own fields — do not paste them here.",
+            "type": "string"
+          },
+          "priority": {
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "project": {
+            "description": "File this task under an initiative: project name or UUID. Use list_projects for valid names.",
+            "type": "string"
+          },
+          "rollback_plan": {
+            "description": "How to undo this change if production breaks (markdown). Posted alongside the pre-deploy checklist when the release is dispatched.",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis).",
+            "type": "string"
+          },
+          "technical_description": {
+            "description": "Technical detail (markdown): affected endpoints/files/schema, approach, constraints. The only place technical detail belongs.",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_project",
+      "description": "Rename an initiative project or update its description. Empty fields are left unchanged.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "New description (optional)",
+            "type": "string"
+          },
+          "name": {
+            "description": "New name (optional)",
+            "type": "string"
+          },
+          "project_id": {
+            "description": "Project UUID (from list_projects)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "update_task_document",
+      "description": "REWRITE a document that already exists on a board task, in place. This is the tool for every revision of a spec, a plan or a report already attached to the task: whoever reads that task must find one current document, not a pile of near-duplicates, so revise instead of adding a \"v2\". Identify the document by document_id or by its exact title; on a task that has exactly one document both may be omitted. Either `content` REPLACES the whole body — read it first with list_task_documents (raw: true for html) and send the full new text, not a fragment — or `edits` changes passages in place: each old_text must appear exactly once in the current source (for html, the HTML source from list_task_documents raw: true) and is replaced by new_text, in order. The document keeps its format unless `format` is given; html is sanitized on save.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "description": "The complete new body (markdown, or a full HTML document for an html document). Replaces the existing content entirely. Not together with edits.",
+            "type": "string"
+          },
+          "document_id": {
+            "description": "UUID of the document to rewrite (from list_task_documents). Optional if `title` is given, or if the task has exactly one document.",
+            "type": "string"
+          },
+          "edits": {
+            "description": "Targeted replacements applied in order to the current source. Not together with content.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "new_text": {
+                  "description": "Replacement text (may be empty to delete).",
+                  "type": "string"
+                },
+                "old_text": {
+                  "description": "Exact text currently in the document; must occur exactly once.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "old_text",
+                "new_text"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "format": {
+            "description": "Change the document's format. Omit to keep the current one.",
+            "enum": [
+              "markdown",
+              "html"
+            ],
+            "type": "string"
+          },
+          "new_title": {
+            "description": "Optional new title. Omit to keep the current one.",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Title of the document to rewrite, matched exactly (case-insensitive). Ignored when document_id is given.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "watch_release",
+      "description": "Watch this task's release through its deploy and soak window. While the release is still deploying, verifying, or rolling back, this call PARKS the task and ends the run — that is correct and expected: do not try to poll, wait, or sleep. The release sweeper watches it in the background and re-dispatches this task the moment a verdict is needed (awaiting_verdict) or something failed — you (or the next run) will be woken with the answer. Call it right after merge_task_pull_request for an on_merge release, and right after deploy_release for a dispatch one. Once it returns a result instead of parking, the release has reached a status you must act on: read `next` and follow it (get_release explains each status the same way).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  }
+]
