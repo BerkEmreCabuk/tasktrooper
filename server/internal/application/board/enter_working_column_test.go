@@ -234,5 +234,8 @@ func TestColumnInstructionAsksForTheMoveWhenItWasRefused(t *testing.T) {
 	stuck := r.enterWorkingColumn(context.Background(), runJobFor(task, agentID))
 
 	assert.Equal(t, domain.TaskColumnReadyForQA, stuck.Column)
-	assert.Contains(t, columnInstruction(taskWF, stuck), "Move it to in_qa yourself")
+	// "Move it to in_qa yourself" now lives in qa-agent's own ready_for_qa.md
+	// (catalogrepo's TestQACatalogCarriesTheExecutionRule); the engine's own
+	// fact line only states that the automatic move did not go through.
+	assert.Contains(t, columnInstruction(taskWF, stuck), "the automatic move into `in_qa` did not go through")
 }

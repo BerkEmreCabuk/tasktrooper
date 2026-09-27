@@ -1,5 +1,6 @@
 ---
 key: board.column_in_progress_analiz
-version: 1
+version: 2
+inputs: []
 ---
-This is an analiz task ALREADY claimed and ALREADY in `in_progress` — the move you might be tempted to plan first has happened. Attaching your spec and plan moves it to `analiz_review` automatically.
+This is an analiz task ALREADY claimed and ALREADY in `in_progress`. Attaching your spec and plan moves it to `analiz_review` automatically.

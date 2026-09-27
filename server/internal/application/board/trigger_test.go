@@ -22,13 +22,17 @@ func TestTriggerMessageDoesNotAskForAMoveIntoTheCurrentColumn(t *testing.T) {
 	}
 }
 
-func TestTriggerMessageKeepsTheClaimAndMoveForATodoTask(t *testing.T) {
+// The claim-and-move imperative itself now lives in each developer's own
+// todo.md column file (job.ColumnInstruction, appended by the dispatcher);
+// buildTriggerMessage keeps only the engine fact about what column the task
+// is in and what the automatic hand-off does.
+func TestTriggerMessageKeepsTheTodoFactForATodoTask(t *testing.T) {
 	job := RunJob{Task: domain.BoardTask{Title: "t", Column: domain.TaskColumnTodo}}
 
 	msg := buildTriggerMessage(job, taskWF, nil, nil)
 
-	if !strings.Contains(msg, "move it to in_progress") {
-		t.Fatalf("a todo task must still be told to claim and move:\n%s", msg)
+	if !strings.Contains(msg, "This task is in `todo`") || !strings.Contains(msg, "code_review` automatically") {
+		t.Fatalf("a todo task must still be told which column it is in and what the automatic hand-off does:\n%s", msg)
 	}
 }
 
@@ -108,10 +112,15 @@ func TestAnalizInstructionDoesNotAskForCodeOrACodeReviewHandoff(t *testing.T) {
 	}
 }
 
+// The decompose-and-release imperative now lives entirely in
+// system-architect's own done.md column file (catalogrepo's
+// TestSystemArchitectCatalogCarriesTheAnalizWorkflow checks it carries
+// "decompose", "list_team" and "released"); columnInstruction keeps only the
+// engine fact that the human's move to `done` is the approval.
 func TestAnalizInstructionSplitsTheHumanGateFromTheApproval(t *testing.T) {
 	approved := columnInstruction(analizWF, domain.BoardTask{Column: domain.TaskColumnDone, TaskType: "analiz"})
-	if !strings.Contains(approved, "released") || !strings.Contains(approved, "decompose") {
-		t.Errorf("an approved analiz must be decomposed and released:\n%s", approved)
+	if !strings.Contains(approved, "the human's move here is the approval") {
+		t.Errorf("an approved analiz's done instruction must still state the human's move is the approval:\n%s", approved)
 	}
 }
 

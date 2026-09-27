@@ -141,6 +141,17 @@ func TestQACatalogCarriesTheExecutionRule(t *testing.T) {
 	}
 }
 
+// "Move it to in_qa yourself when the automatic move was refused" used to be
+// part of board.columnInstruction's ready_for_qa case (WP10); it now lives
+// in qa-agent's own ready_for_qa.md.
+func TestQACatalogCarriesTheMoveYourselfFallback(t *testing.T) {
+	agents := repoCatalogAgents(t)
+	got := columnInstruction(t, agents, "qa-agent", domain.TaskColumnReadyForQA)
+	if !strings.Contains(got, "move it yourself") {
+		t.Errorf("qa-agent/ready_for_qa: missing the move-it-yourself fallback:\n%s", got)
+	}
+}
+
 // The proposed:true / auto_rollback-off handling used to exist only in
 // board.columnInstruction's released case; it now lives in released.md too.
 func TestReleaseEngineerReleasedCarriesTheProposedRollbackRule(t *testing.T) {
@@ -148,6 +159,53 @@ func TestReleaseEngineerReleasedCarriesTheProposedRollbackRule(t *testing.T) {
 	got := columnInstruction(t, agents, "release-engineer", domain.TaskColumnReleased)
 	if !strings.Contains(got, "proposed: true") {
 		t.Errorf("release-engineer/released: missing the proposed:true rollback handling:\n%s", got)
+	}
+}
+
+// The batch-release handling (joined draft release, a human cutting it
+// later, no-bound-runtime-environment evidence, batch rollback only
+// reverting the default branch, local_run.tail for a failed local run) used
+// to live only in board.columnInstruction's done case (WP10); it now lives
+// entirely in release-engineer's own done.md.
+func TestReleaseEngineerDoneCoversBatchReleases(t *testing.T) {
+	agents := repoCatalogAgents(t)
+	got := columnInstruction(t, agents, "release-engineer", domain.TaskColumnDone)
+	for _, want := range []string{
+		"joined the component's draft release",
+		"a human just cut",
+		"no bound runtime environment",
+		"only reverts the default branch",
+		"local_run.tail",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("release-engineer/done: missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// The "do not edit or commit code" rule used to live only in
+// board.columnInstruction's done/released cases (WP10); it now lives in
+// release-engineer's own done.md and released.md.
+func TestReleaseEngineerDoneAndReleasedForbidEditingCode(t *testing.T) {
+	agents := repoCatalogAgents(t)
+	for _, col := range []domain.TaskColumn{domain.TaskColumnDone, domain.TaskColumnReleased} {
+		got := columnInstruction(t, agents, "release-engineer", col)
+		if !strings.Contains(got, "Do not edit or commit code") {
+			t.Errorf("release-engineer/%s: missing the no-code-editing rule:\n%s", col, got)
+		}
+	}
+}
+
+// "If it is not relevant to your role, take no action" used to be part of
+// board.columnInstruction's todo case (WP10); it now lives in each
+// developer's own todo.md, matching system-architect's analiz todo.md.
+func TestDeveloperTodoSkipsWhenNotRelevant(t *testing.T) {
+	agents := repoCatalogAgents(t)
+	for _, slug := range []string{"backend-developer", "frontend-developer", "mobile-developer"} {
+		got := columnInstruction(t, agents, slug, domain.TaskColumnTodo)
+		if !strings.Contains(got, "not relevant to your role, take no action") {
+			t.Errorf("%s/todo: missing the not-relevant-take-no-action rule:\n%s", slug, got)
+		}
 	}
 }
 

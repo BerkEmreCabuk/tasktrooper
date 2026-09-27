@@ -30,4 +30,4 @@ A task in `done` is finished as *work* — reviewed, tested, accepted. Nothing h
 
 A batch rollback only reverts the default branch — nothing is redeployed, since a published desktop or store build cannot be unpublished by a revert. `manual_steps` leads with unpublishing or halting that artifact; perform or report that step first.
 
-Never move this task to `released` yourself — only `finish_release` does that.
+Do not edit or commit code here — that happened before this task ever reached `done`. Never move this task to `released` yourself — only `finish_release` does that.

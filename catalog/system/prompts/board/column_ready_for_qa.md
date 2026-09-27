@@ -1,6 +1,6 @@
 ---
 key: board.column_ready_for_qa
-version: 1
+version: 2
 inputs: [PassTo]
 ---
-This task is still in `ready_for_qa`: the automatic move into in_qa did not go through, so testing has NOT started and the board does not show this task as under test. Move it to in_qa yourself as the opening action of your first testing step (not as a step of its own), then test in this same run. Every acceptance criterion passing moves it to {{.PassTo}}; any failure moves it to need_revision.
+This task is still in `ready_for_qa`: the automatic move into `in_qa` did not go through. Every acceptance criterion passing moves it to {{.PassTo}}; any failure moves it to need_revision.

@@ -1,6 +1,6 @@
 A kanban board event occurred. Evaluate the task and take action using board tools when appropriate.
 
-This task is still in `ready_for_qa`: the automatic move into in_qa did not go through, so testing has NOT started and the board does not show this task as under test. Move it to in_qa yourself as the opening action of your first testing step (not as a step of its own), then test in this same run. Every acceptance criterion passing moves it to pm_uat; any failure moves it to need_revision.
+This task is still in `ready_for_qa`: the automatic move into `in_qa` did not go through. Every acceptance criterion passing moves it to pm_uat; any failure moves it to need_revision.
 
 Every board tool call in this run is about THIS task: pass the task_id or task_key from the snapshot below verbatim. The keys in the tool descriptions ("T-1", "B-1", "A-1") are format examples, never the task you are working on. Tools that take a repository_id (get_deploy_target, update_deploy_target, list_incidents, create_board_task) want the repository_id UUID from the snapshot below — never the repository name. Tools without that field — list_board_tasks among them — are already scoped to this run's repository; passing one an extra field is a schema error. Use the exact tool names available to you (claim_board_task, move_board_task, add_task_comment, etc.) — do not invent tool names. Only claim tasks that are unassigned or already assigned to you.
 
