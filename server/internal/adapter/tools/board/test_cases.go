@@ -31,14 +31,12 @@ func (t *listTestCasesTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: listTestCasesToolName,
-			Description: "List the test cases recorded on a board task with their status, expectation and evidence. " +
-				"This is the round the task was actually given — read it before re-testing, and before judging whether a change was verified.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"task_id"},
 				"properties": map[string]interface{}{
-					"task_id": map[string]interface{}{"type": "string", "description": "Board task UUID or its board key (e.g. \"T-1\")."},
+					"task_id": map[string]interface{}{"type": "string"},
 				},
 			},
 		},
@@ -79,18 +77,12 @@ func (t *recordTestCasesTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: recordTestCasesToolName,
-			Description: "Write the task's test cases onto the card — the whole matrix, not only the acceptance criteria. " +
-				"Derive the cases from what was ASKED FOR and what the request IMPLIES: happy path, boundaries, invalid input, auth, empty state, " +
-				"async/worker side effects, visual states, and regression of adjacent behaviour. Record them BEFORE executing (status=planned), " +
-				"then call this again (or set_test_case_result) with each verdict. Cases are matched by title, so re-sending a title updates that case. " +
-				"Record the cases you considered and rejected too, as status=invalid with the reason in notes — a case that was thought about and " +
-				"dismissed is part of the evidence, not noise.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"task_id", "cases"},
 				"properties": map[string]interface{}{
-					"task_id": map[string]interface{}{"type": "string", "description": "Board task UUID or its board key (e.g. \"T-1\")."},
+					"task_id": map[string]interface{}{"type": "string"},
 					"cases": map[string]interface{}{
 						"type":  "array",
 						"items": testCaseItemSchema(),
@@ -188,18 +180,16 @@ func (t *setTestCaseResultTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: setTestCaseResultToolName,
-			Description: "Record the verdict on ONE test case you just executed: passed, failed (with what you actually observed), " +
-				"skipped (with what blocked it) or invalid (with why it is not a valid case). Fields you leave empty keep their stored value.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"test_case_id", "status"},
 				"properties": map[string]interface{}{
-					"test_case_id": map[string]interface{}{"type": "string", "description": "Test case UUID (from list_test_cases or record_test_cases)"},
-					"status":       map[string]interface{}{"type": "string", "enum": testCaseStatusEnum(), "description": "passed | failed | skipped | invalid"},
-					"actual":       map[string]interface{}{"type": "string", "description": "Required for failed: what you observed instead of the expectation."},
-					"evidence":     map[string]interface{}{"type": "string", "description": "The command and its output, the request/response, or the screenshot path that proves this verdict."},
-					"notes":        map[string]interface{}{"type": "string", "description": "Required for skipped (what blocked it) and invalid (why it is not a valid case)."},
+					"test_case_id": map[string]interface{}{"type": "string"},
+					"status":       map[string]interface{}{"type": "string", "enum": testCaseStatusEnum()},
+					"actual":       map[string]interface{}{"type": "string"},
+					"evidence":     map[string]interface{}{"type": "string"},
+					"notes":        map[string]interface{}{"type": "string"},
 				},
 			},
 		},
@@ -239,16 +229,15 @@ func testCaseItemSchema() map[string]interface{} {
 		"additionalProperties": false,
 		"required":             []string{"title"},
 		"properties": map[string]interface{}{
-			"title":    map[string]interface{}{"type": "string", "description": "What the case does, in one line. This is the case's identity — re-sending the same title updates it."},
-			"category": map[string]interface{}{"type": "string", "enum": testCaseCategoryEnum(), "description": "Which dimension this case covers."},
-			"status":   map[string]interface{}{"type": "string", "enum": testCaseStatusEnum(), "description": "planned before you run it; then passed | failed | skipped | invalid."},
-			"expected": map[string]interface{}{"type": "string", "description": "The observable result the request implies."},
-			"actual":   map[string]interface{}{"type": "string", "description": "Required for failed: what actually happened."},
-			"evidence": map[string]interface{}{"type": "string", "description": "Command + output, request/response, or screenshot path."},
-			"notes":    map[string]interface{}{"type": "string", "description": "Required for skipped (what blocked it) and invalid (why it is not a valid case)."},
+			"title":    map[string]interface{}{"type": "string"},
+			"category": map[string]interface{}{"type": "string", "enum": testCaseCategoryEnum()},
+			"status":   map[string]interface{}{"type": "string", "enum": testCaseStatusEnum()},
+			"expected": map[string]interface{}{"type": "string"},
+			"actual":   map[string]interface{}{"type": "string"},
+			"evidence": map[string]interface{}{"type": "string"},
+			"notes":    map[string]interface{}{"type": "string"},
 			"criterion_id": map[string]interface{}{
-				"type":        "string",
-				"description": "Optional: the acceptance criterion this case exercises. Leave empty for a case no criterion states — those are the ones worth writing down.",
+				"type": "string",
 			},
 		},
 	}

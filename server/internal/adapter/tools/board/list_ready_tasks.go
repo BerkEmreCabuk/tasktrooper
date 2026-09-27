@@ -35,24 +35,16 @@ func (t *listReadyTasksTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: listReadyTasksToolName,
-			Description: "List the unblocked queue: backlog and todo tasks with no " +
-				"unfinished blocked_by blocker, sorted by priority (critical first) " +
-				"then age. Use this instead of scanning list_board_tasks to decide " +
-				"what to pick up next — a task listed here can be claimed with " +
-				"claim_board_task and moved to in_progress. Tasks parked in the " +
-				"blocked column, or waiting on an unfinished blocker, never appear.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"column": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{"backlog", "todo"},
-						"description": "Optional column filter. Defaults to both backlog and todo.",
+						"type": "string",
+						"enum": []string{"backlog", "todo"},
 					},
 					"assigned_to_me": map[string]interface{}{
-						"type":        "boolean",
-						"description": "Only return tasks already assigned to the calling agent.",
+						"type": "boolean",
 					},
 				},
 			},

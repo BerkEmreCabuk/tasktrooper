@@ -34,19 +34,16 @@ func (t *attachTaskFileTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        attachTaskFileToolName,
-			Description: "Attach an already-uploaded file (image/document) to a board task. Use when the conversation/task context references an uploaded file that belongs on the task.",
+			Name: attachTaskFileToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"task_id": map[string]interface{}{
-						"type":        "string",
-						"description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis).",
+						"type": "string",
 					},
 					"attachment_id": map[string]interface{}{
-						"type":        "string",
-						"description": "UUID of the already-uploaded attachment.",
+						"type": "string",
 					},
 				},
 				"required": []string{"task_id", "attachment_id"},

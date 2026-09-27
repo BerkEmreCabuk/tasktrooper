@@ -48,9 +48,6 @@ func (t *getTaskPreviewTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: getTaskPreviewToolName,
-			Description: "Find the task branch's per-branch preview deployment (Vercel builds every pushed branch / pull request as its own preview). " +
-				"Per component: status (ready, building, error, canceled, none), the stable branch_url and this build's url, the commit it was built from and built_from_pr_head, and — for a preview behind Vercel Deployment Protection — open_url (for the browser; it sets a bypass cookie) and request_headers (send them on every HTTP request). " +
-				"A preview is the task's own code only when status is ready AND built_from_pr_head is true. Read-only; it never deploys anything.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,

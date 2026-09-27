@@ -35,30 +35,22 @@ func (t *addDocumentTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: addTaskDocumentToolName,
-			Description: "Add a NEW document to a board task as the current agent — markdown by default, or a self-contained HTML page with `format: \"html\"` (an analysis report). " +
-				"HTML is sanitized on save: scripts, iframes, forms, event handlers and javascript: URLs are removed; inline <style>, inline SVG and data:/https images are kept. Limit 1 MB. " +
-				"Revising something already attached to the task is update_task_document's job, not this one — never write \"Spec v2\" next to \"Spec\". " +
-				"Writing a title that already exists on the task rewrites that document in place rather than duplicating it.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"task_id": map[string]interface{}{
-						"type":        "string",
-						"description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis).",
+						"type": "string",
 					},
 					"title": map[string]interface{}{
-						"type":        "string",
-						"description": "Document title",
+						"type": "string",
 					},
 					"content": map[string]interface{}{
-						"type":        "string",
-						"description": "Document content: markdown, or a full HTML document when format is html",
+						"type": "string",
 					},
 					"format": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{string(domain.DocumentFormatMarkdown), string(domain.DocumentFormatHTML)},
-						"description": "markdown (default) or html",
+						"type": "string",
+						"enum": []string{string(domain.DocumentFormatMarkdown), string(domain.DocumentFormatHTML)},
 					},
 				},
 				"required": []string{"task_id", "title"},

@@ -94,100 +94,78 @@ func (t *createTaskTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        createBoardTaskToolName,
-			Description: "Create a new task on the board. Always set repository (which codebase the work touches) and project (which initiative it belongs to) when you can tell — call list_repositories / list_projects to find them rather than asking the user. Leaving repository unset falls back to the active repository context, or to the default repository, which may well be the wrong one. When you are splitting work that has an order, put it in the ARGUMENTS and not only in prose — blocked_by (nobody starts this task until those are done) and deploy_depends_on (this task ships AFTER those) are both enforced, a sentence in the description is not. When you open this task out of an analysis, set derived_from to that analiz task: the agent that picks this up is then handed that analysis's documents to work from. Inside a task run, the task you create here is linked back to the task you are working on as discovered_from automatically — there is no argument for it, and you do not need to (or need to try to) set it yourself. Anything that has to happen around the deploy belongs in before_deploy / after_deploy / rollback_plan, not in a comment: those fields are posted automatically when the release is dispatched and when it lands.",
+			Name: createBoardTaskToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"title": map[string]interface{}{
-						"type":        "string",
-						"description": "Task title",
+						"type": "string",
 					},
 					"task_type": map[string]interface{}{
-						"type":        "string",
-						"description": "Task type key (see list_team or GET /v1/task-types for the configured types — e.g. \"task\", \"analiz\", \"bug\"). Omit to use the workspace default type.",
+						"type": "string",
 					},
 					"assignee_role": map[string]interface{}{
-						"type":        "string",
-						"description": "Assign by ROLE instead of by agent name: the role key (e.g. \"developer\", \"qa\") whose agent for this task's repository area should be assigned. Ignored when assignee is also set — assignee wins. Use list_team to see role keys and which areas they cover.",
+						"type": "string",
 					},
 					"description": map[string]interface{}{
-						"type":        "string",
-						"description": "Product-level description (markdown): the user story, context and out-of-scope notes. Do NOT paste acceptance criteria or technical detail here — they have their own fields (acceptance_criteria, technical_description) and repeating them makes the task drift out of sync.",
+						"type": "string",
 					},
 					"technical_description": map[string]interface{}{
-						"type":        "string",
-						"description": "Technical detail (markdown): affected endpoints/files/schema, approach, constraints. This is the ONLY place technical detail belongs — do not repeat it in description.",
+						"type": "string",
 					},
 					"acceptance_criteria": map[string]interface{}{
-						"type":        "array",
-						"items":       map[string]interface{}{"type": "string"},
-						"description": "Acceptance criteria, one observable Given/When/Then per array item, in order. This is the ONLY place criteria belong — they become the checklist QA executes and pm_uat verifies. Writing them into description instead leaves the task with an empty checklist.",
+						"type":  "array",
+						"items": map[string]interface{}{"type": "string"},
 					},
 					"column": map[string]interface{}{
-						"type":        "string",
-						"description": "Board column (default: backlog)",
+						"type": "string",
 					},
 					"priority": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{"low", "medium", "high", "critical"},
-						"description": "Task priority",
+						"type": "string",
+						"enum": []string{"low", "medium", "high", "critical"},
 					},
 					"assignee": map[string]interface{}{
-						"type":        "string",
-						"description": "Who handles this task: the responsible agent's name (e.g. \"system-architect\", \"backend-developer\") or its UUID. Set this so the assignee is dispatched automatically. Use list_team to see valid names.",
+						"type": "string",
 					},
 					"repository": map[string]interface{}{
-						"type":        "string",
-						"description": "Which codebase this task touches: repository name (e.g. \"acme-web\") or its UUID. Use list_repositories to see valid names. Omit only when the task genuinely touches no repository.",
+						"type": "string",
 					},
 					"project": map[string]interface{}{
-						"type":        "string",
-						"description": "Which initiative this task belongs to: project name or its UUID. Use list_projects to see valid names, or create_project when the initiative does not exist yet.",
+						"type": "string",
 					},
 					"repository_id": map[string]interface{}{
-						"type":        "string",
-						"description": "Deprecated alias for repository (UUID only).",
+						"type": "string",
 					},
 					"initiative_project_id": map[string]interface{}{
-						"type":        "string",
-						"description": "Deprecated alias for project (UUID only).",
+						"type": "string",
 					},
 					"component": map[string]interface{}{
-						"type":        "string",
-						"description": "For a monorepo: which component this task belongs to, by its repository-relative path (e.g. \"services/api\"); \".\" means the repository root. Scopes the task's required checks and brief to that component instead of the whole repository. Omit for a single-purpose repository, or when you are not sure — use list_repositories/the repository's model to see valid component paths.",
+						"type": "string",
 					},
 					"allow_duplicate": map[string]interface{}{
-						"type":        "boolean",
-						"description": "Set true only when an open task with an almost identical title is genuinely different work. Creation is otherwise refused and the existing task is returned, so parallel agents cannot open the same task twice.",
+						"type": "boolean",
 					},
 					"before_deploy": map[string]interface{}{
-						"type":        "string",
-						"description": "Pre-deploy checklist (markdown): what must be true or done before this ships. Posted on the task automatically when the release is dispatched — do not write it as a comment.",
+						"type": "string",
 					},
 					"after_deploy": map[string]interface{}{
-						"type":        "string",
-						"description": "Post-deploy steps (markdown): cache warms, flag flips, smoke checks. Posted on the task automatically when the production deploy succeeds.",
+						"type": "string",
 					},
 					"rollback_plan": map[string]interface{}{
-						"type":        "string",
-						"description": "How to undo this change if production breaks (markdown). Posted alongside the pre-deploy checklist when the release is dispatched.",
+						"type": "string",
 					},
 					"deploy_depends_on": map[string]interface{}{
-						"type":        "array",
-						"items":       map[string]interface{}{"type": "string"},
-						"description": "Deploy ordering: task UUIDs or board keys (e.g. [\"T-1\"]) that must be LIVE IN PRODUCTION before this task may be released. THIS task ships AFTER the ones you list. Enforced — releasing this task is refused while any of them is unreleased, and the ordering is written into this task's before_deploy runbook automatically. Use it for real shipping order (the API before the client that calls it); use blocked_by for who writes the code first.",
+						"type":  "array",
+						"items": map[string]interface{}{"type": "string"},
 					},
 					"blocked_by": map[string]interface{}{
-						"type":        "array",
-						"items":       map[string]interface{}{"type": "string"},
-						"description": "Work ordering: task UUIDs or board keys (e.g. [\"T-1\"]) that must be FINISHED (done or released) before anyone starts this task. THIS task waits for the ones you list — same direction as deploy_depends_on. Enforced: while any of them is open this task is parked in `blocked` instead of being dispatched, and it is picked up automatically the moment the last one lands. Use it when one task's code has to exist before the next can be written; use deploy_depends_on when the order is about shipping, and both when it is both. A cycle is refused at creation.",
+						"type":  "array",
+						"items": map[string]interface{}{"type": "string"},
 					},
 					"derived_from": map[string]interface{}{
-						"type":        "array",
-						"items":       map[string]interface{}{"type": "string"},
-						"description": "The analiz task this implementation task was opened out of (board key, e.g. [\"A-12\"], or UUID). Set it on EVERY task you create from an approved analysis. It is how the developer reaches the spec: the analiz task's documents are read into that task's run context automatically, and list_task_documents re-reads them at any time. The analysis lives on that task as documents — never as a file committed to the repository — so a task without this reference is a task whose specification the implementer cannot find.",
+						"type":  "array",
+						"items": map[string]interface{}{"type": "string"},
 					},
 				},
 				"required": []string{"title"},
@@ -236,7 +214,6 @@ func (t *createTaskTool) Execute(ctx context.Context, arguments string) domain.T
 	criteria, droppedCriteria := criteriaInputs(args.AcceptanceCriteria)
 	req := domain.CreateBoardTaskRequest{
 		Title:                args.Title,
-		Description:          args.Description,
 		TechnicalDescription: args.TechnicalDescription,
 		AcceptanceCriteria:   criteria,
 		Column:               col,

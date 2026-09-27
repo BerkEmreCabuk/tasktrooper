@@ -77,14 +77,13 @@ func (t *listCriteriaTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        listCriteriaToolName,
-			Description: "List the acceptance criteria of a board task with their completion state. Complete every criterion before moving a task to ready_for_qa or done.",
+			Name: listCriteriaToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"task_id"},
 				"properties": map[string]interface{}{
-					"task_id": map[string]interface{}{"type": "string", "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis)."},
+					"task_id": map[string]interface{}{"type": "string"},
 				},
 			},
 		},
@@ -123,14 +122,13 @@ func (t *setCriterionTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        setCriterionToolName,
-			Description: "Mark one acceptance criterion completed (or not). Only mark a criterion completed after you have actually verified it.",
+			Name: setCriterionToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"criterion_id", "completed"},
 				"properties": map[string]interface{}{
-					"criterion_id": map[string]interface{}{"type": "string", "description": "Criterion UUID (from list_acceptance_criteria)"},
+					"criterion_id": map[string]interface{}{"type": "string"},
 					"completed":    map[string]interface{}{"type": "boolean"},
 				},
 			},
@@ -172,20 +170,15 @@ func (t *cancelCriterionTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: cancelCriterionToolName,
-			Description: "Drop ONE acceptance criterion from this task's scope, with the reason. Use it only for a criterion that is deliberately " +
-				"not being done — out of scope, superseded by another decision, impossible as written, moved to another task. " +
-				"It is NOT a way past a criterion you simply have not implemented: if the work is missing, do the work and call set_criterion_completed. " +
-				"The reason is stored on the criterion and posted as a task comment, so the decision is visible to the humans reading the card.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"criterion_id", "reason"},
 				"properties": map[string]interface{}{
-					"criterion_id": map[string]interface{}{"type": "string", "description": "Criterion UUID (from list_acceptance_criteria)"},
-					"reason":       map[string]interface{}{"type": "string", "description": "Why this criterion is not being done. One or two sentences, concrete."},
+					"criterion_id": map[string]interface{}{"type": "string"},
+					"reason":       map[string]interface{}{"type": "string"},
 					"canceled": map[string]interface{}{
-						"type":        "boolean",
-						"description": "Defaults to true. Pass false to put a cancelled criterion back in scope.",
+						"type": "boolean",
 					},
 				},
 			},
@@ -238,19 +231,15 @@ func (t *reviewCriterionTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: reviewCriterionToolName,
-			Description: "Record YOUR verdict on one acceptance criterion after actually verifying it — QA while the task is in ready_for_qa/in_qa, PM while it is in pm_uat. " +
-				"The implementer's checkmark is a claim, not proof: every criterion needs your own approved=true before the task can leave your review phase. " +
-				"A rejection (approved=false) requires a note saying exactly what failed and how you observed it; that note is shown on the task and read by the developer in need_revision.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"criterion_id", "approved"},
 				"properties": map[string]interface{}{
-					"criterion_id": map[string]interface{}{"type": "string", "description": "Criterion UUID (from list_acceptance_criteria)"},
-					"approved":     map[string]interface{}{"type": "boolean", "description": "true only after you verified the criterion yourself"},
+					"criterion_id": map[string]interface{}{"type": "string"},
+					"approved":     map[string]interface{}{"type": "boolean"},
 					"note": map[string]interface{}{
-						"type":        "string",
-						"description": "Required when approved=false: what failed, expected vs actual, how to reproduce. Optional evidence summary when approving.",
+						"type": "string",
 					},
 				},
 			},

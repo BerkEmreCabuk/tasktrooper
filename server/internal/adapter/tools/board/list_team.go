@@ -26,8 +26,7 @@ func (t *listTeamTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        listTeamToolName,
-			Description: "List the orchestration team: each agent's name, role description, whether it is enabled, which roles it holds (with the repo areas each covers), and which board columns it is subscribed to. Use to see who is on the team and which role handles which kind of work before assigning or decomposing.",
+			Name: listTeamToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,

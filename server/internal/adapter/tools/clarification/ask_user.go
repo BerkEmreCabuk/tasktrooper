@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	goccyjson "github.com/goccy/go-json"
-	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -29,52 +28,43 @@ func (t *askUserTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        domain.AskUserToolName,
-			Description: prompt.AskUserToolDescription,
+			Name: domain.AskUserToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"context": map[string]interface{}{
-						"type":        "string",
-						"description": prompt.AskUserContextParamDescription,
+						"type": "string",
 					},
 					"questions": map[string]interface{}{
-						"type":        "array",
-						"maxItems":    5,
-						"description": prompt.AskUserQuestionsParamDescription,
+						"type":     "array",
+						"maxItems": 5,
 						"items": map[string]interface{}{
 							"type":                 "object",
 							"additionalProperties": false,
 							"properties": map[string]interface{}{
 								"id": map[string]interface{}{
-									"type":        "string",
-									"description": prompt.AskUserQuestionIDParamDescription,
+									"type": "string",
 								},
 								"prompt": map[string]interface{}{
-									"type":        "string",
-									"description": prompt.AskUserQuestionPromptParamDescription,
+									"type": "string",
 								},
 								"allow_multiple": map[string]interface{}{
-									"type":        "boolean",
-									"description": prompt.AskUserQuestionAllowMultipleParamDescription,
+									"type": "boolean",
 								},
 								"options": map[string]interface{}{
-									"type":        "array",
-									"minItems":    2,
-									"maxItems":    6,
-									"description": prompt.AskUserOptionsParamDescription,
+									"type":     "array",
+									"minItems": 2,
+									"maxItems": 6,
 									"items": map[string]interface{}{
 										"type":                 "object",
 										"additionalProperties": false,
 										"properties": map[string]interface{}{
 											"id": map[string]interface{}{
-												"type":        "string",
-												"description": prompt.AskUserOptionIDParamDescription,
+												"type": "string",
 											},
 											"label": map[string]interface{}{
-												"type":        "string",
-												"description": prompt.AskUserOptionLabelParamDescription,
+												"type": "string",
 											},
 										},
 										"required": []string{"id", "label"},

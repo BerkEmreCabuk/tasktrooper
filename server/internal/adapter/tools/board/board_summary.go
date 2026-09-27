@@ -23,8 +23,7 @@ func (t *boardSummaryTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        getBoardSummaryToolName,
-			Description: "Get an aggregated status snapshot of the board: total task count and counts grouped by column, type, and priority. Use to report status without listing every task.",
+			Name: getBoardSummaryToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,

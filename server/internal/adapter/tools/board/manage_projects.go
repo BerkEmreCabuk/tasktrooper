@@ -36,19 +36,16 @@ func (t *createProjectTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        createProjectToolName,
-			Description: "Create a new initiative project on the board (name + optional description). Use to organize repositories and tasks under a product initiative.",
+			Name: createProjectToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"name": map[string]interface{}{
-						"type":        "string",
-						"description": "Project name",
+						"type": "string",
 					},
 					"description": map[string]interface{}{
-						"type":        "string",
-						"description": "Optional project description",
+						"type": "string",
 					},
 				},
 				"required": []string{"name"},
@@ -95,23 +92,19 @@ func (t *updateProjectTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        updateProjectToolName,
-			Description: "Rename an initiative project or update its description. Empty fields are left unchanged.",
+			Name: updateProjectToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"project_id": map[string]interface{}{
-						"type":        "string",
-						"description": "Project UUID (from list_projects)",
+						"type": "string",
 					},
 					"name": map[string]interface{}{
-						"type":        "string",
-						"description": "New name (optional)",
+						"type": "string",
 					},
 					"description": map[string]interface{}{
-						"type":        "string",
-						"description": "New description (optional)",
+						"type": "string",
 					},
 				},
 				"required": []string{"project_id"},
@@ -158,20 +151,17 @@ func (t *setRepositoryProjectsTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        setRepositoryProjectsToolName,
-			Description: "Set which initiative projects a code repository belongs to. Replaces the repository's project links with the provided list (empty list unlinks all).",
+			Name: setRepositoryProjectsToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"repository_id": map[string]interface{}{
-						"type":        "string",
-						"description": "Repository UUID (from list_repositories)",
+						"type": "string",
 					},
 					"project_ids": map[string]interface{}{
-						"type":        "array",
-						"items":       map[string]interface{}{"type": "string"},
-						"description": "Project UUIDs the repository should belong to (replaces existing links)",
+						"type":  "array",
+						"items": map[string]interface{}{"type": "string"},
 					},
 				},
 				"required": []string{"repository_id", "project_ids"},

@@ -48,17 +48,13 @@ func (t *listCommentsTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: listTaskCommentsToolName,
-			Description: "READ the comments on a board task — the reviewer's revision feedback, the human's answers and every earlier agent's notes, oldest first. " +
-				"Use it before starting work on a task that came back from review, and whenever you are about to say \"let me check the comments\". " +
-				"This tool only reads; add_task_comment is what writes one. Reviewer notes left on the PULL REQUEST are not here — get_task_pull_request returns those.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"task_id": taskRefProperty,
 					"limit": map[string]interface{}{
-						"type":        "integer",
-						"description": "How many of the most recent comments to return (default 20).",
+						"type": "integer",
 					},
 				},
 			},

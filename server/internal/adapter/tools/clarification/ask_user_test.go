@@ -4,17 +4,51 @@ import (
 	"testing"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/clarification"
-	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
+// ask_user's Definition() itself carries no prose any more — the function
+// description and every parameter description come from
+// catalog/system/tools/ask_user.md via registry.Register (see
+// internal/application/registry/tooldocs.go). This is the contract check
+// that used to run against the raw Definition(); it now runs against the
+// decorated one, the shape every real caller sees.
 func TestAskUserTool_DefinitionIncludesContract(t *testing.T) {
-	tool := clarification.NewAskUserTool()
-	def := tool.Definition()
-	assert.Equal(t, prompt.AskUserToolDescription, def.Function.Description)
+	reg := registry.New()
+	reg.Register(clarification.NewAskUserTool())
+	def := reg.Definitions()[0]
 	assert.Contains(t, def.Function.Description, "free_text")
 	assert.Contains(t, def.Function.Description, "other")
+}
+
+func TestAskUserTool_RawDefinitionCarriesNoGoProse(t *testing.T) {
+	tool := clarification.NewAskUserTool()
+	def := tool.Definition()
+	assert.Empty(t, def.Function.Description,
+		"ask_user's description belongs in catalog/system/tools/ask_user.md, not in Go")
+	assertNoParamProse(t, def.Function.Parameters)
+}
+
+func assertNoParamProse(t *testing.T, node map[string]interface{}) {
+	t.Helper()
+	if node == nil {
+		return
+	}
+	if desc, ok := node["description"].(string); ok {
+		assert.Empty(t, desc, "a parameter still carries a Go-literal description")
+	}
+	if items, ok := node["items"].(map[string]interface{}); ok {
+		assertNoParamProse(t, items)
+	}
+	if props, ok := node["properties"].(map[string]interface{}); ok {
+		for _, raw := range props {
+			if sub, ok := raw.(map[string]interface{}); ok {
+				assertNoParamProse(t, sub)
+			}
+		}
+	}
 }
 
 func TestAskUserTool_ValidChoiceMode(t *testing.T) {

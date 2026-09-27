@@ -31,15 +31,13 @@ func (t *listTasksTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        listBoardTasksToolName,
-			Description: "List board tasks for the current repository or team context.",
+			Name: listBoardTasksToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"column": map[string]interface{}{
-						"type":        "string",
-						"description": "Optional column filter",
+						"type": "string",
 					},
 				},
 			},

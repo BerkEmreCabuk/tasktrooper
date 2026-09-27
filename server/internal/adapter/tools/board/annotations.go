@@ -87,19 +87,14 @@ func (t *listAnnotationsTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: listDocumentAnnotationsToolName,
-			Description: "READ the review comments a human anchored to passages of a task's documents — the feedback on an analysis report. " +
-				"Each comment has the quoted passage (`quote`, with a little `prefix`/`suffix` of the text around it), the human's `comment`, and a `status`: " +
-				"`submitted` comments are the ones sent back with the latest review and are waiting for you; `resolved` ones you already answered; `open` ones are drafts the human has not sent. " +
-				"Address every submitted comment in the document itself, then answer each with resolve_document_annotations.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"task_id": taskRefProperty,
 					"status": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{string(domain.AnnotationStatusOpen), string(domain.AnnotationStatusSubmitted), string(domain.AnnotationStatusResolved)},
-						"description": "Only comments in this status. Omit for all of them.",
+						"type": "string",
+						"enum": []string{string(domain.AnnotationStatusOpen), string(domain.AnnotationStatusSubmitted), string(domain.AnnotationStatusResolved)},
 					},
 				},
 			},
@@ -168,9 +163,6 @@ func (t *resolveAnnotationsTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: resolveDocumentAnnotationsToolName,
-			Description: "Mark review comments on a task document as RESOLVED, each with a one-line reply the human reads next to their comment. " +
-				"Call it AFTER the document itself is revised (update_task_document): the reply says what changed and where (\"Replaced the queue with a cron job — see §4 Proposed design\"), " +
-				"or, when you deliberately kept something, why. Resolve every submitted comment in one call; an id that fails does not stop the others.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -183,8 +175,8 @@ func (t *resolveAnnotationsTool) Definition() domain.ToolDefinition {
 							"type":                 "object",
 							"additionalProperties": false,
 							"properties": map[string]interface{}{
-								"id":    map[string]interface{}{"type": "string", "description": "Annotation id from list_document_annotations or the run context."},
-								"reply": map[string]interface{}{"type": "string", "description": "One line: what changed and where, or why nothing did."},
+								"id":    map[string]interface{}{"type": "string"},
+								"reply": map[string]interface{}{"type": "string"},
 							},
 							"required": []string{"id", "reply"},
 						},

@@ -41,8 +41,6 @@ func (t *startTaskPreviewTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: startTaskPreviewToolName,
-			Description: "Start (or reuse) the task branch's local preview — the product built from this task's branch, running on this machine, never production. " +
-				"Checks out the branch, detects how to run it, starts it, and returns its http://localhost URL once the dev server has printed one, for the browser tools. Needs no shell.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,

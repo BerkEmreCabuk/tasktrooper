@@ -42,8 +42,7 @@ type TaskPullRequests interface {
 // taskRefProperty is the shared argument doc: optional everywhere, because a
 // task-scoped run already knows which task it is on.
 var taskRefProperty = map[string]interface{}{
-	"type":        "string",
-	"description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+	"type": "string",
 }
 
 // resolveTaskArg turns the optional task_id argument into an id, falling back to
@@ -73,16 +72,13 @@ func (t *getTaskPullRequestTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: getTaskPullRequestToolName,
-			Description: "Read the pull request opened for a board task: its state (open/draft/merged/mergeable), head and base branch, the changed-file list, the review comments and PR conversation, and — unless you turn it off — a size-capped diff. " +
-				"Use it before answering any question about \"the PR\" and before changing code a reviewer commented on. If the task has no PR yet, the result says so instead of failing.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"task_id": taskRefProperty,
 					"include_diff": map[string]interface{}{
-						"type":        "boolean",
-						"description": "Include the unified diff (default true). Set false when you only need the state, files or comments — the diff is by far the largest part of the result.",
+						"type": "boolean",
 					},
 				},
 			},
@@ -132,9 +128,6 @@ func (t *commitTaskChangesTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: commitTaskChangesToolName,
-			Description: "Commit everything you changed in the task's working copy, push it to the task branch, make sure the pull request exists, and return the branch, commit and PR. " +
-				"This is the ONLY way an edit you made reaches the pull request — describing a change or writing the file is not enough. Call it once the change is complete and builds. " +
-				"If the working copy has no changes, it says so instead of creating an empty commit.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -142,8 +135,7 @@ func (t *commitTaskChangesTool) Definition() domain.ToolDefinition {
 				"properties": map[string]interface{}{
 					"task_id": taskRefProperty,
 					"message": map[string]interface{}{
-						"type":        "string",
-						"description": "Commit message describing what changed and why, in the imperative (\"fix the null check on the deploy target lookup\"). A reviewer reads this next to the diff. Always English, whatever language the conversation is in — the repository history is English even when the chat is not.",
+						"type": "string",
 					},
 				},
 			},
@@ -195,8 +187,6 @@ func (t *commentOnPullRequestTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: commentOnPullRequestToolName,
-			Description: "Post a comment on the task's pull request, or answer one review comment inside its own thread by passing that comment's id. " +
-				"Reply in-thread whenever you are responding to a reviewer — a new top-level comment leaves their thread unanswered. Get the ids from get_task_pull_request.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -204,12 +194,10 @@ func (t *commentOnPullRequestTool) Definition() domain.ToolDefinition {
 				"properties": map[string]interface{}{
 					"task_id": taskRefProperty,
 					"body": map[string]interface{}{
-						"type":        "string",
-						"description": "Comment text (markdown). Say what you changed and where, not that you will change it.",
+						"type": "string",
 					},
 					"reply_to_comment_id": map[string]interface{}{
-						"type":        "integer",
-						"description": "Id of the review comment to answer, from get_task_pull_request's review_comments. Omit to start a new PR conversation comment.",
+						"type": "integer",
 					},
 				},
 			},

@@ -286,7 +286,9 @@ func TestDeployReleaseToolRefusalTellsTheModelNotToRetry(t *testing.T) {
 // release is a real failure, unlike dispatch's silent success — pin the key
 // phrases so an edit cannot drop them unnoticed.
 func TestDeployReleaseToolDescriptionCoversBatchExecutors(t *testing.T) {
-	desc := newDeployReleaseTool(releaseToolKit(uuid.New(), &fakeReleaseService{})).Definition().Function.Description
+	reg := registry.New()
+	reg.Register(newDeployReleaseTool(releaseToolKit(uuid.New(), &fakeReleaseService{})))
+	desc := reg.Definitions()[0].Function.Description
 	for _, want := range []string{"batch", "github_actions creates the release tag", "local runs the profile's command", "store starts a store build", "never re-used"} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("deploy_release description missing %q: %s", want, desc)
@@ -546,7 +548,9 @@ func TestRollbackReleaseToolWrongStatusRefusal(t *testing.T) {
 // rollback_release's description is where the agent learns a batch rollback
 // never redeploys and leads with unpublishing/halting the artifact — pin it.
 func TestRollbackReleaseToolDescriptionCoversBatch(t *testing.T) {
-	desc := newRollbackReleaseTool(releaseToolKit(uuid.New(), &fakeReleaseService{})).Definition().Function.Description
+	reg := registry.New()
+	reg.Register(newRollbackReleaseTool(releaseToolKit(uuid.New(), &fakeReleaseService{})))
+	desc := reg.Definitions()[0].Function.Description
 	for _, want := range []string{"nothing is redeployed", "cannot be unpublished by a revert", "unpublishing or halting"} {
 		if !strings.Contains(desc, want) {
 			t.Errorf("rollback_release description missing %q: %s", want, desc)

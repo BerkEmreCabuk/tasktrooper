@@ -28,8 +28,7 @@ func (t *listProjectsTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        listProjectsToolName,
-			Description: "List the projects on the board (id, name, description). Use to answer how many projects exist or what they are.",
+			Name: listProjectsToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -47,9 +46,8 @@ func (t *listProjectsTool) Execute(ctx context.Context, _ string) domain.ToolRes
 	out := make([]map[string]any, 0, len(projects))
 	for _, p := range projects {
 		out = append(out, map[string]any{
-			"id":          p.ID.String(),
-			"name":        p.Name,
-			"description": p.Description,
+			"id":   p.ID.String(),
+			"name": p.Name,
 		})
 	}
 	return toolJSON(listProjectsToolName, map[string]any{"count": len(out), "projects": out})
@@ -71,8 +69,7 @@ func (t *listRepositoriesTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        listRepositoriesToolName,
-			Description: "List the code repositories on the board (id, name, description, root_path, kind, remote_url, which projects they belong to). Use to answer what repositories exist and where a repository's code lives — never ask the user for a repository path or URL before calling this.",
+			Name: listRepositoriesToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
@@ -96,7 +93,6 @@ func (t *listRepositoriesTool) Execute(ctx context.Context, _ string) domain.Too
 		entry := map[string]any{
 			"id":          r.ID.String(),
 			"name":        r.Name,
-			"description": r.Description,
 			"project_ids": projectIDs,
 			// root_path lets an agent match the repo it was handed against the
 			// workspace it is running in instead of asking the human where the

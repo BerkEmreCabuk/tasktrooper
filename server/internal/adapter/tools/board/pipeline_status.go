@@ -37,14 +37,13 @@ func (t *getPipelineStatusTool) Definition() domain.ToolDefinition {
 	return domain.ToolDefinition{
 		Type: "function",
 		Function: domain.FunctionDefinition{
-			Name:        getPipelineStatusToolName,
-			Description: "Get the most recent QA-gate pipeline run for a board task: overall status, trigger, and per-job results (failed jobs include tail-truncated output). Use this to see why a task landed back in need_revision.",
+			Name: getPipelineStatusToolName,
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"required":             []string{"task_id"},
 				"properties": map[string]interface{}{
-					"task_id": map[string]interface{}{"type": "string", "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis)."},
+					"task_id": map[string]interface{}{"type": "string"},
 				},
 			},
 		},
