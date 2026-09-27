@@ -63,7 +63,7 @@ func (s *ExecutorMessagesSuite) TestBuildTaskMessages_IsolatedHistoryKeepsEveryU
 
 func (s *ExecutorMessagesSuite) TestBuildTaskMessages_IsolatedHistoryDropsToolChatterKeepsActionLedger() {
 	taskID := uuid.New()
-	ledger := domain.SessionActionDigest([]domain.SessionAction{{
+	ledger := orchestrator.RenderActionDigest([]domain.SessionAction{{
 		ToolName: "create_board_task", Verb: domain.ActionVerbCreated,
 		EntityKind: domain.ActionEntityBoardTask, EntityID: &taskID, EntityKey: "TT-42",
 	}})

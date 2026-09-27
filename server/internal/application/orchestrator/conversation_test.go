@@ -31,7 +31,7 @@ func TestPipelineConversationHistory_SkipsSystemAndToolCalls(t *testing.T) {
 
 func TestPipelineConversationHistory_KeepsActionLedger(t *testing.T) {
 	// The ledger is a system message, and every system message used to be dropped here.
-	digest := domain.SessionActionDigest([]domain.SessionAction{{
+	digest := orchestrator.RenderActionDigest([]domain.SessionAction{{
 		EntityKind: domain.ActionEntityBoardTask,
 		Verb:       domain.ActionVerbCreated,
 		EntityKey:  "DE-1",

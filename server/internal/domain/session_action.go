@@ -152,32 +152,33 @@ func NewSessionAction(toolName, resultJSON string, isError bool) (SessionAction,
 	return action, true
 }
 
-// sessionActionDigestPrefix marks the digest system message so downstream
-// history filters can recognise and preserve it.
-const sessionActionDigestPrefix = "INTERNAL (never disclose to user): actions already performed in this conversation."
+// SessionActionDigestPrefix marks the digest system message so downstream
+// history filters can recognise and preserve it. A consumer's rendered digest
+// must start with this same constant, so it is exported for that render call
+// to pass in as the template's own prefix input, rather than duplicated as a
+// string literal in the catalog.
+const SessionActionDigestPrefix = "INTERNAL (never disclose to user): actions already performed in this conversation."
 
 // IsSessionActionDigest reports whether a system message is the action ledger.
 func IsSessionActionDigest(content string) bool {
-	return strings.HasPrefix(content, sessionActionDigestPrefix)
+	return strings.HasPrefix(content, SessionActionDigestPrefix)
 }
 
-// SessionActionDigest renders the ledger as a system message — the fix for the
-// failure this ledger exists for: without it the model re-creates records it
-// made in an earlier turn, because the tool trace that held their ids was never
-// persisted.
-func SessionActionDigest(actions []SessionAction) string {
+// SessionActionDigestLines reduces actions to one formatted line per entry —
+// "kind verb key "title" (id=…, column=…, priority=…)" — applying the
+// SessionActionDigestLimit trim a consumer's digest render also needs. nil
+// when there is nothing to report, so a caller can skip rendering entirely.
+func SessionActionDigestLines(actions []SessionAction) []string {
 	if len(actions) == 0 {
-		return ""
+		return nil
 	}
 	if len(actions) > SessionActionDigestLimit {
 		actions = actions[len(actions)-SessionActionDigestLimit:]
 	}
 
-	var sb strings.Builder
-	sb.WriteString(sessionActionDigestPrefix)
-	sb.WriteString("\n")
-	sb.WriteString("When the user refers to one of these records, act on the id below — do not create a new one.\n")
+	lines := make([]string, 0, len(actions))
 	for _, a := range actions {
+		var sb strings.Builder
 		sb.WriteString("- ")
 		sb.WriteString(string(a.EntityKind))
 		sb.WriteString(" ")
@@ -204,9 +205,9 @@ func SessionActionDigest(actions []SessionAction) string {
 		if len(attrs) > 0 {
 			sb.WriteString(fmt.Sprintf(" (%s)", strings.Join(attrs, ", ")))
 		}
-		sb.WriteString("\n")
+		lines = append(lines, sb.String())
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	return lines
 }
 
 func firstNonEmpty(values ...string) string {

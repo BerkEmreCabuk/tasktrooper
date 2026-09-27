@@ -1,6 +1,7 @@
 package domain_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -58,7 +59,7 @@ func (s *SessionActionSuite) TestNewSessionActionSkipsUnparseableResults() {
 	s.False(ok)
 }
 
-func (s *SessionActionSuite) TestDigestNamesEveryEntityWithItsID() {
+func (s *SessionActionSuite) TestDigestLinesNameEveryEntityWithItsID() {
 	taskID := uuid.New()
 	actions := []domain.SessionAction{
 		{
@@ -73,22 +74,20 @@ func (s *SessionActionSuite) TestDigestNamesEveryEntityWithItsID() {
 		},
 	}
 
-	digest := domain.SessionActionDigest(actions)
-	s.Contains(digest, taskID.String())
-	s.Contains(digest, "TT-42")
-	s.Contains(digest, "Ops konsolu")
-	s.Contains(digest, "backlog")
-	s.Contains(digest, "sprint")
-	// The whole point of the digest: stop the agent re-creating what it already made.
-	s.Contains(digest, "do not create a new one")
+	lines := strings.Join(domain.SessionActionDigestLines(actions), "\n")
+	s.Contains(lines, taskID.String())
+	s.Contains(lines, "TT-42")
+	s.Contains(lines, "Ops konsolu")
+	s.Contains(lines, "backlog")
+	s.Contains(lines, "sprint")
 }
 
-func (s *SessionActionSuite) TestDigestIsEmptyWithoutActions() {
-	s.Equal("", domain.SessionActionDigest(nil))
-	s.Equal("", domain.SessionActionDigest([]domain.SessionAction{}))
+func (s *SessionActionSuite) TestDigestLinesAreEmptyWithoutActions() {
+	s.Nil(domain.SessionActionDigestLines(nil))
+	s.Nil(domain.SessionActionDigestLines([]domain.SessionAction{}))
 }
 
-func (s *SessionActionSuite) TestDigestKeepsOnlyTheMostRecentActions() {
+func (s *SessionActionSuite) TestDigestLinesKeepOnlyTheMostRecentActions() {
 	actions := make([]domain.SessionAction, 0, domain.SessionActionDigestLimit+5)
 	for i := 0; i < cap(actions); i++ {
 		id := uuid.New()
@@ -98,9 +97,9 @@ func (s *SessionActionSuite) TestDigestKeepsOnlyTheMostRecentActions() {
 			EntityKey: "TT-" + string(rune('a'+i)), Title: "t",
 		})
 	}
-	digest := domain.SessionActionDigest(actions)
-	s.NotContains(digest, actions[0].EntityID.String(), "oldest action must be dropped")
-	s.Contains(digest, actions[len(actions)-1].EntityID.String(), "newest action must be kept")
+	lines := strings.Join(domain.SessionActionDigestLines(actions), "\n")
+	s.NotContains(lines, actions[0].EntityID.String(), "oldest action must be dropped")
+	s.Contains(lines, actions[len(actions)-1].EntityID.String(), "newest action must be kept")
 }
 
 func TestSessionActionSuite(t *testing.T) {

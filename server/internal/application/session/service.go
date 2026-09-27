@@ -731,7 +731,7 @@ func (s *Service) withActionDigest(ctx context.Context, sessionID uuid.UUID, his
 	if err != nil || len(actions) == 0 {
 		return history
 	}
-	digest := domain.SessionActionDigest(actions)
+	digest := orchestrator.RenderActionDigest(actions)
 	if digest == "" {
 		return history
 	}

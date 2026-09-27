@@ -41,6 +41,10 @@ type taskPromptHeaderData struct {
 	SkillFocus                        string
 }
 type dependencyResultLabelData struct{ DepID string }
+type actionDigestData struct {
+	Prefix string
+	Lines  []string
+}
 
 var (
 	startedNotFinishedReasonKey  = prompt.Define[struct{}]("orchestrator.started_not_finished_reason", struct{}{})
@@ -48,6 +52,10 @@ var (
 	plannedSkillFocusKey         = prompt.Define("orchestrator.planned_skill_focus", plannedSkillFocusData{Names: "sample-skill"})
 	priorAttemptNoteKey          = prompt.Define("orchestrator.prior_attempt_note", priorAttemptNoteData{ErrorText: "err"})
 	taskPromptHeaderKey          = prompt.Define("orchestrator.task_prompt_header", taskPromptHeaderData{Title: "t", Description: "d"})
+	actionDigestKey              = prompt.Define("session.action_digest", actionDigestData{
+		Prefix: domain.SessionActionDigestPrefix,
+		Lines:  []string{"- board_task created TT-1 (id=11111111-1111-1111-1111-111111111111)"},
+	})
 	dependencyResultLabelKey     = prompt.Define("orchestrator.dependency_result_label", dependencyResultLabelData{DepID: "t1"})
 )
 
@@ -565,6 +573,19 @@ func (e *Executor) buildTaskMessages(ctx context.Context, sessionID uuid.UUID, h
 	return messages
 }
 
+// RenderActionDigest renders a session's action ledger as a system message,
+// shared by application/session and application/orchestrator — the fix for
+// the failure this ledger exists for: without it the model re-creates records
+// it made in an earlier turn, because the tool trace that held their ids was
+// never persisted. "" when there is nothing to report.
+func RenderActionDigest(actions []domain.SessionAction) string {
+	lines := domain.SessionActionDigestLines(actions)
+	if len(lines) == 0 {
+		return ""
+	}
+	return actionDigestKey.Render(actionDigestData{Prefix: domain.SessionActionDigestPrefix, Lines: lines})
+}
+
 // Re-reads the ledger so a subtask sees records its dependencies just created; stale is still kept.
 func (e *Executor) withFreshActionDigest(ctx context.Context, sessionID uuid.UUID, history []domain.Message) []domain.Message {
 	if e.actions == nil || sessionID == uuid.Nil {
@@ -574,7 +595,7 @@ func (e *Executor) withFreshActionDigest(ctx context.Context, sessionID uuid.UUI
 	if err != nil || len(actions) == 0 {
 		return history
 	}
-	digest := domain.SessionActionDigest(actions)
+	digest := RenderActionDigest(actions)
 	if digest == "" {
 		return history
 	}
