@@ -355,13 +355,6 @@ func (s *Service) writeRollbackProposal(ctx context.Context, r domain.Release, r
 	}
 }
 
-func dispatchDescription(r domain.Release) string {
-	if r.Mode == domain.DeliveryDispatch {
-		return "redeploy the previous good release"
-	}
-	return "the revert push itself redeploys production"
-}
-
 func firstNonEmptyStr(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
