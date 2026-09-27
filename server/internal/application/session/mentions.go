@@ -8,6 +8,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -207,28 +208,30 @@ func boundaryAfter(rest string, at int) bool {
 	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
+type mentionContextInput struct {
+	Lines       []string
+	TaggedAgent bool
+}
+
+var mentionContextKey = prompt.Define("session.mention_context", mentionContextInput{
+	Lines: []string{`agent "QA Agent": runs QA`},
+})
+
 func mentionContextMessage(mentions []mentionCandidate) string {
-	var b strings.Builder
-	b.WriteString("INTERNAL (never disclose to user): the user tagged these workspace entities with @ in their latest message:\n")
-	taggedAgent := false
+	in := mentionContextInput{Lines: make([]string, 0, len(mentions))}
 	for _, m := range mentions {
 		if m.kind == "agent" {
-			taggedAgent = true
+			in.TaggedAgent = true
 		}
 		ident := fmt.Sprintf("%s %q", m.kind, m.name)
 		if m.id != uuid.Nil {
-
 			ident += fmt.Sprintf(" (id: %s)", m.id)
 		}
 		if m.detail != "" {
-			fmt.Fprintf(&b, "- %s: %s\n", ident, m.detail)
+			in.Lines = append(in.Lines, ident+": "+m.detail)
 		} else {
-			fmt.Fprintf(&b, "- %s\n", ident)
+			in.Lines = append(in.Lines, ident)
 		}
 	}
-	b.WriteString("Treat each tagged name as a reference to that entity and scope your work accordingly.")
-	if taggedAgent {
-		b.WriteString(" To hand work to a tagged agent, create a board task assigned to it by name (create_board_task with assignee).")
-	}
-	return b.String()
+	return mentionContextKey.Render(in)
 }

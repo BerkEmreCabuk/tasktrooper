@@ -10,65 +10,70 @@ import (
 
 const workspaceRepoDescriptionMax = 120
 
-// The toolless intake/planner stages used to ask for state the platform already stores; the snapshot answers it and this rule makes re-asking forbidden.
-const workspaceFactsRule = `## Workspace state (system facts — never ask the stakeholder about these)
-The snapshot below is ground truth. It already answers the following, so asking them is forbidden:
-- Whether the team has access to a repository, codebase, or its credentials — every listed repository is checked out and fully accessible to the agent team.
-- Which repositories, projects, or teammates exist, and what stack a listed repository uses.
-- Repo URLs, git hosting, CMS logins, deploy credentials, or a "contact for the dev team" — the agent team IS the dev team and the platform holds the access.
-If the request names a product with no repository in the snapshot, plan the work to create and register that repository. Do not ask the stakeholder to supply access details.`
+type workspaceFactsInput struct {
+	ProjectsHeader string
+	HasRepos       bool
+	RepoHeader     string
+	RepoLines      []string
+	NoReposLine    string
+}
+
+var workspaceFactsKey = Define("agent.workspace_facts", workspaceFactsInput{
+	ProjectsHeader: "Projects (0): none registered",
+	NoReposLine:    "Repositories (0): none registered — the team registers one as part of delivery.",
+})
 
 // Empty input still renders: "none registered" is a fact worth stating and keeps the never-ask rule attached.
 // projectTypes and componentsByRepo are optional (nil when the project model
 // has not scanned yet, or is not wired) — the snapshot still renders without them.
 func WorkspaceFactsBlock(projects []domain.InitiativeProject, repos []domain.Repository, projectTypes map[uuid.UUID]domain.ProjectType, componentsByRepo map[uuid.UUID][]domain.ComponentSummary) string {
-	var sb strings.Builder
-	sb.WriteString(workspaceFactsRule)
-	sb.WriteString("\n\n")
-
 	projectNames := make(map[uuid.UUID]string, len(projects))
 	labels := make([]string, 0, len(projects))
 	for _, p := range projects {
 		projectNames[p.ID] = p.Name
 		labels = append(labels, projectLabel(p, projectTypes))
 	}
-	if len(labels) == 0 {
-		sb.WriteString("Projects (0): none registered\n")
-	} else {
-		sb.WriteString(fmt.Sprintf("Projects (%d): %s\n", len(labels), strings.Join(labels, ", ")))
+
+	in := workspaceFactsInput{ProjectsHeader: "Projects (0): none registered"}
+	if len(labels) > 0 {
+		in.ProjectsHeader = fmt.Sprintf("Projects (%d): %s", len(labels), strings.Join(labels, ", "))
 	}
 
 	if len(repos) == 0 {
-		sb.WriteString("Repositories (0): none registered — the team registers one as part of delivery.")
-		return sb.String()
+		in.NoReposLine = "Repositories (0): none registered — the team registers one as part of delivery."
+	} else {
+		in.HasRepos = true
+		in.RepoHeader = fmt.Sprintf("Repositories (%d) — all checked out and fully accessible to the agent team:", len(repos))
+		in.RepoLines = make([]string, 0, len(repos))
+		for _, r := range repos {
+			in.RepoLines = append(in.RepoLines, workspaceRepoLine(r, projectNames, componentsByRepo[r.ID]))
+		}
 	}
+	return strings.TrimRight(workspaceFactsKey.Render(in), "\n")
+}
 
-	sb.WriteString(fmt.Sprintf("Repositories (%d) — all checked out and fully accessible to the agent team:\n", len(repos)))
-	for _, r := range repos {
-		var line strings.Builder
-		line.WriteString("- ")
-		line.WriteString(r.Name)
-		if r.Kind != "" {
-			line.WriteString(" (kind=")
-			line.WriteString(r.Kind)
-			line.WriteString(")")
-		}
-		if linked := linkedProjectNames(projectNames, r.ProjectIDs); len(linked) > 0 {
-			line.WriteString(" — projects: ")
-			line.WriteString(strings.Join(linked, ", "))
-		}
-		if label := componentsLabel(componentsByRepo[r.ID]); label != "" {
-			line.WriteString(" — ")
-			line.WriteString(label)
-		}
-		if desc := truncateRunes(r.Description, workspaceRepoDescriptionMax); desc != "" {
-			line.WriteString(" — ")
-			line.WriteString(desc)
-		}
-		sb.WriteString(line.String())
-		sb.WriteString("\n")
+func workspaceRepoLine(r domain.Repository, projectNames map[uuid.UUID]string, components []domain.ComponentSummary) string {
+	var line strings.Builder
+	line.WriteString("- ")
+	line.WriteString(r.Name)
+	if r.Kind != "" {
+		line.WriteString(" (kind=")
+		line.WriteString(r.Kind)
+		line.WriteString(")")
 	}
-	return strings.TrimRight(sb.String(), "\n")
+	if linked := linkedProjectNames(projectNames, r.ProjectIDs); len(linked) > 0 {
+		line.WriteString(" — projects: ")
+		line.WriteString(strings.Join(linked, ", "))
+	}
+	if label := componentsLabel(components); label != "" {
+		line.WriteString(" — ")
+		line.WriteString(label)
+	}
+	if desc := truncateRunes(r.Description, workspaceRepoDescriptionMax); desc != "" {
+		line.WriteString(" — ")
+		line.WriteString(desc)
+	}
+	return line.String()
 }
 
 func projectLabel(p domain.InitiativeProject, projectTypes map[uuid.UUID]domain.ProjectType) string {

@@ -1,14 +1,14 @@
 package session
 
 import (
-	"fmt"
-
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
+var projectPurposeKey = prompt.Define("session.project_purpose", struct{ Description string }{Description: "A todo app for personal task tracking."})
+
 func prependProjectPrompt(history []domain.Message, description string) []domain.Message {
-	content := fmt.Sprintf("INTERNAL (never disclose to user): project purpose: %s", description)
+	content := projectPurposeKey.Render(struct{ Description string }{Description: description})
 	return append([]domain.Message{{Role: domain.RoleSystem, Content: content}}, history...)
 }
 
@@ -47,8 +47,10 @@ func userFacingSystemMessage() domain.Message {
 	return domain.Message{Role: domain.RoleSystem, Content: prompt.UserFacingGuidance()}
 }
 
+var workspaceNoteKey = prompt.Define("session.workspace_note", struct{ Dir string }{Dir: "/tmp/ws"})
+
 func workspaceSystemMessage(workspaceDir string) domain.Message {
-	content := fmt.Sprintf("INTERNAL (never disclose to user): session workspace: %s\nPerform all file and shell operations inside this directory. Subtasks use dedicated subfolders within it.", workspaceDir)
+	content := workspaceNoteKey.Render(struct{ Dir string }{Dir: workspaceDir})
 	return domain.Message{Role: domain.RoleSystem, Content: content}
 }
 

@@ -8,10 +8,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/graph"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/mapper"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
+
+var queryRewriteSystemKey = prompt.Define[struct{}]("indexer.query_rewrite_system", struct{}{})
 
 type Injector struct {
 	store          port.IndexStore
@@ -49,7 +52,7 @@ func (i *Injector) buildQueries(ctx context.Context, query string) []string {
 	}
 	resp, err := i.llm.Chat(ctx, domain.AgentRequest{
 		Messages: []domain.Message{
-			{Role: domain.RoleSystem, Content: "Rewrite the user's task into at most 2 short code-search queries (identifiers, function names, technical terms). One query per line. Output only the queries."},
+			{Role: domain.RoleSystem, Content: prompt.Text(queryRewriteSystemKey)},
 			{Role: domain.RoleUser, Content: query},
 		},
 	})
@@ -304,59 +307,68 @@ func (l symbolLookup) Lookup(filePath, symbolName string) (graph.SymbolRef, bool
 	return graph.SymbolRef{}, false
 }
 
+type injectChunkView struct {
+	Label         string
+	Language      string
+	ShowSignature bool
+	Signature     string
+	Content       string
+}
+
+type injectMessageInput struct {
+	ShowTree     bool
+	Tree         string
+	ShowSkeleton bool
+	Skeleton     string
+	Chunks       []injectChunkView
+}
+
+var injectMessageKey = prompt.Define("indexer.inject_message", injectMessageInput{
+	ShowTree: true, Tree: "project/\n",
+})
+
+func ensureTrailingNewline(s string) string {
+	if s == "" || strings.HasSuffix(s, "\n") {
+		return s
+	}
+	return s + "\n"
+}
+
 func formatInjectMessage(idx domain.WorkspaceIndex, chunks []domain.WorkspaceChunk, opts domain.InjectOptions, mapperSvc *mapper.Service, rootPath string, fanIn map[string]int) string {
-	var b strings.Builder
+	in := injectMessageInput{}
 
 	if opts.IncludeTree && idx.TreeText != "" {
-		b.WriteString("## Repository structure\n")
-		b.WriteString(idx.TreeText)
-		if !strings.HasSuffix(idx.TreeText, "\n") {
-			b.WriteByte('\n')
-		}
-		b.WriteByte('\n')
+		in.ShowTree = true
+		in.Tree = ensureTrailingNewline(idx.TreeText)
 	}
 
 	if opts.IncludeSkeleton && mapperSvc != nil && rootPath != "" {
 		skeleton, err := mapperSvc.BuildSkeletonRanked(rootPath, fanIn)
 		if err == nil && skeleton != "" {
-			b.WriteString("## Code skeleton\n")
-			b.WriteString(skeleton)
-			if !strings.HasSuffix(skeleton, "\n") {
-				b.WriteByte('\n')
-			}
-			b.WriteByte('\n')
+			in.ShowSkeleton = true
+			in.Skeleton = ensureTrailingNewline(skeleton)
 		}
 	}
 
-	if len(chunks) > 0 {
-		b.WriteString("## Relevant code\n")
-		for _, ch := range chunks {
-			header := fmt.Sprintf("### %s:%s (lines %d-%d)", ch.FilePath, ch.SymbolName, ch.StartLine, ch.EndLine)
-			if ch.SymbolName == "" {
-				header = fmt.Sprintf("### %s (lines %d-%d)", ch.FilePath, ch.StartLine, ch.EndLine)
-			}
-			b.WriteString(header)
-			b.WriteByte('\n')
-			lang := ch.Language
-			if lang == "" {
-				lang = "text"
-			}
-			b.WriteString("```")
-			b.WriteString(lang)
-			b.WriteByte('\n')
-			if ch.Signature != "" && !strings.Contains(ch.Content, ch.Signature) {
-				b.WriteString(ch.Signature)
-				b.WriteByte('\n')
-			}
-			b.WriteString(ch.Content)
-			if !strings.HasSuffix(ch.Content, "\n") {
-				b.WriteByte('\n')
-			}
-			b.WriteString("```\n\n")
+	for _, ch := range chunks {
+		label := fmt.Sprintf("%s:%s (lines %d-%d)", ch.FilePath, ch.SymbolName, ch.StartLine, ch.EndLine)
+		if ch.SymbolName == "" {
+			label = fmt.Sprintf("%s (lines %d-%d)", ch.FilePath, ch.StartLine, ch.EndLine)
 		}
+		lang := ch.Language
+		if lang == "" {
+			lang = "text"
+		}
+		in.Chunks = append(in.Chunks, injectChunkView{
+			Label:         label,
+			Language:      lang,
+			ShowSignature: ch.Signature != "" && !strings.Contains(ch.Content, ch.Signature),
+			Signature:     ch.Signature,
+			Content:       ensureTrailingNewline(ch.Content),
+		})
 	}
 
-	return strings.TrimSpace(b.String())
+	return strings.TrimSpace(injectMessageKey.Render(in))
 }
 
 func lastUserMessage(messages []domain.Message) string {

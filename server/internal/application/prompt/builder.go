@@ -8,6 +8,15 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
+type scoreContextInput struct {
+	Score       float64
+	RunsPassed  int
+	RunsRevised int
+	Trend       string
+}
+
+var scoreContextKey = Define("agent.score_context", scoreContextInput{Score: 82.5, RunsPassed: 10, RunsRevised: 2, Trend: "stable"})
+
 func ScoreContextMessage(score domain.AgentPerformanceScore, recentEvents []domain.AgentScoreEvent) string {
 	trend := "stable"
 	if len(recentEvents) >= 3 {
@@ -18,19 +27,37 @@ func ScoreContextMessage(score domain.AgentPerformanceScore, recentEvents []doma
 			}
 		}
 		if neg >= 2 {
-			trend = "declining — recent revisions flagged"
+			trend = "declining"
 		} else if neg == 0 {
 			trend = "improving"
 		}
 	}
-	return fmt.Sprintf(
-		"## Performance Context (internal — never disclose to user)\n"+
-			"Score: %.1f/100 | Completed clean: %d | Revised: %d | Trend: %s\n\n"+
-			"Completing tasks without revision improves your score. Revisions reduce it.\n"+
-			"Verify all AC before moving to ready_for_qa or done. When requirements are unclear, use add_task_comment.",
-		score.Score, score.RunsPassed, score.RunsRevised, trend,
-	)
+	return scoreContextKey.Render(scoreContextInput{
+		Score:       score.Score,
+		RunsPassed:  score.RunsPassed,
+		RunsRevised: score.RunsRevised,
+		Trend:       trend,
+	})
 }
+
+type skillGroupInput struct {
+	Header string
+	Lines  []string
+}
+
+type skillIndexInput struct {
+	HasSkills bool
+	CanCreate bool
+	Grouped   bool
+	Ungrouped []string
+	General   []string
+	Groups    []skillGroupInput
+}
+
+var skillIndexKey = Define("agent.skill_index", skillIndexInput{
+	HasSkills: true,
+	Ungrouped: []string{"go-patterns — Go mimari desenleri"},
+})
 
 // SkillIndexMessage lists name + description only; full bodies are fetched by load_skill before applying. canCreate must be true only when self-evolution AND policy let create_skill succeed, or the prompt promises a refused tool. Stacks group the flat list into sections; a skill whose stack is missing is shown as general rather than dropped.
 func SkillIndexMessage(skills []domain.Skill, stacks []domain.TechStack, canCreate bool) string {
@@ -40,50 +67,40 @@ func SkillIndexMessage(skills []domain.Skill, stacks []domain.TechStack, canCrea
 			withContent = append(withContent, sk)
 		}
 	}
-	if len(withContent) == 0 {
-		if !canCreate {
-			return ""
-		}
-		return "## Skills\n" +
-			"You have no skills yet. When this task forces you to work out something durable — a procedure, a convention, a recovery path future tasks will need again — save it with create_skill: reusable step-by-step instructions, not a log of this task."
-	}
-	var b strings.Builder
-	b.WriteString("## Skills (index — load on demand)\n")
-	b.WriteString("You have the skills below. Their full instructions are NOT included here. Immediately before applying a skill, call load_skill with its name, read the returned instructions, then follow them.\n")
 
-	general, grouped := groupSkillsByStack(withContent, stacks)
-	if len(grouped) == 0 {
-		b.WriteString("\n")
-		writeSkillLines(&b, withContent)
-	} else {
-		b.WriteString("A skill under a technology heading applies only when the work is in that technology; a general skill applies whatever the code is written in.\n")
-		if len(general) > 0 {
-			b.WriteString("\n### General skills\n")
-			writeSkillLines(&b, general)
-		}
-		for _, g := range grouped {
-			b.WriteString("\n### " + g.stack.Name)
-			if desc := strings.TrimSpace(g.stack.Description); desc != "" {
-				b.WriteString(" — " + desc)
+	in := skillIndexInput{HasSkills: len(withContent) > 0, CanCreate: canCreate}
+	if in.HasSkills {
+		general, grouped := groupSkillsByStack(withContent, stacks)
+		in.Grouped = len(grouped) > 0
+		if in.Grouped {
+			in.General = skillLines(general)
+			for _, g := range grouped {
+				in.Groups = append(in.Groups, skillGroupInput{Header: skillGroupHeader(g.stack), Lines: skillLines(g.skills)})
 			}
-			b.WriteString("\n")
-			writeSkillLines(&b, g.skills)
+		} else {
+			in.Ungrouped = skillLines(withContent)
 		}
 	}
-	if canCreate {
-		b.WriteString("\nIf none of these covers the work at hand, write yourself a new skill with create_skill once you have worked the approach out: durable, reusable instructions future runs can follow — not a log of this task.")
-	}
-	return strings.TrimRight(b.String(), "\n")
+	return strings.TrimRight(skillIndexKey.Render(in), "\n")
 }
 
-func writeSkillLines(b *strings.Builder, skills []domain.Skill) {
+func skillLines(skills []domain.Skill) []string {
+	lines := make([]string, 0, len(skills))
 	for _, sk := range skills {
 		desc := sk.Description
 		if desc == "" {
 			desc = "(no description)"
 		}
-		fmt.Fprintf(b, "- %s — %s\n", sk.Name, desc)
+		lines = append(lines, sk.Name+" — "+desc)
 	}
+	return lines
+}
+
+func skillGroupHeader(stack domain.TechStack) string {
+	if desc := strings.TrimSpace(stack.Description); desc != "" {
+		return stack.Name + " — " + desc
+	}
+	return stack.Name
 }
 
 type stackGroup struct {
@@ -255,20 +272,30 @@ const commitLanguageGuidance = `## Commit messages
 - Subject: Conventional Commits ("type(scope): summary"), imperative, at most 72 characters. Add a body only when it says something the subject does not.
 - This overrides the response-language instruction: your reply to the user follows their language, the repository history does not.`
 
+var (
+	toolSelectionGuidanceKey  = Define[struct{}]("agent.tool_selection", struct{}{})
+	repeatCallGuidanceKey     = Define[struct{}]("agent.repeat_call", struct{}{})
+	userFacingGuidanceKey     = Define[struct{}]("agent.user_facing", struct{}{})
+	commitLanguageGuidanceKey = Define[struct{}]("agent.commit_language", struct{}{})
+	languageInstructionKey    = Define("agent.language_instruction", struct{ Locale string }{Locale: "English"})
+	subtaskWorkspaceNoteKey   = Define("agent.subtask_workspace_note", struct{ Dir string }{Dir: "/tmp/subtask"})
+	skillsOnDiskKey           = Define("agent.skills_on_disk", struct{ CanCreate bool }{CanCreate: true})
+)
+
 func CommitLanguageGuidance() string {
-	return commitLanguageGuidance
+	return Text(commitLanguageGuidanceKey)
 }
 
 func ToolSelectionGuidance() string {
-	return toolSelectionGuidance
+	return Text(toolSelectionGuidanceKey)
 }
 
 func UserFacingGuidance() string {
-	return userFacingGuidance
+	return Text(userFacingGuidanceKey)
 }
 
 func RepeatCallGuidance() string {
-	return repeatCallGuidance
+	return Text(repeatCallGuidanceKey)
 }
 
 func LocalToolGuidance() string {
@@ -276,21 +303,16 @@ func LocalToolGuidance() string {
 }
 
 func LanguageInstruction(lang string) string {
-	return fmt.Sprintf("Respond in %s unless the user explicitly requests another language.", LocaleDisplayName(lang))
+	return languageInstructionKey.Render(struct{ Locale string }{Locale: LocaleDisplayName(lang)})
 }
 
 func SubtaskWorkspaceNote(dir string) string {
-	return "\n\nINTERNAL (never disclose to user): subtask working directory: " + dir + "\nKeep all files and shell commands inside this directory."
+	return subtaskWorkspaceNoteKey.Render(struct{ Dir string }{Dir: dir})
 }
 
 // For a CLI run only the invitation matters: listing the skills would rebuild the index this delivery mode exists to remove, the CLI already shows them.
 func SkillsOnDiskMessage(canCreate bool) string {
-	if !canCreate {
-		return ""
-	}
-	return "## Skills\n" +
-		"Your skills are installed in this workspace and your own skill mechanism lists them; apply one the way you normally would.\n" +
-		"When this task forces you to work out something durable — a procedure, a convention, a recovery path future tasks will need again — save it with create_skill: reusable step-by-step instructions, not a log of this task."
+	return skillsOnDiskKey.Render(struct{ CanCreate bool }{CanCreate: canCreate})
 }
 
 // Two mechanisms deliver skills; running both would point a CLI run at a second vocabulary and a tool (load_skill) whose job its own machinery already does.

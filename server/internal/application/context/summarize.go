@@ -5,9 +5,14 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
+
+var summarizeSystemPromptKey = prompt.Define[struct{}]("context.summarize_system", struct{}{})
+
+var recapKey = prompt.Define("context.recap", struct{ Summary string }{Summary: "Investigated the auth bug and fixed the token refresh race."})
 
 type Summarizer interface {
 	Summarize(ctx gocontext.Context, messages []domain.Message, model string) (string, error)
@@ -55,7 +60,7 @@ func (s *LLMSummarizer) SummarizeFor(
 		Messages: []domain.Message{
 			{
 				Role:    domain.RoleSystem,
-				Content: "Summarize the following conversation history concisely. Preserve key facts, decisions, file paths, and tool outcomes. Write in the same language as the conversation.",
+				Content: prompt.Text(summarizeSystemPromptKey),
 			},
 			{Role: domain.RoleUser, Content: formatMessagesForSummary(messages)},
 		},
@@ -123,7 +128,7 @@ func SummarizeRollingFor(
 	out = append(out, system...)
 	out = append(out, domain.Message{
 		Role:    domain.RoleSystem,
-		Content: "Conversation summary:\n" + summary,
+		Content: recapKey.Render(struct{ Summary string }{Summary: summary}),
 	})
 	out = append(out, recent...)
 	return out, nil

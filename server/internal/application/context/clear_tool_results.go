@@ -1,18 +1,16 @@
 package context
 
 import (
-	"fmt"
-
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
+
+var clearedToolResultKey = prompt.Define("context.cleared_tool_result", struct{ ToolName string }{ToolName: "read_file"})
 
 // Clearing old tool results is the cheapest large saving a long run has and works on every provider. Only the payload goes — the assistant's tool_call block stays as the ledger that stops the re-run doing the search again — but the prefix rewrite invalidates the prompt cache, which is why callers pass a threshold instead of clearing every turn.
 func ClearedToolResultNote(toolName string) string {
 	// Not an empty string, which would read to the model as a tool that returned nothing.
-	if toolName == "" {
-		return "[earlier tool output cleared to save context — re-run the call if you need it again]"
-	}
-	return fmt.Sprintf("[earlier %s output cleared to save context — re-run the call if you need it again]", toolName)
+	return clearedToolResultKey.Render(struct{ ToolName string }{ToolName: toolName})
 }
 
 // ClearToolResults blanks the payload of every tool result except the most recent keepRecent. Messages are rewritten, never removed: a result pairs with its assistant turn by ToolCallID, and both endpoint families reject a call with no matching result. keepRecent <= 0 clears everything.

@@ -1,0 +1,16 @@
+---
+key: agent.workspace_facts
+version: 1
+inputs: [ProjectsHeader, HasRepos, RepoHeader, RepoLines, NoReposLine]
+---
+## Workspace state (system facts — never ask the stakeholder about these)
+The snapshot below is ground truth. It already answers the following, so asking them is forbidden:
+- Whether the team has access to a repository, codebase, or its credentials — every listed repository is checked out and fully accessible to the agent team.
+- Which repositories, projects, or teammates exist, and what stack a listed repository uses.
+- Repo URLs, git hosting, CMS logins, deploy credentials, or a "contact for the dev team" — the agent team IS the dev team and the platform holds the access.
+If the request names a product with no repository in the snapshot, plan the work to create and register that repository. Do not ask the stakeholder to supply access details.
+
+{{.ProjectsHeader}}
+{{if .HasRepos}}{{.RepoHeader}}
+{{range .RepoLines}}{{.}}
+{{end}}{{else}}{{.NoReposLine}}{{end}}

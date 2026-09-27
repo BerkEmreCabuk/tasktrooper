@@ -263,6 +263,12 @@ func TestDefinedKeyRenderWithAgainstCandidateLibrary(t *testing.T) {
 }
 
 func TestSetDefaultOverridesKeyRender(t *testing.T) {
+	// Every other test in this binary renders real keys (guidance text, task-chat
+	// messages, ...) through Default(); leaving the overlay installed here would
+	// poison every test that runs afterward in file order.
+	original := prompt.Default()
+	t.Cleanup(func() { prompt.SetDefault(original) })
+
 	lib, err := prompt.LoadFS(fstest.MapFS{
 		"prompts/test/library/greet.md": mapFile("---\nkey: test.library.greet\n---\nOverlay hi, {{.Name}}."),
 	})

@@ -6,12 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/google/uuid"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
+
+var injectContextKey = prompt.Define("rag.inject_context", struct{ Chunks []string }{Chunks: []string{"Sample chunk."}})
 
 type Service struct {
 	store          port.FileStore
@@ -133,16 +135,14 @@ func (s *Service) InjectContext(ctx context.Context, messages []domain.Message, 
 		return messages, nil
 	}
 
-	var sb strings.Builder
-	sb.WriteString("Relevant document excerpts:\n\n")
-	for _, ch := range chunks {
-		sb.WriteString(ch.Content)
-		sb.WriteString("\n---\n")
+	contents := make([]string, len(chunks))
+	for i, ch := range chunks {
+		contents[i] = ch.Content
 	}
 
 	systemMsg := domain.Message{
 		Role:    domain.RoleSystem,
-		Content: sb.String(),
+		Content: injectContextKey.Render(struct{ Chunks []string }{Chunks: contents}),
 	}
 	return append([]domain.Message{systemMsg}, messages...), nil
 }

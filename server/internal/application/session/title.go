@@ -4,6 +4,7 @@ import (
 	gocontext "context"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -25,12 +26,14 @@ func NewLLMTitleGenerator(client port.LLMClient) *LLMTitleGenerator {
 	return &LLMTitleGenerator{client: client}
 }
 
+var titleSystemPromptKey = prompt.Define[struct{}]("session.title_system_prompt", struct{}{})
+
 func (g *LLMTitleGenerator) GenerateTitle(ctx gocontext.Context, userMessage, assistantReply, model string, provider domain.LLMProviderType) (string, error) {
 	resp, err := g.client.Chat(ctx, domain.AgentRequest{
 		Messages: []domain.Message{
 			{
 				Role:    domain.RoleSystem,
-				Content: "Write a short 3-7 word title that summarizes the topic of this chat exchange. No quotes, no trailing punctuation, no prefix like 'Title:'. Write in the same language as the conversation.",
+				Content: prompt.Text(titleSystemPromptKey),
 			},
 			{Role: domain.RoleUser, Content: "User: " + userMessage + "\nAssistant: " + assistantReply},
 		},

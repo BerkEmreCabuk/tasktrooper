@@ -16,8 +16,10 @@ const clarificationGuidance = `## Clarification policy
 - Read the thread first; do not repeat answered questions.
 - Only continue after the user submits clarification answers.`
 
+var clarificationGuidanceKey = Define[struct{}]("clarification.guidance", struct{}{})
+
 func ClarificationGuidance() string {
-	return clarificationGuidance
+	return Text(clarificationGuidanceKey)
 }
 
 // ask_user is refused over MCP before any policy filtering (it parks a task in a way a live CLI session cannot offer), so this says the opposite of clarificationGuidance: no ask_user, and the questions live in the closing message the runner already surfaces on the card.
@@ -27,55 +29,83 @@ const cliClarificationGuidance = `## Missing information
 - You cannot reach the human mid-run — this session has no way to wait for an answer. Where the choice is reversible, decide with what you have and say what you assumed. Where it is not, stop and state in your closing message what is missing and what you would need; that message is shown on the task card.
 - Read the task's comments first. A question already answered there is decided, not open.`
 
+var cliClarificationGuidanceKey = Define[struct{}]("clarification.cli_guidance", struct{}{})
+
 func CLIClarificationGuidance() string {
-	return cliClarificationGuidance
+	return Text(cliClarificationGuidanceKey)
 }
 
+type clarificationQuestionBlock struct {
+	Number  int
+	Prompt  string
+	Options []string
+}
+
+type formatClarificationMessageInput struct {
+	Context   string
+	Questions []clarificationQuestionBlock
+}
+
+var formatClarificationMessageKey = Define("clarification.format_message", formatClarificationMessageInput{
+	Context:   "Sample context.",
+	Questions: []clarificationQuestionBlock{{Number: 1, Prompt: "Sample question?", Options: []string{"A", "B"}}},
+})
+
 func FormatClarificationMessage(req domain.ClarificationRequest) string {
-	var sb strings.Builder
-	sb.WriteString("I need a few details before I can continue:\n\n")
-	if req.Context != "" {
-		sb.WriteString(req.Context)
-		sb.WriteString("\n\n")
-	}
+	blocks := make([]clarificationQuestionBlock, 0, len(req.Questions))
 	for i, q := range req.Questions {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, q.Prompt))
-		for _, opt := range q.Options {
-			sb.WriteString(fmt.Sprintf("   - %s\n", opt.Label))
-		}
-		sb.WriteString("\n")
+		blocks = append(blocks, clarificationQuestionBlock{Number: i + 1, Prompt: q.Prompt, Options: optionLabels(q.Options)})
 	}
-	sb.WriteString("Please reply with your choices or additional details.")
-	return strings.TrimSpace(sb.String())
+	return strings.TrimSpace(formatClarificationMessageKey.Render(formatClarificationMessageInput{
+		Context:   req.Context,
+		Questions: blocks,
+	}))
+}
+
+func optionLabels(options []domain.ClarificationOption) []string {
+	labels := make([]string, 0, len(options))
+	for _, opt := range options {
+		labels = append(labels, opt.Label)
+	}
+	return labels
 }
 
 // The stored assistant message only held the context line; the questions lived in a JSONB column the model never saw, so the next turn read the answer without knowing what it answered.
+type historyNoteInput struct {
+	Lines []string
+}
+
+var historyNoteKey = Define("clarification.history_note", historyNoteInput{Lines: []string{"1. Sample question?"}})
+
 func ClarificationHistoryNote(req domain.ClarificationRequest) string {
 	if len(req.Questions) == 0 {
 		return ""
 	}
-	var sb strings.Builder
-	sb.WriteString("INTERNAL (never disclose to user): you asked the user the questions below; their reply is the next user message.")
+	lines := make([]string, len(req.Questions))
 	for i, q := range req.Questions {
-		sb.WriteString("\n")
-		sb.WriteString(numberedQuestion(i, q))
+		lines[i] = numberedQuestion(i, q)
 	}
-	return sb.String()
+	return historyNoteKey.Render(historyNoteInput{Lines: lines})
 }
+
+type formatQuestionsInput struct {
+	Parts []string
+}
+
+var formatQuestionsKey = Define("clarification.format_questions", formatQuestionsInput{
+	Parts: []string{"Sample context.", "1. Sample question?"},
+})
 
 // A parked task once remembered only the context line, which is not a question; the question text is the part that must survive.
 func FormatClarificationQuestions(req domain.ClarificationRequest) string {
-	var sb strings.Builder
+	var parts []string
 	if ctx := strings.TrimSpace(req.Context); ctx != "" {
-		sb.WriteString(ctx)
+		parts = append(parts, ctx)
 	}
 	for i, q := range req.Questions {
-		if sb.Len() > 0 {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(numberedQuestion(i, q))
+		parts = append(parts, numberedQuestion(i, q))
 	}
-	return sb.String()
+	return formatQuestionsKey.Render(formatQuestionsInput{Parts: parts})
 }
 
 func numberedQuestion(index int, q domain.ClarificationQuestion) string {
@@ -115,6 +145,17 @@ const (
 	maxAnsweredClarificationChars = 2000
 )
 
+type answeredInput struct {
+	ShownCount   int
+	OmittedCount int
+	Answers      []string
+}
+
+var answeredKey = Define("clarification.answered", answeredInput{
+	ShownCount: 1,
+	Answers:    []string{"Asked:\nSample question?\nAnswered by the human:\nSample answer."},
+})
+
 func AnsweredClarificationsMessage(comments []domain.TaskComment) string {
 	answered := make([]string, 0, len(comments))
 	for _, c := range comments {
@@ -134,34 +175,29 @@ func AnsweredClarificationsMessage(comments []domain.TaskComment) string {
 		omitted = len(answered) - maxAnsweredClarifications
 		answered = answered[omitted:]
 	}
-	var sb strings.Builder
-	sb.WriteString("## Clarifications already answered on this task\n")
-	sb.WriteString("The human has already answered the questions below. Treat these answers as decided requirements, ")
-	sb.WriteString("act on them, and never ask them again — only ask about something genuinely still unknown.\n")
-	if omitted > 0 {
-		// Said out loud, so a run that finds a gap looks it up instead of deciding the question was never answered.
-		fmt.Fprintf(&sb, "The %d most recent are shown; %d older answer(s) are on this task's comments — read them with list_comments before treating anything as unanswered.\n",
-			len(answered), omitted)
-	}
-	for _, a := range answered {
+	shown := make([]string, len(answered))
+	for i, a := range answered {
 		body := domain.TruncateHead(a, maxAnsweredClarificationChars)
 		if len(body) < len(a) {
 			body += "…"
 		}
-		sb.WriteString("\n")
-		sb.WriteString(body)
-		sb.WriteString("\n")
+		shown[i] = body
 	}
-	return strings.TrimSpace(sb.String())
+	return strings.TrimSpace(answeredKey.Render(answeredInput{
+		ShownCount:   len(shown),
+		OmittedCount: omitted,
+		Answers:      shown,
+	}))
 }
 
+type ackInput struct {
+	Lang string
+}
+
+var ackKey = Define("clarification.ack", ackInput{Lang: "en"})
+
 func ClarificationAckMessage(lang string) string {
-	switch lang {
-	case "tr":
-		return "Cevabın alındı — görev bu cevapla devam ediyor. Başka bir şey net değilse yine buradan sorarım."
-	default:
-		return "Answer received — the task continues with it. I will ask here if anything else is unclear."
-	}
+	return ackKey.Render(ackInput{Lang: lang})
 }
 
 func BuildClarificationResponse(req domain.ClarificationRequest) domain.AgentResponse {
@@ -181,14 +217,18 @@ If you need information from the user, call ask_user — follow its tool definit
 Anything the repository can answer (file layout, where a page or component lives, routing, existing config) you must find with your read tools first; ask_user is refused until this run has read the code.
 Never write clarification questions as markdown in your reply.`
 
+var askUserTaskGuidanceKey = Define[struct{}]("clarification.ask_user_task_guidance", struct{}{})
+
 func AskUserTaskGuidance() string {
-	return askUserTaskGuidance
+	return Text(askUserTaskGuidanceKey)
 }
 
+type userFacingLanguageRuleInput struct {
+	Locale string
+}
+
+var userFacingLanguageRuleKey = Define("clarification.user_facing_language_rule", userFacingLanguageRuleInput{Locale: "English"})
+
 func UserFacingLanguageRule(lang string) string {
-	locale := LocaleDisplayName(lang)
-	return fmt.Sprintf(`## User-facing language (required)
-The configured application locale is %s.
-All user-visible strings must be in %s: clarification questions (questions[].prompt), option labels (options[].label), context, and summary.
-Internal sub-agent handoffs may use English.`, locale, locale)
+	return userFacingLanguageRuleKey.Render(userFacingLanguageRuleInput{Locale: LocaleDisplayName(lang)})
 }

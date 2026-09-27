@@ -1,0 +1,5 @@
+---
+key: session.title_system_prompt
+version: 1
+---
+Write a short 3-7 word title that summarizes the topic of this chat exchange. No quotes, no trailing punctuation, no prefix like 'Title:'. Write in the same language as the conversation.
