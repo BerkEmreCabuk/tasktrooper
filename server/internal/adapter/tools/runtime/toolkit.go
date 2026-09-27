@@ -58,25 +58,24 @@ const repositoryIDProperty = "repository_id"
 
 func repositoryIDSchema() map[string]interface{} {
 	return map[string]interface{}{
-		"type":        "string",
-		"description": "Repository UUID. Defaults to the run's own repository; pass this only to look at a different one.",
+		"type": "string",
 	}
 }
 
 func componentSchema() map[string]interface{} {
 	return map[string]interface{}{
 		"type": "string",
-		"description": "A component's own path (e.g. \"apps/web\", or \".\" for a single-purpose repo). Omit it (or " +
-			"pass \".\") when the repository has only one component — it resolves automatically; with more than one " +
-			"it is required and the error names every path to choose from.",
 	}
 }
 
-func environmentSchema(defaultDesc string) map[string]interface{} {
+// environmentSchema's own description is per-tool (this repository's four
+// callers each default to a different environment), so it is left for
+// catalog/system/tools/<name>.md's own "environment" params entry rather
+// than composed here from call-site text.
+func environmentSchema() map[string]interface{} {
 	return map[string]interface{}{
-		"type":        "string",
-		"enum":        []string{"production", "staging", "preview", "development"},
-		"description": "Which environment to read. Defaults to " + defaultDesc + ".",
+		"type": "string",
+		"enum": []string{"production", "staging", "preview", "development"},
 	}
 }
 

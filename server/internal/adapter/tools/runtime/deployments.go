@@ -23,17 +23,14 @@ func (t *listDeploymentsTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: listDeploymentsToolName,
-			Description: "List an environment's recent deployments (status, commit, branch, URL, timestamps) as the provider " +
-				"reports them, newest first.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"component":   componentSchema(),
-					"environment": environmentSchema("\"production\""),
+					"environment": environmentSchema(),
 					"limit": map[string]interface{}{
-						"type":        "integer",
-						"description": "Maximum deployments to return. Defaults to 10.",
+						"type": "integer",
 					},
 					repositoryIDProperty: repositoryIDSchema(),
 				},

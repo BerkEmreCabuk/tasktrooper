@@ -24,20 +24,16 @@ func (t *linksTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: listLinksToolName,
-			Description: "List what a component talks to and what talks to it: other components (in this repository or another), " +
-				"and system resources (databases, queues, third-party APIs). Use this before touching an integration point to see who else depends on it.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"component": map[string]interface{}{
-						"type":        "string",
-						"description": "A component's own path (e.g. \"apps/web\", or \".\" for a single-purpose repo) to list just that component's links.",
+						"type": "string",
 					},
 					"direction": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{"out", "in", "both"},
-						"description": "\"out\" for what the component calls, \"in\" for what calls it, \"both\" (default) for everything.",
+						"type": "string",
+						"enum": []string{"out", "in", "both"},
 					},
 					repositoryIDProperty: repositoryIDSchema(),
 				},

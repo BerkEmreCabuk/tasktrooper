@@ -22,15 +22,12 @@ func (t *getEnvironmentTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: getEnvironmentToolName,
-			Description: "Read where a component runs: provider, resource, URL, health and binding status for one or every " +
-				"environment. Call this before query_runtime_logs/list_runtime_errors/list_deployments to see whether an " +
-				"environment is actually bound, or to find its URL for a request of your own.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"component":          componentSchema(),
-					"environment":        environmentSchema("every environment of the component"),
+					"environment":        environmentSchema(),
 					repositoryIDProperty: repositoryIDSchema(),
 				},
 			},

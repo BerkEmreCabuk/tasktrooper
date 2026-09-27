@@ -27,18 +27,14 @@ func (t *listRuntimeErrorsTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: listRuntimeErrorsToolName,
-			Description: "List an environment's runtime errors, grouped and deduplicated (native grouping where the provider has " +
-				"it, a message fingerprint otherwise) — a triage view, not a log dump. `new: true` means the group's first " +
-				"occurrence falls inside this window, the \"started with this deploy\" signal.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"component":   componentSchema(),
-					"environment": environmentSchema("\"production\""),
+					"environment": environmentSchema(),
 					"since": map[string]interface{}{
-						"type":        "string",
-						"description": "How far back to look, as a duration: \"30m\", \"2h\", \"1d\". Defaults to \"24h\".",
+						"type": "string",
 					},
 					repositoryIDProperty: repositoryIDSchema(),
 				},

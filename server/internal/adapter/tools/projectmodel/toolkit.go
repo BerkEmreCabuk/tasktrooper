@@ -51,8 +51,7 @@ const repositoryIDProperty = "repository_id"
 
 func repositoryIDSchema() map[string]interface{} {
 	return map[string]interface{}{
-		"type":        "string",
-		"description": "Repository UUID. Defaults to the run's own repository; pass this only to look at a different one.",
+		"type": "string",
 	}
 }
 

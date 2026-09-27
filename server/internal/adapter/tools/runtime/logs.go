@@ -29,31 +29,24 @@ func (t *queryRuntimeLogsTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: queryRuntimeLogsToolName,
-			Description: "Read an environment's live application logs — what the running product itself printed, not a CI job's " +
-				"output (that is get_deploy_logs). Use this to see what a request actually did in production or on stage " +
-				"instead of guessing from the code.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"component":   componentSchema(),
-					"environment": environmentSchema("\"production\""),
+					"environment": environmentSchema(),
 					"since": map[string]interface{}{
-						"type":        "string",
-						"description": "How far back to read, as a duration: \"30m\", \"2h\", \"1d\". Defaults to \"1h\".",
+						"type": "string",
 					},
 					"min_severity": map[string]interface{}{
-						"type":        "string",
-						"enum":        []string{"debug", "info", "warning", "error", "critical"},
-						"description": "Only entries at or above this severity.",
+						"type": "string",
+						"enum": []string{"debug", "info", "warning", "error", "critical"},
 					},
 					"text": map[string]interface{}{
-						"type":        "string",
-						"description": "Free-text filter over the log message.",
+						"type": "string",
 					},
 					"limit": map[string]interface{}{
-						"type":        "integer",
-						"description": "Maximum entries to return. Defaults to 100, capped at 500.",
+						"type": "integer",
 					},
 					repositoryIDProperty: repositoryIDSchema(),
 				},

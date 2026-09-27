@@ -24,15 +24,12 @@ func (t *checksTool) Definition() domain.ToolDefinition {
 		Type: "function",
 		Function: domain.FunctionDefinition{
 			Name: listChecksToolName,
-			Description: "List the CI checks mapped onto each component: what job runs it, what it verifies, whether CI gates on it, " +
-				"and the local command that reproduces it. Use this to find the exact command CI runs before you claim something builds or passes.",
 			Parameters: map[string]interface{}{
 				"type":                 "object",
 				"additionalProperties": false,
 				"properties": map[string]interface{}{
 					"component": map[string]interface{}{
-						"type":        "string",
-						"description": "A component's own path (e.g. \"apps/web\", or \".\" for a single-purpose repo) to list just that component's checks.",
+						"type": "string",
 					},
 					repositoryIDProperty: repositoryIDSchema(),
 				},
