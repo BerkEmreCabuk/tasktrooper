@@ -1,7 +1,6 @@
 package mcpserver
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
@@ -101,22 +100,22 @@ func textResult(text string, isError bool) callToolResult {
 
 func resultToMCP(name string, result domain.ToolResult) callToolResult {
 	if result.Clarification != nil {
-		return textResult(fmt.Sprintf(
-			"%s asked the human a question, which a headless agent session cannot wait for. Decide with what you have, or explain what is missing in your final message.",
-			name), true)
+		return textResult(clarificationWaitKey.Render(toolNameInput{Name: name}), true)
 	}
 	if result.ResourceBlock != nil {
 		detail := strings.TrimSpace(result.ResourceBlock.Detail)
 		if detail == "" {
 			detail = "the resource is held by another run"
 		}
-		return textResult(fmt.Sprintf("%s is waiting on %s: %s", name, result.ResourceBlock.Resource, detail), true)
+		return textResult(resourceBlockKey.Render(resourceBlockInput{
+			Name: name, Resource: result.ResourceBlock.Resource, Detail: detail,
+		}), true)
 	}
 
 	blocks := make([]content, 0, len(result.Images)+1)
 	text := result.Content
 	if strings.TrimSpace(text) == "" && len(result.Images) == 0 {
-		text = fmt.Sprintf("%s returned no output.", name)
+		text = emptyResultKey.Render(toolNameInput{Name: name})
 	}
 	if text != "" {
 		blocks = append(blocks, content{Type: "text", Text: text})
