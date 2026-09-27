@@ -1,11 +1,8 @@
 package evolution
 
 import (
-	"fmt"
 	"testing"
 
-	"github.com/google/uuid"
-	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -231,19 +228,24 @@ func TestEvidenceLinesBlockGolden(t *testing.T) {
 	})
 }
 
-// TestRegressionsSectionPromptGoldenBeforeMove pins the exact byte output
-// appendRegressionReport builds today (header + one fmt.Sprintf row per
-// regressed change), before the row wording moves into
+// TestRegressionsSectionPromptGolden pins evidenceRegressionsSection's exact
+// byte output — the same "event_id ... performance DROPPED" wording
+// appendRegressionReport used to build with fmt.Sprintf, now rendered from
 // catalog/system/prompts/evolution/evidence_regressions.md.
-func TestRegressionsSectionPromptGoldenBeforeMove(t *testing.T) {
-	eventID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
-	line := fmt.Sprintf("- event_id %s | %s %s (%s) | performance DROPPED after this change. Before-state is stored; add it to reverts[] to undo.",
-		eventID, domain.EvolutionChangeSkillUpdated, "sample-skill", "2026-01-15")
-
-	got := evidenceLinesBlock(prompt.Text(evidenceRegressionsHeaderKey), []string{line})
+func TestRegressionsSectionPromptGolden(t *testing.T) {
+	got := evidenceRegressionsSection([]evidenceRegressionLine{{
+		EventID: "11111111-1111-1111-1111-111111111111", ChangeType: "skill_updated",
+		TargetName: "sample-skill", Date: "2026-01-15",
+	}})
 	want := "## ⚠ Regressed changes (your earlier changes that hurt performance — consider reverting)\n" +
 		"- event_id 11111111-1111-1111-1111-111111111111 | skill_updated sample-skill (2026-01-15) | performance DROPPED after this change. Before-state is stored; add it to reverts[] to undo.\n\n"
 	if got != want {
 		t.Fatalf("regressions section =\n%q\nwant\n%q", got, want)
 	}
+
+	t.Run("no regressions", func(t *testing.T) {
+		if got := evidenceRegressionsSection(nil); got != "" {
+			t.Fatalf("regressions section (empty) = %q, want \"\"", got)
+		}
+	})
 }

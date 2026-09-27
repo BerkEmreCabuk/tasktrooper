@@ -281,8 +281,31 @@ var (
 	evidenceTaskRunsHeaderKey         = prompt.Define[struct{}]("evolution.evidence_task_runs_header", struct{}{})
 	evidenceChatMessagesHeaderKey     = prompt.Define[struct{}]("evolution.evidence_chat_messages_header", struct{}{})
 	evidenceMemoriesHeaderKey         = prompt.Define[struct{}]("evolution.evidence_memories_header", struct{}{})
-	evidenceRegressionsHeaderKey      = prompt.Define[struct{}]("evolution.evidence_regressions_header", struct{}{})
 )
+
+// evidenceRegressionLine is one regressed change's raw data; the template
+// renders its "performance DROPPED..." row, not this package.
+type evidenceRegressionLine struct{ EventID, ChangeType, TargetName, Date string }
+
+type evidenceRegressionsInput struct{ Lines []evidenceRegressionLine }
+
+var evidenceRegressionsKey = prompt.Define("evolution.evidence_regressions", evidenceRegressionsInput{
+	Lines: []evidenceRegressionLine{{
+		EventID: "11111111-1111-1111-1111-111111111111", ChangeType: "skill_updated",
+		TargetName: "sample-skill", Date: "2026-01-15",
+	}},
+})
+
+// evidenceRegressionsSection reports regressed prior changes; see
+// catalog/system/prompts/evolution/evidence_regressions.md. "" when there is
+// nothing regressed, so the caller skips the section entirely rather than
+// emitting a header over nothing.
+func evidenceRegressionsSection(lines []evidenceRegressionLine) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	return evidenceRegressionsKey.Render(evidenceRegressionsInput{Lines: lines})
+}
 
 type evidenceCountBudgetInput struct{ Count, Budget int }
 
@@ -512,15 +535,15 @@ func (s *Service) appendRegressionReport(ctx context.Context, b *strings.Builder
 			reverted[*e.RevertedEventID] = true
 		}
 	}
-	var lines []string
+	var lines []evidenceRegressionLine
 	for _, e := range allEvents {
 		if e.Impact != domain.EvolutionImpactRegressed || reverted[e.ID] || e.ChangeType == domain.EvolutionChangeRevert {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("- event_id %s | %s %s (%s) | performance DROPPED after this change. Before-state is stored; add it to reverts[] to undo.",
-			e.ID, e.ChangeType, e.TargetName, e.CreatedAt.Format("2006-01-02")))
+		lines = append(lines, evidenceRegressionLine{
+			EventID: e.ID.String(), ChangeType: e.ChangeType, TargetName: e.TargetName,
+			Date: e.CreatedAt.Format("2006-01-02"),
+		})
 	}
-	if len(lines) > 0 {
-		b.WriteString(evidenceLinesBlock(prompt.Text(evidenceRegressionsHeaderKey), lines))
-	}
+	b.WriteString(evidenceRegressionsSection(lines))
 }
