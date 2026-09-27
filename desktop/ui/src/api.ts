@@ -2134,17 +2134,32 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return JSON.parse(body) as T;
 }
 
+// prompt_tokens is the TOTAL prompt; cache_read/cache_write are subsets of it.
 export interface UsageTotals {
   calls: number;
   prompt_tokens: number;
   completion_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
 }
+
+// "cli" is a host agent CLI session (Claude Code, Cursor, …), "api" one call to
+// a connected provider, "embedding" an indexing/search vector (estimated tokens).
+export type UsageKind = "api" | "cli" | "embedding";
+
+export type UsageByModel = { kind: UsageKind; provider: string; model: string } & UsageTotals;
+
+export type UsageByDay = { day: string } & UsageTotals;
 
 export interface UsageSummary {
   days: number;
-  total: UsageTotals;
-  by_model: ({ model: string } & UsageTotals)[] | null;
-  daily: ({ day: string } & UsageTotals)[] | null;
+  timezone: string;
+  from: string;
+  to: string;
+  generation: UsageTotals;
+  embedding: UsageTotals;
+  by_model: UsageByModel[] | null;
+  daily: UsageByDay[] | null;
 }
 
 export interface BillingStatus {
@@ -3446,7 +3461,8 @@ export interface WorkspaceMap {
 
 export const api = {
   health: () => request<HealthResponse>("/health"),
-  usageSummary: (days = 30) => request<UsageSummary>(`/v1/usage?days=${days}`),
+  usageSummary: (days = 30, tz = "") =>
+    request<UsageSummary>(`/v1/usage?days=${days}&tz=${encodeURIComponent(tz)}`),
   billingStatus: () => request<BillingStatus>("/v1/billing"),
   getBillingPlan: () => request<BillingPlan>("/admin/billing/plan"),
   updateBillingPlan: (data: Partial<Omit<BillingPlan, "period_start" | "updated_at">>) =>

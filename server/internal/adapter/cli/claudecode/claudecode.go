@@ -59,6 +59,10 @@ type Config struct {
 	MCP MCPConfig
 	MCPProvider MCPProvider
 	MaxConcurrentSessions int
+	// Usage is where every session's token spend is metered, both into the
+	// run's context accumulator and (kind=cli) the usage dashboard. Nil is
+	// safe — Meter.Record is nil-receiver safe.
+	Usage *usageapp.Meter
 }
 
 type Executor struct {
@@ -68,6 +72,7 @@ type Executor struct {
 	settingSources string
 	mcp            MCPConfig
 	mcpProvider    MCPProvider
+	usage          *usageapp.Meter
 	now func() time.Time
 	sem     chan struct{}
 	slotCap int
@@ -127,6 +132,7 @@ func New(cfg Config) (*Executor, error) {
 		settingSources: normalizeSettingSources(cfg.SettingSources),
 		mcp:            cfg.MCP,
 		mcpProvider:    cfg.MCPProvider,
+		usage:          cfg.Usage,
 		now:            time.Now,
 		sem:            sem,
 		slotCap:        slotCap,
@@ -386,13 +392,14 @@ func (e *Executor) spawn(ctx context.Context, inv invocation) (session, error) {
 	timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 
 	return session{
-		out:        out,
-		trace:      trace,
-		stderrTail: stderr.String(),
-		parseErr:   parseErr,
-		waitErr:    waitErr,
-		timedOut:   timedOut,
-		initFault:  guard.fault,
+		out:             out,
+		trace:           trace,
+		stderrTail:      stderr.String(),
+		parseErr:        parseErr,
+		waitErr:         waitErr,
+		timedOut:        timedOut,
+		initFault:       guard.fault,
+		requestedModel:  inv.model,
 	}, nil
 }
 
@@ -438,6 +445,9 @@ type session struct {
 	waitErr    error
 	timedOut   bool
 	initFault error
+	// requestedModel is the invocation's own model flag, used when the CLI's
+	// init event never reports one (e.g. the session died before init).
+	requestedModel string
 }
 
 func (s session) sessionID() string {
@@ -460,10 +470,11 @@ type sessionFinisher struct {
 	runTimeout time.Duration
 	maxTurns   int
 	now        func() time.Time
+	usage      *usageapp.Meter
 }
 
 func (e *Executor) finish(ctx context.Context, label string, s session) (domain.AgentResponse, error) {
-	resp, err := sessionFinisher{runTimeout: e.runTimeout, maxTurns: e.maxTurns, now: e.now}.finish(ctx, label, s)
+	resp, err := sessionFinisher{runTimeout: e.runTimeout, maxTurns: e.maxTurns, now: e.now, usage: e.usage}.finish(ctx, label, s)
 	if err == nil {
 		e.clearQuotaGate()
 		return resp, nil
@@ -476,7 +487,18 @@ func (e *Executor) finish(ctx context.Context, label string, s session) (domain.
 
 func (f sessionFinisher) finish(ctx context.Context, label string, s session) (domain.AgentResponse, error) {
 	out, stderrTail := s.out, s.stderrTail
-	usageapp.TokenUsageFromContext(ctx).Add(out.Usage)
+	// At the top, ahead of every failure branch below: a session that timed
+	// out, hit its quota or otherwise failed still burned the tokens the CLI
+	// reports, and those must still count against the run and the dashboard.
+	f.usage.Record(ctx, domain.LLMUsageRecord{
+		Kind:             domain.LLMUsageKindCLI,
+		Provider:         string(domain.LLMProviderClaudeCode),
+		Model:            firstNonEmpty(out.Init.Model, s.requestedModel),
+		PromptTokens:     out.Usage.PromptTokens,
+		CompletionTokens: out.Usage.CompletionTokens,
+		CacheReadTokens:  out.Usage.CacheReadTokens,
+		CacheWriteTokens: out.Usage.CacheWriteTokens,
+	})
 
 	sessionID := s.sessionID()
 

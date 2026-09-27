@@ -1,144 +1,425 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { BarChart3 } from "lucide-react";
 import { toast } from "sonner";
-import { api, type UsageSummary } from "@/api";
-import { Button } from "@/components/ui/button";
+import { api, type UsageByModel, type UsageSummary } from "@/api";
 import { Card } from "@/components/ui/card";
+import { EmptyState } from "@/components/ui/empty-state";
+import { HelpTooltip } from "@/components/ui/help-tooltip";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { UsageDailyChart, type DailySeries } from "@/components/admin/UsageDailyChart";
+import { useCachedState } from "@/hooks/useCachedState";
 import { useI18n } from "@/hooks/useI18n";
+import {
+  EMPTY_TOTALS,
+  breakdown,
+  browserTimeZone,
+  cacheHitRate,
+  fillDays,
+  formatCompact,
+  formatDay,
+  formatInteger,
+  formatPercent,
+  rowsOfKind,
+  sumTotals,
+} from "@/lib/usage";
 import { cn } from "@/lib/utils";
 
 const RANGES = [7, 30, 90] as const;
 
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-  return String(n);
-}
+type Metric = "input" | "output";
 
-// LLM sağlayıcı token kullanımı: toplamlar, model kırılımı ve günlük döküm.
-// Maliyet hesabı bilinçli olarak yok — fiyatlar sağlayıcıya/moda göre değişiyor;
-// ham token sayısı faturayla birebir karşılaştırılabilir tek veri.
+// Brand names, so not translated; "local" and unknown providers are.
+const PROVIDER_NAMES: Record<string, string> = {
+  claude_code: "Claude Code",
+  cursor_agent: "Cursor",
+  antigravity: "Antigravity",
+  opencode: "OpenCode",
+  anthropic: "Anthropic",
+  gemini: "Gemini",
+  openai: "OpenAI",
+  groq: "Groq",
+};
+
+// Sentinels the server writes when it could not know the model.
+const DEFAULT_MODEL = "(default)";
+const UNRECORDED_MODEL = "(unrecorded)";
+
+// Token counts only: prices differ per provider, plan and mode, and a CLI on a
+// subscription is not billed per token at all, so any cost figure here would be
+// a guess dressed as a number.
 export function UsageSettingsPage() {
-  const { t } = useI18n();
-  const [days, setDays] = useState<number>(30);
-  const [summary, setSummary] = useState<UsageSummary | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { t, lang } = useI18n();
+  const [days, setDays] = useCachedState<number>("usage:days", 30);
+  const [metric, setMetric] = useCachedState<Metric>("usage:metric", "input");
+  const [summary, setSummary] = useCachedState<UsageSummary | null>("usage:summary", null);
+  const [loading, setLoading] = useState(false);
+  const latest = useRef(0);
 
-  const load = useCallback(async (range: number) => {
-    setLoading(true);
-    try {
-      setSummary(await api.usageSummary(range));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("settingsPages.usage.usageLoadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
+  const load = useCallback(
+    async (range: number) => {
+      const id = ++latest.current;
+      setLoading(true);
+      try {
+        const next = await api.usageSummary(range, browserTimeZone());
+        if (id === latest.current) setSummary(next);
+      } catch (err) {
+        if (id === latest.current) {
+          toast.error(err instanceof Error ? err.message : t("settingsPages.usage.loadFailed"));
+        }
+      } finally {
+        if (id === latest.current) setLoading(false);
+      }
+    },
+    [t, setSummary],
+  );
 
   useEffect(() => {
     void load(days);
   }, [days, load]);
 
-  if (loading && !summary) {
+  const view = useMemo(() => {
+    if (!summary) return null;
+    const rows = summary.by_model ?? [];
+    const generationRows = rowsOfKind(rows, "cli", "api").sort(
+      (a, b) => b.prompt_tokens + b.completion_tokens - (a.prompt_tokens + a.completion_tokens),
+    );
+    return {
+      generation: summary.generation ?? EMPTY_TOTALS,
+      embedding: summary.embedding ?? EMPTY_TOTALS,
+      cli: sumTotals(rowsOfKind(rows, "cli")),
+      api: sumTotals(rowsOfKind(rows, "api")),
+      generationRows,
+      embeddingRows: rowsOfKind(rows, "embedding"),
+      daily: fillDays(summary.from, summary.to, summary.daily ?? []),
+    };
+  }, [summary]);
+
+  const u = (key: string, params?: Record<string, string | number>) => t(`settingsPages.usage.${key}`, params);
+
+  const rangeControl = (
+    <Tabs value={String(days)} onValueChange={(v) => setDays(Number(v))} variant="pill" className="w-fit">
+      <TabsList aria-label={u("rangeLabel")}>
+        {RANGES.map((r) => (
+          <TabsTrigger key={r} value={String(r)}>
+            {u("lastNDays", { days: r })}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
+  );
+
+  if (!view || !summary) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-24 w-full" />
-        <Skeleton className="h-48 w-full" />
+      <div className="space-y-6">
+        {rangeControl}
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} className="h-28" />
+          ))}
+        </div>
+        <Skeleton className="h-80" />
       </div>
     );
   }
 
-  const total = summary?.total ?? { calls: 0, prompt_tokens: 0, completion_tokens: 0 };
-  const byModel = summary?.by_model ?? [];
-  const daily = [...(summary?.daily ?? [])].reverse();
-  const maxDayTokens = Math.max(1, ...daily.map((d) => d.prompt_tokens + d.completion_tokens));
+  const { generation, embedding, cli, api: apiTotals, generationRows, embeddingRows, daily } = view;
+  const parts = breakdown(generation);
+  const hit = cacheHitRate(generation);
+  const hasAny = generation.calls > 0 || embedding.calls > 0;
+  const shortDay = (day: string) => formatDay(day, lang, { day: "numeric", month: "short" });
+
+  const series: DailySeries[] =
+    metric === "input"
+      ? [
+          { key: "cacheRead", label: u("seriesCacheRead"), swatch: "bg-chart-3", value: (d) => d.cache_read_tokens },
+          { key: "cacheWrite", label: u("seriesCacheWrite"), swatch: "bg-chart-2", value: (d) => d.cache_write_tokens },
+          { key: "fresh", label: u("seriesFresh"), swatch: "bg-chart-1", value: (d) => breakdown(d).fresh },
+        ]
+      : [{ key: "output", label: u("seriesOutput"), swatch: "bg-chart-4", value: (d) => d.completion_tokens }];
+
+  const segments = [
+    { key: "fresh", label: u("seriesFresh"), swatch: "bg-chart-1", value: parts.fresh },
+    { key: "cacheWrite", label: u("seriesCacheWrite"), swatch: "bg-chart-2", value: parts.cacheWrite },
+    { key: "cacheRead", label: u("seriesCacheRead"), swatch: "bg-chart-3", value: parts.cacheRead },
+    { key: "output", label: u("seriesOutput"), swatch: "bg-chart-4", value: parts.output },
+  ];
+
+  const perSession = (tokens: number) =>
+    generation.calls > 0 ? u("perSessionFoot", { avg: formatCompact(Math.round(tokens / generation.calls)) }) : undefined;
+
+  const providerName = (p: string) => PROVIDER_NAMES[p] ?? (p === "local" ? u("providerLocal") : p || u("providerUnknown"));
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-2">
-        {RANGES.map((r) => (
-          <Button
-            key={r}
-            size="sm"
-            variant={days === r ? "default" : "outline"}
-            onClick={() => setDays(r)}
-          >
-            {t("settingsPages.usage.lastNDays", { days: r })}
-          </Button>
-        ))}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {rangeControl}
+        <p className="text-caption text-muted-foreground">
+          {u("windowCaption", {
+            from: formatDay(summary.from, lang, { day: "numeric", month: "short" }),
+            to: formatDay(summary.to, lang, { day: "numeric", month: "short", year: "numeric" }),
+            timezone: summary.timezone,
+          })}
+        </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Card className="p-4">
-          <p className="text-xs text-muted-foreground">{t("settingsPages.usage.llmCalls")}</p>
-          <p className="mt-1 text-2xl font-semibold">{total.calls}</p>
+      {!hasAny ? (
+        <Card>
+          <EmptyState icon={BarChart3} title={u("emptyTitle")} description={u("emptyDescription")} />
         </Card>
-        <Card className="p-4">
-          <p className="text-xs text-muted-foreground">{t("settingsPages.usage.inputTokens")}</p>
-          <p className="mt-1 text-2xl font-semibold">{formatTokens(total.prompt_tokens)}</p>
-        </Card>
-        <Card className="p-4">
-          <p className="text-xs text-muted-foreground">{t("settingsPages.usage.outputTokens")}</p>
-          <p className="mt-1 text-2xl font-semibold">{formatTokens(total.completion_tokens)}</p>
-        </Card>
-      </div>
+      ) : (
+        <div className={cn("space-y-6 transition-opacity duration-200", loading && "opacity-60")} aria-busy={loading}>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatTile
+              label={u("inputTokens")}
+              value={formatCompact(generation.prompt_tokens)}
+              title={formatInteger(generation.prompt_tokens, lang)}
+              foot={perSession(generation.prompt_tokens)}
+            />
+            <StatTile
+              label={u("outputTokens")}
+              value={formatCompact(generation.completion_tokens)}
+              title={formatInteger(generation.completion_tokens, lang)}
+              foot={perSession(generation.completion_tokens)}
+            />
+            <StatTile
+              label={u("cacheHit")}
+              value={hit !== null ? formatPercent(hit, lang) : "—"}
+              foot={u("cacheHitFoot")}
+            >
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-chart-3/20">
+                <div className="h-full rounded-full bg-chart-3" style={{ width: `${(hit ?? 0) * 100}%` }} />
+              </div>
+            </StatTile>
+            <StatTile
+              label={u("sessions")}
+              value={formatInteger(generation.calls, lang)}
+              foot={u("sessionsFoot", { cli: formatInteger(cli.calls, lang), api: formatInteger(apiTotals.calls, lang) })}
+            />
+          </div>
 
-      <Card className="p-4">
-        <h3 className="mb-3 text-sm font-semibold">{t("settingsPages.usage.byModel")}</h3>
-        {byModel.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("settingsPages.usage.noUsage")}</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border text-left text-xs text-muted-foreground">
-                  <th className="pb-2 font-medium">{t("settingsPages.usage.modelColumn")}</th>
-                  <th className="pb-2 text-right font-medium">{t("settingsPages.usage.callsColumn")}</th>
-                  <th className="pb-2 text-right font-medium">{t("settingsPages.usage.inputColumn")}</th>
-                  <th className="pb-2 text-right font-medium">{t("settingsPages.usage.outputColumn")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {byModel.map((m) => (
-                  <tr key={m.model} className="border-b border-border/50 last:border-0">
-                    <td className="py-2 font-mono text-xs">{m.model}</td>
-                    <td className="py-2 text-right">{m.calls}</td>
-                    <td className="py-2 text-right">{formatTokens(m.prompt_tokens)}</td>
-                    <td className="py-2 text-right">{formatTokens(m.completion_tokens)}</td>
-                  </tr>
+          <Card className="p-5">
+            <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-heading font-semibold">{u("dailyTitle")}</h3>
+                <p className="text-caption text-muted-foreground">{u("dailySubtitle")}</p>
+              </div>
+              <Tabs value={metric} onValueChange={(v) => setMetric(v as Metric)} variant="pill" className="w-fit">
+                <TabsList aria-label={u("dailyTitle")}>
+                  <TabsTrigger value="input">{u("metricInput")}</TabsTrigger>
+                  <TabsTrigger value="output">{u("metricOutput")}</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+            {series.length > 1 && (
+              <ul className="mb-4 flex flex-wrap gap-x-5 gap-y-1 text-caption text-muted-foreground">
+                {[...series].reverse().map((s) => (
+                  <li key={s.key} className="flex items-center gap-1.5">
+                    <span className={cn("h-2.5 w-2.5 rounded-[3px]", s.swatch)} />
+                    {s.label}
+                  </li>
                 ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+              </ul>
+            )}
+            <UsageDailyChart
+              days={daily}
+              series={series}
+              lang={lang}
+              ariaLabel={u("chartLabel", {
+                metric: metric === "input" ? u("metricInput") : u("metricOutput"),
+                from: shortDay(summary.from),
+                to: shortDay(summary.to),
+              })}
+              totalLabel={u("tooltipTotal")}
+              callsLabel={(count) => u("tooltipCalls", { count })}
+            />
+          </Card>
 
-      <Card className="p-4">
-        <h3 className="mb-3 text-sm font-semibold">{t("settingsPages.usage.daily")}</h3>
-        {daily.length === 0 ? (
-          <p className="text-sm text-muted-foreground">{t("settingsPages.usage.noUsage")}</p>
-        ) : (
-          <div className="space-y-1.5">
-            {daily.map((d) => {
-              const tokens = d.prompt_tokens + d.completion_tokens;
-              return (
-                <div key={d.day} className="flex items-center gap-3 text-xs">
-                  <span className="w-20 shrink-0 text-muted-foreground">{d.day}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={cn("h-full rounded-full bg-primary")}
-                      style={{ width: `${Math.max(2, (tokens / maxDayTokens) * 100)}%` }}
-                    />
-                  </div>
-                  <span className="w-16 shrink-0 text-right tabular-nums">
-                    {formatTokens(tokens)}
-                  </span>
+          <div className="grid gap-6 xl:grid-cols-3 xl:items-start">
+            <Card className="p-5 xl:col-span-2">
+              <h3 className="text-heading font-semibold">{u("byModelTitle")}</h3>
+              <p className="mb-4 text-caption text-muted-foreground">{u("byModelSubtitle")}</p>
+              {generationRows.length === 0 ? (
+                <p className="py-6 text-center text-body text-muted-foreground">{u("noGeneration")}</p>
+              ) : (
+                <ModelTable rows={generationRows} total={parts.total} lang={lang} u={u} providerName={providerName} />
+              )}
+            </Card>
+
+            <div className="space-y-6">
+              <Card className="p-5">
+                <h3 className="text-heading font-semibold">{u("breakdownTitle")}</h3>
+                <p className="mb-4 text-caption text-muted-foreground">{u("breakdownSubtitle")}</p>
+                <div className="flex h-3 w-full gap-[2px] overflow-hidden rounded-full bg-muted">
+                  {segments
+                    .filter((s) => parts.total > 0 && s.value / parts.total >= 0.005)
+                    .map((s) => (
+                      <div key={s.key} className={s.swatch} style={{ flex: `${s.value} 1 0px` }} />
+                    ))}
                 </div>
-              );
-            })}
+                <ul className="mt-4 space-y-2.5">
+                  {segments.map((s) => (
+                    <li key={s.key} className="flex items-center gap-2 text-body">
+                      <span className={cn("h-2.5 w-2.5 shrink-0 rounded-[3px]", s.swatch)} />
+                      <span className="min-w-0 flex-1 truncate text-muted-foreground">{s.label}</span>
+                      <span className="font-medium tabular-nums" title={formatInteger(s.value, lang)}>
+                        {formatCompact(s.value)}
+                      </span>
+                      <span className="w-12 text-right text-caption tabular-nums text-muted-foreground">
+                        {parts.total > 0 ? formatPercent(s.value / parts.total, lang) : "—"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+
+              <Card className="p-5">
+                <div className="flex items-center gap-1.5">
+                  <h3 className="text-heading font-semibold">{u("embeddingTitle")}</h3>
+                  <HelpTooltip text={u("embeddingHelp")} />
+                </div>
+                {embedding.calls === 0 ? (
+                  <p className="mt-2 text-body text-muted-foreground">{u("embeddingEmpty")}</p>
+                ) : (
+                  <>
+                    <div className="mt-3 flex items-baseline gap-4">
+                      <p>
+                        <span className="text-title font-semibold">{formatCompact(embedding.calls)}</span>{" "}
+                        <span className="text-caption text-muted-foreground">{u("embeddingCalls")}</span>
+                      </p>
+                      <p>
+                        <span className="text-title font-semibold">~{formatCompact(embedding.prompt_tokens)}</span>{" "}
+                        <span className="text-caption text-muted-foreground">{u("embeddingTokens")}</span>
+                      </p>
+                    </div>
+                    <ul className="mt-3 space-y-1.5 border-t border-border pt-3">
+                      {embeddingRows.map((r) => (
+                        <li key={`${r.provider}/${r.model}`} className="flex items-center gap-2 text-caption">
+                          <ModelName model={r.model} u={u} />
+                          <span className="text-muted-foreground">{providerName(r.provider)}</span>
+                          <span className="ml-auto tabular-nums text-muted-foreground">{formatInteger(r.calls, lang)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </Card>
+            </div>
           </div>
-        )}
-      </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatTile({
+  label,
+  value,
+  title,
+  foot,
+  children,
+}: {
+  label: string;
+  value: string;
+  title?: string;
+  foot?: string;
+  children?: ReactNode;
+}) {
+  return (
+    <Card className="flex flex-col p-5">
+      <p className="text-caption text-muted-foreground">{label}</p>
+      <p className="mt-1.5 text-display font-semibold" title={title}>
+        {value}
+      </p>
+      {children}
+      {foot && <p className="mt-auto pt-2 text-caption text-muted-foreground">{foot}</p>}
+    </Card>
+  );
+}
+
+type Translate = (key: string, params?: Record<string, string | number>) => string;
+
+function ModelName({ model, u }: { model: string; u: Translate }) {
+  if (model === UNRECORDED_MODEL) {
+    return (
+      <span className="inline-flex items-center gap-1 italic text-muted-foreground">
+        {u("unrecordedModel")}
+        <HelpTooltip text={u("unrecordedHint")} />
+      </span>
+    );
+  }
+  if (model === DEFAULT_MODEL || model === "") {
+    return <span className="italic text-muted-foreground">{u("defaultModel")}</span>;
+  }
+  return <span className="truncate font-mono text-caption">{model}</span>;
+}
+
+function ModelTable({
+  rows,
+  total,
+  lang,
+  u,
+  providerName,
+}: {
+  rows: UsageByModel[];
+  total: number;
+  lang: string;
+  u: Translate;
+  providerName: (p: string) => string;
+}) {
+  return (
+    <div className="-mx-5 overflow-x-auto px-5">
+      <table className="w-full min-w-[640px] text-body">
+        <thead>
+          <tr className="border-b border-border text-left text-caption text-muted-foreground">
+            <th className="pb-2 font-medium">{u("modelColumn")}</th>
+            <th className="pb-2 font-medium">{u("sourceColumn")}</th>
+            <th className="pb-2 pl-4 text-right font-medium">{u("callsColumn")}</th>
+            <th className="pb-2 pl-4 text-right font-medium">{u("inputColumn")}</th>
+            <th className="pb-2 pl-4 text-right font-medium">{u("cacheColumn")}</th>
+            <th className="pb-2 pl-4 text-right font-medium">{u("outputColumn")}</th>
+            <th className="pb-2 pl-6 font-medium">{u("shareColumn")}</th>
+          </tr>
+        </thead>
+        <tbody className="tabular-nums">
+          {rows.map((r) => {
+            const tokens = r.prompt_tokens + r.completion_tokens;
+            const share = total > 0 ? tokens / total : 0;
+            const hit = cacheHitRate(r);
+            return (
+              <tr key={`${r.kind}/${r.provider}/${r.model}`} className="border-b border-border/50 last:border-0">
+                <td className="max-w-64 py-2.5 pr-3">
+                  <ModelName model={r.model} u={u} />
+                </td>
+                <td className="py-2.5 pr-3 whitespace-nowrap">
+                  {providerName(r.provider)}
+                  <span className="ml-1.5 text-caption text-muted-foreground">
+                    · {r.kind === "cli" ? u("kindCli") : u("kindApi")}
+                  </span>
+                </td>
+                <td className="pl-4 py-2.5 text-right">{formatInteger(r.calls, lang)}</td>
+                <td className="pl-4 py-2.5 text-right" title={formatInteger(r.prompt_tokens, lang)}>
+                  {formatCompact(r.prompt_tokens)}
+                </td>
+                <td className="pl-4 py-2.5 text-right text-muted-foreground">
+                  {hit !== null ? formatPercent(hit, lang) : "—"}
+                </td>
+                <td className="pl-4 py-2.5 text-right" title={formatInteger(r.completion_tokens, lang)}>
+                  {formatCompact(r.completion_tokens)}
+                </td>
+                <td className="py-2.5 pl-6">
+                  <div className="flex items-center gap-2">
+                    <div className="h-1.5 w-20 overflow-hidden rounded-full bg-muted">
+                      <div className="h-full rounded-full bg-muted-foreground/70" style={{ width: `${share * 100}%` }} />
+                    </div>
+                    <span className="w-10 text-right text-caption text-muted-foreground">{formatPercent(share, lang)}</span>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

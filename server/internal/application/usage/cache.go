@@ -67,20 +67,52 @@ func (c *CachingEmbedder) Embed(ctx context.Context, input, model string) ([]flo
 }
 
 func (c *CachingEmbedder) embeddingProvider(ctx context.Context) string {
-	var cur port.LLMClient = c.inner
+	return embeddingProviderOf(ctx, c.inner)
+}
+
+// findInUnwrapChain walks a port.LLMClient's Unwrap() chain (recording/caching
+// wrappers, down to the raw MultiProviderClient) looking for a client that
+// answers probe. Shared by every lookup that needs to reach through the
+// wrapper stack — the caching embedder's provider lookup and the recording
+// client's provider/model lookups all use this instead of copying the walk.
+func findInUnwrapChain[T any](start port.LLMClient, probe func(port.LLMClient) (T, bool)) (T, bool) {
+	var zero T
+	cur := start
 	for i := 0; i < 8 && cur != nil; i++ {
-		if r, ok := cur.(interface {
-			EmbeddingProvider(context.Context) domain.LLMProviderType
-		}); ok {
-			return string(r.EmbeddingProvider(ctx))
+		if v, ok := probe(cur); ok {
+			return v, true
 		}
 		u, ok := cur.(interface{ Unwrap() port.LLMClient })
 		if !ok {
-			return ""
+			return zero, false
 		}
 		cur = u.Unwrap()
 	}
-	return ""
+	return zero, false
+}
+
+func embeddingProviderOf(ctx context.Context, start port.LLMClient) string {
+	v, _ := findInUnwrapChain(start, func(cur port.LLMClient) (string, bool) {
+		if r, ok := cur.(interface {
+			EmbeddingProvider(context.Context) domain.LLMProviderType
+		}); ok {
+			return string(r.EmbeddingProvider(ctx)), true
+		}
+		return "", false
+	})
+	return v
+}
+
+func embeddingModelOf(ctx context.Context, start port.LLMClient) string {
+	v, _ := findInUnwrapChain(start, func(cur port.LLMClient) (string, bool) {
+		if r, ok := cur.(interface {
+			EmbeddingModel(context.Context) string
+		}); ok {
+			return r.EmbeddingModel(ctx), true
+		}
+		return "", false
+	})
+	return v
 }
 
 func embedCacheKey(provider, model, input string) string {

@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/core"
+	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -22,6 +23,8 @@ type Config struct {
 	RunTimeout  time.Duration
 	MCP         core.MCPConfig
 	MCPProvider core.MCPProvider
+	// Usage is where every session's token spend is metered. Nil is safe.
+	Usage *usageapp.Meter
 }
 
 // Executor runs tasks on opencode. The whole spawn/parse/finish flow, the
@@ -72,7 +75,7 @@ func New(cfg Config) (*Executor, error) {
 		runTimeout = DefaultRunTimeout
 	}
 	return &Executor{
-		family: *core.NewFamily(familySpec, resolved, runTimeout, cfg.MCP, cfg.MCPProvider),
+		family: *core.NewFamily(familySpec, resolved, runTimeout, cfg.MCP, cfg.MCPProvider, cfg.Usage),
 		now:    time.Now,
 	}, nil
 }

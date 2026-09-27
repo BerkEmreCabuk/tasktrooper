@@ -158,7 +158,10 @@ const usdSpentSinceSQL = `
 			COALESCE(rate.raw_read::double precision, rate.prompt) AS read,
 			COALESCE(rate.raw_write::double precision, rate.prompt) AS write
 	) cache_rate
-	WHERE u.created_at >= $1
+	-- CLI-kind rows are host CLI sessions (Claude Code, cursor-agent, ...); those
+	-- are paid by the CLI's own subscription/account, not this install's model
+	-- prices, so they must not count against the budget gate.
+	WHERE u.created_at >= $1 AND u.kind <> 'cli'
 `
 
 func (s *BillingStore) UsdSpentSince(ctx context.Context, since time.Time) (float64, error) {
@@ -208,7 +211,7 @@ func (s *BillingStore) TokensSince(ctx context.Context, since time.Time) (int64,
 	var tokens int64
 	err := s.pool.QueryRow(ctx, `
 		SELECT COALESCE(SUM(prompt_tokens + completion_tokens), 0)
-		FROM llm_usage WHERE created_at >= $1
+		FROM llm_usage WHERE created_at >= $1 AND kind <> 'cli'
 	`, since).Scan(&tokens)
 	if err != nil {
 		return 0, fmt.Errorf("tokens since: %w", err)

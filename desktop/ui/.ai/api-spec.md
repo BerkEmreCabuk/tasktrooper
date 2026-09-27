@@ -193,11 +193,23 @@ Reloads config file and reconnects MCP servers. Does not restart the HTTP server
 
 No auth. Returns bridge and LM Studio status.
 
-## GET /v1/usage?days=30
+## GET /v1/usage?days=30&tz=Europe/Istanbul
 
-LLM token usage aggregates for the cost dashboard: totals, by-model, and
-daily breakdowns (`llm_usage` table, recorded by the `application/usage`
-LLM-client decorator). `days` 1-365, default 30.
+Token usage for Settings → Usage, from the `llm_usage` ledger. Every model
+call lands there with a `kind`: `cli` (one host agent CLI session — Claude
+Code, Cursor, OpenCode, Antigravity), `api` (one call to a connected
+provider) or `embedding` (an indexing/search vector; token count estimated).
+`days` 1-365, default 30, counted as local calendar days in `tz` (IANA name,
+default UTC) including today.
+
+Response: `days`, `timezone`, `from`/`to` (`YYYY-MM-DD`), `generation`
+(cli + api totals), `embedding` (totals), `by_model[]` (`kind`, `provider`,
+`model` + totals; every kind), `daily[]` (`day` + totals; generation only,
+days with rows only). Totals are `calls`, `prompt_tokens`,
+`completion_tokens`, `cache_read_tokens`, `cache_write_tokens` —
+`prompt_tokens` is the whole prompt and both cache counts are subsets of it.
+`model` is `(default)` when the caller did not name one and `(unrecorded)`
+for runs backfilled from before per-model tracking.
 
 ## Embedding provider & model
 

@@ -75,10 +75,11 @@ type Family struct {
 	runTimeout  time.Duration
 	mcp         MCPConfig
 	mcpProvider MCPProvider
+	usage       *usageapp.Meter
 }
 
-func NewFamily(spec FamilySpec, bin string, runTimeout time.Duration, mcp MCPConfig, mcpProvider MCPProvider) *Family {
-	return &Family{spec: spec, bin: bin, runTimeout: runTimeout, mcp: mcp, mcpProvider: mcpProvider}
+func NewFamily(spec FamilySpec, bin string, runTimeout time.Duration, mcp MCPConfig, mcpProvider MCPProvider, usage *usageapp.Meter) *Family {
+	return &Family{spec: spec, bin: bin, runTimeout: runTimeout, mcp: mcp, mcpProvider: mcpProvider, usage: usage}
 }
 
 func (f *Family) Spec() FamilySpec { return f.spec }
@@ -182,17 +183,29 @@ func (f *Family) spawn(ctx context.Context, inv Invocation, extraEnv []string) (
 	timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 
 	return Session{
-		Out:        out,
-		StderrTail: tail.String(),
-		ParseErr:   parseErr,
-		WaitErr:    waitErr,
-		TimedOut:   timedOut,
+		Out:             out,
+		StderrTail:      tail.String(),
+		ParseErr:        parseErr,
+		WaitErr:         waitErr,
+		TimedOut:        timedOut,
+		InvocationModel: inv.Model,
 	}, nil
 }
 
 func (f *Family) finishInner(ctx context.Context, label string, s Session, now func() time.Time) (domain.AgentResponse, error) {
 	out := s.Out
-	usageapp.TokenUsageFromContext(ctx).Add(out.Usage)
+	// At the top, ahead of every failure branch below: a session that timed
+	// out or hit its quota still burned the tokens the CLI reports, and those
+	// must still count against the run and the dashboard.
+	f.usage.Record(ctx, domain.LLMUsageRecord{
+		Kind:             domain.LLMUsageKindCLI,
+		Provider:         string(f.spec.Provider),
+		Model:            FirstNonEmpty(out.Model, out.Init.Model, s.InvocationModel),
+		PromptTokens:     out.Usage.PromptTokens,
+		CompletionTokens: out.Usage.CompletionTokens,
+		CacheReadTokens:  out.Usage.CacheReadTokens,
+		CacheWriteTokens: out.Usage.CacheWriteTokens,
+	})
 
 	if s.TimedOut {
 		return domain.AgentResponse{}, fmt.Errorf("%s did not finish within %s and was stopped: %s",

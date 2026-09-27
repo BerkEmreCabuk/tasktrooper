@@ -88,6 +88,9 @@ type Session struct {
 	WaitErr    error
 	TimedOut   bool
 	InitFault  error
+	// InvocationModel is the model the invocation requested, used when the CLI
+	// never reports one back (e.g. the session died before any output).
+	InvocationModel string
 }
 
 func (s Session) SessionID() string {

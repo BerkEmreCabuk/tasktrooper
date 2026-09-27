@@ -37,6 +37,10 @@
   --color-surface-sunken: var(--surface-sunken);
   --color-accent-warm: var(--accent-warm);
   --color-brand-mark: var(--brand-mark);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -107,6 +111,13 @@
      redefined in .dark, so the brand mark stays this fixed color in both
      themes the way the icon itself does not change with the OS theme. */
   --brand-mark: #15214b;
+  /* Categorical chart slots in fixed order. The order is what keeps adjacent
+     stacked segments apart under color-vision deficiency; the dark steps are
+     their own set for the dark surface, not a flip of these. */
+  --chart-1: #2a78d6;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
 }
 
 .dark {
@@ -142,6 +153,10 @@
   --surface-raised: oklch(0.21 0.015 265);
   --surface-sunken: oklch(0.1 0.015 265);
   --accent-warm: oklch(0.8 0.13 72.9);
+  --chart-1: #3987e5;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
   --scrollbar-thumb: oklch(0.38 0.02 265 / 0.85);
   --scrollbar-thumb-hover: oklch(0.48 0.03 265 / 0.95);
   --scrollbar-track: transparent;

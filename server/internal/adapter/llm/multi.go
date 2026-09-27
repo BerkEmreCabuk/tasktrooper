@@ -87,6 +87,14 @@ func (m *MultiProviderClient) EmbeddingProvider(ctx context.Context) domain.LLMP
 	return m.providers(ctx).EmbeddingProvider
 }
 
+// EmbeddingModel is the pinned embedding model an Embed call with an empty
+// model argument actually resolves to (see embedOnce) — the usage recorder
+// needs this so an unspecified-model embedding call still logs a real model
+// name instead of "(default)".
+func (m *MultiProviderClient) EmbeddingModel(ctx context.Context) string {
+	return m.providers(ctx).EmbeddingModel
+}
+
 func (m *MultiProviderClient) SetEmbeddingLimits(cfg domain.EmbeddingConfig) {
 	m.mu.Lock()
 	m.embedCfg = cfg

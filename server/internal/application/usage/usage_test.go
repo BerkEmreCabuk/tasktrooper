@@ -23,7 +23,7 @@ func (f *fakeUsageStore) Record(_ context.Context, rec domain.LLMUsageRecord) er
 	return nil
 }
 
-func (f *fakeUsageStore) Summary(context.Context, int) (domain.LLMUsageSummary, error) {
+func (f *fakeUsageStore) Summary(context.Context, time.Time, *time.Location) (domain.LLMUsageSummary, error) {
 	return domain.LLMUsageSummary{}, nil
 }
 
@@ -38,7 +38,7 @@ func (f *fakeUsageStore) snapshot() []domain.LLMUsageRecord {
 func TestRecordingClient_EmbedRecordsEstimatedPromptTokens(t *testing.T) {
 	inner := &fakeEmbedClient{}
 	store := &fakeUsageStore{}
-	rec := NewRecordingClient(inner, store)
+	rec := NewRecordingClient(inner, NewMeter(store))
 
 	longQuery := "how does the board dispatcher recover an orphaned task run"
 	_, err := rec.Embed(context.Background(), longQuery, "m1")
@@ -47,6 +47,7 @@ func TestRecordingClient_EmbedRecordsEstimatedPromptTokens(t *testing.T) {
 	require.Eventually(t, func() bool { return len(store.snapshot()) == 1 }, time.Second, 5*time.Millisecond)
 	got := store.snapshot()[0]
 	require.Equal(t, "m1", got.Model)
+	require.Equal(t, domain.LLMUsageKindEmbedding, got.Kind)
 	require.Positive(t, got.PromptTokens, "prompt_tokens should be a positive estimate")
 	require.Zero(t, got.CompletionTokens)
 	require.Zero(t, got.CacheReadTokens)
@@ -56,7 +57,7 @@ func TestRecordingClient_EmbedRecordsEstimatedPromptTokens(t *testing.T) {
 func TestRecordingClient_EmbedDefaultsEmptyModel(t *testing.T) {
 	inner := &fakeEmbedClient{}
 	store := &fakeUsageStore{}
-	rec := NewRecordingClient(inner, store)
+	rec := NewRecordingClient(inner, NewMeter(store))
 
 	_, err := rec.Embed(context.Background(), "text", "")
 	require.NoError(t, err)
@@ -68,7 +69,7 @@ func TestRecordingClient_EmbedDefaultsEmptyModel(t *testing.T) {
 func TestRecordingClient_EmbedSkipsRecordingOnError(t *testing.T) {
 	inner := &erroringEmbedClient{}
 	store := &fakeUsageStore{}
-	rec := NewRecordingClient(inner, store)
+	rec := NewRecordingClient(inner, NewMeter(store))
 
 	_, err := rec.Embed(context.Background(), "text", "m1")
 	require.Error(t, err)
@@ -86,7 +87,7 @@ func (e *erroringEmbedClient) Embed(context.Context, string, string) ([]float32,
 func TestCachingEmbedder_HitsSkipRecordingMissesRecord(t *testing.T) {
 	inner := &fakeEmbedClient{}
 	store := &fakeUsageStore{}
-	rec := NewRecordingClient(inner, store)
+	rec := NewRecordingClient(inner, NewMeter(store))
 	cache := NewCachingEmbedder(rec, 8)
 
 	if _, err := cache.Embed(context.Background(), "q", "m1"); err != nil {
@@ -118,7 +119,7 @@ func (usageInner) Embed(context.Context, string, string) ([]float32, error) {
 
 func TestChatAndEmbedUsageIsRecorded(t *testing.T) {
 	store := &fakeUsageStore{}
-	client := NewRecordingClient(usageInner{}, store)
+	client := NewRecordingClient(usageInner{}, NewMeter(store))
 
 	if _, err := client.Chat(context.Background(), domain.AgentRequest{Model: "gpt-4o"}); err != nil {
 		t.Fatalf("chat: %v", err)
@@ -138,10 +139,16 @@ func TestChatAndEmbedUsageIsRecorded(t *testing.T) {
 			if rec.PromptTokens != 11 || rec.CompletionTokens != 7 {
 				t.Fatalf("chat usage = %d/%d, want 11/7", rec.PromptTokens, rec.CompletionTokens)
 			}
+			if rec.Kind != domain.LLMUsageKindAPI {
+				t.Fatalf("chat kind = %q, want api", rec.Kind)
+			}
 		case "text-embedding-3-small":
 			sawEmbed = true
 			if rec.PromptTokens == 0 {
 				t.Fatal("an embedding call must accrue prompt tokens")
+			}
+			if rec.Kind != domain.LLMUsageKindEmbedding {
+				t.Fatalf("embed kind = %q, want embedding", rec.Kind)
 			}
 		}
 	}

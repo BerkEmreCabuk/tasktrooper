@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"time"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
@@ -15,44 +16,67 @@ func NewLLMUsageStore(pool *DB) *LLMUsageStore {
 }
 
 func (s *LLMUsageStore) Record(ctx context.Context, rec domain.LLMUsageRecord) error {
+	kind := rec.Kind
+	if kind == "" {
+		kind = domain.LLMUsageKindAPI
+	}
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO llm_usage (model, prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens)
-		VALUES ($1, $2, $3, $4, $5)`,
-		rec.Model, rec.PromptTokens, rec.CompletionTokens, rec.CacheReadTokens, rec.CacheWriteTokens)
+		INSERT INTO llm_usage (kind, provider, model, prompt_tokens, completion_tokens, cache_read_tokens, cache_write_tokens)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		kind, rec.Provider, rec.Model, rec.PromptTokens, rec.CompletionTokens, rec.CacheReadTokens, rec.CacheWriteTokens)
 	return err
 }
 
-func (s *LLMUsageStore) Summary(ctx context.Context, days int) (domain.LLMUsageSummary, error) {
-	if days <= 0 {
-		days = 30
+// Summary buckets by kind (generation = api+cli, embedding on its own), by
+// (kind, provider, model), and by local calendar day in loc — a CLI session's
+// created_at is stamped when the run finished, in UTC, so "today" only means
+// the browser's today once it is reinterpreted in the browser's own timezone.
+func (s *LLMUsageStore) Summary(ctx context.Context, since time.Time, loc *time.Location) (domain.LLMUsageSummary, error) {
+	if loc == nil {
+		loc = time.UTC
 	}
-	sum := domain.LLMUsageSummary{Days: days}
+	sum := domain.LLMUsageSummary{
+		Timezone: loc.String(),
+		ByModel:  []domain.LLMUsageByModel{},
+		Daily:    []domain.LLMUsageByDay{},
+	}
 
 	err := s.pool.QueryRow(ctx, `
-		SELECT COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0),
-		       COALESCE(SUM(cache_read_tokens), 0), COALESCE(SUM(cache_write_tokens), 0)
+		SELECT COUNT(*) FILTER (WHERE kind IN ('api', 'cli')),
+		       COALESCE(SUM(prompt_tokens) FILTER (WHERE kind IN ('api', 'cli')), 0),
+		       COALESCE(SUM(completion_tokens) FILTER (WHERE kind IN ('api', 'cli')), 0),
+		       COALESCE(SUM(cache_read_tokens) FILTER (WHERE kind IN ('api', 'cli')), 0),
+		       COALESCE(SUM(cache_write_tokens) FILTER (WHERE kind IN ('api', 'cli')), 0),
+		       COUNT(*) FILTER (WHERE kind = 'embedding'),
+		       COALESCE(SUM(prompt_tokens) FILTER (WHERE kind = 'embedding'), 0),
+		       COALESCE(SUM(completion_tokens) FILTER (WHERE kind = 'embedding'), 0),
+		       COALESCE(SUM(cache_read_tokens) FILTER (WHERE kind = 'embedding'), 0),
+		       COALESCE(SUM(cache_write_tokens) FILTER (WHERE kind = 'embedding'), 0)
 		FROM llm_usage
-		WHERE created_at >= now() - make_interval(days => $1)`, days).
-		Scan(&sum.Total.Calls, &sum.Total.PromptTokens, &sum.Total.CompletionTokens,
-			&sum.Total.CacheReadTokens, &sum.Total.CacheWriteTokens)
+		WHERE created_at >= $1`, since).
+		Scan(&sum.Generation.Calls, &sum.Generation.PromptTokens, &sum.Generation.CompletionTokens,
+			&sum.Generation.CacheReadTokens, &sum.Generation.CacheWriteTokens,
+			&sum.Embedding.Calls, &sum.Embedding.PromptTokens, &sum.Embedding.CompletionTokens,
+			&sum.Embedding.CacheReadTokens, &sum.Embedding.CacheWriteTokens)
 	if err != nil {
 		return domain.LLMUsageSummary{}, err
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT model, COUNT(*), SUM(prompt_tokens), SUM(completion_tokens),
+		SELECT kind, provider, model, COUNT(*), SUM(prompt_tokens), SUM(completion_tokens),
 		       SUM(cache_read_tokens), SUM(cache_write_tokens)
 		FROM llm_usage
-		WHERE created_at >= now() - make_interval(days => $1)
-		GROUP BY model
-		ORDER BY SUM(prompt_tokens + completion_tokens) DESC`, days)
+		WHERE created_at >= $1
+		GROUP BY kind, provider, model
+		ORDER BY CASE kind WHEN 'cli' THEN 0 WHEN 'api' THEN 1 ELSE 2 END,
+		         SUM(prompt_tokens + completion_tokens) DESC`, since)
 	if err != nil {
 		return domain.LLMUsageSummary{}, err
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var m domain.LLMUsageByModel
-		if err := rows.Scan(&m.Model, &m.Calls, &m.PromptTokens, &m.CompletionTokens,
+		if err := rows.Scan(&m.Kind, &m.Provider, &m.Model, &m.Calls, &m.PromptTokens, &m.CompletionTokens,
 			&m.CacheReadTokens, &m.CacheWriteTokens); err != nil {
 			return domain.LLMUsageSummary{}, err
 		}
@@ -63,13 +87,13 @@ func (s *LLMUsageStore) Summary(ctx context.Context, days int) (domain.LLMUsageS
 	}
 
 	dayRows, err := s.pool.Query(ctx, `
-		SELECT to_char(date_trunc('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD'),
+		SELECT to_char(date_trunc('day', created_at AT TIME ZONE $2::text), 'YYYY-MM-DD'),
 		       COUNT(*), SUM(prompt_tokens), SUM(completion_tokens),
 		       SUM(cache_read_tokens), SUM(cache_write_tokens)
 		FROM llm_usage
-		WHERE created_at >= now() - make_interval(days => $1)
+		WHERE created_at >= $1 AND kind IN ('api', 'cli')
 		GROUP BY 1
-		ORDER BY 1`, days)
+		ORDER BY 1`, since, loc.String())
 	if err != nil {
 		return domain.LLMUsageSummary{}, err
 	}

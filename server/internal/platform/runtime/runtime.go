@@ -924,9 +924,11 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		// rewriting draw on one embedding quota.
 		e.multiLLM.SetEmbeddingLimits(cfg.Embedding)
 	}
-	if usageStore != nil {
-		llmClient = usageapp.NewRecordingClient(llmClient, usageStore)
-	}
+	// One meter for every model call, whether it goes through this HTTP client
+	// or a host CLI session (wired below): it always feeds the run's context
+	// accumulator, and persists to usageStore (nil-safe) for the dashboard.
+	usageMeter := usageapp.NewMeter(usageStore)
+	llmClient = usageapp.NewRecordingClient(llmClient, usageMeter)
 	// Cache wraps OUTSIDE the recording client: a cache hit never calls the
 	// inner client, so no usage is recorded for an unbilled call.
 	llmClient = usageapp.NewCachingEmbedder(llmClient, cfg.Embedding.QueryCacheEntries)
@@ -1323,6 +1325,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// session and revoked at its end. See claudecode_mcp.go.
 			MCPProvider:           claudeMCP,
 			MaxConcurrentSessions: cfg.ClaudeCode.MaxConcurrentSessions,
+			Usage:                 usageMeter,
 		}); ccErr != nil {
 			log.Info().Err(ccErr).Msg("agent cli executor not registered; agents on the claude_code provider cannot run on this host")
 		} else {
@@ -1336,6 +1339,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			Binary:      cfg.Antigravity.Binary,
 			RunTimeout:  cfg.Antigravity.RunTimeout,
 			MCPProvider: claudeMCP,
+			Usage:       usageMeter,
 		}); agErr != nil {
 			log.Info().Err(agErr).Msg("antigravity executor not registered; agents on the antigravity provider cannot run on this host")
 		} else {
@@ -1347,6 +1351,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			Binary:      cfg.CursorAgent.Binary,
 			RunTimeout:  cfg.CursorAgent.RunTimeout,
 			MCPProvider: claudeMCP,
+			Usage:       usageMeter,
 		}); curErr != nil {
 			log.Info().Err(curErr).Msg("cursor executor not registered; agents on the cursor_agent provider cannot run on this host")
 		} else {
@@ -1358,6 +1363,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			Binary:      cfg.Opencode.Binary,
 			RunTimeout:  cfg.Opencode.RunTimeout,
 			MCPProvider: claudeMCP,
+			Usage:       usageMeter,
 		}); ocErr != nil {
 			log.Info().Err(ocErr).Msg("opencode executor not registered; agents on the opencode provider cannot run on this host")
 		} else {

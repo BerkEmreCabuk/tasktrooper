@@ -140,7 +140,7 @@ alongside `documents`.
 | `GET /docs` | OpenAPI 3.0 YAML |
 | `POST /admin/reload` | Reloads config, reconnects MCP servers; no HTTP restart |
 | `GET /health` | No auth; bridge + LM Studio status |
-| `GET /v1/usage?days=30` | Token usage aggregates (totals, by-model, daily) from `llm_usage`. `days` 1-365 |
+| `GET /v1/usage?days=30&tz=Europe/Istanbul` | Token usage aggregates from `llm_usage`, split into `generation` (kind api+cli) and `embedding` totals, plus `by_model` (grouped by kind/provider/model) and `daily` (generation only, bucketed by local day in `tz`). `days` 1-365, `tz` an IANA name (empty/invalid → UTC) |
 
 ## Board run control
 
