@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/catalog"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/rs/zerolog/log"
 )
@@ -437,15 +438,11 @@ type saveClassification struct {
 	Content     string `json:"content"`
 }
 
-const teamPromotionSystemPrompt = `You curate a software team's shared memory. Some entries are not memories at all — they are reusable know-how that belongs in the skill catalog, where agents load it while working.
+var teamPromotionSystemKey = prompt.Define[struct{}]("evolution.team_promotion_system", struct{}{})
 
-Promote an entry ONLY when it teaches a durable, reusable method: a how-to, technique, checklist, convention, or workflow that will keep paying off in future tasks. When promoting, rewrite the content as concise instructional markdown an agent can follow.
-
-Do NOT promote: one-off facts, project status, decisions or events, user/stakeholder preferences, credentials or URLs, and repository-specific trivia that teaches no transferable method. Those stay memories. An empty promotions array is a valid and often correct answer.
-
-For each promotion set agents to the roster names the skill is relevant for; use an empty array when it fits the whole team.
-
-Respond with a single JSON object matching the provided schema.`
+// teamPromotionSystemPrompt frames the shared-memory-to-skill promotion
+// sweep; see catalog/system/prompts/evolution/team_promotion_system.md.
+var teamPromotionSystemPrompt = prompt.Text(teamPromotionSystemKey)
 
 // teamPromotionAgentLine and teamPromotionMemoryLine format one roster/memory
 // row; teamPromotionUserMessage joins them under their section headers. See
@@ -466,26 +463,34 @@ func teamPromotionMemoryLine(m domain.AgentMemory) string {
 	return fmt.Sprintf("- id: %s | category: %s | scope: %s\n  %s", m.ID, category, scope, strings.ReplaceAll(m.Content, "\n", "\n  "))
 }
 
-func teamPromotionUserMessage(memories []domain.AgentMemory, agents []domain.Agent) string {
-	var b strings.Builder
-	b.WriteString("## Agent roster\n")
-	for _, a := range agents {
-		b.WriteString(teamPromotionAgentLine(a) + "\n")
-	}
-	b.WriteString("\n## Team memories\n")
-	for _, m := range memories {
-		b.WriteString(teamPromotionMemoryLine(m) + "\n")
-	}
-	return b.String()
+type teamPromotionUserInput struct {
+	AgentLines  []string
+	MemoryLines []string
 }
 
-const saveClassifierSystemPrompt = `An agent on a software team is about to save a note to its long-term memory. Decide whether the note is actually reusable know-how that belongs in the skill catalog instead.
+var teamPromotionUserKey = prompt.Define("evolution.team_promotion_user", teamPromotionUserInput{
+	AgentLines:  []string{"- sample-agent: does sample work."},
+	MemoryLines: []string{"- id: sample-id | category: workflow | scope: global\n  Sample lesson."},
+})
 
-Set skill=true ONLY when the note teaches a durable, reusable method: a how-to, technique, checklist, convention, or workflow worth loading in future tasks. Then rewrite it as concise instructional markdown in content and give it a short kebab-case name and a one-line description.
+func teamPromotionUserMessage(memories []domain.AgentMemory, agents []domain.Agent) string {
+	agentLines := make([]string, 0, len(agents))
+	for _, a := range agents {
+		agentLines = append(agentLines, teamPromotionAgentLine(a))
+	}
+	memoryLines := make([]string, 0, len(memories))
+	for _, m := range memories {
+		memoryLines = append(memoryLines, teamPromotionMemoryLine(m))
+	}
+	return teamPromotionUserKey.Render(teamPromotionUserInput{AgentLines: agentLines, MemoryLines: memoryLines})
+}
 
-Set skill=false for everything else: one-off facts, status, events, preferences, credentials, and notes tied to a single repository's current state. When in doubt, skill=false — a wrong memory is cheap, a wrong skill pollutes the catalog. Fill unused fields with empty strings.
+var saveClassifierSystemKey = prompt.Define[struct{}]("evolution.save_classifier_system", struct{}{})
 
-Respond with a single JSON object matching the provided schema.`
+// saveClassifierSystemPrompt decides whether a save_memory note is really
+// reusable know-how that belongs in the skill catalog instead; see
+// catalog/system/prompts/evolution/save_classifier_system.md.
+var saveClassifierSystemPrompt = prompt.Text(saveClassifierSystemKey)
 
 // OpenAI's strict json_schema mode rejects optional properties (see reflectionOutputSchema for the long version).
 func promotionOutputSchema() map[string]interface{} {

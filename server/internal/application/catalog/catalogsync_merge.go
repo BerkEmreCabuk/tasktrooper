@@ -5,25 +5,30 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
+
+var mergeSkillSystemKey = prompt.Define[struct{}]("catalog.merge_skill_system", struct{}{})
+
+type mergeSkillUserInput struct {
+	Name, Local, Upstream string
+}
+
+var mergeSkillUserKey = prompt.Define("catalog.merge_skill_user", mergeSkillUserInput{
+	Name: "sample-skill", Local: "local body", Upstream: "upstream body",
+})
 
 // mergeSkillSystemPrompt is the fixed instruction for reconciling two SKILL.md
 // versions; see catalog/system/prompts/catalog/merge_skill_system.md.
 func mergeSkillSystemPrompt() string {
-	return "You merge two versions of the same agent skill into one SKILL.md document. " +
-		"Reply with ONLY the merged document, frontmatter first (name:, description:, category:), " +
-		"then ---, then the merged body. Keep every distinct instruction from both sides; " +
-		"drop only what the two versions contradict themselves about."
+	return prompt.Text(mergeSkillSystemKey)
 }
 
 // mergeSkillUserMessage carries the two document bodies the LLM must
 // reconcile; see catalog/system/prompts/catalog/merge_skill_user.md.
 func mergeSkillUserMessage(skillName, local, upstream string) string {
-	var user strings.Builder
-	fmt.Fprintf(&user, "Skill: %s\nThis machine's current copy (LOCAL):\n---\n%s\n---\n", skillName, local)
-	fmt.Fprintf(&user, "New catalog revision (UPSTREAM):\n---\n%s\n---\n", upstream)
-	return user.String()
+	return mergeSkillUserKey.Render(mergeSkillUserInput{Name: skillName, Local: local, Upstream: upstream})
 }
 
 // Asks the LLM to merge a skill changed both locally and upstream; the local copy's tags and tech stack win, and the model reconciles the prose.

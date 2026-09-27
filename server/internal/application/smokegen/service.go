@@ -12,6 +12,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
@@ -316,10 +317,14 @@ func (s *Service) run(ctx context.Context, cancel context.CancelFunc, jobID uuid
 // command would be touching the user's working tree.
 var readOnlyTools = []string{"read_file", "grep_code", "glob", "codebase_search"}
 
+type smokeRetryInput struct{ ParseError string }
+
+var smokeRetryKey = prompt.Define("smokegen.retry", smokeRetryInput{ParseError: "unexpected end of JSON input"})
+
 // smokeRetryMessage asks the agent to answer again after an unparsable
 // reply; see catalog/system/prompts/smokegen/retry.md.
 func smokeRetryMessage(parseErr error) string {
-	return "That was not a valid JSON object (" + parseErr.Error() + "). Reply again with ONLY the JSON object {\"checks\":[...]}, no prose, no code fences."
+	return smokeRetryKey.Render(smokeRetryInput{ParseError: parseErr.Error()})
 }
 
 func (s *Service) propose(ctx context.Context, comp domain.Component, repo domain.Repository, agentRec domain.Agent, brief string, existing []domain.SmokeCheck) ([]domain.SmokeCheck, error) {
