@@ -184,6 +184,18 @@ func extractFirstJSONObject(s string) string {
 	return s[start:]
 }
 
+// guardWrapError carries a rendered catalog guard's text as its Error() — the
+// model-facing wording — while keeping the original error reachable through
+// Unwrap, since jsonErrorContext's errors.As walk still needs to reach a
+// wrapped JSON syntax/type error to find its offset.
+type guardWrapError struct {
+	text string
+	err  error
+}
+
+func (e *guardWrapError) Error() string { return e.text }
+func (e *guardWrapError) Unwrap() error { return e.err }
+
 // Feeds the parse failure back with the offending spot quoted, not just the raw error.
 func pipelineCorrection(badResponse string, err error) []domain.Message {
 	instruction := pipelineCorrectionKey.Render(pipelineCorrectionData{

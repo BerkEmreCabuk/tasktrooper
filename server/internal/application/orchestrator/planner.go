@@ -65,6 +65,16 @@ var (
 		multipleCreatorsData{Count: 2, IDs: "t1, t2", Tool: createBoardTaskTool})
 )
 
+type plannerInvalidJSONData struct{ Err string }
+type taskInvalidToolNamesData struct{ TaskID, Err string }
+
+var (
+	plannerInvalidJSONKey      = prompt.Define("guard.orchestrator_parse_invalid_planner_json", plannerInvalidJSONData{Err: "err"})
+	plannerMissingQuestionsKey = prompt.Define[struct{}]("guard.orchestrator_parse_planner_missing_questions", struct{}{})
+	taskMissingToolNamesKey    = prompt.Define("guard.orchestrator_parse_task_missing_tool_names", taskIDData{TaskID: "t1"})
+	taskInvalidToolNamesKey    = prompt.Define("guard.orchestrator_parse_invalid_tool_names", taskInvalidToolNamesData{TaskID: "t1", Err: "err"})
+)
+
 // One retry budget shared by intake, planner, replanner and verifier, for provider and parse failures alike.
 const maxPlannerRetries = 2
 
@@ -276,7 +286,10 @@ func parsePlannerJSON(content string, opts plannerParseOpts) (domain.PlannerOutp
 
 	var raw plannerOutputWire
 	if err := parseLLMJSON(trimmed, &raw); err != nil {
-		return domain.PlannerOutput{}, fmt.Errorf("invalid planner json: %w", err)
+		return domain.PlannerOutput{}, &guardWrapError{
+			text: plannerInvalidJSONKey.Render(plannerInvalidJSONData{Err: err.Error()}),
+			err:  err,
+		}
 	}
 
 	var summaryStr string
@@ -287,7 +300,7 @@ func parsePlannerJSON(content string, opts plannerParseOpts) (domain.PlannerOutp
 		}
 	}
 	if opts.requireQuestions && raw.Questions == nil {
-		return domain.PlannerOutput{}, fmt.Errorf("planner output missing questions field")
+		return domain.PlannerOutput{}, errors.New(prompt.Text(plannerMissingQuestionsKey))
 	}
 
 	output := domain.PlannerOutput{
@@ -305,11 +318,14 @@ func parsePlannerJSON(content string, opts plannerParseOpts) (domain.PlannerOutp
 
 	for _, t := range raw.Tasks {
 		if t.ToolNames == nil {
-			return domain.PlannerOutput{}, fmt.Errorf("task %s missing tool_names field", t.ID)
+			return domain.PlannerOutput{}, errors.New(taskMissingToolNamesKey.Render(taskIDData{TaskID: t.ID}))
 		}
 		var toolNames []string
 		if err := goccyjson.Unmarshal(t.ToolNames, &toolNames); err != nil {
-			return domain.PlannerOutput{}, fmt.Errorf("task %s invalid tool_names: %w", t.ID, err)
+			return domain.PlannerOutput{}, &guardWrapError{
+				text: taskInvalidToolNamesKey.Render(taskInvalidToolNamesData{TaskID: t.ID, Err: err.Error()}),
+				err:  err,
+			}
 		}
 		output.Tasks = append(output.Tasks, domain.PlannerTask{
 			ID:            t.ID,

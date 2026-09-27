@@ -56,7 +56,7 @@ var (
 		Prefix: domain.SessionActionDigestPrefix,
 		Lines:  []string{"- board_task created TT-1 (id=11111111-1111-1111-1111-111111111111)"},
 	})
-	dependencyResultLabelKey     = prompt.Define("orchestrator.dependency_result_label", dependencyResultLabelData{DepID: "t1"})
+	dependencyResultLabelKey = prompt.Define("orchestrator.dependency_result_label", dependencyResultLabelData{DepID: "t1"})
 )
 
 type SessionActionReader interface {

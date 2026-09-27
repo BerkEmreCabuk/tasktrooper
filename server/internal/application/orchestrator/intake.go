@@ -2,7 +2,7 @@ package orchestrator
 
 import (
 	"context"
-	"fmt"
+	"errors"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/activity"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/llmretry"
@@ -10,6 +10,17 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
+)
+
+type intakeInvalidJSONData struct{ Err string }
+
+var (
+	intakeInvalidJSONKey                 = prompt.Define("guard.orchestrator_parse_invalid_intake_json", intakeInvalidJSONData{Err: "err"})
+	intakeMissingConstraintsKey          = prompt.Define[struct{}]("guard.orchestrator_parse_intake_missing_constraints", struct{}{})
+	intakeMissingQuestionsKey            = prompt.Define[struct{}]("guard.orchestrator_parse_intake_missing_questions", struct{}{})
+	intakeMissingPurposeKey              = prompt.Define[struct{}]("guard.orchestrator_parse_intake_missing_purpose", struct{}{})
+	intakeMissingGoalKey                 = prompt.Define[struct{}]("guard.orchestrator_parse_intake_missing_goal", struct{}{})
+	intakeReadyRequiresEmptyQuestionsKey = prompt.Define[struct{}]("guard.orchestrator_parse_intake_ready_requires_empty_questions", struct{}{})
 )
 
 type IntakeExtractor struct {
@@ -100,13 +111,16 @@ func parseGoalIntake(content string) (domain.GoalIntake, error) {
 
 	var raw intakeWireOutput
 	if err := parseLLMJSON(trimmed, &raw); err != nil {
-		return domain.GoalIntake{}, fmt.Errorf("invalid intake json: %w", err)
+		return domain.GoalIntake{}, &guardWrapError{
+			text: intakeInvalidJSONKey.Render(intakeInvalidJSONData{Err: err.Error()}),
+			err:  err,
+		}
 	}
 	if raw.Constraints == nil {
-		return domain.GoalIntake{}, fmt.Errorf("intake missing constraints field")
+		return domain.GoalIntake{}, errors.New(prompt.Text(intakeMissingConstraintsKey))
 	}
 	if raw.Questions == nil {
-		return domain.GoalIntake{}, fmt.Errorf("intake missing questions field")
+		return domain.GoalIntake{}, errors.New(prompt.Text(intakeMissingQuestionsKey))
 	}
 
 	intake := domain.GoalIntake{
@@ -119,13 +133,13 @@ func parseGoalIntake(content string) (domain.GoalIntake, error) {
 
 	if intake.Ready {
 		if intake.Purpose == "" {
-			return domain.GoalIntake{}, fmt.Errorf("intake missing purpose")
+			return domain.GoalIntake{}, errors.New(prompt.Text(intakeMissingPurposeKey))
 		}
 		if intake.Goal == "" {
-			return domain.GoalIntake{}, fmt.Errorf("intake missing goal")
+			return domain.GoalIntake{}, errors.New(prompt.Text(intakeMissingGoalKey))
 		}
 		if len(intake.Questions) > 0 {
-			return domain.GoalIntake{}, fmt.Errorf("intake ready=true requires empty questions")
+			return domain.GoalIntake{}, errors.New(prompt.Text(intakeReadyRequiresEmptyQuestionsKey))
 		}
 		return intake, nil
 	}
