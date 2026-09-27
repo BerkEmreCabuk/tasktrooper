@@ -444,11 +444,25 @@ var teamPromotionSystemKey = prompt.Define[struct{}]("evolution.team_promotion_s
 // sweep; see catalog/system/prompts/evolution/team_promotion_system.md.
 var teamPromotionSystemPrompt = prompt.Text(teamPromotionSystemKey)
 
+type teamPromotionAgentLineInput struct{ Name, Description string }
+
+var teamPromotionAgentLineKey = prompt.Define("evolution.team_promotion_agent_line",
+	teamPromotionAgentLineInput{Name: "sample-agent", Description: "does sample work."})
+
+type teamPromotionMemoryLineInput struct{ MemoryID, Category, Scope, Content string }
+
+var teamPromotionMemoryLineKey = prompt.Define("evolution.team_promotion_memory_line", teamPromotionMemoryLineInput{
+	MemoryID: "sample-id", Category: "workflow", Scope: "global", Content: "Sample lesson.",
+})
+
 // teamPromotionAgentLine and teamPromotionMemoryLine format one roster/memory
 // row; teamPromotionUserMessage joins them under their section headers. See
-// catalog/system/prompts/evolution/team_promotion_user.md.
+// catalog/system/prompts/evolution/team_promotion_agent_line.md,
+// team_promotion_memory_line.md and team_promotion_user.md.
 func teamPromotionAgentLine(a domain.Agent) string {
-	return fmt.Sprintf("- %s: %s", a.Name, truncate(a.Description, 160))
+	return teamPromotionAgentLineKey.Render(teamPromotionAgentLineInput{
+		Name: a.Name, Description: truncate(a.Description, 160),
+	})
 }
 
 func teamPromotionMemoryLine(m domain.AgentMemory) string {
@@ -460,7 +474,10 @@ func teamPromotionMemoryLine(m domain.AgentMemory) string {
 	if category == "" {
 		category = "-"
 	}
-	return fmt.Sprintf("- id: %s | category: %s | scope: %s\n  %s", m.ID, category, scope, strings.ReplaceAll(m.Content, "\n", "\n  "))
+	return teamPromotionMemoryLineKey.Render(teamPromotionMemoryLineInput{
+		MemoryID: m.ID.String(), Category: category, Scope: scope,
+		Content: strings.ReplaceAll(m.Content, "\n", "\n  "),
+	})
 }
 
 type teamPromotionUserInput struct {
