@@ -1,0 +1,78 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "get_project_brief",
+      "description": "Read the repository overview: what it is, its stack, its components and their commands, git conventions, reference docs, what runs where, what it talks to, and the CI checks to run before handing off. Not given to you automatically — call it when you need this, optionally scoped to a component path or area.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "area": {
+            "description": "A role/area (e.g. \"backend\", \"frontend\") to scope the brief to every component in that area. Ignored when component is set.",
+            "type": "string"
+          },
+          "component": {
+            "description": "A component's own path (e.g. \"apps/web\", or \".\" for a single-purpose repo) to scope the brief to just that component.",
+            "type": "string"
+          },
+          "repository_id": {
+            "description": "Repository UUID. Defaults to the run's own repository; pass this only to look at a different one.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_component_checks",
+      "description": "List the CI checks mapped onto each component: what job runs it, what it verifies, whether CI gates on it, and the local command that reproduces it. Use this to find the exact command CI runs before you claim something builds or passes.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "description": "A component's own path (e.g. \"apps/web\", or \".\" for a single-purpose repo) to list just that component's checks.",
+            "type": "string"
+          },
+          "repository_id": {
+            "description": "Repository UUID. Defaults to the run's own repository; pass this only to look at a different one.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_links",
+      "description": "List what a component talks to and what talks to it: other components (in this repository or another), and system resources (databases, queues, third-party APIs). Use this before touching an integration point to see who else depends on it.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "description": "A component's own path (e.g. \"apps/web\", or \".\" for a single-purpose repo) to list just that component's links.",
+            "type": "string"
+          },
+          "direction": {
+            "description": "\"out\" for what the component calls, \"in\" for what calls it, \"both\" (default) for everything.",
+            "enum": [
+              "out",
+              "in",
+              "both"
+            ],
+            "type": "string"
+          },
+          "repository_id": {
+            "description": "Repository UUID. Defaults to the run's own repository; pass this only to look at a different one.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  }
+]

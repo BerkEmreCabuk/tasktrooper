@@ -1,0 +1,157 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "get_environment",
+      "description": "Read where a component runs: provider, resource, URL, health and binding status for one or every environment. Call this before query_runtime_logs/list_runtime_errors/list_deployments to see whether an environment is actually bound, or to find its URL for a request of your own.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "description": "A component's own path (e.g. \"apps/web\", or \".\" for a single-purpose repo). Omit it (or pass \".\") when the repository has only one component — it resolves automatically; with more than one it is required and the error names every path to choose from.",
+            "type": "string"
+          },
+          "environment": {
+            "description": "Which environment to read. Defaults to every environment of the component.",
+            "enum": [
+              "production",
+              "staging",
+              "preview",
+              "development"
+            ],
+            "type": "string"
+          },
+          "repository_id": {
+            "description": "Repository UUID. Defaults to the run's own repository; pass this only to look at a different one.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_deployments",
+      "description": "List an environment's recent deployments (status, commit, branch, URL, timestamps) as the provider reports them, newest first.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "description": "A component's own path (e.g. \"apps/web\", or \".\" for a single-purpose repo). Omit it (or pass \".\") when the repository has only one component — it resolves automatically; with more than one it is required and the error names every path to choose from.",
+            "type": "string"
+          },
+          "environment": {
+            "description": "Which environment to read. Defaults to \"production\".",
+            "enum": [
+              "production",
+              "staging",
+              "preview",
+              "development"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum deployments to return. Defaults to 10.",
+            "type": "integer"
+          },
+          "repository_id": {
+            "description": "Repository UUID. Defaults to the run's own repository; pass this only to look at a different one.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_runtime_errors",
+      "description": "List an environment's runtime errors, grouped and deduplicated (native grouping where the provider has it, a message fingerprint otherwise) — a triage view, not a log dump. `new: true` means the group's first occurrence falls inside this window, the \"started with this deploy\" signal.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "description": "A component's own path (e.g. \"apps/web\", or \".\" for a single-purpose repo). Omit it (or pass \".\") when the repository has only one component — it resolves automatically; with more than one it is required and the error names every path to choose from.",
+            "type": "string"
+          },
+          "environment": {
+            "description": "Which environment to read. Defaults to \"production\".",
+            "enum": [
+              "production",
+              "staging",
+              "preview",
+              "development"
+            ],
+            "type": "string"
+          },
+          "repository_id": {
+            "description": "Repository UUID. Defaults to the run's own repository; pass this only to look at a different one.",
+            "type": "string"
+          },
+          "since": {
+            "description": "How far back to look, as a duration: \"30m\", \"2h\", \"1d\". Defaults to \"24h\".",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "query_runtime_logs",
+      "description": "Read an environment's live application logs — what the running product itself printed, not a CI job's output (that is get_deploy_logs). Use this to see what a request actually did in production or on stage instead of guessing from the code.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "component": {
+            "description": "A component's own path (e.g. \"apps/web\", or \".\" for a single-purpose repo). Omit it (or pass \".\") when the repository has only one component — it resolves automatically; with more than one it is required and the error names every path to choose from.",
+            "type": "string"
+          },
+          "environment": {
+            "description": "Which environment to read. Defaults to \"production\".",
+            "enum": [
+              "production",
+              "staging",
+              "preview",
+              "development"
+            ],
+            "type": "string"
+          },
+          "limit": {
+            "description": "Maximum entries to return. Defaults to 100, capped at 500.",
+            "type": "integer"
+          },
+          "min_severity": {
+            "description": "Only entries at or above this severity.",
+            "enum": [
+              "debug",
+              "info",
+              "warning",
+              "error",
+              "critical"
+            ],
+            "type": "string"
+          },
+          "repository_id": {
+            "description": "Repository UUID. Defaults to the run's own repository; pass this only to look at a different one.",
+            "type": "string"
+          },
+          "since": {
+            "description": "How far back to read, as a duration: \"30m\", \"2h\", \"1d\". Defaults to \"1h\".",
+            "type": "string"
+          },
+          "text": {
+            "description": "Free-text filter over the log message.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  }
+]
