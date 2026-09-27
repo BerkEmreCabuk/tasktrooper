@@ -794,10 +794,14 @@ func (p *PipelineRunner) postDeployNotes(ctx context.Context, job pipelineJob) {
 	}
 	if _, err := p.tasks.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 		AuthorType: "system",
-		Content:    "Deploy sonrası yapılacaklar:\n" + after,
+		Content:    postDeployNotesComment(after),
 	}); err != nil {
 		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("post-deploy notes comment failed")
 	}
+}
+
+func postDeployNotesComment(after string) string {
+	return "Deploy sonrası yapılacaklar:\n" + after
 }
 
 func (p *PipelineRunner) reportDeployIncident(ctx context.Context, job pipelineJob, pipeline domain.TaskPipeline) {
@@ -889,13 +893,17 @@ func (p *PipelineRunner) finishNoWorkspace(ctx context.Context, job pipelineJob,
 		cmtCtx, cancelCmt := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		if _, err := p.tasks.AddComment(cmtCtx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
-			Content:    "Pipeline could not start: " + note,
+			Content:    pipelineCouldNotStartComment(note),
 		}); err != nil {
 			log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("pipeline failure comment failed")
 		}
 		cancelCmt()
 	}
 	return p.persistNoWorkspace(ctx, pipeline, note)
+}
+
+func pipelineCouldNotStartComment(note string) string {
+	return "Pipeline could not start: " + note
 }
 
 func (p *PipelineRunner) persistNoWorkspace(ctx context.Context, pipeline domain.TaskPipeline, note string) error {

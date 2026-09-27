@@ -113,9 +113,15 @@ func revisionPRCommentsHeader(url string) string {
 	return reviewPRCommentsHeaderKey.Render(reviewPRCommentsHeaderData{URL: url}) + "\n"
 }
 
-func (r *Runner) failRunNoPR(ctx context.Context, job RunJob, run domain.TaskAgentRun, cause error) error {
-	reason := "Code review did not start: the task branch has no pull request. " +
+// reviewNoPRReason is why a code_review run refuses to start: the branch
+// has no pull request, and review happens on the PR.
+func reviewNoPRReason(cause error) string {
+	return "Code review did not start: the task branch has no pull request. " +
 		"A review is done on the PR, so the branch must be pushed and a PR opened before code_review. Details: " + cause.Error()
+}
+
+func (r *Runner) failRunNoPR(ctx context.Context, job RunJob, run domain.TaskAgentRun, cause error) error {
+	reason := reviewNoPRReason(cause)
 
 	if r.taskUpdater != nil {
 		if _, err := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{

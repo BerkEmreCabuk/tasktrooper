@@ -1652,7 +1652,7 @@ func (r *Runner) failRunUngrounded(ctx context.Context, job RunJob, run domain.T
 	if r.taskUpdater != nil {
 		content := reason
 		if summary := strings.TrimSpace(resp.Message.Content); summary != "" {
-			content += "\n\nRejected draft (not attached as the analysis):\n\n" + summary
+			content += rejectedDraftNote(summary)
 		}
 		if _, err := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
@@ -1680,6 +1680,13 @@ func (r *Runner) failRunUngrounded(ctx context.Context, job RunJob, run domain.T
 }
 
 var ErrUngroundedAnalysis = errors.New("analiz run produced no repository exploration")
+
+// rejectedDraftNote appends the run's own draft to an ungrounded-analysis
+// rejection comment — it was never attached as the analysis, but a person
+// reviewing the rejection may still want to see what was produced.
+func rejectedDraftNote(summary string) string {
+	return "\n\nRejected draft (not attached as the analysis):\n\n" + summary
+}
 
 func isUngroundedQA(wf domain.Workflow, task domain.BoardTask, resp domain.AgentResponse, usage *registry.ToolUsage) bool {
 	if resp.Clarification != nil || usage == nil || !wf.Has(task.Column, domain.BehaviourRequireExecutionEvidence) {
@@ -1711,11 +1718,17 @@ func (r *Runner) uiRepo(ctx context.Context, repositoryID uuid.UUID) bool {
 	return domain.RepoHasUI(repo)
 }
 
+// rejectedRunReportReplanNote appends a rejected QA run's own report to the
+// rejection comment: told to execute it, not to re-plan around it.
+func rejectedRunReportReplanNote(summary string) string {
+	return "\n\nWhat the rejected run reported (execute this, do not re-plan it):\n\n" + summary
+}
+
 func (r *Runner) failRunUngroundedQA(ctx context.Context, job RunJob, run domain.TaskAgentRun, resp domain.AgentResponse, reason string) error {
 	if r.taskUpdater != nil {
 		content := reason
 		if summary := strings.TrimSpace(resp.Message.Content); summary != "" {
-			content += "\n\nWhat the rejected run reported (execute this, do not re-plan it):\n\n" + summary
+			content += rejectedRunReportReplanNote(summary)
 		}
 		if _, err := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
@@ -1822,11 +1835,17 @@ func (r *Runner) taskTestCases(ctx context.Context, job RunJob) []domain.TaskTes
 	return items
 }
 
+// rejectedRunReportReapproveNote appends a rejected pm_uat run's own report
+// to the rejection comment: told to execute it, not to re-approve around it.
+func rejectedRunReportReapproveNote(summary string) string {
+	return "\n\nWhat the rejected run reported (execute this, do not re-approve it):\n\n" + summary
+}
+
 func (r *Runner) failRunUngroundedPMUAT(ctx context.Context, job RunJob, run domain.TaskAgentRun, resp domain.AgentResponse, reason string) error {
 	if r.taskUpdater != nil {
 		content := reason
 		if summary := strings.TrimSpace(resp.Message.Content); summary != "" {
-			content += "\n\nWhat the rejected run reported (execute this, do not re-approve it):\n\n" + summary
+			content += rejectedRunReportReapproveNote(summary)
 		}
 		if _, err := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",

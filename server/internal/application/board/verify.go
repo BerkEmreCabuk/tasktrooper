@@ -154,6 +154,15 @@ func (r *Runner) reportPlanVerificationFailure(ctx context.Context, job RunJob, 
 	if r.taskUpdater == nil {
 		return
 	}
+	if _, err := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
+		AuthorType: "system",
+		Content:    truncateTail(planVerificationFailureComment(verdict), 3000),
+	}); err != nil {
+		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("plan verification failure comment failed")
+	}
+}
+
+func planVerificationFailureComment(verdict domain.VerificationResult) string {
 	var sb strings.Builder
 	sb.WriteString("Otomatik doğrulama başarısız: bu run'ın sonucu hedefi karşılamıyor, bu yüzden görev code_review'a devredilmedi.\n")
 	if summary := strings.TrimSpace(verdict.Summary); summary != "" {
@@ -166,12 +175,7 @@ func (r *Runner) reportPlanVerificationFailure(ctx context.Context, job RunJob, 
 		}
 	}
 	sb.WriteString("\nBir sonraki run bu maddeleri kapatmalı; kapanmadan görev ilerlemez.")
-	if _, err := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
-		AuthorType: "system",
-		Content:    truncateTail(sb.String(), 3000),
-	}); err != nil {
-		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("plan verification failure comment failed")
-	}
+	return sb.String()
 }
 
 func (r *Runner) reportVerificationFailure(ctx context.Context, job RunJob, failReport string) {
@@ -183,7 +187,7 @@ func (r *Runner) reportVerificationFailure(ctx context.Context, job RunJob, fail
 	}
 	if _, err := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 		AuthorType: "system",
-		Content:    "Automated verification failed — build/vet errors:\n\n```\n" + failReport + "\n```",
+		Content:    verificationFailureComment(failReport),
 	}); err != nil {
 		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("verification failure comment failed")
 	}
@@ -197,6 +201,10 @@ func (r *Runner) reportVerificationFailure(ctx context.Context, job RunJob, fail
 	}); err != nil {
 		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("verification failure task move failed")
 	}
+}
+
+func verificationFailureComment(failReport string) string {
+	return "Automated verification failed — build/vet errors:\n\n```\n" + failReport + "\n```"
 }
 
 // requiredVerifyCommands resolves the components this run's verification

@@ -116,18 +116,25 @@ func criteriaSweepPrompt(open []domain.AcceptanceCriterion, round int) string {
 }
 
 func (r *Runner) reportUnsettledCriteria(ctx context.Context, job RunJob, open []domain.AcceptanceCriterion) {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("This run ended with %d acceptance criterion/criteria unsettled after %d completion checks:\n", len(open), criteriaSweepRounds))
-	for _, c := range open {
-		sb.WriteString("- " + c.Text + "\n")
-	}
-	sb.WriteString("\nThey were neither implemented nor cancelled with a reason, so the task stays in this column: the hand-off to code_review is refused while a criterion is open. Either the work is still missing, or the criterion needs a decision only a person can make.")
 	if _, err := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
-		Content:    sb.String(),
+		Content:    unsettledCriteriaReport(open, criteriaSweepRounds),
 		AuthorType: "system",
 	}); err != nil {
 		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("unsettled criteria comment failed")
 	}
+}
+
+// unsettledCriteriaReport is the system comment posted when the sweep loop
+// runs out of rounds with criteria still open — it names each one so a
+// person can act without re-reading the whole task.
+func unsettledCriteriaReport(open []domain.AcceptanceCriterion, rounds int) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("This run ended with %d acceptance criterion/criteria unsettled after %d completion checks:\n", len(open), rounds))
+	for _, c := range open {
+		sb.WriteString("- " + c.Text + "\n")
+	}
+	sb.WriteString("\nThey were neither implemented nor cancelled with a reason, so the task stays in this column: the hand-off to code_review is refused while a criterion is open. Either the work is still missing, or the criterion needs a decision only a person can make.")
+	return sb.String()
 }
 
 const unsettledCriteriaMarker = "unsettled acceptance criteria"

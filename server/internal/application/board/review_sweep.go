@@ -64,6 +64,14 @@ func (r *Runner) missingVerdicts(ctx context.Context, job RunJob, role domain.Cr
 	return missing
 }
 
+// stuckColumnComment tells a person the review ran but never moved the
+// card, so nudging it forward (or back to need_revision) needs a human hand.
+func stuckColumnComment(column, exit domain.TaskColumn, note string) string {
+	return "Review tamamlandı ama kart hâlâ `" + string(column) + "` kolonunda: değerlendirme sonrası " +
+		"`" + string(exit) + "` veya `need_revision` geçişi yapılmadı." + note +
+		" Kolonu elle taşımak gerekiyor."
+}
+
 func (r *Runner) stuckVerdictNote(ctx context.Context, job RunJob) string {
 	role, ok := criterionReviewRole(r.workflowFor(ctx, job.Task.TaskType), job.Task.Column)
 	if !ok {
@@ -262,9 +270,7 @@ func (r *Runner) sweepReviewVerdict(
 		if r.taskUpdater != nil {
 			if _, cErr := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 				AuthorType: "system",
-				Content: "Review tamamlandı ama kart hâlâ `" + string(job.Task.Column) + "` kolonunda: değerlendirme sonrası " +
-					"`" + string(exit) + "` veya `need_revision` geçişi yapılmadı." + r.stuckVerdictNote(ctx, job) +
-					" Kolonu elle taşımak gerekiyor.",
+				Content:    stuckColumnComment(job.Task.Column, exit, r.stuckVerdictNote(ctx, job)),
 			}); cErr != nil {
 				log.Warn().Err(cErr).Str("task_id", job.Task.ID.String()).Msg("review sweep: stuck-column comment failed")
 			}

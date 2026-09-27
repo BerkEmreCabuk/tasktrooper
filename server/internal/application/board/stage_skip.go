@@ -142,13 +142,19 @@ func (r *Runner) humanCommentedAfter(ctx context.Context, job RunJob, after time
 	return false
 }
 
+// diffSkipSummary is the run summary (and system comment) posted when a gate
+// is skipped because the diff exactly matches what it already approved.
+func diffSkipSummary(column domain.TaskColumn, shortPatchID string, approvedAt time.Time) string {
+	return fmt.Sprintf("Skipped %s: the diff is identical (patch-id %s) to the one approved at %s.",
+		column, shortPatchID, approvedAt.UTC().Format("2006-01-02 15:04Z"))
+}
+
 func (r *Runner) applyUnchangedDiffSkip(ctx context.Context, job RunJob, run domain.TaskAgentRun, target domain.TaskColumn, patchID string, approvedAt time.Time) bool {
 	short := patchID
 	if len(short) > 12 {
 		short = short[:12]
 	}
-	summary := fmt.Sprintf("Skipped %s: the diff is identical (patch-id %s) to the one approved at %s.",
-		job.Task.Column, short, approvedAt.UTC().Format("2006-01-02 15:04Z"))
+	summary := diffSkipSummary(job.Task.Column, short, approvedAt)
 
 	if _, err := r.taskUpdater.UpdateTask(ctx, job.RepositoryID, job.Task.ID, domain.UpdateBoardTaskRequest{
 		Column:       &target,
