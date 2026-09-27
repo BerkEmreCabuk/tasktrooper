@@ -68,6 +68,16 @@ type criterionVerdictWrongColumnInput struct{ Key, Column string }
 
 var criterionVerdictWrongColumnKey = prompt.Define("guard.criterion_verdict_wrong_column", criterionVerdictWrongColumnInput{Key: "T-4", Column: "in_progress"})
 
+var criterionCancelReasonRequiredKey = prompt.Define("guard.criterion_cancel_reason_required", struct{}{})
+var criterionRejectNoteRequiredKey = prompt.Define("guard.criterion_reject_note_required", struct{}{})
+var documentTooLargeHintKey = prompt.Define("guard.document_too_large_hint", struct{}{})
+var noRepositoriesKey = prompt.Define("guard.no_repositories", struct{}{})
+var relationTargetRequiredKey = prompt.Define("guard.relation_target_required", struct{}{})
+
+type stageNotConfiguredInput struct{ TaskType, Column string }
+
+var stageNotConfiguredKey = prompt.Define("guard.stage_not_configured", stageNotConfiguredInput{TaskType: "backend", Column: "in_progress"})
+
 type workflowSetupTaskBriefInput struct{ Kind string }
 
 var workflowSetupTaskBriefKey = prompt.Define("repository.workflow_setup_task_brief", workflowSetupTaskBriefInput{Kind: "backend"})

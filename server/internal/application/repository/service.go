@@ -236,7 +236,7 @@ func (s *Service) SetTaskCriterionCanceled(ctx context.Context, criterionID uuid
 	}
 	reason = strings.TrimSpace(reason)
 	if canceled && reason == "" {
-		return domain.AcceptanceCriterion{}, fmt.Errorf("cancelling a criterion requires a reason: say why it is not being done (out of scope, superseded, impossible as written)")
+		return domain.AcceptanceCriterion{}, errors.New(prompt.Text(criterionCancelReasonRequiredKey))
 	}
 	item, err := s.criteria.UpdateCanceled(ctx, criterionID, canceled, reason)
 	if err != nil {
@@ -268,7 +268,7 @@ func (s *Service) ReviewTaskCriterion(ctx context.Context, criterionID, agentID 
 	}
 	note = strings.TrimSpace(note)
 	if !approved && note == "" {
-		return domain.CriterionCheck{}, fmt.Errorf("a rejected criterion needs a note explaining what failed and how it was observed")
+		return domain.CriterionCheck{}, errors.New(prompt.Text(criterionRejectNoteRequiredKey))
 	}
 	criterion, err := s.criteria.GetCriterion(ctx, criterionID)
 	if err != nil {
@@ -1240,7 +1240,7 @@ func (s *Service) DefaultRepositoryID(ctx context.Context) (uuid.UUID, error) {
 		return uuid.Nil, err
 	}
 	if len(repos) == 0 {
-		return uuid.Nil, fmt.Errorf("no repositories; add a repository before creating board tasks")
+		return uuid.Nil, errors.New(prompt.Text(noRepositoriesKey))
 	}
 	return repos[0].ID, nil
 }
@@ -1503,7 +1503,7 @@ func (s *Service) resolveRelations(ctx context.Context, inputs []domain.TaskRela
 			continue
 		}
 		if rel.TargetKey == "" {
-			return nil, fmt.Errorf("relation requires target_task_id or target_key")
+			return nil, errors.New(prompt.Text(relationTargetRequiredKey))
 		}
 		target, err := s.LookupTaskByKey(ctx, rel.TargetKey)
 		if err != nil {
@@ -2109,7 +2109,7 @@ func prepareDocumentContent(format domain.DocumentFormat, content string) (strin
 		return content, nil
 	}
 	if len(content) > domain.MaxHTMLDocumentBytes {
-		return "", fmt.Errorf("%w (got %d bytes) — keep the report scannable: summarize, link to code instead of pasting it", domain.ErrDocumentTooLarge, len(content))
+		return "", fmt.Errorf("%w (got %d bytes) — %s", domain.ErrDocumentTooLarge, len(content), prompt.Text(documentTooLargeHintKey))
 	}
 	clean, err := htmldoc.Sanitize(content)
 	if err != nil {
@@ -2314,9 +2314,8 @@ func (s *Service) validateStageConfigured(ctx context.Context, taskType domain.T
 	if _, ok := wf.Stage(target); ok {
 		return nil
 	}
-	return domain.NewStageNotOnWorkflowError(taskType, target, fmt.Sprintf(
-		"%s tasks don't use the %s column — this task type's workflow has no stage configured for it",
-		taskType, target))
+	return domain.NewStageNotOnWorkflowError(taskType, target,
+		stageNotConfiguredKey.Render(stageNotConfiguredInput{TaskType: string(taskType), Column: string(target)}))
 }
 
 func (s *Service) emit(ctx context.Context, repo domain.Repository, task domain.BoardTask, eventType domain.BoardEventType, payload map[string]interface{}) error {
