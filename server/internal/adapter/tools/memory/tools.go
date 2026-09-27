@@ -190,7 +190,7 @@ func (t *saveMemoryTool) Execute(ctx context.Context, arguments string) domain.T
 		repoID = nil
 	case "project":
 		if repoID == nil {
-			return toolError(saveMemoryToolName, "scope=project needs a repository in context; this run has none — use scope=global")
+			return toolError(saveMemoryToolName, prompt.MemoryScopeProjectRequiredSaveText())
 		}
 	case "":
 		// Unset means "wherever I am": project-scoped inside a repository,
@@ -220,7 +220,7 @@ func (t *saveMemoryTool) Execute(ctx context.Context, arguments string) domain.T
 		case promoted:
 			return toolJSON(saveMemoryToolName, map[string]any{
 				"saved": false, "promoted_to_skill": skillName,
-				"note": "this was reusable know-how, so it was stored in the skill catalog instead of memory",
+				"note": prompt.MemoryPromotedToSkillNote(),
 			})
 		}
 	}
@@ -234,8 +234,7 @@ func (t *saveMemoryTool) Execute(ctx context.Context, arguments string) domain.T
 			"saved":        false,
 			"duplicate_of": existing.ID,
 			"existing":     existing.Content,
-			"note": "this is already remembered. If your version adds something the stored one lacks, " +
-				"delete that memory and save the fuller sentence; otherwise nothing needs saving.",
+			"note":         prompt.MemoryDuplicateSaveNote(),
 		})
 	}
 
@@ -306,7 +305,7 @@ func (t *searchMemoryTool) Execute(ctx context.Context, arguments string) domain
 		query.Repo = domain.MemoryRepoScopeVisible
 	case "project":
 		if query.RepositoryID == nil {
-			return toolError(searchMemoryToolName, "scope=project needs a repository in context; this run has none")
+			return toolError(searchMemoryToolName, prompt.MemoryScopeProjectRequiredSearchText())
 		}
 		query.Repo = domain.MemoryRepoScopeProject
 	case "global":

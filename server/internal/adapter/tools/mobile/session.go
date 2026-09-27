@@ -46,12 +46,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
 // notConfiguredMsg is operator-facing: the tools exist in every build, but the
 // hub only exists where an operator has actually attached a device.
-const notConfiguredMsg = "no mobile device is configured — set tools.mobile.hub_url and tools.mobile.device_udid"
+var notConfiguredMsg = prompt.MobileNotConfiguredText()
 
 var errNotConfigured = errors.New(notConfiguredMsg)
 
@@ -612,7 +613,7 @@ func isStaleSession(err error) bool { return errors.Is(err, errStaleSession) }
 func deviceBlock(name string) domain.ToolResult {
 	return domain.ToolResult{
 		Name:    name,
-		Content: "Every shared test device is in use by another run. This task is parked and will resume automatically when one frees up — stop working on it now.",
+		Content: prompt.MobileDeviceBusyContent(),
 		ResourceBlock: &domain.ResourceBlock{
 			Resource: domain.ResourceMobileDevice,
 			Detail:   "waiting for a free mobile test device",

@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 )
 
@@ -28,9 +29,9 @@ var errBlockedPage = errors.New("browser: destination not permitted")
 // the URL, and the answer lands right back in its context — that is a working
 // internal port scanner with the LLM as its operator. Blocked, refused, reset,
 // unresolvable and timed out are now one message; the reason goes to the log.
-const (
-	navFailedMsg       = "could not open that URL"
-	pageUnavailableMsg = "could not use the current page"
+var (
+	navFailedMsg       = prompt.BrowserNavFailedText()
+	pageUnavailableMsg = prompt.BrowserPageUnavailableText()
 )
 
 // maxCheckedFrameURLs bounds how many distinct frame URLs the choke point vets

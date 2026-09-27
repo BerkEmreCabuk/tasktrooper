@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -97,7 +98,7 @@ func (t *downloadTool) Execute(ctx context.Context, arguments string) domain.Too
 	// Same protection the file writers apply: nothing may write into .git.
 	for _, segment := range strings.Split(filepath.ToSlash(a.Path), "/") {
 		if segment == ".git" {
-			return domain.ToolResult{Name: DownloadToolName, Content: `".git" is protected: download_file may not write into it`, IsError: true}
+			return domain.ToolResult{Name: DownloadToolName, Content: prompt.WebDownloadGitProtectedText(), IsError: true}
 		}
 	}
 
@@ -134,11 +135,7 @@ func (t *downloadTool) Execute(ctx context.Context, arguments string) domain.Too
 	// consent wall — saving it as .png is exactly the broken-image bug this tool
 	// exists to prevent, so it is refused rather than written.
 	if strings.Contains(contentType, "text/html") {
-		return domain.ToolResult{Name: DownloadToolName,
-			Content: "the URL returned an HTML page, not a binary asset — nothing was saved. " +
-				"You are probably holding the page that SHOWS the asset. Find the direct asset URL " +
-				"(it usually ends in .png, .svg, .jpg or .woff2) and call download_file with that.",
-			IsError: true}
+		return domain.ToolResult{Name: DownloadToolName, Content: prompt.WebDownloadHTMLNotBinaryText(), IsError: true}
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, downloadMaxBytes+1))
@@ -147,9 +144,7 @@ func (t *downloadTool) Execute(ctx context.Context, arguments string) domain.Too
 		return domain.ToolResult{Name: DownloadToolName, Content: fetchFailed, IsError: true}
 	}
 	if len(body) > downloadMaxBytes {
-		return domain.ToolResult{Name: DownloadToolName,
-			Content: fmt.Sprintf("the asset is larger than the %d MB download limit — nothing was saved. This is not the kind of file to vendor into the repository.", downloadMaxBytes>>20),
-			IsError: true}
+		return domain.ToolResult{Name: DownloadToolName, Content: prompt.WebDownloadSizeLimitText(downloadMaxBytes >> 20), IsError: true}
 	}
 	if len(body) == 0 {
 		return domain.ToolResult{Name: DownloadToolName, Content: "the URL returned an empty body — nothing was saved.", IsError: true}
@@ -164,10 +159,8 @@ func (t *downloadTool) Execute(ctx context.Context, arguments string) domain.Too
 
 	log.Debug().Str("url", urlguard.LogValue(target.URL)).Str("path", a.Path).Int("bytes", len(body)).Msg("download_file saved asset")
 	return domain.ToolResult{
-		Name: DownloadToolName,
-		Content: fmt.Sprintf("saved %s (%d bytes, %s). That IS the confirmation — do not re-download or re-read it. "+
-			"Reference it from the code, then verify the page actually renders it (browser_screenshot reports broken images).",
-			a.Path, len(body), contentType),
+		Name:    DownloadToolName,
+		Content: prompt.WebDownloadSavedText(a.Path, len(body), contentType),
 		IsError: false,
 	}
 }

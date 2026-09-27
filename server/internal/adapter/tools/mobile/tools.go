@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -155,7 +156,7 @@ func escapeUiSelector(s string) string {
 func findElement(ctx context.Context, s device, sel selectorArgs) (string, error) {
 	using, value, ok := sel.strategy()
 	if !ok {
-		return "", errors.New("give one of text, resource_id, content_desc or xpath")
+		return "", errors.New(prompt.MobileSelectorMissingText())
 	}
 	var out struct {
 		Value map[string]string `json:"value"`

@@ -20,13 +20,14 @@ import (
 	"github.com/chromedp/chromedp"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 )
 
 // chromeNotFoundMsg is deliberately operator-facing: this process ships
 // without a bundled browser, so only a host with Chromium already installed
 // (or CHROME_BIN pointed at one) can use these tools.
-const chromeNotFoundMsg = "chromium not found — this tool requires the tools image (TENANT_IMAGE)"
+var chromeNotFoundMsg = prompt.BrowserChromeNotFoundText()
 
 // errChromeNotFound lets tools surface chromeNotFoundMsg verbatim instead of
 // wrapped in an action prefix like "navigate: ...".

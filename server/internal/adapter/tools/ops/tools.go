@@ -13,6 +13,7 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deploy"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deployops"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -610,14 +611,10 @@ func localDeployActor(ctx context.Context) string {
 	return "agent"
 }
 
-const repositoryIDFilterDescription = "Repository UUID (the repository_id in your task snapshot) to list one repository's incidents. " +
-	"Omit to list incidents across every repository."
-
 // repositoryIDHelp is what a call that named no resolvable repository gets
 // back: both ways out, because the model that got here either passed nothing
 // or passed something that was not a UUID.
-const repositoryIDHelp = "invalid repository_id: pass the repository_id UUID from your task snapshot, " +
-	"or omit it to use the current task's repository"
+var repositoryIDHelp = prompt.OpsRepositoryIDInvalidText()
 
 // resolveRepositoryID turns whatever the model put in repository_id into the
 // repository the call should act on.

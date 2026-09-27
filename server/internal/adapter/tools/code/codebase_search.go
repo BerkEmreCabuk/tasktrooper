@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/llm"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -165,11 +166,6 @@ func (t *codebaseSearchTool) Execute(ctx context.Context, arguments string) doma
 	return toolJSON(codebaseSearchToolName, codebaseSearchResponse{Results: results})
 }
 
-// embeddingFallbackTools names what still works when the embedding provider
-// does not. Every branch below ends with it, because "semantic search failed"
-// on its own leaves the agent with nowhere to go.
-const embeddingFallbackTools = "use grep_code for exact symbols/strings, get_repo_tree to browse and read_file to read"
-
 // embeddingUnavailableError turns an embedding provider's failure into an
 // instruction, and reports false for any other error so the caller keeps its
 // own wording.
@@ -196,23 +192,13 @@ func embeddingUnavailableError(name string, err error) (domain.ToolResult, bool)
 	switch {
 	case errors.As(err, &unavailable) && unavailable.StatusCode == 0:
 		// The provider was never reached at all, and the next call may reach it.
-		return toolError(name, fmt.Sprintf(
-			"semantic search could not run just now: embedding provider could not be reached (%v). "+
-				"Retry %s once after a moment, otherwise %s.",
-			unavailable.Cause, name, embeddingFallbackTools)), true
+		return toolError(name, prompt.CodeEmbeddingUnreachableText(fmt.Sprintf("%v", unavailable.Cause), name)), true
 	case errors.As(err, &unavailable):
-		return toolError(name, fmt.Sprintf(
-			"semantic search is unavailable on this server (embedding provider rejected the request: HTTP %d). "+
-				"Use grep_code for exact symbols/strings, get_repo_tree to browse and read_file to read — "+
-				"do not call %s again in this run.",
-			unavailable.StatusCode, name)), true
+		return toolError(name, prompt.CodeEmbeddingRejectedText(unavailable.StatusCode, name)), true
 	case errors.As(err, &limited):
 		// The account limiter has already waited out one window by the time
 		// this escapes, so the budget left here is one call, not a loop.
-		return toolError(name, fmt.Sprintf(
-			"semantic search could not run just now: embedding provider is rate-limited (HTTP %d%s). "+
-				"Wait, then at most one retry — otherwise %s.",
-			limited.StatusCode, retryAfterClause(limited.RetryAfter), embeddingFallbackTools)), true
+		return toolError(name, prompt.CodeEmbeddingRateLimitedText(limited.StatusCode, retryAfterClause(limited.RetryAfter))), true
 	}
 	return domain.ToolResult{}, false
 }

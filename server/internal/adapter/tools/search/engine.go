@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 	"github.com/rs/zerolog/log"
 )
@@ -139,9 +140,7 @@ func (s *searchTool) search(ctx context.Context, query string, maxResults int) (
 		return content, b.name, nil
 	}
 
-	return "", "", fmt.Errorf(
-		"web search backends unavailable right now (%s) — try again later or fetch a known URL with fetch_url",
-		strings.Join(reasons, "; "))
+	return "", "", errors.New(prompt.SearchBackendsUnavailableText(strings.Join(reasons, "; ")))
 }
 
 // modelSafeReason is the part of a backend failure the model is allowed to

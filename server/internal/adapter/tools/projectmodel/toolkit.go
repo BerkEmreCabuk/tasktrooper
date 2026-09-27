@@ -7,11 +7,13 @@ package projectmodel
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -69,7 +71,7 @@ func resolveRepositoryID(ctx context.Context, raw, toolName string) (uuid.UUID, 
 	if id := registry.RepositoryIDFromContext(ctx); id != uuid.Nil {
 		return id, nil
 	}
-	return uuid.Nil, fmt.Errorf("%s needs a repository in context or repository_id; this run has none", toolName)
+	return uuid.Nil, errors.New(prompt.ToolRepositoryRequiredText(toolName))
 }
 
 // resolveComponentID turns a component's own path (as ComponentsForPaths

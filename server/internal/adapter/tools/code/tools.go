@@ -9,6 +9,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/chunker"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/graph"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/mapper"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -116,10 +117,7 @@ func toolError(name, message string) domain.ToolResult {
 // a code_review run burned seven iterations that way, all of them on
 // codebase_search against an unindexed repository.
 func indexUnavailableError(name string, cause error) domain.ToolResult {
-	return toolError(name, fmt.Sprintf(
-		"this repository has no semantic index yet (%v). %s cannot work without one — do not retry it. "+
-			"Use grep_code for exact symbols and strings, get_repo_tree for structure, and read_file to read a file.",
-		cause, name))
+	return toolError(name, prompt.CodeIndexUnavailableText(fmt.Sprintf("%v", cause), name))
 }
 
 func toolJSON(name string, payload any) domain.ToolResult {

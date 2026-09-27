@@ -8,6 +8,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/uuid"
 
 	cloudapp "github.com/makifbaysal/tasktrooper/server/internal/application/cloud"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -93,7 +95,7 @@ func resolveRepositoryID(ctx context.Context, raw, toolName string) (uuid.UUID, 
 	if id := registry.RepositoryIDFromContext(ctx); id != uuid.Nil {
 		return id, nil
 	}
-	return uuid.Nil, fmt.Errorf("%s needs a repository in context or repository_id; this run has none", toolName)
+	return uuid.Nil, errors.New(prompt.ToolRepositoryRequiredText(toolName))
 }
 
 func activeComponents(all []domain.Component) []domain.Component {
@@ -143,8 +145,7 @@ func resolveComponent(ctx context.Context, store port.ComponentStore, repository
 		paths = append(paths, c.Path)
 	}
 	sort.Strings(paths)
-	return domain.Component{}, fmt.Errorf(
-		"this repository has %d components: pass component (one of %s)", len(active), strings.Join(paths, ", "))
+	return domain.Component{}, errors.New(prompt.RuntimeComponentsAmbiguousText(len(active), strings.Join(paths, ", ")))
 }
 
 // resolveBoundEnvironment resolves the component and, within it, one bound
@@ -172,8 +173,7 @@ func resolveBoundEnvironment(ctx context.Context, kit *ToolKit, repositoryID uui
 			return e, comp, nil
 		}
 	}
-	return domain.ComponentEnvironment{}, comp, fmt.Errorf(
-		"no %s environment is bound for %s — the human connects it on the repository's Deploy tab", env, comp.DisplayName())
+	return domain.ComponentEnvironment{}, comp, errors.New(prompt.RuntimeEnvironmentNotBoundText(string(env), comp.DisplayName()))
 }
 
 // parseSinceDuration accepts a Go duration ("30m", "2h") plus a day suffix
@@ -186,13 +186,13 @@ func parseSinceDuration(raw string) (time.Duration, error) {
 	if strings.HasSuffix(trimmed, "d") {
 		n, err := strconv.ParseFloat(strings.TrimSuffix(trimmed, "d"), 64)
 		if err != nil || n <= 0 {
-			return 0, fmt.Errorf("invalid since %q: use a duration like \"30m\", \"2h\", \"1d\"", raw)
+			return 0, errors.New(prompt.RuntimeInvalidSinceText(fmt.Sprintf("%q", raw)))
 		}
 		return time.Duration(n * float64(24*time.Hour)), nil
 	}
 	d, err := time.ParseDuration(trimmed)
 	if err != nil || d <= 0 {
-		return 0, fmt.Errorf("invalid since %q: use a duration like \"30m\", \"2h\", \"1d\"", raw)
+		return 0, errors.New(prompt.RuntimeInvalidSinceText(fmt.Sprintf("%q", raw)))
 	}
 	return d, nil
 }

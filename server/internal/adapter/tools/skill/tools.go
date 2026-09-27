@@ -3,10 +3,12 @@ package skill
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -111,7 +113,7 @@ func (t *loadSkillTool) Execute(ctx context.Context, arguments string) domain.To
 				names = append(names, sk.Name)
 			}
 		}
-		return toolError(loadSkillToolName, "skill not found: "+query+". Available: "+strings.Join(names, ", "))
+		return toolError(loadSkillToolName, prompt.SkillNotFoundText(query, strings.Join(names, ", ")))
 	}
 	fields := map[string]any{
 		"name":        match.Name,
@@ -199,20 +201,18 @@ func (t *createSkillTool) Execute(ctx context.Context, arguments string) domain.
 		return toolError(createSkillToolName, fmt.Sprintf("agent lookup failed: %v", err))
 	}
 	if !agentRec.SelfEvolutionEnabled {
-		return toolError(createSkillToolName, "self-evolution is disabled for this agent; you cannot create skills. Work with the skills you have.")
+		return toolError(createSkillToolName, prompt.SkillSelfEvolutionDisabledText())
 	}
 	skills, err := t.kit.Catalog.ListSkillsByAgent(ctx, agentID)
 	if err != nil {
 		return toolError(createSkillToolName, err.Error())
 	}
 	if t.kit.MaxSkills > 0 && len(skills) >= t.kit.MaxSkills {
-		return toolError(createSkillToolName, fmt.Sprintf(
-			"you already hold %d skills, the maximum for one agent. Load the closest existing skill and work from it; a new skill can only be added after your next reflection merges or retires an old one.",
-			len(skills)))
+		return toolError(createSkillToolName, prompt.SkillMaxSkillsText(len(skills)))
 	}
 	for _, sk := range skills {
 		if strings.EqualFold(sk.Name, name) {
-			return toolError(createSkillToolName, "a skill named \""+sk.Name+"\" already exists — call load_skill and follow it, or pick a different name if this is genuinely new ground.")
+			return toolError(createSkillToolName, prompt.SkillNameExistsText(sk.Name))
 		}
 	}
 	stackID, stackErr := t.resolveStack(ctx, agentID, args.TechStack)
@@ -230,7 +230,7 @@ func (t *createSkillTool) Execute(ctx context.Context, arguments string) domain.
 	payload, err := json.Marshal(map[string]any{
 		"id":      created.ID,
 		"name":    created.Name,
-		"message": "Skill created and added to your index. Apply its instructions now; future runs load it with load_skill.",
+		"message": prompt.SkillCreatedMessage(),
 	})
 	if err != nil {
 		return toolError(createSkillToolName, fmt.Sprintf("marshal response: %v", err))
@@ -258,13 +258,13 @@ func (t *createSkillTool) resolveStack(ctx context.Context, agentID uuid.UUID, n
 		}
 	}
 	if len(stacks) == 0 {
-		return nil, fmt.Errorf("you have no tech stacks, so a skill cannot be filed under %q. Omit tech_stack to create a general skill", name)
+		return nil, errors.New(prompt.SkillNoTechStacksText(fmt.Sprintf("%q", name)))
 	}
 	names := make([]string, 0, len(stacks))
 	for _, st := range stacks {
 		names = append(names, st.Name)
 	}
-	return nil, fmt.Errorf("unknown tech stack %q. Available: %s. Omit tech_stack to create a general skill", name, strings.Join(names, ", "))
+	return nil, errors.New(prompt.SkillUnknownTechStackText(fmt.Sprintf("%q", name), strings.Join(names, ", ")))
 }
 
 // recordEvent puts the runtime creation on the evolution timeline with no

@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -48,7 +49,7 @@ func (t *tapTool) Execute(ctx context.Context, arguments string) domain.ToolResu
 	}
 	if _, _, ok := a.strategy(); !ok {
 		if a.X <= 0 && a.Y <= 0 {
-			return toolError(tapToolName, "give text, resource_id, content_desc, xpath, or both x and y")
+			return toolError(tapToolName, prompt.MobileTapSelectorMissingText())
 		}
 		if err := tapAt(ctx, t.session, a.X, a.Y); err != nil {
 			return runError(tapToolName, "tap", err)

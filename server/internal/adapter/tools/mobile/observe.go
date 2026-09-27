@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -82,8 +83,7 @@ func (t *launchTool) Execute(ctx context.Context, arguments string) domain.ToolR
 		return toolError(launchToolName, err.Error())
 	}
 	if appPackage == "" {
-		return toolError(launchToolName, fmt.Sprintf(
-			"the %s deploy target has no android app package recorded — a human must set app_package (and app_url) on it before the app can be tested on a device", env))
+		return toolError(launchToolName, prompt.MobileLaunchNoPackageText(env))
 	}
 	if err := t.session.launch(ctx, appPackage, appURL); err != nil {
 		return runError(launchToolName, "launch_app", err)
@@ -92,7 +92,7 @@ func (t *launchTool) Execute(ctx context.Context, arguments string) domain.ToolR
 	if appURL != "" {
 		msg += "\ninstalled build: " + appURL
 	}
-	msg += "\nYou hold the device until you call " + releaseToolName + " — release it as soon as you are done."
+	msg += prompt.MobileLaunchHoldDeviceNote()
 	return toolOK(launchToolName, msg)
 }
 
@@ -120,9 +120,7 @@ func (t *screenshotTool) Execute(ctx context.Context, _ string) domain.ToolResul
 		return toolError(screenshotToolName, "the device returned an empty screenshot")
 	}
 	if len(encoded) > maxBase64Bytes {
-		return toolError(screenshotToolName, fmt.Sprintf(
-			"screenshot is too large for the model context (%d base64 bytes); use %s to inspect the screen instead",
-			len(encoded), readUIToolName))
+		return toolError(screenshotToolName, prompt.MobileScreenshotTooLargeText(len(encoded)))
 	}
 	// Decoded only to report a byte count and to catch a hub that answered with
 	// something that is not an image at all — a truncated body reaching the
@@ -226,7 +224,7 @@ func (t *waitForTool) Execute(ctx context.Context, arguments string) domain.Tool
 		return *res
 	}
 	if _, _, ok := a.strategy(); !ok {
-		return toolError(waitForToolName, "give one of text, resource_id, content_desc or xpath")
+		return toolError(waitForToolName, prompt.MobileSelectorMissingText())
 	}
 	timeout := a.TimeoutSeconds
 	if timeout <= 0 {
@@ -249,9 +247,7 @@ func (t *waitForTool) Execute(ctx context.Context, arguments string) domain.Tool
 			return *res
 		}
 		if time.Now().After(deadline) {
-			return toolError(waitForToolName, fmt.Sprintf(
-				"%s did not appear within %ds — read the screen with %s to see what is actually there",
-				a.describe(), timeout, readUIToolName))
+			return toolError(waitForToolName, prompt.MobileWaitForTimeoutText(a.describe(), timeout))
 		}
 		select {
 		case <-ctx.Done():

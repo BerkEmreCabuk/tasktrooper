@@ -3,6 +3,8 @@ package shell
 import (
 	"regexp"
 	"strings"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 )
 
 // A dev server never returns. Run in the foreground it can only ever end one
@@ -55,11 +57,7 @@ func blockingCommandReason(command string) string {
 	for _, segment := range splitSegments(trimmed) {
 		for _, b := range blockingCommands {
 			if b.pattern.MatchString(segment) {
-				return "refused: `" + segment + "` starts " + b.what + ", which runs until it is interrupted. " +
-					"Run in the foreground it cannot finish — it would hold this tool until the timeout and return nothing but a partial log. " +
-					"To check that the code works, run the build, typecheck or test command instead. " +
-					"If you genuinely need the process up, start it detached and read its log: " +
-					"`" + segment + " > /tmp/dev.log 2>&1 &` then `sleep 5; cat /tmp/dev.log`."
+				return prompt.ShellBlockingCommandText(segment, b.what)
 			}
 		}
 	}
