@@ -358,6 +358,70 @@ func TestEnsureTaskWorkspaceReuseRebasesLocalCommits(t *testing.T) {
 	}
 }
 
+func TestTaskPatchIDEmptyWithNoDiff(t *testing.T) {
+	f := newTaskFixture(t)
+	if err := f.ensure(t); err != nil {
+		t.Fatalf("EnsureTaskWorkspace: %v", err)
+	}
+	id, err := NewClient().TaskPatchID(context.Background(), f.workspace)
+	if err != nil {
+		t.Fatalf("TaskPatchID: %v", err)
+	}
+	if id != "" {
+		t.Fatalf("id = %q, want empty for a branch with no diff against origin/main", id)
+	}
+}
+
+func TestTaskPatchIDStableAcrossRebase(t *testing.T) {
+	f := newTaskFixture(t)
+	if err := f.ensure(t); err != nil {
+		t.Fatalf("first EnsureTaskWorkspace: %v", err)
+	}
+	f.commitLocal(t, "agent.go", "package main // agent\n")
+	before, err := NewClient().TaskPatchID(context.Background(), f.workspace)
+	if err != nil {
+		t.Fatalf("TaskPatchID before rebase: %v", err)
+	}
+	if before == "" {
+		t.Fatal("expected a non-empty patch id for a real diff")
+	}
+
+	f.pushUpstream(t, "merged.go", "package main\n")
+	if err := f.ensure(t); err != nil {
+		t.Fatalf("reuse (rebase): %v", err)
+	}
+
+	after, err := NewClient().TaskPatchID(context.Background(), f.workspace)
+	if err != nil {
+		t.Fatalf("TaskPatchID after rebase: %v", err)
+	}
+	if after != before {
+		t.Fatalf("id changed across a rebase that replayed the same patch: before=%s after=%s", before, after)
+	}
+}
+
+func TestTaskPatchIDChangesWithContent(t *testing.T) {
+	f := newTaskFixture(t)
+	if err := f.ensure(t); err != nil {
+		t.Fatalf("EnsureTaskWorkspace: %v", err)
+	}
+	f.commitLocal(t, "agent.go", "package main // v1\n")
+	first, err := NewClient().TaskPatchID(context.Background(), f.workspace)
+	if err != nil {
+		t.Fatalf("TaskPatchID: %v", err)
+	}
+
+	f.commitLocal(t, "agent.go", "package main // v2, a real change\n")
+	second, err := NewClient().TaskPatchID(context.Background(), f.workspace)
+	if err != nil {
+		t.Fatalf("TaskPatchID: %v", err)
+	}
+
+	if first == second {
+		t.Fatalf("id did not change for a genuinely different diff: %s", first)
+	}
+}
+
 func TestEnsureTaskWorkspaceReuseConflictAbortsAndFails(t *testing.T) {
 	f := newTaskFixture(t)
 	if err := f.ensure(t); err != nil {

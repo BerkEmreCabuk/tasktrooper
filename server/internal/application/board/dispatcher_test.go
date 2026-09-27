@@ -769,6 +769,14 @@ func (f *fakeSpanStore) OpenSpan(context.Context, uuid.UUID) (domain.TaskColumnS
 	return domain.TaskColumnSpan{}, false, nil
 }
 
+func (f *fakeSpanStore) SetReviewPatchID(context.Context, uuid.UUID, string, string) error {
+	return nil
+}
+
+func (f *fakeSpanStore) LatestApprovedPatchID(context.Context, uuid.UUID, string) (string, time.Time, bool, error) {
+	return "", time.Time{}, false, nil
+}
+
 func (f *fakeSpanStore) OwnersForTask(context.Context, uuid.UUID) (map[string]uuid.UUID, error) {
 	return nil, nil
 }

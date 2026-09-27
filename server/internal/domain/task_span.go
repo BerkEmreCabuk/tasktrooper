@@ -21,6 +21,11 @@ type TaskColumnSpan struct {
 	DurationSeconds *int       `json:"duration_seconds,omitempty"`
 	VisitNo         int        `json:"visit_no"`
 	ReviewVerdict   string     `json:"review_verdict,omitempty"`
+	// PatchID is `git patch-id --stable` of the diff a code_review approval
+	// closed this span on; empty for every span that isn't an approved
+	// code_review visit. The diff-skip stage compares it against the task's
+	// current patch id instead of trusting the span's column alone.
+	PatchID string `json:"patch_id,omitempty"`
 }
 
 const (

@@ -178,6 +178,11 @@ type CriterionCheck struct {
 	CheckedAt   time.Time           `json:"checked_at"`
 	// VerifiedSHA is the task branch's HEAD at the moment of this verdict.
 	VerifiedSHA string `json:"verified_sha,omitempty"`
+	// VerifiedPatchID is `git patch-id --stable` of the same diff, which
+	// survives a rebase VerifiedSHA does not — the diff-skip stage checks
+	// this, not the SHA, to decide whether this verdict still covers the
+	// task's current diff.
+	VerifiedPatchID string `json:"verified_patch_id,omitempty"`
 }
 
 // ReleasedBoardWindow is how long a released task stays on the board before

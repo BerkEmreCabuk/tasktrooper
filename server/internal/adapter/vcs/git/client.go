@@ -647,6 +647,46 @@ func (c *Client) TaskDiff(ctx context.Context, workspacePath string) (string, er
 	return strings.TrimSpace(combined), nil
 }
 
+// TaskPatchID is `git patch-id --stable` of the task's diff against its
+// merge-base with the default branch — the same diff TaskDiff reports, minus
+// the --stat header patch-id was never meant to read. Stable across a rebase
+// that replays the same patch onto a new base; a content change (not just a
+// new base) changes it.
+func (c *Client) TaskPatchID(ctx context.Context, workspacePath string) (string, error) {
+	if !c.HasGit(workspacePath) {
+		return "", nil
+	}
+	base := ""
+	for _, ref := range []string{"origin/HEAD", "origin/main", "origin/master"} {
+		if out, err := c.run(ctx, workspacePath, "git", "merge-base", "HEAD", ref); err == nil {
+			base = strings.TrimSpace(out)
+			break
+		}
+	}
+	if base == "" {
+		return "", nil
+	}
+	diff, err := c.run(ctx, workspacePath, "git", "diff", base)
+	if err != nil {
+		return "", fmt.Errorf("git diff: %w", err)
+	}
+	if strings.TrimSpace(diff) == "" {
+		return "", nil
+	}
+	cmd := exec.CommandContext(ctx, "git", "patch-id", "--stable")
+	cmd.Dir = workspacePath
+	cmd.Stdin = strings.NewReader(diff)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git patch-id: %w", err)
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		return "", nil
+	}
+	return fields[0], nil
+}
+
 func (c *Client) TaskChangedFiles(ctx context.Context, workspacePath string) ([]string, error) {
 	if !c.HasGit(workspacePath) {
 		return nil, nil

@@ -789,6 +789,10 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 		_, _ = r.runs.Update(ctx, run)
 	}
 
+	if r.skipUnchangedDiffGate(ctx, job, run, taskWorkspace) {
+		return nil
+	}
+
 	skillDelivery := prompt.SkillsInPrompt
 	if flavor, isCLI := cliFlavor(agentRec.ProviderType); isCLI {
 		if err := agentfs.Exclude(workDir); err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
@@ -13,10 +14,52 @@ import (
 
 type StageEvidence interface {
 	LatestVerdicts(ctx context.Context, taskID uuid.UUID) (map[string]string, error)
+	// SetReviewPatchID stamps the diff a column's currently open span is being
+	// approved on; called just before the move that closes it, so it lands on
+	// the span the approval actually belongs to.
+	SetReviewPatchID(ctx context.Context, taskID uuid.UUID, column, patchID string) error
+	// LatestApprovedPatchID is the most recent CLOSED span of this column that
+	// carries a patch id, and when it closed (its left_at) — the moment of
+	// that approval. ok is false when the column was never approved this way.
+	LatestApprovedPatchID(ctx context.Context, taskID uuid.UUID, column string) (patchID string, approvedAt time.Time, ok bool, err error)
 }
 
 func (s *Service) SetSpanStore(spans StageEvidence) {
 	s.spans = spans
+}
+
+// recordCodeReviewApprovalPatchID stamps the current diff onto the code_review
+// span that is about to close on this approving move. A patch id lookup
+// failure (no git, no workspace) just leaves the span without one — the
+// diff-skip stage that reads it back fails open on the same absence.
+func (s *Service) recordCodeReviewApprovalPatchID(ctx context.Context, taskID uuid.UUID) {
+	if s.spans == nil {
+		return
+	}
+	patchID := s.currentTaskPatchID(ctx, taskID)
+	if patchID == "" {
+		return
+	}
+	if err := s.spans.SetReviewPatchID(ctx, taskID, string(domain.TaskColumnCodeReview), patchID); err != nil {
+		log.Warn().Err(err).Str("task_id", taskID.String()).Msg("recording the code review approval's patch id failed")
+	}
+}
+
+// LatestApprovedReviewPatchID is the diff-skip stage's read of the most
+// recent approval this column closed on: what patch id it approved, and
+// when. ok is false when the column has no such approval, the span store is
+// unavailable, or the read failed — every one of those must fail the caller
+// open (run the agent), never open (skip it).
+func (s *Service) LatestApprovedReviewPatchID(ctx context.Context, taskID uuid.UUID, column domain.TaskColumn) (patchID string, approvedAt time.Time, ok bool) {
+	if s.spans == nil {
+		return "", time.Time{}, false
+	}
+	patchID, approvedAt, ok, err := s.spans.LatestApprovedPatchID(ctx, taskID, string(column))
+	if err != nil {
+		log.Warn().Err(err).Str("task_id", taskID.String()).Msg("reading the latest code review approval's patch id failed")
+		return "", time.Time{}, false
+	}
+	return patchID, approvedAt, ok
 }
 
 func (s *Service) reviewChainGate(ctx context.Context, repo domain.Repository, task domain.BoardTask, prev, target domain.TaskColumn) error {

@@ -1809,7 +1809,7 @@ func (s *AcceptanceCriterionStore) attachChecks(ctx context.Context, taskID uuid
 		return nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT ch.id, ch.criterion_id, ch.role, ch.agent_id, ch.approved, ch.note, ch.checked_at, ch.verified_sha
+		SELECT ch.id, ch.criterion_id, ch.role, ch.agent_id, ch.approved, ch.note, ch.checked_at, ch.verified_sha, ch.verified_patch_id
 		FROM task_criterion_checks ch
 		JOIN task_acceptance_criteria c ON c.id = ch.criterion_id
 		WHERE c.task_id = $1
@@ -1821,7 +1821,7 @@ func (s *AcceptanceCriterionStore) attachChecks(ctx context.Context, taskID uuid
 	byCriterion := make(map[uuid.UUID][]domain.CriterionCheck)
 	for rows.Next() {
 		var ch domain.CriterionCheck
-		if err := rows.Scan(&ch.ID, &ch.CriterionID, &ch.Role, &ch.AgentID, &ch.Approved, &ch.Note, &ch.CheckedAt, &ch.VerifiedSHA); err != nil {
+		if err := rows.Scan(&ch.ID, &ch.CriterionID, &ch.Role, &ch.AgentID, &ch.Approved, &ch.Note, &ch.CheckedAt, &ch.VerifiedSHA, &ch.VerifiedPatchID); err != nil {
 			return err
 		}
 		byCriterion[ch.CriterionID] = append(byCriterion[ch.CriterionID], ch)
@@ -1853,13 +1853,14 @@ func (s *AcceptanceCriterionStore) GetCriterion(ctx context.Context, criterionID
 func (s *AcceptanceCriterionStore) UpsertCheck(ctx context.Context, check domain.CriterionCheck) (domain.CriterionCheck, error) {
 	var out domain.CriterionCheck
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO task_criterion_checks (criterion_id, role, agent_id, approved, note, checked_at, verified_sha)
-		VALUES ($1, $2, $3, $4, $5, now(), $6)
+		INSERT INTO task_criterion_checks (criterion_id, role, agent_id, approved, note, checked_at, verified_sha, verified_patch_id)
+		VALUES ($1, $2, $3, $4, $5, now(), $6, $7)
 		ON CONFLICT (criterion_id, role) DO UPDATE
-		SET agent_id = EXCLUDED.agent_id, approved = EXCLUDED.approved, note = EXCLUDED.note, checked_at = now(), verified_sha = EXCLUDED.verified_sha
-		RETURNING id, criterion_id, role, agent_id, approved, note, checked_at, verified_sha
-	`, check.CriterionID, check.Role, check.AgentID, check.Approved, check.Note, check.VerifiedSHA).Scan(
-		&out.ID, &out.CriterionID, &out.Role, &out.AgentID, &out.Approved, &out.Note, &out.CheckedAt, &out.VerifiedSHA,
+		SET agent_id = EXCLUDED.agent_id, approved = EXCLUDED.approved, note = EXCLUDED.note, checked_at = now(),
+		    verified_sha = EXCLUDED.verified_sha, verified_patch_id = EXCLUDED.verified_patch_id
+		RETURNING id, criterion_id, role, agent_id, approved, note, checked_at, verified_sha, verified_patch_id
+	`, check.CriterionID, check.Role, check.AgentID, check.Approved, check.Note, check.VerifiedSHA, check.VerifiedPatchID).Scan(
+		&out.ID, &out.CriterionID, &out.Role, &out.AgentID, &out.Approved, &out.Note, &out.CheckedAt, &out.VerifiedSHA, &out.VerifiedPatchID,
 	)
 	if err != nil {
 		return domain.CriterionCheck{}, err

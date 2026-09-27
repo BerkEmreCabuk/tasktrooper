@@ -96,6 +96,11 @@ const (
 	MoveReasonRunnerOffline = "runner_offline"
 	// The RESUME half of runner_offline.
 	MoveReasonRunnerAttached = "runner_attached"
+	// A gate run was skipped because this gate already approved the task's
+	// current diff (same git patch-id, e.g. after a rebase or a bounce for a
+	// reason that changed nothing) — the move that approval would have made,
+	// made without re-running the agent.
+	MoveReasonUnchangedDiff = "unchanged_diff"
 )
 
 type BoardEvent struct {

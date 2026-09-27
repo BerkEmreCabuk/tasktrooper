@@ -82,6 +82,49 @@ func (s *TaskColumnSpanStore) SetReviewVerdict(ctx context.Context, taskID uuid.
 	return nil
 }
 
+// SetReviewPatchID stamps the currently open span of this column with the
+// diff it is about to be approved on; the caller runs it just before the
+// move that closes the span, mirroring SetReviewVerdict.
+func (s *TaskColumnSpanStore) SetReviewPatchID(ctx context.Context, taskID uuid.UUID, column, patchID string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE task_column_spans SET patch_id = $3
+		WHERE id = (
+			SELECT id FROM task_column_spans
+			WHERE task_id = $1 AND board_column = $2 AND left_at IS NULL
+			ORDER BY entered_at DESC LIMIT 1
+		)
+	`, taskID, column, patchID)
+	if err != nil {
+		return fmt.Errorf("set review patch id: %w", err)
+	}
+	return nil
+}
+
+// LatestApprovedPatchID is the most recently CLOSED span of this column that
+// carries a patch id — a span only ever gets one via SetReviewPatchID, i.e.
+// on an approving exit, so its presence alone means "approved". left_at is
+// reported as the approval time: it is stamped by the same move that closed
+// the span SetReviewPatchID had just written to.
+func (s *TaskColumnSpanStore) LatestApprovedPatchID(ctx context.Context, taskID uuid.UUID, column string) (string, time.Time, bool, error) {
+	var patchID string
+	var leftAt *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT patch_id, left_at FROM task_column_spans
+		WHERE task_id = $1 AND board_column = $2 AND patch_id <> '' AND left_at IS NOT NULL
+		ORDER BY left_at DESC LIMIT 1
+	`, taskID, column).Scan(&patchID, &leftAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", time.Time{}, false, nil
+	}
+	if err != nil {
+		return "", time.Time{}, false, fmt.Errorf("latest approved patch id: %w", err)
+	}
+	if leftAt == nil {
+		return "", time.Time{}, false, nil
+	}
+	return patchID, *leftAt, true, nil
+}
+
 func (s *TaskColumnSpanStore) OpenSpan(ctx context.Context, taskID uuid.UUID) (domain.TaskColumnSpan, bool, error) {
 	var sp domain.TaskColumnSpan
 	var verdict *string

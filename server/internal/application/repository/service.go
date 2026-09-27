@@ -300,6 +300,7 @@ func (s *Service) ReviewTaskCriterion(ctx context.Context, criterionID, agentID 
 		check.AgentID = &agentID
 	}
 	check.VerifiedSHA = s.currentTaskSHA(ctx, task.ID)
+	check.VerifiedPatchID = s.currentTaskPatchID(ctx, task.ID)
 	return s.criteria.UpsertCheck(ctx, check)
 }
 
@@ -316,6 +317,34 @@ func (s *Service) currentTaskSHA(ctx context.Context, taskID uuid.UUID) string {
 		return ""
 	}
 	return strings.TrimSpace(info.HeadSHA)
+}
+
+// patchIDGit is the optional half of port.GitClient: adding TaskPatchID to
+// the interface itself would force every test fake that embeds it to grow
+// the method too, so it is reached with a type-assert instead, and its
+// absence (any fake that doesn't implement it) is exactly the "lookup
+// failed" case the diff-skip stage already fails open on.
+type patchIDGit interface {
+	TaskPatchID(ctx context.Context, workspacePath string) (string, error)
+}
+
+func (s *Service) currentTaskPatchID(ctx context.Context, taskID uuid.UUID) string {
+	if s.git == nil {
+		return ""
+	}
+	pg, ok := s.git.(patchIDGit)
+	if !ok {
+		return ""
+	}
+	path := s.taskWorkspacePath(taskID)
+	if path == "" || !s.git.HasGit(path) {
+		return ""
+	}
+	id, err := pg.TaskPatchID(ctx, path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(id)
 }
 
 func (s *Service) criteriaGate(ctx context.Context, taskID uuid.UUID, taskType domain.TaskType, target domain.TaskColumn) error {
@@ -1623,6 +1652,11 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 		if !s.reviewGate.InterceptAgentMove(ctx, task, prevColumn, *req.Column, req.Actor, repo) {
 			return task, nil
 		}
+	}
+
+	if req.Column != nil && *req.Column != prevColumn && prevColumn == domain.TaskColumnCodeReview &&
+		*req.Column != domain.TaskColumnNeedRevision {
+		s.recordCodeReviewApprovalPatchID(ctx, task.ID)
 	}
 
 	if req.Column != nil && *req.Column != prevColumn {

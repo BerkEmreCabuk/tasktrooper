@@ -94,6 +94,12 @@ func (s *parkSpanStore) SetReviewVerdict(context.Context, uuid.UUID, string, str
 func (s *parkSpanStore) OpenSpan(context.Context, uuid.UUID) (domain.TaskColumnSpan, bool, error) {
 	return domain.TaskColumnSpan{}, false, nil
 }
+func (s *parkSpanStore) SetReviewPatchID(context.Context, uuid.UUID, string, string) error {
+	return nil
+}
+func (s *parkSpanStore) LatestApprovedPatchID(context.Context, uuid.UUID, string) (string, time.Time, bool, error) {
+	return "", time.Time{}, false, nil
+}
 func (s *parkSpanStore) OwnersForTask(context.Context, uuid.UUID) (map[string]uuid.UUID, error) {
 	return nil, nil
 }

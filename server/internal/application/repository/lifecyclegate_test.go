@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -23,6 +24,14 @@ func (f *fakeStageEvidence) LatestVerdicts(context.Context, uuid.UUID) (map[stri
 		return nil, f.err
 	}
 	return f.verdicts, nil
+}
+
+func (f *fakeStageEvidence) SetReviewPatchID(context.Context, uuid.UUID, string, string) error {
+	return nil
+}
+
+func (f *fakeStageEvidence) LatestApprovedPatchID(context.Context, uuid.UUID, string) (string, time.Time, bool, error) {
+	return "", time.Time{}, false, nil
 }
 
 func visited(columns ...domain.TaskColumn) *fakeStageEvidence {

@@ -79,6 +79,12 @@ type TaskColumnSpanStore interface {
 	RecordMove(ctx context.Context, repositoryID, taskID uuid.UUID, toColumn string, at time.Time) error
 	AttachAgent(ctx context.Context, taskID, agentID uuid.UUID) error
 	SetReviewVerdict(ctx context.Context, taskID uuid.UUID, column, verdict string) error
+	// SetReviewPatchID stamps the diff a column's open span is being
+	// approved on, and LatestApprovedPatchID reads the most recent CLOSED
+	// span that carries one back — the diff-skip stage's read of "did this
+	// gate already approve exactly this diff".
+	SetReviewPatchID(ctx context.Context, taskID uuid.UUID, column, patchID string) error
+	LatestApprovedPatchID(ctx context.Context, taskID uuid.UUID, column string) (patchID string, approvedAt time.Time, ok bool, err error)
 	OpenSpan(ctx context.Context, taskID uuid.UUID) (domain.TaskColumnSpan, bool, error)
 	OwnersForTask(ctx context.Context, taskID uuid.UUID) (map[string]uuid.UUID, error)
 	HasVisited(ctx context.Context, taskID uuid.UUID, column string) (bool, error)
