@@ -7,6 +7,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -140,7 +141,7 @@ func (s *WorkOrderSweeper) resumeIfClear(ctx context.Context, parked domain.Boar
 	if s.comments != nil {
 		if _, cerr := s.comments.AddComment(ctx, task.RepositoryID, task.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
-			Content:    "Work order: this task's blockers are done — resumed automatically.",
+			Content:    prompt.Text(workOrderResumedKey),
 		}); cerr != nil {
 			log.Warn().Err(cerr).Str("task_id", task.ID.String()).Msg("work order sweeper: resume comment failed")
 		}

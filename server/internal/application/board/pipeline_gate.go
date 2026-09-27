@@ -11,6 +11,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -295,8 +296,7 @@ func (p *PipelineRunner) openGate(ctx context.Context, job pipelineJob, pipeline
 	if p.tasks != nil {
 		if _, cerr := p.tasks.AddComment(finCtx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
-			Content: "Code review başlatıldı ama arkasında yeşil bir pipeline YOK — " +
-				gateReasonLabel(reason) + ": " + note + ".",
+			Content:    pipelineGateNoGreenBuildComment(reason, note),
 		}); cerr != nil {
 			log.Warn().Err(cerr).Str("task_id", job.Task.ID.String()).Msg("pipeline gate: comment failed")
 		}
@@ -326,6 +326,10 @@ func (p *PipelineRunner) settleQuietly(ctx context.Context, pipeline domain.Task
 	log.Info().Str("pipeline_id", pipeline.ID.String()).Str("note", note).
 		Msg("pipeline settled without side effects")
 	return nil
+}
+
+func pipelineGateNoGreenBuildComment(reason, note string) string {
+	return prompt.Text(pipelineGateNoGreenBuildKey) + " " + gateReasonLabel(reason) + ": " + note + "."
 }
 
 func gateReasonLabel(reason string) string {

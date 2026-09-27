@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -220,14 +221,9 @@ func (g *PipelineBounceGuard) comment(ctx context.Context, repositoryID uuid.UUI
 	if g.tasks == nil {
 		return
 	}
-	body := "Pipeline aynı commit için yine kırmızı (" + domain.ShortSHA(headSHA) + ") ve arada YENİ bir commit gelmedi. " +
-		"Bu görev bu commit yüzünden zaten bir kez geri gönderildi; sonuç değişmediği için board onu tekrar döngüye sokmayacak — " +
-		"kart `blocked` kolonuna alındı.\n\n" +
-		"Yapılması gereken bir insanda: CI'ı düzeltin (build hatası, ya da hesap/faturalandırma kaynaklı olarak " +
-		"\"job was not started\" diyen bir Actions çalıştırması) ve ardından kartı elle ilerletin. " +
-		"Ajan çalıştırmak bu noktada aynı sonucu üretir ve kotayı harcar."
+	body := pipelineBounceCommentKey.Render(pipelineBounceCommentInput{SHA: domain.ShortSHA(headSHA)})
 	if note := strings.TrimSpace(pipeline.Note); note != "" {
-		body += "\n\nSon pipeline notu: " + truncateTail(note, 500)
+		body += "\n\n" + prompt.Text(pipelineBounceNoteLabelKey) + ": " + truncateTail(note, 500)
 	}
 	if _, err := g.tasks.AddComment(ctx, repositoryID, task.ID, domain.CreateTaskCommentRequest{
 		AuthorType: "system",

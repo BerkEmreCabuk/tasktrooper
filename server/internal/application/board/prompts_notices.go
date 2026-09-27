@@ -68,3 +68,34 @@ var diffSkipSummaryKey = prompt.Define("notices.diff_skip_summary", diffSkipSumm
 var rejectedDraftLabelKey = prompt.Define("notices.rejected_draft_label", struct{}{})
 var rejectedRunReportReplanKey = prompt.Define("notices.rejected_run_report_replan", struct{}{})
 var rejectedRunReportReapproveKey = prompt.Define("notices.rejected_run_report_reapprove", struct{}{})
+
+var pipelineGateNoGreenBuildKey = prompt.Define("notices.pipeline_gate_no_green_build", struct{}{})
+
+var workOrderParkPrefixKey = prompt.Define("notices.work_order_park_prefix", struct{}{})
+var workOrderParkSuffixKey = prompt.Define("notices.work_order_park_suffix", struct{}{})
+var workOrderResumedKey = prompt.Define("notices.work_order_resumed", struct{}{})
+
+type reviewLoopParkCommentInput struct{ Entries int }
+
+var reviewLoopParkCommentKey = prompt.Define("notices.review_loop_park_comment", reviewLoopParkCommentInput{Entries: 3})
+
+type reviewLoopParkDetailInput struct{ Entries int }
+
+var reviewLoopParkDetailKey = prompt.Define("notices.review_loop_park_detail", reviewLoopParkDetailInput{Entries: 3})
+
+type criteriaLoopParkHeaderInput struct{ RunCount int }
+
+var criteriaLoopParkHeaderKey = prompt.Define("notices.criteria_loop_park_header", criteriaLoopParkHeaderInput{RunCount: 3})
+
+var stillOpenLabelKey = prompt.Define("notices.still_open_label", struct{}{})
+var criteriaLoopParkFooterKey = prompt.Define("notices.criteria_loop_park_footer", struct{}{})
+
+type criteriaLoopParkDetailInput struct{ RunCount int }
+
+var criteriaLoopParkDetailKey = prompt.Define("notices.criteria_loop_park_detail", criteriaLoopParkDetailInput{RunCount: 3})
+
+type pipelineBounceCommentInput struct{ SHA string }
+
+var pipelineBounceCommentKey = prompt.Define("notices.pipeline_bounce_comment", pipelineBounceCommentInput{SHA: "abc1234"})
+
+var pipelineBounceNoteLabelKey = prompt.Define("notices.pipeline_bounce_note_label", struct{}{})

@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -62,8 +63,7 @@ func (w *WorkOrder) Park(ctx context.Context, repositoryID uuid.UUID, task domai
 	if w.comments != nil {
 		if _, err := w.comments.AddComment(ctx, repositoryID, task.ID, domain.CreateTaskCommentRequest{
 			AuthorType: "system",
-			Content: "Work order: this task is parked until " + strings.Join(blockerLabels(blockers), ", ") +
-				" reach done or released. It is picked up automatically when they do — nothing to do here.",
+			Content:    workOrderParkComment(blockers),
 		}); err != nil {
 			log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("work order: park comment failed")
 		}
@@ -71,6 +71,11 @@ func (w *WorkOrder) Park(ctx context.Context, repositoryID uuid.UUID, task domai
 	log.Info().Str("task_id", task.ID.String()).Str("resource", domain.ResourceWorkOrder).
 		Str("detail", detail).Msg("task parked: its work order is not satisfied yet")
 	return nil
+}
+
+func workOrderParkComment(blockers []domain.BoardTask) string {
+	return prompt.Text(workOrderParkPrefixKey) + " " + strings.Join(blockerLabels(blockers), ", ") +
+		" " + prompt.Text(workOrderParkSuffixKey)
 }
 
 func blockerLabels(blockers []domain.BoardTask) []string {

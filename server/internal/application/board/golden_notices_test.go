@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -136,4 +137,65 @@ func TestGolden_RejectedRunReportReplanNote(t *testing.T) {
 func TestGolden_RejectedRunReportReapproveNote(t *testing.T) {
 	assert.Equal(t, "\n\nWhat the rejected run reported (execute this, do not re-approve it):\n\nApproved.",
 		rejectedRunReportReapproveNote("Approved."))
+}
+
+func TestGolden_PipelineGateNoGreenBuildComment(t *testing.T) {
+	assert.Equal(t,
+		"Code review başlatıldı ama arkasında yeşil bir pipeline YOK — CI unavailable: GitHub Actions billing limit reached.",
+		pipelineGateNoGreenBuildComment(domain.PipelineGateReasonCIUnavailable, "GitHub Actions billing limit reached"))
+}
+
+func TestGolden_WorkOrderParkComment(t *testing.T) {
+	blockers := []domain.BoardTask{{Key: "A-1", Title: "Fix the export", Column: domain.TaskColumnInProgress}}
+	assert.Equal(t,
+		"Work order: this task is parked until A-1 (Fix the export) [in_progress] reach done or released. "+
+			"It is picked up automatically when they do — nothing to do here.",
+		workOrderParkComment(blockers))
+}
+
+func TestGolden_WorkOrderResumedComment(t *testing.T) {
+	assert.Equal(t, "Work order: this task's blockers are done — resumed automatically.", prompt.Text(workOrderResumedKey))
+}
+
+func TestGolden_ReviewLoopParkComment(t *testing.T) {
+	assert.Equal(t,
+		"review loop: sent back 3 times without human input; parking for a human decision. "+
+			"Aradaki turlarda hiçbir insan bu karta dokunmadı ve sonuç değişmedi, bu yüzden geliştirici tekrar "+
+			"başlatılmadı. Kart `blocked` kolonunda bekliyor: ne yapılması gerektiğine karar verip elle ilerletin.",
+		reviewLoopParkCommentKey.Render(reviewLoopParkCommentInput{Entries: 3}))
+}
+
+func TestGolden_ReviewLoopParkDetail(t *testing.T) {
+	assert.Equal(t, "review loop: sent back 3 times with no human input — waiting for a human decision",
+		reviewLoopParkDetailKey.Render(reviewLoopParkDetailInput{Entries: 3}))
+}
+
+func TestGolden_CriteriaLoopParkComment(t *testing.T) {
+	assert.Equal(t,
+		"criteria loop: 2 run in a row ended with the same acceptance criteria still open and no human input in between; parking for a human decision.\n\n"+
+			"Kart `blocked` kolonunda bekliyor: kriterleri tamamlayın ya da cancel_criterion ile gerekçesiyle iptal edin, ardından kartı ilerletin.",
+		criteriaLoopParkComment(2, nil))
+
+	open := []domain.AcceptanceCriterion{{Text: "Export includes the archived rows"}}
+	assert.Equal(t,
+		"criteria loop: 2 run in a row ended with the same acceptance criteria still open and no human input in between; parking for a human decision.\n\n"+
+			"Still open:\n- Export includes the archived rows\n\n"+
+			"Kart `blocked` kolonunda bekliyor: kriterleri tamamlayın ya da cancel_criterion ile gerekçesiyle iptal edin, ardından kartı ilerletin.",
+		criteriaLoopParkComment(2, open))
+}
+
+func TestGolden_CriteriaLoopParkDetail(t *testing.T) {
+	assert.Equal(t, "criteria loop: 2 runs in a row left the same acceptance criteria open — waiting for a human decision",
+		criteriaLoopParkDetailKey.Render(criteriaLoopParkDetailInput{RunCount: 2}))
+}
+
+func TestGolden_PipelineBounceComment(t *testing.T) {
+	assert.Equal(t,
+		"Pipeline aynı commit için yine kırmızı (abc1234) ve arada YENİ bir commit gelmedi. "+
+			"Bu görev bu commit yüzünden zaten bir kez geri gönderildi; sonuç değişmediği için board onu tekrar döngüye sokmayacak — "+
+			"kart `blocked` kolonuna alındı.\n\n"+
+			"Yapılması gereken bir insanda: CI'ı düzeltin (build hatası, ya da hesap/faturalandırma kaynaklı olarak "+
+			"\"job was not started\" diyen bir Actions çalıştırması) ve ardından kartı elle ilerletin. "+
+			"Ajan çalıştırmak bu noktada aynı sonucu üretir ve kotayı harcar.",
+		pipelineBounceCommentKey.Render(pipelineBounceCommentInput{SHA: "abc1234"}))
 }

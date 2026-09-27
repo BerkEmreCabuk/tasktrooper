@@ -2,12 +2,12 @@ package board
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -113,29 +113,33 @@ func (g *CriteriaLoopGuard) comment(ctx context.Context, repositoryID uuid.UUID,
 	if g.comments == nil {
 		return
 	}
+	if _, err := g.comments.AddComment(ctx, repositoryID, task.ID, domain.CreateTaskCommentRequest{
+		AuthorType: "system",
+		Content:    criteriaLoopParkComment(runCount, open),
+	}); err != nil {
+		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("criteria loop guard: park comment failed")
+	}
+}
+
+func criteriaLoopParkComment(runCount int, open []domain.AcceptanceCriterion) string {
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("criteria loop: %d run in a row ended with the same acceptance criteria still open and no human input in between; parking for a human decision.\n\n", runCount))
+	sb.WriteString(criteriaLoopParkHeaderKey.Render(criteriaLoopParkHeaderInput{RunCount: runCount}) + "\n\n")
 	if len(open) > 0 {
-		sb.WriteString("Still open:\n")
+		sb.WriteString(prompt.Text(stillOpenLabelKey) + "\n")
 		for _, c := range open {
 			sb.WriteString("- " + c.Text + "\n")
 		}
 		sb.WriteString("\n")
 	}
-	sb.WriteString("Kart `blocked` kolonunda bekliyor: kriterleri tamamlayın ya da cancel_criterion ile gerekçesiyle iptal edin, ardından kartı ilerletin.")
-	if _, err := g.comments.AddComment(ctx, repositoryID, task.ID, domain.CreateTaskCommentRequest{
-		AuthorType: "system",
-		Content:    sb.String(),
-	}); err != nil {
-		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("criteria loop guard: park comment failed")
-	}
+	sb.WriteString(prompt.Text(criteriaLoopParkFooterKey))
+	return sb.String()
 }
 
 func (g *CriteriaLoopGuard) park(ctx context.Context, repositoryID uuid.UUID, task domain.BoardTask, runCount int) bool {
 	if g.parker == nil || task.Column == domain.TaskColumnBlocked {
 		return false
 	}
-	detail := fmt.Sprintf("criteria loop: %d runs in a row left the same acceptance criteria open — waiting for a human decision", runCount)
+	detail := criteriaLoopParkDetailKey.Render(criteriaLoopParkDetailInput{RunCount: runCount})
 	previous, err := g.parker.BlockOnResource(ctx, repositoryID, task.ID, domain.ResourceHumanDecision, detail)
 	if err != nil {
 		log.Warn().Err(err).Str("task_id", task.ID.String()).

@@ -3,7 +3,6 @@ package board
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -177,9 +176,7 @@ func (g *ReviewLoopGuard) comment(ctx context.Context, repositoryID uuid.UUID, t
 	}
 	if _, err := g.comments.AddComment(ctx, repositoryID, task.ID, domain.CreateTaskCommentRequest{
 		AuthorType: "system",
-		Content: fmt.Sprintf("review loop: sent back %d times without human input; parking for a human decision. "+
-			"Aradaki turlarda hiçbir insan bu karta dokunmadı ve sonuç değişmedi, bu yüzden geliştirici tekrar "+
-			"başlatılmadı. Kart `blocked` kolonunda bekliyor: ne yapılması gerektiğine karar verip elle ilerletin.", entries),
+		Content: reviewLoopParkCommentKey.Render(reviewLoopParkCommentInput{Entries: entries}),
 	}); err != nil {
 		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("review loop guard: park comment failed")
 	}
@@ -189,7 +186,7 @@ func (g *ReviewLoopGuard) park(ctx context.Context, repositoryID uuid.UUID, task
 	if g.parker == nil || task.Column == domain.TaskColumnBlocked {
 		return false
 	}
-	detail := fmt.Sprintf("review loop: sent back %d times with no human input — waiting for a human decision", entries)
+	detail := reviewLoopParkDetailKey.Render(reviewLoopParkDetailInput{Entries: entries})
 	previous, err := g.parker.BlockOnResource(ctx, repositoryID, task.ID, domain.ResourceHumanDecision, detail)
 	if err != nil {
 		log.Warn().Err(err).Str("task_id", task.ID.String()).
