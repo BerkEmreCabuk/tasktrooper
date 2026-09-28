@@ -35,6 +35,7 @@ arrive through the sync.
 | `backend-developer` | `backend-engineer` | high | Go/Fiber/hexagonal and Java/Quarkus APIs, DB, tests |
 | `frontend-developer` | `frontend-engineer` | high | React/Vite/Tailwind UI |
 | `mobile-developer` | `mobile-dev-engineer` | high | Flutter, SwiftUI, Compose; store deploy |
+| `devops-engineer` | `devops-engineer` | high | CI/CD, container images, Kubernetes/Coolify deploys, secrets, networking, releases |
 | `product-manager` | `generalPurpose` | medium | Backlog, requirements, board tools |
 | `qa-agent` | `generalPurpose` | medium | Manual test rounds in `in_qa`, read-only code tools; work ends at its verdict |
 | `system-architect` | `system-architect` | high | Analysis (`analiz`) tasks, code review, task decomposition |

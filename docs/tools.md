@@ -8,7 +8,7 @@ set of named tools. A [tool policy](tool-policies.md) decides which of these
 a given agent may call; this page describes what each tool does. "Typically
 held by" reflects the default role policies TaskTrooper ships with
 (`backend-developer`, `frontend-developer`, `mobile-developer`,
-`system-architect`, `qa-agent`, `product-manager`) — your own agents and
+`devops-engineer`, `system-architect`, `qa-agent`, `product-manager`) — your own agents and
 [custom agents](custom-agents.md) can be granted any subset.
 
 ## Shell and files
@@ -70,7 +70,7 @@ Read-only, and available even on a repository with no semantic index yet.
 | `record_test_cases` | Writes the QA test round for a task | `qa-agent` only |
 | `set_test_case_result` | Updates one test case's result | `qa-agent` only |
 | `list_test_cases` | Reads the recorded test round | Every role |
-| `get_pipeline_status` | Reads the most recent QA-gate pipeline run | Developer roles, `system-architect`, `qa-agent` |
+| `get_pipeline_status` | Reads the most recent QA-gate pipeline run | Developer roles, `devops-engineer`, `system-architect`, `qa-agent` |
 | `get_board_summary` | Board-wide counts and status | Every role |
 | `list_projects` / `create_project` / `update_project` | Initiative projects | Read: every role. Write: `product-manager` |
 | `list_repositories` | Lists registered repositories | Every role |
@@ -122,11 +122,11 @@ See [Deploy targets and recipes](deploy.md) → "Releases" for the full flow.
 | `run_smoke_checks` | Runs the release's frozen smoke checks against production right now, read-only | `release-engineer` only |
 | `finish_release` | Confirms a release as shipped; the only way a task reaches Released | `release-engineer` only, and only Done/Released |
 | `rollback_release` | Rolls a release back off production: reverts the merge, redeploys or lets the provider's own push-to-deploy redeploy (instant provider rollback only for an `on_merge` component); refused while a newer release of the component is open or has already shipped | `release-engineer` only, and only Done/Released |
-| `get_deploy_logs` | Reads the log behind a deploy (a release's failed job by default), summarized | `release-engineer` only |
-| `list_deploy_templates` | Lists the deploy recipe catalog | `release-engineer`, `product-manager` (via `get_deploy_target`) |
+| `get_deploy_logs` | Reads the log behind a deploy (a release's failed job by default), summarized | `release-engineer`, `devops-engineer` (read-only) |
+| `list_deploy_templates` | Lists the deploy recipe catalog | `release-engineer`, `devops-engineer`, `product-manager` (via `get_deploy_target`) |
 | `load_deploy_template` | Reads one recipe in full | Same as above |
-| `get_deploy_target` | How a repository ships to an environment (the legacy per-env address record, unrelated to a component's delivery profile) | `release-engineer`, `product-manager` |
-| `update_deploy_target` | Records the address an environment actually answers at (`base_url`/`health_url`/`logs_url`/`app_url` only) | `release-engineer`, `product-manager` |
+| `get_deploy_target` | How a repository ships to an environment (the legacy per-env address record, unrelated to a component's delivery profile) | `release-engineer`, `product-manager`, `devops-engineer` |
+| `update_deploy_target` | Records the address an environment actually answers at (`base_url`/`health_url`/`logs_url`/`app_url` only) | `release-engineer`, `product-manager`, `devops-engineer` |
 | `record_local_deploy` | Records a break-glass deploy run made from a machine directly, so the Deployments page still reflects it | Ops-facing agents with board/deploy write access |
 
 `get_deploy_logs` reads a CI/Actions job's output; a bound environment's own live logs and grouped errors come from `query_runtime_logs`/`list_runtime_errors` in [Cloud runtime](#cloud-runtime) instead.
@@ -137,10 +137,10 @@ See [Deploy targets and recipes](deploy.md).
 
 | Tool | What it does | Typically held by |
 |---|---|---|
-| `list_incidents` | Lists live production incidents | Ops-facing agents |
-| `get_incident` | Full incident: alert payload, timeline, occurrences, remedy | Ops-facing agents |
-| `propose_incident_remedy` | Records a diagnosis: kind, steps, evidence, confidence | Ops-facing agents |
-| `resolve_incident` | Closes an incident after verifying recovery | Ops-facing agents |
+| `list_incidents` | Lists live production incidents | Ops-facing agents (`devops-engineer` first) |
+| `get_incident` | Full incident: alert payload, timeline, occurrences, remedy | Ops-facing agents (`devops-engineer` first) |
+| `propose_incident_remedy` | Records a diagnosis: kind, steps, evidence, confidence | Ops-facing agents (`devops-engineer` first) |
+| `resolve_incident` | Closes an incident after verifying recovery | Ops-facing agents (`devops-engineer` first) |
 
 See [Production incidents](incidents.md).
 

@@ -249,7 +249,7 @@ func TestGoldenHandoffComments(t *testing.T) {
 	unverifiedRunner := handoffRunner(unverifiedUpdater, &handoffGit{diff: "diff --git a/app.tsx b/app.tsx"})
 	unverifiedUsage := registry.NewToolUsage()
 	unverifiedUsage.Record("edit_file")
-	unverifiedRunner.advanceToCodeReview(context.Background(), runJobFor(unverifiedTask, agentID), taskWF, "/w/task-1", unverifiedUsage)
+	unverifiedRunner.advanceToCodeReview(context.Background(), runJobFor(unverifiedTask, agentID), taskWF, "/w/task-1", unverifiedUsage, domain.Agent{})
 	require1(t, len(unverifiedUpdater.comments) == 1, "expected the unverified-run comment")
 	assertGolden(t, "handoff_unverified_run_comment", unverifiedUpdater.comments[0].Content)
 
@@ -258,7 +258,7 @@ func TestGoldenHandoffComments(t *testing.T) {
 	uiRunner := handoffRunnerWithProjects(uiUpdater, &handoffGit{diff: "diff --git a/App.tsx b/App.tsx", files: []string{"web/App.tsx"}}, uiKindRepos{kind: "frontend"})
 	uiUsage := registry.NewToolUsage()
 	uiUsage.Record("run_terminal")
-	uiRunner.advanceToCodeReview(context.Background(), runJobFor(uiTask, agentID), taskWF, "/w/task-1", uiUsage)
+	uiRunner.advanceToCodeReview(context.Background(), runJobFor(uiTask, agentID), taskWF, "/w/task-1", uiUsage, domain.Agent{})
 	require1(t, len(uiUpdater.comments) == 1, "expected the unseen-UI comment")
 	assertGolden(t, "handoff_unseen_ui_comment", uiUpdater.comments[0].Content)
 
@@ -268,7 +268,7 @@ func TestGoldenHandoffComments(t *testing.T) {
 	refusedRunner := handoffRunner(refusedUpdater, refusedGit)
 	refusedUsage := registry.NewToolUsage()
 	refusedUsage.Record("run_terminal")
-	refusedRunner.advanceToCodeReview(context.Background(), runJobFor(refusedTask, agentID), taskWF, "/w/task-1", refusedUsage)
+	refusedRunner.advanceToCodeReview(context.Background(), runJobFor(refusedTask, agentID), taskWF, "/w/task-1", refusedUsage, domain.Agent{})
 	require1(t, len(refusedUpdater.comments) == 1, "expected the code_review handoff refusal comment")
 	assertGolden(t, "handoff_code_review_refused_comment", refusedUpdater.comments[0].Content)
 

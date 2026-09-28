@@ -1172,7 +1172,7 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 			}
 		}
 		if buildVerified {
-			r.advanceToCodeReview(ctx, job, wf, taskWorkspace, toolUsage)
+			r.advanceToCodeReview(ctx, job, wf, taskWorkspace, toolUsage, agentRec)
 			r.advanceToAnalizReview(ctx, job, wf, toolUsage)
 		} else {
 			log.Info().Str("task_id", job.Task.ID.String()).
@@ -1444,7 +1444,7 @@ type taskColumnReader interface {
 	GetTask(ctx context.Context, repositoryID, taskID uuid.UUID) (domain.BoardTask, error)
 }
 
-func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, wf domain.Workflow, taskWorkspace string, usage *registry.ToolUsage) {
+func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, wf domain.Workflow, taskWorkspace string, usage *registry.ToolUsage, agent domain.Agent) {
 	if r.taskUpdater == nil || r.git == nil || taskWorkspace == "" {
 		return
 	}
@@ -1475,7 +1475,7 @@ func (r *Runner) advanceToCodeReview(ctx context.Context, job RunJob, wf domain.
 		return
 	}
 
-	if usage != nil && r.uiRepo(ctx, job.RepositoryID) && !usage.UsedAny(domain.UIObservationTools...) {
+	if usage != nil && agentCanObserveUI(agent) && r.uiRepo(ctx, job.RepositoryID) && !usage.UsedAny(domain.UIObservationTools...) {
 		needsUI := true
 		if files, filesErr := r.git.TaskChangedFiles(ctx, taskWorkspace); filesErr == nil {
 			needsUI = domain.DiffNeedsUIEvidence(files)
@@ -1703,6 +1703,21 @@ func (r *Runner) qaSkippedTheUI(ctx context.Context, job RunJob, wf domain.Workf
 		return false
 	}
 	return r.uiRepo(ctx, job.RepositoryID)
+}
+
+// agentCanObserveUI reports whether this agent could produce UI evidence at
+// all. A role holding no screenshot or DOM tool (the devops-engineer: a
+// Dockerfile in a frontend repository is a UI-repo diff by every test the gate
+// can apply) could only answer the gate by parking the card and telling the
+// next run to call a tool it does not have either. An empty allowlist is
+// unrestricted, so an agent that never narrowed its policy keeps the gate.
+func agentCanObserveUI(agent domain.Agent) bool {
+	for _, tool := range domain.UIObservationTools {
+		if domain.ToolAllowedByPolicy(tool, agent.ToolPolicy) {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *Runner) uiRepo(ctx context.Context, repositoryID uuid.UUID) bool {

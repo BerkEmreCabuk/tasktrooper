@@ -99,7 +99,7 @@ export interface Role {
   description: string;
   required_tools: string[];
   assignments: RoleAssignment[];
-  /** Purpose keys (system_task_assignee, repo_profiler) currently pointed at this role. */
+  /** Purpose keys (system_task_assignee, repo_profiler, infra_task_assignee) currently pointed at this role. */
   purposes: string[];
 }
 
@@ -151,9 +151,9 @@ export interface AgentRolesResult {
 }
 
 /** Hook names, not roles: which role currently answers a system-created task / repo profile run. */
-export type RolePurposeKey = "system_task_assignee" | "repo_profiler";
+export type RolePurposeKey = "system_task_assignee" | "repo_profiler" | "infra_task_assignee";
 
-export const ROLE_PURPOSE_KEYS: RolePurposeKey[] = ["system_task_assignee", "repo_profiler"];
+export const ROLE_PURPOSE_KEYS: RolePurposeKey[] = ["system_task_assignee", "repo_profiler", "infra_task_assignee"];
 
 export interface RolePurposeAssignment {
   purpose: RolePurposeKey;

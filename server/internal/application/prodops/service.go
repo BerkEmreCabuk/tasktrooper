@@ -412,6 +412,8 @@ func (s *Service) policy(ctx context.Context, repositoryID uuid.UUID) domain.Inc
 	return repo.IncidentPolicy
 }
 
+// systemTaskAssignee prefers whoever holds the devops role, the only one whose
+// catalog policy carries the incident tools, and falls back to the developer.
 func (s *Service) systemTaskAssignee(ctx context.Context, repositoryID uuid.UUID) *uuid.UUID {
 	if s.roles == nil || s.repos == nil {
 		return nil
@@ -421,11 +423,12 @@ func (s *Service) systemTaskAssignee(ctx context.Context, repositoryID uuid.UUID
 		return nil
 	}
 	area := domain.RepoArea(repo.Kind, repo.SubProjects)
-	id, err := s.roles.AgentForPurpose(ctx, domain.PurposeSystemTaskAssignee, area)
-	if err != nil {
-		return nil
+	for _, purpose := range []domain.RolePurposeKey{domain.PurposeInfraTaskAssignee, domain.PurposeSystemTaskAssignee} {
+		if id, err := s.roles.AgentForPurpose(ctx, purpose, area); err == nil && id != nil {
+			return id
+		}
 	}
-	return id
+	return nil
 }
 
 func (s *Service) event(ctx context.Context, incidentID uuid.UUID, kind, message string) {

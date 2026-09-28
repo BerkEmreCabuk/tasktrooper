@@ -317,6 +317,7 @@ export const settingsPages = {
     duty: {
       system_task_assignee: "System-created tasks",
       repo_profiler: "Repository profiling",
+      infra_task_assignee: "Deploy setup and incident tasks",
     },
 
     missingToolsTitle: "Missing tools",

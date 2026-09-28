@@ -29,13 +29,13 @@ they're where a human, not an agent, is expected to act.
 
 ## Which agent owns which column
 
-The six seeded role agents map onto the columns like this by default:
+The seven seeded role agents map onto the columns like this by default:
 
 | Agent | Columns |
 |---|---|
 | `product-manager` | Backlog (requirements), PM UAT |
 | `system-architect` | Analysis (`analiz`) tasks in In Progress, Code Review |
-| `backend-developer` / `frontend-developer` / `mobile-developer` | In Progress, Need Revision (for their own tasks) |
+| `backend-developer` / `frontend-developer` / `mobile-developer` / `devops-engineer` | In Progress, Need Revision (for their own tasks) |
 | `qa-agent` | Ready for QA, In QA, Done (merges the pull request), Released (watches the deploy and can roll it back) |
 
 A column can have several subscribers — every one of them is dispatched when

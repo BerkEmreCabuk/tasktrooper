@@ -64,7 +64,7 @@ carries on from where it stopped instead of starting over.
 
 ### Role agents
 
-Seven role agents ship with a catalog-driven library of skills, rules and tool
+Eight role agents ship with a catalog-driven library of skills, rules and tool
 policies — the repo's `catalog/` directory is the source of truth and the
 backend syncs it into the database at boot and on an interval. They run on the
 connected agent CLI (Claude Code, Cursor, Antigravity or OpenCode) or on a
@@ -75,9 +75,10 @@ agent is given its own.
 |---|---|
 | `product-manager` | backlog, requirements, PM UAT |
 | `system-architect` | analysis tasks, task breakdown, code review |
-| `backend-developer` | APIs, databases and tests (Go, Java/Quarkus) |
+| `backend-developer` | APIs, databases and tests (Go, Java/Quarkus, C#/.NET) |
 | `frontend-developer` | React, Vite and Tailwind UIs |
 | `mobile-developer` | Flutter, SwiftUI, Compose, store releases |
+| `devops-engineer` | pipelines, containers, Kubernetes and Coolify deploys, secrets, networking, releases |
 | `qa-agent` | manual test rounds with real requests and headless-browser screenshots; it cannot pass a task without running something |
 | `release-engineer` | merges signed-off work, ships it, verifies production and rolls back what breaks — the only agent that touches Done and Released |
 
@@ -313,7 +314,7 @@ Open-source projects that also put coding agents to work on your own machine. Th
 |---|---|---|---|---|---|
 | What it is | Desktop app: board, role agents and the runtime that runs them | Git-embedded issue tracker and memory for agents (`bd` CLI) | Software factory on top of Beads (`bh` CLI; Gas City orchestrates it) | Kanban and per-task workspaces for coding agents (announced as sunsetting) | TUI that runs many agent sessions side by side |
 | Who starts the work | The board: a card entering a column is dispatched to that column's agent | You, or an agent you are already running | Its planner/dispatcher agents, behind human gates | You, per task | You, per session |
-| Roles | Seven seeded agents (PM, architect, backend, frontend, mobile, QA, release engineer) with skills and rules that rewrite themselves from results | None, it tracks work for any agent | Planner, dispatcher, developer, reviewer, merger, warden | None | None |
+| Roles | Eight seeded agents (PM, architect, backend, frontend, mobile, devops, QA, release engineer) with skills and rules that rewrite themselves from results | None, it tracks work for any agent | Planner, dispatcher, developer, reviewer, merger, warden | None | None |
 | Your own agents | Create agents from a template or from scratch: prompt, skills, rules, tool policy, columns, memory. Each agent picks its own runtime, so one board mixes Claude Code, Cursor, OpenCode, Antigravity and API models | No agents; bring your own | Roles are configured in the factory; agents run through its CLI | Pick a supported agent per task; no agent definitions | Pick a program per session; no agent definitions |
 | Parallel agents and tools | Several tasks at once (three sessions by default), each in its own workspace, branch and CLI session; each role has its own tool policy, so the backend agent runs tests while QA drives a browser and the architect reads a third task's PR. QA has no code tools | Any number of agents share the graph; what each may do is up to the agent you run | Role agents on one graph; tool separation by role | One agent per task, same capabilities | Several sessions side by side, each a full agent |
 | Lifecycle | Thirteen columns out of the box: analysis review, code review, QA, PM UAT, human UAT, Done and Released owned by a release engineer | Open/closed with typed dependencies | Plan, review, merge with human gates | Todo, in progress, review | Branch, diff, commit |

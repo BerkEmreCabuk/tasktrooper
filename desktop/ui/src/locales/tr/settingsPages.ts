@@ -303,6 +303,7 @@ export const settingsPages: SettingsPagesDict = {
     duty: {
       system_task_assignee: "Sistem tarafından oluşturulan görevler",
       repo_profiler: "Repo profilleme",
+      infra_task_assignee: "Deploy setup ve incident görevleri",
     },
 
     missingToolsTitle: "Eksik tool'lar",

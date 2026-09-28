@@ -480,7 +480,7 @@ paths:
   /v1/role-purposes:
     get:
       summary: List the system-purpose to role mapping
-      description: purposes = system_task_assignee, repo_profiler.
+      description: purposes = system_task_assignee, repo_profiler, infra_task_assignee.
       security:
         - bearerAuth: []
 

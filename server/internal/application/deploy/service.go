@@ -464,7 +464,7 @@ func (s *Service) CreateSetupTask(ctx context.Context, repositoryID uuid.UUID, e
 		Priority:        domain.TaskPriorityHigh,
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
-		AssigneeAgentID: s.systemTaskAssignee(ctx, repo.Kind, repo.SubProjects),
+		AssigneeAgentID: s.infraTaskAssignee(ctx, repo.Kind, repo.SubProjects),
 	})
 }
 
@@ -519,15 +519,26 @@ func (s *Service) CreateLocalSetupTask(ctx context.Context, repositoryID uuid.UU
 // developer (RepoArea's per-kind resolution), never to the system architect,
 // which refuses to author files.
 func (s *Service) systemTaskAssignee(ctx context.Context, kind string, subProjects []domain.RepoSubProject) *uuid.UUID {
+	return s.assigneeFor(ctx, kind, subProjects, domain.PurposeSystemTaskAssignee)
+}
+
+// infraTaskAssignee prefers whoever holds the devops role and falls back to
+// systemTaskAssignee's developer.
+func (s *Service) infraTaskAssignee(ctx context.Context, kind string, subProjects []domain.RepoSubProject) *uuid.UUID {
+	return s.assigneeFor(ctx, kind, subProjects, domain.PurposeInfraTaskAssignee, domain.PurposeSystemTaskAssignee)
+}
+
+func (s *Service) assigneeFor(ctx context.Context, kind string, subProjects []domain.RepoSubProject, purposes ...domain.RolePurposeKey) *uuid.UUID {
 	if s.roles == nil {
 		return nil
 	}
 	area := domain.RepoArea(kind, subProjects)
-	id, err := s.roles.AgentForPurpose(ctx, domain.PurposeSystemTaskAssignee, area)
-	if err != nil {
-		return nil
+	for _, purpose := range purposes {
+		if id, err := s.roles.AgentForPurpose(ctx, purpose, area); err == nil && id != nil {
+			return id
+		}
 	}
-	return id
+	return nil
 }
 
 // firstNonEmpty returns the first value that is not blank, or "".

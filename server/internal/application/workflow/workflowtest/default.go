@@ -71,6 +71,7 @@ func Default() Fixture {
 	qaID := RoleID("qa")
 	pmID := RoleID("product_manager")
 	releaseID := RoleID("release")
+	devopsID := RoleID("devops")
 
 	roles := []domain.AgentRole{
 		{
@@ -112,11 +113,18 @@ func Default() Fixture {
 			ID: releaseID, Key: "release", Name: "Release Engineer",
 			Description: "Merges signed-off work, ships it, verifies production after the deploy and rolls back what breaks.",
 		},
+		{
+			// Fork-only (migration 169_fork_devops_role). Like release, the
+			// devops-engineer agent is assigned by the catalog sync.
+			ID: devopsID, Key: "devops", Name: "DevOps Engineer",
+			Description: "Owns pipelines, images, manifests, deploy setup and the incident loop.",
+		},
 	}
 
 	purposes := []domain.RolePurpose{
 		{Purpose: domain.PurposeSystemTaskAssignee, RoleID: &developerID},
 		{Purpose: domain.PurposeRepoProfiler, RoleID: &architectID},
+		{Purpose: domain.PurposeInfraTaskAssignee, RoleID: &devopsID},
 	}
 
 	taskTypes := []domain.TaskTypeDef{

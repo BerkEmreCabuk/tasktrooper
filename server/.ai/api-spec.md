@@ -196,7 +196,8 @@ every read CLOSED rather than answering as if a type or stage were simply absent
 - `GET /v1/role-purposes` / `PUT /v1/role-purposes/{purpose}` `{role_id|null}` — the
   `system_task_assignee` (who `CreateWorkflowSetupTask`/deploy/repodocs/prodops hand their
   own system-opened tasks to) and `repo_profiler` (defined for future use; currently has no
-  runtime consumer) hooks. `role_id: null` clears the hook; nothing resolves for it until set
+  runtime consumer) hooks, plus `infra_task_assignee` (asked first for deploy setup and incident
+  tasks, falling back to `system_task_assignee`). `role_id: null` clears the hook; nothing resolves for it until set
   again.
 - `GET /v1/task-types` → `{task_types:[{key,label,key_prefix,position,is_default,
   is_defect,assignee_role_id,assignee_mode,behaviours:[{key,params}],built_in,

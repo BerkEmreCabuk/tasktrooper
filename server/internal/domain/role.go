@@ -48,13 +48,17 @@ const (
 	// PurposeRepoProfiler is who repoprofile hands a repository-profile refresh
 	// to.
 	PurposeRepoProfiler RolePurposeKey = "repo_profiler"
+	// PurposeInfraTaskAssignee is who deploy setup and incident tasks go to
+	// first. Unassigned, callers fall back to PurposeSystemTaskAssignee, so an
+	// install without a devops-engineer routes them as it always did.
+	PurposeInfraTaskAssignee RolePurposeKey = "infra_task_assignee"
 )
 
 // ValidRolePurposeKey reports whether a purpose is one the schema's CHECK
 // constraint accepts.
 func ValidRolePurposeKey(p RolePurposeKey) bool {
 	switch p {
-	case PurposeSystemTaskAssignee, PurposeRepoProfiler:
+	case PurposeSystemTaskAssignee, PurposeRepoProfiler, PurposeInfraTaskAssignee:
 		return true
 	default:
 		return false

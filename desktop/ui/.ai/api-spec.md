@@ -546,7 +546,8 @@ Settings → Roles / Settings → Workflows (`pages/RolesSettingsPage.tsx`,
 - `GET /v1/role-purposes` → `{purposes:[{purpose,role_id|null}]}`. `PUT
   /v1/role-purposes/{purpose}` `{role_id|null}`. Purposes are hook names, not
   roles: `system_task_assignee` (who answers a system-created task) and
-  `repo_profiler` (who runs repository profiling) — edited as "System duties"
+  `repo_profiler` (who runs repository profiling) and `infra_task_assignee` (who
+  answers deploy setup and incident tasks before `system_task_assignee`) — edited as "System duties"
   on the Roles page.
 - `GET /v1/task-types` → `{task_types:[{key,label,key_prefix,position,is_default,is_defect,assignee_role_id,assignee_mode,behaviours:[{key,params}],built_in,task_count}]}`.
   `assignee_mode` is `none` (leave whatever was requested), `default` (fill
