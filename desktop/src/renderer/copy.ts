@@ -8,3 +8,23 @@ export function unreachableCopy(isMac: boolean): string {
   const tray = isMac ? "menu bar" : "system tray";
   return `Everything runs on this machine, so there is nothing to show until the local server is up. Start it from the TaskTrooper icon in the ${tray}, or retry below.`;
 }
+
+/**
+ * A plain-language cause for the failures a user can fix themselves, matched
+ * on the supervisor's description, which carries the backend's own last line.
+ * `undefined` leaves the generic copy in place: guessing a cause for an
+ * unrecognized line would send someone to fix the wrong thing.
+ */
+export function startFailureCopy(description: string | undefined): string | undefined {
+  if (!description) return undefined;
+  if (/unable to connect to https?:\/\/repo1\.maven\.org|error fetching postgres|download sha256 from/i.test(description)) {
+    return "TaskTrooper could not download its database. The first start fetches PostgreSQL (about 30 MB) from Maven Central, and this machine could not reach it. Check the internet connection, VPN, proxy or firewall, then try again. Later starts do not need it.";
+  }
+  if (/no space left on device|free some disk space/i.test(description)) {
+    return "The disk is full. TaskTrooper keeps its database on this machine and could not write to it. Free some space, then try again.";
+  }
+  if (/could not launch the postgres binary/i.test(description)) {
+    return "The operating system would not run TaskTrooper's database (PostgreSQL). Security software quarantining it is the usual cause: allow TaskTrooper in it, then try again.";
+  }
+  return undefined;
+}

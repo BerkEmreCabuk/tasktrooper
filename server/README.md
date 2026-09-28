@@ -113,7 +113,9 @@ Exactly one line goes to **stdout**, once the listener is bound:
 LISTENING http://127.0.0.1:<port>
 ```
 
-Everything else — including every log line — goes to stderr. The desktop app
+Everything else — including every log line — goes to stderr: colored console
+lines on a terminal, one zerolog JSON object per line otherwise (which is what
+`desktop/src/main/supervisor/server-log.ts` parses). The desktop app
 spawns this binary with `PORT=0` and reads the port back off that line, then
 polls `GET /health` until it answers 200. `/health` is public and answers 200
 whenever the database is migrated, even with no LLM provider configured; the

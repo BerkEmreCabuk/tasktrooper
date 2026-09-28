@@ -22,6 +22,7 @@ require (
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
 	github.com/knadh/koanf/v2 v2.3.6
 	github.com/makifbaysal/tasktrooper/catalog v0.0.0-00010101000000-000000000000
+	github.com/mattn/go-isatty v0.0.20
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/prometheus/client_golang v1.24.1
 	github.com/rs/zerolog v1.35.1
@@ -73,7 +74,6 @@ require (
 	github.com/knadh/koanf/maps v0.1.2 // indirect
 	github.com/lib/pq v1.10.9 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
-	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.16 // indirect
 	github.com/mitchellh/copystructure v1.2.0 // indirect
 	github.com/mitchellh/reflectwalk v1.0.2 // indirect

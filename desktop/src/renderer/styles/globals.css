@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* shared/ui (the Button among them) sits outside this renderer root, where
+   Tailwind does not look on its own. */
+@source "../../shared";
 
 @custom-variant dark (&:is(.dark *));
 

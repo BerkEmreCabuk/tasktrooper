@@ -18,6 +18,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	corsmw "github.com/gofiber/fiber/v2/middleware/cors"
 	recovermw "github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/mattn/go-isatty"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -324,8 +325,15 @@ func ConfigureLogger(debug bool) {
 		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	}
 	// stderr, not stdout: stdout carries exactly one machine-read line (the
-	// LISTENING address the desktop supervisor parses).
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	// LISTENING address the desktop supervisor parses). Colored console lines
+	// only on a terminal: piped, they reach the desktop's log view and its
+	// "could not start" screen as ANSI escape codes, and the supervisor parses
+	// JSON lines into level and fields.
+	if isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd()) {
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+		return
+	}
+	log.Logger = zerolog.New(os.Stderr).With().Timestamp().Logger()
 }
 
 // flattenLegacyWorkspaces moves a per-tenant layout install to the flat one

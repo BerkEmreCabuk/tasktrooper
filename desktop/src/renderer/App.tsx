@@ -3,7 +3,7 @@ import { ArrowUpCircle, Loader2, RefreshCw, WifiOff } from "lucide-react";
 import type { AppInfo, CloudStatus, SupervisorSnapshot, UpdateStatus } from "@ipc/types.js";
 import { Button } from "@shared/ui/button.js";
 import { api } from "./bridge";
-import { unreachableCopy } from "./copy";
+import { startFailureCopy, unreachableCopy } from "./copy";
 
 // Only macOS draws traffic lights inside the window, over the title bar.
 const IS_MAC = navigator.userAgent.includes("Macintosh");
@@ -145,9 +145,11 @@ function Unreachable({
       <div className="max-w-md text-center">
         <WifiOff className="mx-auto size-8 text-muted-foreground" />
         <h1 className="mt-4 text-base font-semibold">TaskTrooper could not start</h1>
-        <p className="mt-2 text-sm text-muted-foreground">{unreachableCopy(IS_MAC)}</p>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {startFailureCopy(status.description) ?? unreachableCopy(IS_MAC)}
+        </p>
         {status.description ? (
-          <code className="selectable mt-3 block break-all rounded bg-muted px-2 py-1.5 font-mono text-xs">
+          <code className="selectable mt-3 block whitespace-pre-wrap break-words rounded bg-muted px-2 py-1.5 text-left font-mono text-xs">
             {status.description}
             {status.code !== undefined ? ` (${status.code})` : ""}
           </code>
