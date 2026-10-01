@@ -78,6 +78,16 @@ var triggerMessageKey = prompt.Define("board.trigger_message", triggerMessageInp
 var closingStepBuildVerifyKey = prompt.Define("board.closing_step_build_verify", struct{}{})
 var closingStepDefaultKey = prompt.Define("board.closing_step_default", struct{}{})
 
+// closingStepReviewKey covers every StageKindReview column (code_review,
+// in_qa, pm_uat): the run judges or tests, it never changes the diff, so
+// closing_step_default's "state what you changed" is always wrong there.
+var closingStepReviewKey = prompt.Define("board.closing_step_review", struct{}{})
+
+// closingStepReleaseKey covers the release engineer's done/released runs
+// (StageKindTerminal on a non-analiz task — analiz's own done/released runs
+// are the architect's and keep closing_step_default).
+var closingStepReleaseKey = prompt.Define("board.closing_step_release", struct{}{})
+
 type projectContextInput struct{ Description string }
 
 var projectContextNoteKey = prompt.Define("board.project_context_note", projectContextInput{Description: "x"})

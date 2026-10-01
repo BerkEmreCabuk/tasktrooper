@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -38,6 +39,13 @@ const stopGrace = 10 * time.Second
 const logTailLines = 200
 
 var urlPattern = regexp.MustCompile(`https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?[^\s"'<>]*`)
+
+// portPattern is the fallback when a server prints its port without a full
+// URL — Go's net/http default log line, Spring Boot's embedded-Tomcat
+// banner, and bare framework conventions all do this. It matches "listening
+// on :8080", "Listening on port 8080", "Tomcat started on port 8080 (http)"
+// and "port(s): 8080"; group 1 is the port.
+var portPattern = regexp.MustCompile(`(?i)\b(?:listening on(?: port)?|started on port(?:\(s\))?|port(?:\(s\))?)\s*:?\s*(\d{2,5})\b`)
 
 type Deps struct {
 	Tasks         TaskReader
@@ -119,6 +127,9 @@ func (p *process) appendLine(line string) {
 		if m := urlPattern.FindString(line); m != "" {
 			p.url = strings.Replace(m, "0.0.0.0", "127.0.0.1", 1)
 			p.status = domain.LocalPreviewRunning
+		} else if m := portPattern.FindStringSubmatch(line); m != nil {
+			p.url = "http://127.0.0.1:" + m[1]
+			p.status = domain.LocalPreviewRunning
 		}
 	}
 }
@@ -164,11 +175,16 @@ func (s *Service) Start(ctx context.Context, repositoryID, taskID uuid.UUID, com
 	}
 
 	command := strings.TrimSpace(commandOverride)
+	var detectDetail string
 	if command == "" {
-		command = DetectRunCommand(workspacePath)
+		command, detectDetail = DetectRunCommand(workspacePath)
 	}
 	if command == "" {
-		return domain.LocalPreview{}, fmt.Errorf("could not detect a way to run this repository locally (looked for an npm dev/start script, a Makefile dev target, or a Go module)")
+		msg := "could not detect a way to run this repository locally (looked for an npm dev/start script, a Makefile dev/run target, a Maven or Gradle Spring Boot/Quarkus project, or a Go module)"
+		if detectDetail != "" {
+			msg += ": " + detectDetail
+		}
+		return domain.LocalPreview{}, fmt.Errorf("%s", msg)
 	}
 
 	releaseStaleDevServer(workspacePath)
@@ -317,18 +333,144 @@ func (s *Service) stopProcess(p *process) {
 	<-p.done
 }
 
-func DetectRunCommand(dir string) string {
+// DetectRunCommand returns the shell command to run dir's project locally.
+// command is "" when nothing recognised matched; detail, only ever set
+// alongside an empty command, names what was ambiguous (today: a Go module
+// with several cmd/*/main.go candidates and no root main) so the caller's
+// error can tell the agent what commandOverride to pass instead of a bare
+// "could not detect".
+func DetectRunCommand(dir string) (command, detail string) {
 	if hasNPMScript(dir, "dev") {
-		return "npm run dev"
+		return "npm run dev", ""
 	}
 	if hasNPMScript(dir, "start") {
-		return "npm start"
+		return "npm start", ""
 	}
-	if fileExists(filepath.Join(dir, "Makefile")) && makeHasTarget(dir, "dev") {
-		return "make dev"
+	if fileExists(filepath.Join(dir, "Makefile")) {
+		if makeHasTarget(dir, "dev") {
+			return "make dev", ""
+		}
+		if makeHasTarget(dir, "run") {
+			return "make run", ""
+		}
+	}
+	if cmd := mavenRunCommand(dir); cmd != "" {
+		return cmd, ""
+	}
+	if cmd := gradleRunCommand(dir); cmd != "" {
+		return cmd, ""
 	}
 	if fileExists(filepath.Join(dir, "go.mod")) {
-		return "go run ."
+		if hasRootMainPackage(dir) {
+			return "go run .", ""
+		}
+		switch mains := cmdMainPackages(dir); len(mains) {
+		case 0:
+			// No root main.go and no cmd/<name>/main.go either; "go run ."
+			// is the same best-effort guess this returned before cmd/ was
+			// understood — still the least-wrong default for an unusual
+			// layout DetectRunCommand does not otherwise recognise.
+			return "go run .", ""
+		case 1:
+			return "go run ./cmd/" + mains[0], ""
+		default:
+			return "", fmt.Sprintf(
+				"this Go module's main package is not at the root, and cmd/ holds several: %s — pass commandOverride with the one to run, e.g. %q",
+				strings.Join(mains, ", "), "go run ./cmd/"+mains[0],
+			)
+		}
+	}
+	return "", ""
+}
+
+// packageMainPattern matches a top-level "package main" declaration; it is a
+// text scan rather than go/parser because DetectRunCommand runs against a
+// freshly checked-out workspace that need not build yet.
+var packageMainPattern = regexp.MustCompile(`(?m)^package\s+main\s*$`)
+
+// hasRootMainPackage reports whether dir itself (not a subdirectory) holds a
+// "package main" .go file — the common case `go run .` targets.
+func hasRootMainPackage(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		if packageMainPattern.Match(data) {
+			return true
+		}
+	}
+	return false
+}
+
+// cmdMainPackages lists the cmd/<name> directories that hold a main.go, sorted
+// for a deterministic pick when exactly one exists.
+func cmdMainPackages(dir string) []string {
+	cmdDir := filepath.Join(dir, "cmd")
+	entries, err := os.ReadDir(cmdDir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() && fileExists(filepath.Join(cmdDir, e.Name(), "main.go")) {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// mavenRunCommand detects a Maven-wrapper project and which plugin to run it
+// with. Only the committed wrapper is used (mvnw), never a bare "mvn" — a
+// task workspace has no guarantee the right Maven is on PATH.
+func mavenRunCommand(dir string) string {
+	if !fileExists(filepath.Join(dir, "mvnw")) {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "pom.xml"))
+	if err != nil {
+		return ""
+	}
+	content := string(data)
+	switch {
+	case strings.Contains(content, "quarkus"):
+		return "./mvnw quarkus:dev"
+	case strings.Contains(content, "spring-boot"):
+		return "./mvnw spring-boot:run"
+	}
+	return ""
+}
+
+// gradleRunCommand is mavenRunCommand's Gradle-wrapper counterpart; Kotlin
+// and Groovy build scripts carry the same plugin ids as plain text.
+func gradleRunCommand(dir string) string {
+	if !fileExists(filepath.Join(dir, "gradlew")) {
+		return ""
+	}
+	var content string
+	for _, name := range []string{"build.gradle.kts", "build.gradle"} {
+		if data, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+			content = string(data)
+			break
+		}
+	}
+	if content == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(content, "quarkus"):
+		return "./gradlew quarkusDev"
+	case strings.Contains(content, "spring-boot") || strings.Contains(content, "org.springframework.boot"):
+		return "./gradlew bootRun"
 	}
 	return ""
 }

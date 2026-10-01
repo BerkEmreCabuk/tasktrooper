@@ -1,7 +1,7 @@
 ---
 name: flutter-state-management
 category: architecture
-description: Use when a Flutter screen needs app state or data - separate presentation from state, keep business logic out of widgets, and follow the app's existing state solution
+description: Use when a Flutter screen needs app state or data - separate presentation from state, keep business logic out of widgets, and follow the app's existing state solution (Riverpod 3 Notifier/AsyncNotifier, or the official ChangeNotifier+ListenableBuilder MVVM pattern)
 tech_stack: Flutter
 ---
 # Flutter State Management
@@ -21,28 +21,67 @@ Widgets render state; something else owns it. Keeping business logic and data ou
 - **Dispose** controllers/subscriptions to avoid leaks.
 - **Immutable state objects** (copyWith) so rebuilds are diff-friendly and predictable.
 
-## Worked Example (pattern, not a specific lib)
+## Worked Example — Riverpod 3 (`Notifier`/`AsyncNotifier`, not `StateNotifier`)
+
+`StateNotifier`/`StateNotifierProvider`/`StateProvider`/`ChangeNotifierProvider` are legacy as of Riverpod 3 — use `Notifier`/`AsyncNotifier` in new code. If the repo still uses `StateNotifier`, follow it; don't migrate existing code on your own initiative.
 
 ```dart
 // state owner: no widgets, pure logic — unit-testable without pumping a widget
-class TaskListController extends StateNotifier<AsyncValue<List<Task>>> {
-  TaskListController(this._repo) : super(const AsyncValue.loading());
-  final TaskRepository _repo;
+class TaskListNotifier extends AsyncNotifier<List<Task>> {
+  @override
+  Future<List<Task>> build() => ref.read(taskRepositoryProvider).list();
 
-  Future<void> load() async {
-    state = const AsyncValue.loading();
-    try { state = AsyncValue.data(await _repo.list()); }
-    catch (e, st) { state = AsyncValue.error(e, st); }
+  Future<void> reload() async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() => ref.read(taskRepositoryProvider).list());
   }
 }
+
+final taskListProvider = AsyncNotifierProvider<TaskListNotifier, List<Task>>(TaskListNotifier.new);
 
 // widget: watches state, renders each case, sends intents — no logic
 ref.watch(taskListProvider).when(
   loading: () => const AppSpinner(),
-  error:   (e, _) => AppErrorView(message: e.toString(), onRetry: controller.load),
-  data:    (tasks) => TaskList(tasks: tasks),
+  error:   (e, _) => AppErrorView(message: e.toString(), onRetry: () => ref.read(taskListProvider.notifier).reload()),
+  data:    (tasks) => tasks.isEmpty ? const EmptyView() : TaskList(tasks: tasks),
 );
 ```
+
+## Alternative — official Flutter MVVM (`ChangeNotifier` + `ListenableBuilder`)
+
+Flutter's own architecture guide and the `flutter-apply-architecture-best-practices` skill teach this pattern when the app has no state-management package at all:
+
+```dart
+class TaskListViewModel extends ChangeNotifier {
+  TaskListViewModel(this._repo);
+  final TaskRepository _repo;
+  List<Task>? _tasks;
+  Object? _error;
+  bool _loading = false;
+
+  List<Task>? get tasks => _tasks;
+  Object? get error => _error;
+  bool get loading => _loading;
+
+  Future<void> load() async {
+    _loading = true; _error = null; notifyListeners();
+    try { _tasks = await _repo.list(); }
+    catch (e) { _error = e; }
+    finally { _loading = false; notifyListeners(); }
+  }
+}
+
+ListenableBuilder(
+  listenable: viewModel,
+  builder: (context, _) => switch (viewModel) {
+    _ when viewModel.loading => const AppSpinner(),
+    _ when viewModel.error != null => AppErrorView(message: '${viewModel.error}', onRetry: viewModel.load),
+    _ => TaskList(tasks: viewModel.tasks ?? const []),
+  },
+)
+```
+
+Pick one pattern per app and stay consistent with what's already there — don't introduce a second state-management approach into a repo that already has one.
 
 ## Common Mistakes
 

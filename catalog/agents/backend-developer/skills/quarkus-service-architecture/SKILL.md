@@ -28,8 +28,12 @@ Dependencies point inward: resource → service → domain; repository implement
 - **Constructor injection**, not field injection: `public TaskService(TaskRepository repo)`. Constructor injection is testable without CDI and makes dependencies explicit.
 - **DTOs at the edge**: resources accept/return DTOs (records), map to/from domain in the service. Never expose JPA entities directly over HTTP.
 - **Bean Validation** on request DTOs (`@NotNull`, `@Size(max=200)`) + `@Valid` on the resource method — validate at the boundary, reject early.
-- **Reactive vs imperative**: default to imperative (`RESTEasy Reactive` with blocking) unless the task is genuinely reactive; don't sprinkle `Uni`/`Multi` without cause.
-- **Config** via `@ConfigProperty` from `application.properties`/env — never hardcode.
+- **Reactive vs imperative**: default to imperative (Quarkus REST — formerly branded "RESTEasy Reactive" — with blocking) unless the task is genuinely reactive; don't sprinkle `Uni`/`Multi` without cause. A blocking-I/O-heavy endpoint on Java 21+ may run on a virtual thread instead (`@RunOnVirtualThread`) rather than going reactive.
+- **Config** via `@ConfigProperty` from `application.properties`/env — never hardcode. Group related settings with `@ConfigMapping` instead of a pile of individual `@ConfigProperty` fields.
+- **Error mapping** centrally with `@ServerExceptionMapper`, returning `RestResponse<ProblemDto>` (or the repo's equivalent) — not a `try/catch` per resource method (api-design-conventions has the shape).
+- **Dev Services** start a throwaway Postgres automatically in dev/test when no `quarkus.datasource.jdbc.url` is set — don't hand-wire a local Postgres for local iteration unless the repo has opted out.
+- **Schema management** outside tests is `quarkus.hibernate-orm.schema-management.strategy=none` (or `validate`); this property was renamed from `quarkus.hibernate-orm.database.generation` in 3.23 — use the current name unless the repo is pinned to an older Quarkus.
+- Target the current LTS (3.40, supported to 2027-09); never move a repo onto the Quarkus 4 beta in a feature task.
 
 ## Worked Example
 

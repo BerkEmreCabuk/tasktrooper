@@ -64,12 +64,15 @@ Wrap meaningful primitives: `TaskId`, `Email`, `Money` — not raw `String`/`lon
 - Immutability by default; expose behavior methods, not setters.
 - Throw domain exceptions (`InvalidTaskTitle`) mapped to HTTP status at the boundary — not raw `IllegalArgumentException` leaking out.
 
+Prefer a `sealed` interface + exhaustive `switch` pattern matching (final since Java 21) for a closed set of states or commands over a type enum plus `if`/`instanceof` chains — the compiler then refuses to let a new case go unhandled.
+
 ## Common Mistakes
 
 - Public setters that let callers build invalid state.
 - Business rules in the service that should be on the entity.
 - `String`/`long` everywhere instead of value objects.
 - A god-service with dozens of methods and no domain objects.
+- Lombok `@Data`/`@EqualsAndHashCode` on a JPA entity — it pulls in lazy associations (forcing a load, or crashing outside the session) and generates a mutable, settable id that breaks `equals`/`hashCode` once the entity is persisted. Write `equals`/`hashCode` on the id only, or skip Lombok on entities.
 
 ## Red Flags
 

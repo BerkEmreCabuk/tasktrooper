@@ -434,6 +434,9 @@ type fakeEnvironments struct {
 	deployments map[uuid.UUID][]domain.CloudDeployment
 	errorGroups map[uuid.UUID][]domain.RuntimeErrorGroup
 	errorsErr   error
+	// errorsSinceCalls records the since argument of every Errors call —
+	// used to prove the sweeper's read window starts before the deploy.
+	errorsSinceCalls []time.Time
 
 	// rollbackable/current/rollbackErr/promoteErr are keyed by environment id
 	// and drive the provider-rollback surface: CanRollback,
@@ -478,7 +481,10 @@ func (f *fakeEnvironments) Deployments(_ context.Context, envID uuid.UUID, _ int
 	return f.deployments[envID], nil
 }
 
-func (f *fakeEnvironments) Errors(_ context.Context, envID uuid.UUID, _ time.Time) ([]domain.RuntimeErrorGroup, error) {
+func (f *fakeEnvironments) Errors(_ context.Context, envID uuid.UUID, since time.Time) ([]domain.RuntimeErrorGroup, error) {
+	f.mu.Lock()
+	f.errorsSinceCalls = append(f.errorsSinceCalls, since)
+	f.mu.Unlock()
 	if f.errorsErr != nil {
 		return nil, f.errorsErr
 	}

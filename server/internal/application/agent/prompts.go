@@ -48,6 +48,10 @@ type toolErrorNoteInput struct {
 
 var toolErrorNoteKey = prompt.Define("agent_loop.tool_error_note", toolErrorNoteInput{Name: "write_file", Count: 5})
 
+type attachmentIDsInput struct{ IDs string }
+
+var attachmentIDsKey = prompt.Define("agent_loop.attachment_ids", attachmentIDsInput{IDs: "a1b2c3d4-0000-0000-0000-000000000000"})
+
 var wrapUpKey = prompt.Define("agent_loop.wrap_up", struct{}{})
 
 var emptyTurnPromptKey = prompt.Define("agent_loop.empty_turn_prompt", struct{}{})

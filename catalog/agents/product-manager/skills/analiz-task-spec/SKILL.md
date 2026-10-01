@@ -1,7 +1,7 @@
 ---
 name: analiz-task-spec
 category: pm
-description: How to write an analiz board task
+description: Use when opening an analiz task for the system-architect - the required fields, what the criteria may say, and what the description must hand over
 ---
 # Analiz Task Spec
 
@@ -13,6 +13,7 @@ create_board_task fields for analiz:
 - title: "Analiz: [what is being investigated]"
 - description: investigation goal, scope boundaries, available context (links, prior docs).
   - **Relevant projects/repositories (required):** name every project/repository you believe the work touches, so the system-architect knows what to clone and review. If you are unsure, say so — the architect will verify and pull anything you missed. Missing a repo here does not block the architect (it cross-checks the codebase indexes), but naming them speeds the analysis.
+  - **Design brief, if the work touches UI:** carry the same block implementation-task-spec uses (audience/tone, content language, visual direction, references, states, primary action) so the architect's spec inherits real design direction instead of inventing it. Detect an existing design system first (see implementation-task-spec); if none exists and this is new web UI, say so — the architect sequences a foundation task first.
 - acceptance_criteria — statements about the CONTENT of the spec and the plan, which is the only thing this task delivers. Write what must be true of the documents, e.g.:
   * "The spec names every repository the change touches and, per repository, the files and interfaces that change."
   * "Each unit of work in the plan states its inputs, its outputs and how it is verified."

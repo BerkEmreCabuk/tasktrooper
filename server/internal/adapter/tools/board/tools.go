@@ -70,8 +70,13 @@ type AttachmentManager interface {
 // ComponentResolver looks up a monorepo component by its repository-relative
 // path, so create_task/update_task accept "services/api" (or "." for the
 // repository root) instead of a UUID the planner would have to already know.
+// GetComponent is the reverse lookup: get_release only carries a release's
+// ComponentID, and the runtime tools (query_runtime_logs, list_runtime_errors)
+// take a path, not an id — without this a monorepo's release would silently
+// map to no component argument at all.
 type ComponentResolver interface {
 	ComponentByPath(ctx context.Context, repositoryID uuid.UUID, path string) (domain.Component, error)
+	GetComponent(ctx context.Context, id uuid.UUID) (domain.Component, error)
 }
 
 // ReleaseService is the release-engineer's use case as the tools need it

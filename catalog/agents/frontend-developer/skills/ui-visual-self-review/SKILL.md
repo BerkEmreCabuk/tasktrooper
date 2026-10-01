@@ -15,7 +15,7 @@ A change that compiles and passes its tests has not been looked at. The UI you'r
 
 ## The procedure (exact tool calls)
 
-1. Start the dev server detached, as your main instructions' "Seeing the change" section describes: `npm run dev > /tmp/dev.log 2>&1 &`, then `sleep 5; cat /tmp/dev.log` to read the port.
+1. Start the dev server detached, as your main instructions' "Seeing the change" section describes: `mkdir -p /tmp/tt-<task key> && npm run dev > /tmp/tt-<task key>/dev.log 2>&1 &`, then `sleep 5; cat /tmp/tt-<task key>/dev.log` to read the port.
 2. `browser_navigate` to the changed page.
 3. `browser_wait_for` the content that proves the page actually rendered (not a spinner, not a blank shell).
 4. For each width in the four-width table, in order:

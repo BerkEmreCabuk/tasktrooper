@@ -3,7 +3,7 @@
     "type": "function",
     "function": {
       "name": "mobile_launch_app",
-      "description": "Install (if needed) and open this repository's Android build on the shared test device, and take the device lease. Call this before any other mobile_* tool. The package and artifact come from the repository's deploy target — you cannot open an arbitrary app.",
+      "description": "Install (if needed) and open this repository's build on the shared test device (Android device, Android emulator or iOS simulator), and take the device lease. Call this before any other mobile_* tool. The package/bundle and artifact are the build REGISTERED on the repository's deploy target for `env` — the last one a pipeline published, not your task branch — so a screenshot right after this call alone shows the app WITHOUT a change you have not separately installed. You cannot open an arbitrary app.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -33,7 +33,7 @@
     "type": "function",
     "function": {
       "name": "mobile_press_button",
-      "description": "Press a hardware or system button on the connected Android device.",
+      "description": "Press a hardware or system button on the connected device. Android only — the underlying press_keycode call has no iOS simulator equivalent.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -94,7 +94,7 @@
     "type": "function",
     "function": {
       "name": "mobile_rotate",
-      "description": "Rotate the connected Android device, to check a layout in the other orientation.",
+      "description": "Rotate the connected device (Android or iOS simulator), to check a layout in the other orientation.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -118,7 +118,7 @@
     "type": "function",
     "function": {
       "name": "mobile_screenshot",
-      "description": "Take a screenshot of the connected Android device and attach it to the result so you can see it.",
+      "description": "Take a screenshot of the connected device (Android or iOS simulator) and attach it to the result so you can see it.",
       "parameters": {
         "additionalProperties": false,
         "properties": {},
@@ -130,7 +130,7 @@
     "type": "function",
     "function": {
       "name": "mobile_swipe",
-      "description": "Swipe on the connected Android device — scroll a list, dismiss a sheet, page a carousel.",
+      "description": "Swipe on the connected device (Android or iOS simulator) — scroll a list, dismiss a sheet, page a carousel.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -160,7 +160,7 @@
     "type": "function",
     "function": {
       "name": "mobile_tap",
-      "description": "Tap an element on the connected Android device. Address it by text, resource_id or content_desc; x/y is a fallback for canvases and maps.",
+      "description": "Tap an element on the connected device (Android or iOS simulator). Address it by text, resource_id or content_desc; x/y is a fallback for canvases and maps.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -197,7 +197,7 @@
     "type": "function",
     "function": {
       "name": "mobile_type_text",
-      "description": "Type text into a field on the connected Android device.",
+      "description": "Type text into a field on the connected device (Android or iOS simulator).",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -237,7 +237,7 @@
     "type": "function",
     "function": {
       "name": "mobile_unlock_device",
-      "description": "Wake and unlock the connected Android device. The lease already unlocks it, so this is only needed when the screen locked itself mid-run (a long read, a slow build) and the app is hidden behind the lock screen.",
+      "description": "Wake and unlock the connected device. Android only — an iOS simulator has no lock screen. The lease already unlocks an Android device, so this is only needed when the screen locked itself mid-run (a long read, a slow build) and the app is hidden behind the lock screen.",
       "parameters": {
         "additionalProperties": false,
         "properties": {},
@@ -249,7 +249,7 @@
     "type": "function",
     "function": {
       "name": "mobile_wait_for",
-      "description": "Wait until an element appears on the connected Android device. Use it after a tap that starts a load, instead of taking a screenshot and hoping the screen has settled.",
+      "description": "Wait until an element appears on the connected device (Android or iOS simulator). Use it after a tap that starts a load, instead of taking a screenshot and hoping the screen has settled.",
       "parameters": {
         "additionalProperties": false,
         "properties": {

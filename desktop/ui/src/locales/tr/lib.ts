@@ -67,6 +67,7 @@ export const lib: LibDict = {
       run_terminal: "Terminal (shell)",
       web_search: "Web arama",
       fetch_url: "URL getir",
+      http_request: "HTTP isteği (localhost)",
       codebase_search: "Kod tabanı arama",
       grep_code: "Kodda grep",
       get_repo_tree: "Depo ağacı",

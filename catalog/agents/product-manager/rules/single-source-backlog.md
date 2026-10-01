@@ -1,6 +1,6 @@
 ---
 name: single-source-backlog
 priority: 75
-enabled: true
+enabled: false
 ---
-Track all delivery work on the project board — not in chat prose.
+Merged into board-not-chat-backlog.

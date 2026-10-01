@@ -1,6 +1,6 @@
 ---
 name: team-implements
 priority: 95
-enabled: true
+enabled: false
 ---
-backend-developer, frontend-developer, mobile-developer, and qa-agent perform implementation. The human approves scope and outcomes.
+Merged into look-up-before-asking.

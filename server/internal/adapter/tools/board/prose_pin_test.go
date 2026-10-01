@@ -190,12 +190,12 @@ func TestBoardProsePinnedByteIdentical(t *testing.T) {
 		{
 			"release_next_awaiting_verdict_batch",
 			releaseNextAwaitingVerdictBatchKey.Render(struct{}{}),
-			"Read get_release for the build/publish evidence (workflow run, local_run, or store_builds) and any smoke checks, then call finish_release or rollback_release. Read query_runtime_logs and list_runtime_errors too when the component has a bound runtime environment; when it does not, say so explicitly in the finish note instead of treating the gap as a pass.",
+			"Read get_release for the build/publish evidence (workflow run, local_run, or store_builds) and any smoke checks, then call finish_release or rollback_release. Read query_runtime_logs and list_runtime_errors too when the component has a bound runtime environment (pass its component); when it does not, say so explicitly in the finish note instead of treating the gap as a pass.",
 		},
 		{
 			"release_next_awaiting_verdict",
 			releaseNextAwaitingVerdictKey.Render(struct{}{}),
-			"Read query_runtime_logs and list_runtime_errors since deployed_at, then call finish_release or rollback_release.",
+			"Read query_runtime_logs and list_runtime_errors — pass the release's component, and read errors from well before deployed_at, judging a group by its own first_seen rather than by `new` alone — then call finish_release or rollback_release.",
 		},
 		{
 			"release_next_failed_batch",

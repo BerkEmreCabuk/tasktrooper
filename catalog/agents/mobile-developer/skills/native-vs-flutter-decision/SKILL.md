@@ -42,7 +42,7 @@ digraph m {
 
 ## Hard Rule
 
-Never introduce a second UI stack into a single-stack app. A Flutter app that "needs one native screen" uses a platform view / channel — it does not gain a parallel SwiftUI module on your initiative. Flag genuine cross-stack needs in a task comment for the architect.
+Never introduce a second UI stack into a single-stack app. A Flutter app that "needs one native screen" embeds it via a platform view (`PlatformView`/`AndroidView`/`UiKitView`) or talks to it through a `MethodChannel`/Pigeon — it does not gain a parallel SwiftUI module on your initiative. Going the other way (a native app needing a Flutter module) is Flutter add-to-app, not a rewrite. Flag genuine cross-stack needs in a task comment for the architect.
 
 ## Common Mistakes
 

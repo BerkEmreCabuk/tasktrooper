@@ -1,7 +1,7 @@
 ---
 name: analiz-html-report
 category: architecture
-description: Write the analiz deliverable as ONE self-contained HTML report - spec and plan as sections - that a human reviews passage by passage
+description: Use when you write or revise the analiz deliverable - the ONE self-contained HTML report (spec and plan as sections) a human reviews passage by passage
 ---
 # Analiz HTML Report
 
@@ -19,7 +19,7 @@ The human reads the report in the task drawer, selects passages and comments on 
 
 1. **`summary` — Summary.** What is being built and why, in 3–6 sentences, then one `callout decision` stating the chosen approach. A reviewer who reads only this knows what they are approving.
 2. **`context` — Context & current state.** What exists today, grounded in code you read: a table of real file paths and symbols (`internal/application/task/service.go` — `TaskService.ListByProject`) with what each does now. No path or symbol you did not see in this run.
-3. **`design` — Proposed design.** Components with exact interfaces (names, parameter and return types), data flow, error handling, what the user sees, and the 2–3 approaches you weighed with the one-line reason the chosen one won. Out-of-scope items are listed explicitly.
+3. **`design` — Proposed design.** Components with exact interfaces (names, parameter and return types), data flow, error handling, what the user sees, and the 2–3 approaches you weighed with the one-line reason the chosen one won. A decision worth remembering (new dependency, datastore/schema shape, API/contract pattern, auth/security architecture, cross-repo integration) gets a `<h3 id="design-decision">` decision record (spec-authoring); skip it for a bug fix or config change. A **Security & data** subsection names who may call each new interface, which inputs are attacker-controlled, and what data leaves the system. Out-of-scope items are listed explicitly.
 4. **`diagrams` — Diagrams** (only where they help: a request flow, a state machine, a component boundary). Inline `<svg>` with a `<title>` — its title is what the text rendition shows. Omit the section rather than draw a box that restates a sentence.
 5. **`plan` — Implementation plan.** Numbered steps (`<ol class="steps">`, each `<li id="step-N">`): files to create/modify/test with exact paths, the interfaces each step consumes and produces, and the TDD cycle with the actual test code and the command to run. No placeholders — "add error handling", "similar to step 2" and "TBD" are plan failures (implementation-plan-authoring).
 6. **`split` — Task split.** One row per project/repository: the repository, the layer, the one-line scope of its implementation task, the plan steps it owns, and its order (`blocked_by` / `deploy_depends_on`). This is what the human is approving you to create.
@@ -31,7 +31,7 @@ The human reads the report in the task drawer, selects passages and comments on 
 - **No `<script>`, no external fonts, stylesheets, scripts or images.** Everything the page needs is inline. The server sanitizes on save and removes scripts, iframes, objects/embeds, `<link>`, `<base>`, forms and form controls, every `on*` attribute and `javascript:` URLs — anything that depends on them silently disappears.
 - Images only as `data:image/…` URIs, and only when a screenshot is the evidence; prefer inline SVG.
 - Light and dark: colours are CSS variables with a `prefers-color-scheme: dark` override, as in the template. Never hard-code a text colour on a background you did not also set.
-- Size: keep it scannable and **under ~150 KB** (the hard limit is 1 MB). Summarize, cite files and symbols instead of pasting them, keep code blocks to the lines that matter.
+- Size: derived tasks and the reviewer get the report's TEXT rendition cut at 24,000 bytes from the end — `plan` and `split` are the first to go. After attaching, call `list_task_documents` with this task, the `document_id` and `limit: 22000` (text, not raw): if the result carries `next_offset`, the report is too long — cut code bodies to signatures and test assertions (implementation-plan-authoring) and shorten `context`, then check again. HTML itself stays under ~150 KB (hard limit 1 MB) — summarize, cite files and symbols instead of pasting them, keep code blocks to the lines that matter.
 
 ## Template
 
@@ -110,6 +110,10 @@ svg .edge{stroke:var(--muted);stroke-width:1.5;fill:none}
   <p><code>TaskExporter.Export(ctx, projectID uuid.UUID) ([]byte, error)</code> — …</p>
   <h3 id="design-alternatives">Alternatives considered</h3>
   <table><thead><tr><th>Approach</th><th>Why not</th></tr></thead><tbody><tr><td>Stream from the handler</td><td>Untestable without HTTP.</td></tr></tbody></table>
+  <h3 id="design-decision">Decision record</h3>
+  <p><strong>Problem:</strong> need a reusable, testable export path. <strong>Drivers:</strong> testability without HTTP, reuse by a future scheduled export. <strong>Chosen:</strong> an application service returning bytes, because it is unit-testable and the handler stays thin. <strong>Consequences:</strong> Good, because tests don't need an HTTP harness. Bad, because large exports hold the full CSV in memory (mitigated in risks).</p>
+  <h3 id="design-security">Security &amp; data</h3>
+  <p>Only the project's owner may call the export endpoint (reuses the existing project-scoped auth middleware); no new data leaves the system beyond what the user already sees in the board.</p>
   <p><strong>Out of scope:</strong> PDF, scheduled export, column selection.</p>
 </section>
 
@@ -164,13 +168,13 @@ The report is revised in place, never replaced. After a review (the task comes b
 
 1. Read the comments — they are in your run context under "Review comments on your analysis document", and `list_document_annotations` (status `submitted`) returns them all with the quoted passage.
 2. Read the report's source: `list_task_documents` with the analiz task, its `document_id` and `raw: true`; follow `next_offset` until you have all of it.
-3. Fix every comment at its root — re-read the code where a comment questions a fact — with `update_task_document` on the same `document_id`: `edits` (each `old_text` copied exactly from the source, occurring once) for targeted changes, `content` for a rewrite. Keep the section and step ids.
+3. Fix every comment at its root — re-read the code where a comment questions a fact — with `update_task_document` on the same `document_id`: `edits` (each `old_text` copied exactly from the source, occurring once) for targeted changes, `content` for a rewrite. Keep the section and step ids, and keep the document's TITLE unchanged — a new date in the title creates a second document instead of revising this one, since `add_task_document`/`update_task_document` match by exact title. Do not touch `split` unless a comment or a code re-read gives you a reason to — the human already approved its shape once.
 4. Answer every comment with `resolve_document_annotations`: one line per comment saying what changed and where (`"Switched to a cron job — see #design and #step-2"`), or why you deliberately kept it.
 
 ## Self-review (before the run ends)
 
 - All seven sections present with their ids; the `plan` steps are `step-1…step-N`.
-- Every path and symbol in `context` and `plan` was seen in this run's code exploration.
+- **Grounding pass** — before attaching, re-verify every claim, not just that you made some exploration call earlier: every path in `context` and `plan` exists (`get_repo_tree`/`grep_code`) or the step says *create*; every consumed symbol's signature matches what `get_symbol_skeleton` shows now; every third-party call matches the version locked in the lockfile; every verify command appears in `list_component_checks` or `get_project_brief`. Anything you cannot verify this way is removed from the plan or moved to `risks` as an open question — never left in as an assumption.
 - No `<script>`, no external URL in `<link>`/`<img>`/`@import`/fonts.
 - Every decision and requirement is readable as text, not only inside a diagram.
 - Nothing is readable two ways; no TBD/TODO; the `split` table matches the plan's steps.

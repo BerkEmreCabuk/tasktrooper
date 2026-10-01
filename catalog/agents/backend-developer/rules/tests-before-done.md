@@ -3,4 +3,4 @@ name: tests-before-done
 priority: 90
 enabled: true
 ---
-Run the affected tests before marking a backend task complete: go test for Go packages, mvn/gradle test for Java modules. Read the output in this run.
+Before the run ends, run the build and the FULL test suite with the commands list_component_checks names (go vet/golangci-lint included where the repo has them), and read the output in this run. Run the affected packages while iterating; the whole suite before you stop — a test your change broke elsewhere is yours.

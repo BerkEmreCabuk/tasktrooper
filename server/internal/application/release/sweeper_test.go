@@ -286,14 +286,15 @@ func TestSweepVerifyingEarlyStopsOnTooManyNewErrorGroups(t *testing.T) {
 	repositoryID := uuid.New()
 	task := f.withTask(repositoryID)
 	envID := uuid.New()
-	r := verifyingRelease(repositoryID, f.clock.Now(), f.clock.Now().Add(10*time.Minute))
+	deployedAt := f.clock.Now()
+	r := verifyingRelease(repositoryID, deployedAt, f.clock.Now().Add(10*time.Minute))
 	r.Checks.EnvironmentID = &envID
 	r.Profile.Verify.MaxNewErrors = 1
 	created, err := f.store.Create(context.Background(), r, []uuid.UUID{task.ID})
 	require.NoError(t, err)
 	f.envs.errorGroups[envID] = []domain.RuntimeErrorGroup{
-		{Fingerprint: "a", New: true},
-		{Fingerprint: "b", New: true},
+		{Fingerprint: "a", FirstSeen: deployedAt.Add(time.Minute)},
+		{Fingerprint: "b", FirstSeen: deployedAt.Add(2 * time.Minute)},
 	}
 
 	f.svc.SweepOnce(context.Background())
@@ -303,6 +304,62 @@ func TestSweepVerifyingEarlyStopsOnTooManyNewErrorGroups(t *testing.T) {
 	assert.Equal(t, domain.ReleaseAwaitingVerdict, got.Status)
 	assert.Contains(t, got.Checks.EarlyStop, "2 new runtime error groups")
 	require.Len(t, f.waker.calls, 1)
+}
+
+// TestSweepVerifyingIgnoresErrorGroupsNewOnlyByTheProvidersMidWindowGuess
+// is the P0-2 fix: on Vercel/AWS (no native grouping), cloud.GroupErrors
+// can only set New from where a group's first occurrence falls inside the
+// *queried* window, which is wrong when since=deployedAt puts a
+// regression that starts right after the deploy in the window's front
+// half. The sweeper must classify by FirstSeen against DeployedAt itself,
+// not by the provider's New flag.
+func TestSweepVerifyingIgnoresErrorGroupsNewOnlyByTheProvidersMidWindowGuess(t *testing.T) {
+	f := newSweepFixture()
+	repositoryID := uuid.New()
+	task := f.withTask(repositoryID)
+	envID := uuid.New()
+	deployedAt := f.clock.Now()
+	r := verifyingRelease(repositoryID, deployedAt, f.clock.Now().Add(10*time.Minute))
+	r.Checks.EnvironmentID = &envID
+	r.Profile.Verify.MaxNewErrors = 0
+	created, err := f.store.Create(context.Background(), r, []uuid.UUID{task.ID})
+	require.NoError(t, err)
+	f.envs.errorGroups[envID] = []domain.RuntimeErrorGroup{
+		// New:false and FirstSeen before the deploy — a chronic error the
+		// provider's mid-window heuristic correctly called old.
+		{Fingerprint: "chronic", New: false, FirstSeen: deployedAt.Add(-time.Hour)},
+	}
+
+	f.svc.SweepOnce(context.Background())
+
+	got, err := f.store.Get(context.Background(), created.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.Checks.NewErrors)
+	assert.Empty(t, got.Checks.EarlyStop)
+}
+
+// TestSweepVerifyingReadsErrorsFromBeforeTheDeploy proves the read window
+// starts before DeployedAt (at least one soak period back) rather than at
+// it, so a fallback-grouped provider's first-seen-in-window signal still
+// lands on the correct side of the deploy.
+func TestSweepVerifyingReadsErrorsFromBeforeTheDeploy(t *testing.T) {
+	f := newSweepFixture()
+	repositoryID := uuid.New()
+	task := f.withTask(repositoryID)
+	envID := uuid.New()
+	deployedAt := f.clock.Now().Add(-5 * time.Minute)
+	r := verifyingRelease(repositoryID, deployedAt, f.clock.Now().Add(5*time.Minute))
+	r.Checks.EnvironmentID = &envID
+	r.Profile.Verify.SoakMinutes = 10
+	_, err := f.store.Create(context.Background(), r, []uuid.UUID{task.ID})
+	require.NoError(t, err)
+
+	f.svc.SweepOnce(context.Background())
+
+	require.NotEmpty(t, f.envs.errorsSinceCalls)
+	since := f.envs.errorsSinceCalls[len(f.envs.errorsSinceCalls)-1]
+	assert.True(t, since.Before(deployedAt), "since (%s) must be before deployedAt (%s)", since, deployedAt)
+	assert.True(t, !since.After(deployedAt.Add(-10*time.Minute)), "since (%s) must be at least one soak period before deployedAt (%s)", since, deployedAt)
 }
 
 func TestSweepVerifyingMovesToAwaitingVerdictWhenTheWindowEnds(t *testing.T) {

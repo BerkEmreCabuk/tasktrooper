@@ -68,12 +68,24 @@ class TaskService {
 }
 ```
 
+## Boot 4 notes
+
+- Spring Boot 4.x runs on Spring Framework 7 and Jakarta EE 11; Java 17 is the floor, 25 is recommended. Never bump a repo's Boot major in a feature task — 3.5's open-source support ended 2026-06-30, so a repo still on 3.5 should be flagged, not silently upgraded mid-task.
+- Jackson 3 (`tools.jackson.*`) replaces the `com.fasterxml.jackson.*` import paths used through Boot 3.x — check which the repo is on before copying an import.
+- Error responses: `ProblemDetail` + `spring.mvc.problemdetails.enabled=true`, or throw `ErrorResponseException` — see api-design-conventions for the shape.
+- Outbound HTTP: prefer `RestClient` or a declarative `@HttpExchange` interface client over a hand-rolled `RestTemplate` call.
+- Boot 4 has built-in API versioning (`spring.mvc.apiversion.*`) — use it instead of a custom header/path scheme when the repo needs to version an endpoint.
+- `ResponseEntity.created(uri)` for a 201 with `Location` set, rather than building the header by hand.
+- `spring.jpa.open-in-view=false` (java-persistence) and structured logging (`logging.structured.format.console=ecs`, available since 3.4) are repo-level settings, not per-task changes — follow what's already set.
+- `@MockitoBean`/`@MockitoSpyBean` replace `@MockBean`/`@SpyBean` (removed in 4.0) — see java-testing-junit-mockito.
+
 ## Common Mistakes
 
 - Choosing Spring by habit when Quarkus fits — Quarkus is the default.
 - `@Autowired` field injection — use the constructor.
 - Business logic in `@RestControllerAdvice` or the controller.
 - Returning entities instead of DTOs.
+- Using `@MockBean`/`RestTemplate`-only patterns on a Boot 4 repo where the current idiom (`@MockitoBean`, `RestClient`) already applies.
 
 ## Red Flags
 

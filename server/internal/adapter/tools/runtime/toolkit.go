@@ -197,6 +197,27 @@ func parseSinceDuration(raw string) (time.Duration, error) {
 	return d, nil
 }
 
+// resolveSince turns a since argument into an absolute instant, against now:
+// an RFC3339 timestamp (a release's deployed_at is one) is used as-is —
+// future ones are rejected, since "since" must be in the past — and anything
+// else falls back to parseSinceDuration, measured back from now. Accepting
+// both means "since: release.deployed_at" is a valid call without the caller
+// computing a duration itself.
+func resolveSince(raw string, now time.Time) (time.Time, error) {
+	trimmed := strings.TrimSpace(raw)
+	if t, err := time.Parse(time.RFC3339, trimmed); err == nil {
+		if t.After(now) {
+			return time.Time{}, errors.New(prompt.RuntimeSinceInFutureText(fmt.Sprintf("%q", raw)))
+		}
+		return t, nil
+	}
+	d, err := parseSinceDuration(trimmed)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return now.Add(-d), nil
+}
+
 // firstLines caps a multi-line sample at n lines, marking whether it cut
 // anything — a whole stack trace costs the same context budget as its first
 // useful screenful.

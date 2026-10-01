@@ -213,21 +213,145 @@ func TestStartRefusesAnEmptyCommand(t *testing.T) {
 func TestDetectRunCommandPrefersNpmDevScript(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"scripts":{"dev":"vite","start":"node server.js"}}`), 0o644))
-	assert.Equal(t, "npm run dev", DetectRunCommand(dir))
+	cmd, detail := DetectRunCommand(dir)
+	assert.Equal(t, "npm run dev", cmd)
+	assert.Empty(t, detail)
 }
 
 func TestDetectRunCommandFallsBackToNpmStart(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"scripts":{"start":"node server.js"}}`), 0o644))
-	assert.Equal(t, "npm start", DetectRunCommand(dir))
+	cmd, _ := DetectRunCommand(dir)
+	assert.Equal(t, "npm start", cmd)
 }
 
 func TestDetectRunCommandFallsBackToGoRun(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/x\n"), 0o644))
-	assert.Equal(t, "go run .", DetectRunCommand(dir))
+	cmd, detail := DetectRunCommand(dir)
+	assert.Equal(t, "go run .", cmd)
+	assert.Empty(t, detail)
 }
 
 func TestDetectRunCommandFindsNothingItRecognises(t *testing.T) {
-	assert.Equal(t, "", DetectRunCommand(t.TempDir()))
+	cmd, detail := DetectRunCommand(t.TempDir())
+	assert.Empty(t, cmd)
+	assert.Empty(t, detail)
+}
+
+func TestDetectRunCommandUsesRootMainPackageOverCmd(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/x\n"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "cmd", "worker"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "cmd", "worker", "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
+
+	cmd, _ := DetectRunCommand(dir)
+	assert.Equal(t, "go run .", cmd)
+}
+
+func TestDetectRunCommandFindsTheSingleCmdMainPackage(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/x\n"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "cmd", "api"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "cmd", "api", "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
+
+	cmd, detail := DetectRunCommand(dir)
+	assert.Equal(t, "go run ./cmd/api", cmd)
+	assert.Empty(t, detail)
+}
+
+func TestDetectRunCommandNamesSeveralCmdMainCandidates(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/x\n"), 0o644))
+	for _, name := range []string{"api", "worker"} {
+		require.NoError(t, os.MkdirAll(filepath.Join(dir, "cmd", name), 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(dir, "cmd", name, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644))
+	}
+
+	cmd, detail := DetectRunCommand(dir)
+	assert.Empty(t, cmd)
+	assert.Contains(t, detail, "api, worker")
+	assert.Contains(t, detail, "commandOverride")
+}
+
+func TestDetectRunCommandUsesMakefileRunTargetWhenNoDevTarget(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Makefile"), []byte("run:\n\tgo run .\n"), 0o644))
+	cmd, _ := DetectRunCommand(dir)
+	assert.Equal(t, "make run", cmd)
+}
+
+func TestDetectRunCommandPrefersMakefileDevOverRunTarget(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Makefile"), []byte("dev:\n\tnpm run dev\nrun:\n\tnpm start\n"), 0o644))
+	cmd, _ := DetectRunCommand(dir)
+	assert.Equal(t, "make dev", cmd)
+}
+
+func TestDetectRunCommandMavenSpringBoot(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mvnw"), []byte("#!/bin/sh\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pom.xml"), []byte("<project><dependencies><dependency><artifactId>spring-boot-starter-web</artifactId></dependency></dependencies></project>"), 0o644))
+	cmd, _ := DetectRunCommand(dir)
+	assert.Equal(t, "./mvnw spring-boot:run", cmd)
+}
+
+func TestDetectRunCommandMavenQuarkus(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "mvnw"), []byte("#!/bin/sh\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pom.xml"), []byte("<project><dependencies><dependency><groupId>io.quarkus</groupId></dependency></dependencies></project>"), 0o644))
+	cmd, _ := DetectRunCommand(dir)
+	assert.Equal(t, "./mvnw quarkus:dev", cmd)
+}
+
+func TestDetectRunCommandGradleSpringBoot(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "gradlew"), []byte("#!/bin/sh\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "build.gradle"), []byte("plugins { id 'org.springframework.boot' version '3.3.0' }\n"), 0o644))
+	cmd, _ := DetectRunCommand(dir)
+	assert.Equal(t, "./gradlew bootRun", cmd)
+}
+
+func TestDetectRunCommandGradleQuarkusKotlinDSL(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "gradlew"), []byte("#!/bin/sh\n"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "build.gradle.kts"), []byte("plugins {\n    id(\"io.quarkus\")\n}\n"), 0o644))
+	cmd, _ := DetectRunCommand(dir)
+	assert.Equal(t, "./gradlew quarkusDev", cmd)
+}
+
+func TestDetectRunCommandSkipsMavenWithoutWrapper(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "pom.xml"), []byte("<project><dependencies><dependency><artifactId>spring-boot-starter-web</artifactId></dependency></dependencies></project>"), 0o644))
+	cmd, _ := DetectRunCommand(dir)
+	assert.Empty(t, cmd)
+}
+
+func TestAppendLineSynthesizesURLFromBarePort(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"go default log line", "2026/10/01 12:00:00 listening on :8080", "http://127.0.0.1:8080"},
+		{"generic phrasing", "Listening on port 8080", "http://127.0.0.1:8080"},
+		{"spring boot tomcat banner", "Tomcat started on port 8080 (http) with context path ''", "http://127.0.0.1:8080"},
+		{"bare ports line", "port(s): 8080", "http://127.0.0.1:8080"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &process{done: make(chan struct{})}
+			p.appendLine(tc.line)
+			assert.Equal(t, tc.want, p.url)
+			assert.Equal(t, domain.LocalPreviewRunning, p.status)
+		})
+	}
+}
+
+func TestAppendLinePrefersExplicitURLOverPort(t *testing.T) {
+	p := &process{done: make(chan struct{})}
+	p.appendLine("listening on :8080")
+	p.appendLine("Local: http://localhost:3000/")
+	assert.Equal(t, "http://127.0.0.1:8080", p.url, "the first match wins; a later line must not override it")
 }

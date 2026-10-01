@@ -18,6 +18,10 @@ type runtimeInvalidSinceInput struct{ Raw string }
 
 var runtimeInvalidSinceKey = Define("guard.runtime_invalid_since", runtimeInvalidSinceInput{Raw: `"5x"`})
 
+type runtimeSinceInFutureInput struct{ Raw string }
+
+var runtimeSinceInFutureKey = Define("guard.runtime_since_in_future", runtimeSinceInFutureInput{Raw: `"2099-01-01T00:00:00Z"`})
+
 // RuntimeComponentsAmbiguousText is what a runtime tool says when a
 // repository has more than one active component and none is its root, so
 // the call must name which one it means.
@@ -32,10 +36,18 @@ func RuntimeEnvironmentNotBoundText(env, component string) string {
 	return runtimeEnvironmentNotBoundKey.Render(runtimeEnvironmentNotBoundInput{Env: env, Component: component})
 }
 
-// RuntimeInvalidSinceText is query_runtime_logs' refusal for a since value it
-// could not parse as a duration. raw must already be %q-quoted by the caller.
+// RuntimeInvalidSinceText is a runtime tool's refusal for a since value it
+// could not parse as a duration or an RFC3339 timestamp. raw must already be
+// %q-quoted by the caller.
 func RuntimeInvalidSinceText(raw string) string {
 	return runtimeInvalidSinceKey.Render(runtimeInvalidSinceInput{Raw: raw})
+}
+
+// RuntimeSinceInFutureText is a runtime tool's refusal for an RFC3339 since
+// timestamp that is later than now. raw must already be %q-quoted by the
+// caller.
+func RuntimeSinceInFutureText(raw string) string {
+	return runtimeSinceInFutureKey.Render(runtimeSinceInFutureInput{Raw: raw})
 }
 
 var runtimeLogsTruncatedKey = Define[struct{}]("tool_results.runtime_logs_truncated", struct{}{})

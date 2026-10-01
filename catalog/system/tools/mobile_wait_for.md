@@ -8,4 +8,4 @@ params:
     timeout_seconds: 'How long to wait (default: 10, max: 60)'
     xpath: XPath over the hierarchy from mobile_read_ui. Last resort — prefer the other three, they survive layout changes
 ---
-Wait until an element appears on the connected Android device. Use it after a tap that starts a load, instead of taking a screenshot and hoping the screen has settled.
+Wait until an element appears on the connected device (Android or iOS simulator). Use it after a tap that starts a load, instead of taking a screenshot and hoping the screen has settled.

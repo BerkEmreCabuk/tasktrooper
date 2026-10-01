@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -134,7 +136,26 @@ func (t *getReleaseTool) Execute(ctx context.Context, arguments string) domain.T
 	if res != nil {
 		return *res
 	}
-	return toolJSON(getReleaseToolName, map[string]any{"release": rel, "next": releaseNextStep(rel)})
+	out := map[string]any{"release": rel, "next": releaseNextStep(rel)}
+	if path, ok := t.kit.componentPath(ctx, rel.ComponentID); ok {
+		out["component"] = path
+	}
+	return toolJSON(getReleaseToolName, out)
+}
+
+// componentPath resolves a release's ComponentID to the path argument
+// query_runtime_logs/list_runtime_errors expect — the release itself only
+// carries the id, so without this a monorepo's agent has no way to map one
+// to the other and silently falls back to the root component.
+func (kit *ToolKit) componentPath(ctx context.Context, componentID *uuid.UUID) (string, bool) {
+	if kit.Components == nil || componentID == nil {
+		return "", false
+	}
+	comp, err := kit.Components.GetComponent(ctx, *componentID)
+	if err != nil {
+		return "", false
+	}
+	return comp.Path, true
 }
 
 // --------------------------------------------------------------- deploy_release

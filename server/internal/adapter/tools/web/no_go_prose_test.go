@@ -9,7 +9,7 @@ import (
 // TestWebToolDefinitionsCarryNoGoProse enforces the migration is actually
 // done — see board/no_go_prose_test.go (WP8a).
 func TestWebToolDefinitionsCarryNoGoProse(t *testing.T) {
-	for _, ex := range []port.ToolExecutor{New(1048576), NewDownloadTool()} {
+	for _, ex := range []port.ToolExecutor{New(1048576), NewDownloadTool(), NewHTTPRequestTool()} {
 		def := ex.Definition()
 		if def.Function.Description != "" {
 			t.Errorf("%s: Definition() still returns a Go-literal description: %q", ex.Name(), def.Function.Description)

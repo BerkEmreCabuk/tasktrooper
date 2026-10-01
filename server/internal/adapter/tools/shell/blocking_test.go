@@ -79,7 +79,7 @@ func TestBlockingCommandReasonAllowsBackgroundedServer(t *testing.T) {
 
 func TestBlockingCommandReasonNamesTheAlternative(t *testing.T) {
 	reason := blockingCommandReason("npm run dev")
-	for _, want := range []string{"build", "/tmp/dev.log"} {
+	for _, want := range []string{"build", "/tmp/tt-<task key>/dev.log"} {
 		if !strings.Contains(reason, want) {
 			t.Errorf("refusal %q does not mention %q; the agent needs to be told what to do instead", reason, want)
 		}

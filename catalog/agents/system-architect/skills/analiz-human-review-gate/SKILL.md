@@ -2,6 +2,7 @@
 name: analiz-human-review-gate
 category: architecture
 description: Use when you finish an analiz report - the human must approve the analysis before any implementation task is created, via the analiz_review column
+source: obra/superpowers (MIT), adapted
 ---
 # Analiz Human Review Gate
 
@@ -65,7 +66,7 @@ You are re-dispatched (as the analiz task's assignee) when the human decides. Th
 1. Read EVERY review comment. They are in your run context under "Review comments on your analysis document" — each with its id, the quoted passage and the human's comment. If that list says some were left out, or you are unsure you have them all, `list_document_annotations` with status `submitted` returns every one. Also read the task comments: the review's covering note is there.
 2. Read the report's source: `list_task_documents` on this task with the report's `document_id` and `raw: true`; follow `next_offset` until you have all of it.
 3. Fix each comment at the root of the concern (see root-cause-review reasoning — fix the cause, not the wording). Where a comment questions a fact about the code, re-read the code before you answer it.
-4. Revise the SAME report with `update_task_document` on its `document_id` — `edits` (each `old_text` copied exactly from the source) for targeted passages, `content` for a rewrite. Keep its sections and ids. Never attach a second document.
+4. Revise the SAME report with `update_task_document` on its `document_id` — `edits` (each `old_text` copied exactly from the source) for targeted passages, `content` for a rewrite. Keep its sections and ids, and keep its TITLE unchanged (a new date creates a second document instead of revising this one). Never attach a second document. Leave `split` as the human approved unless a comment or a code re-read gives you a concrete reason to change it.
 5. Re-run the design and plan self-reviews on the revised report.
 6. `resolve_document_annotations` ONCE, with `{id, reply}` for every comment you were sent: the reply is one line saying what changed and where ("Replaced the queue with a cron job — see #design and #step-2"), or why you deliberately kept it.
 7. `add_task_comment` with a short summary of what changed. Then STOP: when the run ends with the report revised, the system moves the task back to **analiz_review** — do not move it yourself.

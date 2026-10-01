@@ -19,8 +19,8 @@ A component test that queries by `data-testid` or asserts on internal state prov
 - **Assert on accessible, user-visible output.** Check rendered text, roles, `aria-*` state (`aria-expanded`, `aria-invalid`, `aria-disabled`), and focus — not component internals, prop values, or CSS class names.
 - **One behavior per test.** A test named for the behavior it proves (`"shows a validation error when the field is left empty"`), not `"renders correctly"`. Multiple assertions are fine as long as they all check the same behavior; a second, unrelated behavior gets its own test.
 - **No implementation-detail mocking.** Mock the network/API boundary (MSW or the API client module), never a child component or a hook's internals just to make the test pass — that tests the mock, not the component.
-- **Wire it into `npm test`.** New component test files must run under the project's existing `npm test` script (Vitest/Jest) with no extra flags — a suite that only runs when invoked by hand is not part of the pipeline (see shared/ci-cd-pipeline-authoring and qa-agent's automation-pipeline-integration).
-- **TDD still applies** (see shared/tdd-workflow): write the test against the intended behavior first, watch it fail, then implement.
+- **Wire it into `npm test`.** New component test files must run under the project's existing `npm test` script (Vitest/Jest) with no extra flags — a suite that only runs when invoked by hand is not part of the pipeline (see ci-cd-pipeline-authoring).
+- **TDD still applies** (see tdd-workflow): write the test against the intended behavior first, watch it fail, then implement.
 
 ## Worked Example
 

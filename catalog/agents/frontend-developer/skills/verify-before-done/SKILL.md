@@ -1,7 +1,8 @@
 ---
 name: verify-before-done
 category: quality
-description: Never claim done or move a task forward without fresh verification evidence from this run
+description: Evidence rules for completion claims. Use before ticking an acceptance criterion, ending an implementation run, or writing anything that says something works, passes or is fixed.
+source: obra/superpowers (MIT), adapted
 ---
 # Verification Before Completion
 
@@ -35,18 +36,20 @@ Skipping any step is lying, not verifying.
 
 | Claim | Requires | Not sufficient |
 |-------|----------|----------------|
-| Tests pass | Test command output: 0 failures | Previous run, "should pass" |
+| Checks pass | The component's `list_component_checks` commands, run in this run, exit 0 — the hand-off gate runs exactly these | A different command you picked yourself |
 | Build succeeds | Build command: exit 0 | Linter passing, logs look fine |
 | Bug fixed | Re-run the original symptom: passes | Code changed, assumed fixed |
-| AC met | Line-by-line check of every acceptance criterion | Tests passing |
+| Regression test guards the fix | Revert the fix, run the test (MUST FAIL), restore, run again (passes) | The test passing once, with the fix already in place |
+| Endpoint works (backend) | `curl` against the running service: status code and body | Code review of the handler |
+| Screen works (frontend) | `browser_read_dom` with `contains:` for the element, plus screenshots at the four widths | A build that compiled |
+| Screen works (mobile) | `mobile_screenshot` / `mobile_read_ui`, or the Flutter web-render fallback when no device is attached | "The widget should render" |
+| AC met | Line-by-line check of every acceptance criterion against what you just verified | Tests passing |
 
 Tests passing is NOT the same as requirements met — re-read every acceptance criterion and confirm each one is actually satisfied.
 
-## Board Handoff
+## Handoff
 
-When the checks pass and every AC is confirmed, your closing action is your run's final MESSAGE: what you changed and how you verified it — the checks you actually ran and what they reported. Keep it short, and keep it out of the comments: a task whose work went through cleanly gets no comment at all, because the diff, the PR, the pipeline result and the ticked criteria already carry it. Comment only when something is wrong or still open.
-
-You do NOT move the task. A run that ends with a green build and a real diff on the branch is moved to **code_review** by the system, which also opens the pull request — ready for review, never a draft — and starts the pipeline. Never plan a step for that move.
+Then close as your prompt says: final message, no comment, no move.
 
 If you cannot show fresh passing output, the task is not done — say what actually failed instead. And do not re-run a check you already have fresh output for: once a build has passed on the code as it stands, running it again proves nothing and costs the run.
 

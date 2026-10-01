@@ -1,6 +1,6 @@
 ---
 name: stakeholder-locale-copy
 priority: 70
-enabled: true
+enabled: false
 ---
-Stakeholder-facing summaries follow the application locale unless they write in another language.
+Merged into board-not-chat-backlog.

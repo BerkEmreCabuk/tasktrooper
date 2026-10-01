@@ -15,7 +15,7 @@ An implementation task is a self-contained unit of work for one developer role. 
 
 | Field | Value |
 |-------|-------|
-| type | `task` (or `bug` for defects) |
+| task_type | `task` (user-visible feature or change) · `bug` (existing behaviour is wrong) · `technical` (no user-facing behaviour: refactor, infra, CI, backend-internal — QA sends it straight to human_uat, skipping pm_uat) · `analiz` (investigation → system-architect, see analiz-task-spec). Spell the argument `task_type` — `type` is silently ignored and the task is created as the default type. |
 | column | `backlog` by default (stakeholder reviews before start); `todo` only if told to start immediately |
 | assignee | one responsible developer role — REQUIRED: pass `assignee: "<role>"` (e.g. `backend-developer`) so that agent is dispatched. An unassigned task sits idle. Use `list_team` for valid names. |
 | title | action-object ("Add task export endpoint", "Fix checkout price rounding") |
@@ -37,7 +37,36 @@ An implementation task is a self-contained unit of work for one developer role. 
 - **Criteria are structured, not prose.** Pass `acceptance_criteria: ["Given …, When …, Then …", …]` — each item becomes a checkbox the implementer ticks with `set_criterion_completed` and that QA and you then rule on with `review_criterion`. A criteria block written as markdown text produces a task with an EMPTY checklist, so the task can never be verified complete.
 - **Tag repository and project.** Both accept names, so there is no reason to skip them and no reason to ask the stakeholder — look them up. To file a task that already exists, use `update_board_task` with `project`.
 - **One role, one deliverable.** Never bundle backend + frontend in one task.
-- **Frontend task design input.** The `description` for a frontend task carries what the developer cannot guess: audience/tone, brand colours/fonts/logo if known (or "free, follow the existing design system"), reference sites if the human gave any, and the real content per section (actual copy, never "lorem ipsum" placeholder). `acceptance_criteria` includes the responsive behaviour, e.g. "Given the page at any width from 360px to 1440px, When it renders, Then there is no horizontal scroll and all content stays reachable", plus the states the view needs (loading/empty/error, form validation).
+- **Creation-only fields.** `assignee`, `task_type` and `derived_from` can only be set by `create_board_task` — `update_board_task` has no such fields and silently ignores them. Fix a wrong one by `delete_board_task` + `create_board_task` (no `force` needed in backlog/todo), never by updating.
+- **Secrets.** Never ask the stakeholder for a third-party API key in chat. If a task needs one configured, say so in `before_deploy` ("needs `X_API_KEY` configured for <env>") and tell the human where to set it — not a comment, which nobody reads at deploy time.
+- **Duplicate guard.** `create_board_task` returns `created:false` with the existing task when an open one has a near-identical title. Report "already on the board as T-n", not "created" — pass `allow_duplicate: true` only for genuinely different work that happens to share a title.
+
+### Design brief (UI work)
+
+Replaces a one-line "follow the existing design system" guess. Put this block in the `description` of any task that touches a screen a user sees:
+
+```
+Design brief
+- Surface: marketing page | app screen | component change
+- Audience & tone: <who>; <3 adjectives>          e.g. "freelance designers; calm, precise, premium"
+- Content language: <the product audience's language, e.g. English> — not TaskTrooper's UI locale
+- Visual direction: follow the existing design system | new: colours <names/hex>, fonts <names>, logo <attached>
+- References: <URL> — borrow <layout | palette | tone>, not the whole look
+- Content: real copy per section (headline, subhead, CTA labels, empty/error messages). Copy you drafted is marked "draft copy".
+- Primary action per view: <one>
+- States: loading / empty / error / success for <which data views>
+- Responsive notes: <anything non-obvious at 360px>
+- Attachments: <files added with attach_task_file>
+```
+
+Procedure:
+- **Detect an existing design system before asking.** `get_repo_tree` for `INVENTORY.md`, `components/ui/`, `tailwind.config.*`; `grep_code "--primary"` in CSS. Present → write "follow the existing design system", no question. Absent, and the work is new web UI → route through analiz first (a design-system foundation task is sequenced before any screen), then ask one `ask_user` choice question on visual direction with a recommended option.
+- **Draft real copy yourself**, in the content language. Never leave lorem ipsum, and never block the task on copy — the human corrects it at backlog approval or human_uat.
+- **Files the human uploads in chat** (mockup, logo, screenshot) go on the task with `attach_task_file` and get one descriptive line in the brief, since the text survives even where an attachment doesn't render.
+- **UI acceptance-criteria templates:**
+  - "Given the page at 360, 768, 1024 and 1440 px wide, When it renders, Then there is no horizontal scroll and nothing overflows (the browser_set_viewport report lists no overflowing elements)"
+  - "Given <list> has no items, When the page loads, Then it shows '<exact empty-state copy>' and a '<CTA label>' button"
+  - "Given saving fails, When I press Save, Then '<exact error copy>' appears beside the form and my input is kept"
 - **Ordering is an argument, not a sentence.** analiz (if needed) → backend → frontend/mobile → qa. Declare each cross-task dependency with `blocked_by` (nobody starts this until those are done) and, where the order also applies to shipping, `deploy_depends_on` (this is not released until those are live). Both point the same way: this task comes after the ones you list. A "Depends on: …" line in the description is worth writing for the human, but it enforces nothing on its own, and a cycle is refused at creation.
 - **Ordered tasks still all go on the board.** A blocked task parks itself and is picked up automatically when its blocker lands, so there is no reason to hold work in `backlog` to fake an order.
 - **Point at the analysis.** If the work came out of an analiz task, set `derived_from`. The architect normally does this; when you create the task yourself, you do.

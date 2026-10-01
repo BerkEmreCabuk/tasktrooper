@@ -207,6 +207,12 @@ type fakeCloudProvider struct {
 	errorsErr error
 	deploys   []domain.CloudDeployment
 	deployErr error
+
+	// lastLogsQuery/lastErrorsSince record the last call's arguments — used
+	// to prove an RFC3339 since argument reaches the provider unchanged
+	// rather than being recomputed as a duration from now.
+	lastLogsQuery   domain.RuntimeLogQuery
+	lastErrorsSince time.Time
 }
 
 func (p *fakeCloudProvider) Kind() domain.CloudProviderKind { return p.kind }
@@ -230,14 +236,16 @@ func (p *fakeCloudProvider) Deployments(context.Context, domain.CloudCredential,
 	return p.deploys, nil
 }
 
-func (p *fakeCloudProvider) Logs(context.Context, domain.CloudCredential, domain.CloudResourceRef, domain.RuntimeLogQuery) (domain.RuntimeLogPage, error) {
+func (p *fakeCloudProvider) Logs(_ context.Context, _ domain.CloudCredential, _ domain.CloudResourceRef, q domain.RuntimeLogQuery) (domain.RuntimeLogPage, error) {
+	p.lastLogsQuery = q
 	if p.logsErr != nil {
 		return domain.RuntimeLogPage{}, p.logsErr
 	}
 	return p.logsPage, nil
 }
 
-func (p *fakeCloudProvider) Errors(context.Context, domain.CloudCredential, domain.CloudResourceRef, time.Time) ([]domain.RuntimeErrorGroup, error) {
+func (p *fakeCloudProvider) Errors(_ context.Context, _ domain.CloudCredential, _ domain.CloudResourceRef, since time.Time) ([]domain.RuntimeErrorGroup, error) {
+	p.lastErrorsSince = since
 	if p.errorsErr != nil {
 		return nil, p.errorsErr
 	}

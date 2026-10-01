@@ -399,26 +399,39 @@ func (s *Service) sweepVerifying(ctx context.Context, r domain.Release) {
 	s.handBack(ctx, updated)
 }
 
+// checkNewErrors reads over a window that starts well before the deploy
+// (at least one soak period back) and then classifies "new" by FirstSeen
+// against DeployedAt itself, rather than trusting the provider's own New
+// flag: on Vercel and AWS, which have no native error grouping,
+// cloud.GroupErrors can only call a group new if it first appeared in the
+// back half of the *queried* window — querying since=deployedAt put a
+// regression that starts right after the deploy in the front half, so it
+// was never flagged.
 func (s *Service) checkNewErrors(ctx context.Context, r *domain.Release) {
 	if s.environments == nil || r.Checks.EnvironmentID == nil || r.DeployedAt == nil {
 		return
 	}
-	groups, err := s.environments.Errors(ctx, *r.Checks.EnvironmentID, *r.DeployedAt)
+	lookback := s.now().Sub(*r.DeployedAt)
+	if soak := time.Duration(r.Profile.Verify.SoakMinutes) * time.Minute; soak > lookback {
+		lookback = soak
+	}
+	since := r.DeployedAt.Add(-lookback)
+	groups, err := s.environments.Errors(ctx, *r.Checks.EnvironmentID, since)
 	if err != nil {
 		log.Warn().Err(err).Str("release_id", r.ID.String()).Msg("release sweeper: reading runtime errors failed")
 		return
 	}
-	r.Checks.NewErrors = newErrorGroups(groups)
+	r.Checks.NewErrors = newErrorGroups(groups, *r.DeployedAt)
 	if len(r.Checks.NewErrors) > r.Profile.Verify.MaxNewErrors {
 		r.Checks.EarlyStop = fmt.Sprintf("%d new runtime error groups since the deploy", len(r.Checks.NewErrors))
 	}
 }
 
-func newErrorGroups(groups []domain.RuntimeErrorGroup) []domain.RuntimeErrorGroup {
+func newErrorGroups(groups []domain.RuntimeErrorGroup, deployedAt time.Time) []domain.RuntimeErrorGroup {
 	seen := map[string]bool{}
 	out := make([]domain.RuntimeErrorGroup, 0, len(groups))
 	for _, g := range groups {
-		if !g.New || seen[g.Fingerprint] {
+		if g.FirstSeen.Before(deployedAt) || seen[g.Fingerprint] {
 			continue
 		}
 		seen[g.Fingerprint] = true

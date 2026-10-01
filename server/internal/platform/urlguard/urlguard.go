@@ -77,6 +77,12 @@ type Policy struct {
 	// it exists so a future internal caller states the exception.
 	AllowPrivate bool
 
+	// RequireLoopback inverts the whole policy: only 127.0.0.0/8 and ::1 dial,
+	// everything else (public, private, link-local) is refused. For a tool
+	// that must stay on this machine (http_request) — not an environment
+	// switch like AllowLoopback, so ALLOW_LOOPBACK_TOOL_URLS has no effect on it.
+	RequireLoopback bool
+
 	MaxRedirects int
 
 	Resolver Resolver
@@ -105,6 +111,18 @@ func Default() Policy {
 	p := PublicOnly()
 	p.AllowLoopback = loopbackAllowed(os.Getenv)
 	return p
+}
+
+// LoopbackOnly is the policy for a tool that must never leave this machine
+// (http_request): http/https to 127.0.0.0/8 or ::1 only, every other
+// destination refused — including private and link-local addresses that
+// AllowPrivate/AllowLoopback would otherwise admit elsewhere.
+func LoopbackOnly() Policy {
+	return Policy{
+		Schemes:         []string{"http", "https"},
+		RequireLoopback: true,
+		MaxRedirects:    defaultMaxRedirects,
+	}
 }
 
 // loopbackAllowed takes getenv so tests do not mutate the process environment.

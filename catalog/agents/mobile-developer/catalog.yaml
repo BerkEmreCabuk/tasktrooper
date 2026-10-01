@@ -60,6 +60,15 @@ tool_policy:
         - get_task_pull_request
         - comment_on_pull_request
         - commit_task_changes
+        - get_incident
+        - propose_incident_remedy
+        - resolve_incident
+        - list_incidents
+        - get_deploy_target
+        - list_deploy_templates
+        - load_deploy_template
+        - search_boilerplate_catalog
+        - get_pipeline_status
         - mobile_launch_app
         - mobile_screenshot
         - mobile_read_ui

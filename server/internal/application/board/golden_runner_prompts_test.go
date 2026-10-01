@@ -151,7 +151,10 @@ func TestGoldenBuildTriggerMessage(t *testing.T) {
 
 func TestGoldenClosingStep(t *testing.T) {
 	assertGolden(t, "closing_step_build_verify", closingStep(taskWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnTodo}}))
-	assertGolden(t, "closing_step_default", closingStep(taskWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnDone}}))
+	assertGolden(t, "closing_step_default", closingStep(analizWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnAnalizReview, TaskType: domain.TaskTypeAnaliz}}))
+	assertGolden(t, "closing_step_review", closingStep(taskWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnCodeReview, TaskType: "task"}}))
+	assertGolden(t, "closing_step_release", closingStep(taskWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnDone, TaskType: "task"}}))
+	assertGolden(t, "closing_step_default_analiz_done", closingStep(analizWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnDone, TaskType: domain.TaskTypeAnaliz}}))
 }
 
 func TestGoldenPrependProjectContext(t *testing.T) {

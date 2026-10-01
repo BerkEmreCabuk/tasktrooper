@@ -159,6 +159,45 @@ func TestQueryRuntimeLogsRejectsAnInvalidSince(t *testing.T) {
 	assert.True(t, res.IsError)
 }
 
+// TestQueryRuntimeLogsAcceptsAnRFC3339Since is the P0-1 fix: a release's
+// deployed_at is an RFC3339 timestamp, not a duration, and the skills tell
+// the release engineer to pass it straight through as since.
+func TestQueryRuntimeLogsAcceptsAnRFC3339Since(t *testing.T) {
+	fx := newTestKit(t)
+	repoID, _, _ := fx.boundEnvironment(domain.EnvironmentProduction, ".")
+	deployedAt := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+
+	tool := &queryRuntimeLogsTool{kit: fx.kit}
+	res := tool.Execute(repoCtx(repoID), `{"since":"`+deployedAt.Format(time.RFC3339)+`"}`)
+	require.False(t, res.IsError, res.Content)
+	assert.True(t, fx.provider.lastLogsQuery.Since.Equal(deployedAt),
+		"since = %s, want %s", fx.provider.lastLogsQuery.Since, deployedAt)
+}
+
+// TestQueryRuntimeLogsRejectsAFutureSince proves "since" must be in the
+// past — the one case an RFC3339 timestamp cannot just be passed through.
+func TestQueryRuntimeLogsRejectsAFutureSince(t *testing.T) {
+	fx := newTestKit(t)
+	repoID, _, _ := fx.boundEnvironment(domain.EnvironmentProduction, ".")
+	future := time.Now().UTC().Add(time.Hour).Format(time.RFC3339)
+
+	tool := &queryRuntimeLogsTool{kit: fx.kit}
+	res := tool.Execute(repoCtx(repoID), `{"since":"`+future+`"}`)
+	assert.True(t, res.IsError)
+}
+
+func TestListRuntimeErrorsAcceptsAnRFC3339Since(t *testing.T) {
+	fx := newTestKit(t)
+	repoID, _, _ := fx.boundEnvironment(domain.EnvironmentProduction, ".")
+	deployedAt := time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC)
+
+	tool := &listRuntimeErrorsTool{kit: fx.kit}
+	res := tool.Execute(repoCtx(repoID), `{"since":"`+deployedAt.Format(time.RFC3339)+`"}`)
+	require.False(t, res.IsError, res.Content)
+	assert.True(t, fx.provider.lastErrorsSince.Equal(deployedAt),
+		"since = %s, want %s", fx.provider.lastErrorsSince, deployedAt)
+}
+
 func TestQueryRuntimeLogsRejectsAnUnknownSeverity(t *testing.T) {
 	fx := newTestKit(t)
 	repoID, _, _ := fx.boundEnvironment(domain.EnvironmentProduction, ".")

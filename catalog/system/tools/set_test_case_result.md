@@ -3,7 +3,7 @@ key: tool.set_test_case_result
 version: "1"
 params:
     actual: 'Required for failed: what you observed instead of the expectation.'
-    evidence: The command and its output, the request/response, or the screenshot path that proves this verdict.
+    evidence: The command and its output, the request/response, or — for a screenshot — the url and viewport browser_screenshot reported and what it showed (it saves no file, so never a path).
     notes: Required for skipped (what blocked it) and invalid (why it is not a valid case).
     status: passed | failed | skipped | invalid
     test_case_id: Test case UUID (from list_test_cases or record_test_cases)

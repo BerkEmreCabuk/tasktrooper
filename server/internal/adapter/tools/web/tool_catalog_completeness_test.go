@@ -12,7 +12,7 @@ import (
 // checks exist alongside internal/platform/runtime's general completeness
 // test.
 func TestEveryWebToolHasACatalogDoc(t *testing.T) {
-	for _, ex := range []port.ToolExecutor{New(1048576), NewDownloadTool()} {
+	for _, ex := range []port.ToolExecutor{New(1048576), NewDownloadTool(), NewHTTPRequestTool()} {
 		if _, ok := prompt.Default().ToolDoc(ex.Name()); !ok {
 			t.Errorf("%s has no catalog/system/tools/%s.md", ex.Name(), ex.Name())
 		}
@@ -20,7 +20,7 @@ func TestEveryWebToolHasACatalogDoc(t *testing.T) {
 }
 
 func TestWebToolDocParamPathsMatchSchema(t *testing.T) {
-	for _, ex := range []port.ToolExecutor{New(1048576), NewDownloadTool()} {
+	for _, ex := range []port.ToolExecutor{New(1048576), NewDownloadTool(), NewHTTPRequestTool()} {
 		doc, ok := prompt.Default().ToolDoc(ex.Name())
 		if !ok {
 			continue

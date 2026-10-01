@@ -9,6 +9,7 @@ tool_policy:
     allow_tools:
         - web_search
         - fetch_url
+        - http_request
         - codebase_search
         - grep_code
         - get_repo_tree

@@ -451,7 +451,7 @@
     "type": "function",
     "function": {
       "name": "finish_release",
-      "description": "Confirm this release as shipped: moves every task it carries to `released`. This is the ONLY way a task may reach `released` — never move the card there yourself. Call it only while the release is `awaiting_verdict`, and only after you have actually read the evidence in THIS run: query_runtime_logs and list_runtime_errors since deployed_at, and the release's own health/smoke checks (get_release). A `failed` release can only be finished by a human overriding it (\"ship it anyway\") — an agent call is refused. `note` is required and must say what you actually checked (the log window, the error groups, the smoke results), not just \"looks fine\".",
+      "description": "Confirm this release as shipped: moves every task it carries to `released`. This is the ONLY way a task may reach `released` — never move the card there yourself. Call it only while the release is `awaiting_verdict`, and only after you have actually read the evidence in THIS run, for every task the release carries, not only the one you were woken on: query_runtime_logs and list_runtime_errors since deployed_at (pass the release's own component — get_release returns it — and judge an error group's novelty by its own first_seen against deployed_at, not by `new` alone), and the release's own health/smoke checks (get_release). A `failed` release can only be finished by a human overriding it (\"ship it anyway\") — an agent call is refused. `note` is required and must say what you actually checked (the log window, the error groups, the smoke results), not just \"looks fine\".",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -546,7 +546,7 @@
     "type": "function",
     "function": {
       "name": "get_release",
-      "description": "Read the release covering this task: status, mode/executor, commit and tag, deploy result (including a batch release's local_run or store_builds), the health/smoke/runtime-error evidence gathered so far, verdict and rollback (if any), and what to do next. It changes nothing and never parks the run — call it any time you want the current picture, including right after a merge and again whenever you are unsure what state the release is in. For a `batch` component (mobile and other human-cut releases) it may return a `draft` release still collecting merged tasks — there is nothing to do until a human cuts it. If nothing has opened a release for this task, it says why instead of a bare not-found (never merged, the component does not deploy on merge, or its delivery profile is unconfirmed).",
+      "description": "Read the release covering this task: status, mode/executor, commit and tag, deploy result (including a batch release's local_run or store_builds), the health/smoke/runtime-error evidence gathered so far, verdict and rollback (if any), and what to do next. It changes nothing and never parks the run — call it any time you want the current picture, including right after a merge and again whenever you are unsure what state the release is in. For a `batch` component (mobile and other human-cut releases) it may return a `draft` release still collecting merged tasks — there is nothing to do until a human cuts it. If nothing has opened a release for this task, it says why instead of a bare not-found (never merged, the component does not deploy on merge, or its delivery profile is unconfirmed). When the release's component is known, the result carries a top-level `component` — the release's own `component_id` is an id, not a path, and in a repository with more than one component this is what you pass as `component` to query_runtime_logs/list_runtime_errors; an omitted `component` on those tools silently reads the repository's root component instead.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -873,7 +873,7 @@
                   "type": "string"
                 },
                 "evidence": {
-                  "description": "Command + output, request/response, or screenshot path.",
+                  "description": "Command + output, request/response, or — for a screenshot — the url and viewport browser_screenshot reported and what it showed (it saves no file, so never a path).",
                   "type": "string"
                 },
                 "expected": {
@@ -1107,7 +1107,7 @@
             "type": "string"
           },
           "evidence": {
-            "description": "The command and its output, the request/response, or the screenshot path that proves this verdict.",
+            "description": "The command and its output, the request/response, or — for a screenshot — the url and viewport browser_screenshot reported and what it showed (it saves no file, so never a path).",
             "type": "string"
           },
           "notes": {
@@ -1142,7 +1142,7 @@
     "type": "function",
     "function": {
       "name": "start_task_preview",
-      "description": "Start (or reuse) the task branch's local preview — the product built from this task's branch, running on this machine, never production. Checks out the branch, detects how to run it, starts it, and returns its http://localhost URL once the dev server has printed one, for the browser tools. Needs no shell.",
+      "description": "Start (or reuse) the task branch's local preview — the product built from this task's branch, running on this machine, never production. Checks out the branch, detects how to run it (an npm dev/start script, a Makefile dev/run target, a Maven or Gradle Spring Boot/Quarkus project, or a Go module — including one whose main package lives under cmd/), starts it, and returns its http://localhost URL once the dev server has printed one (a bare port line such as \"Tomcat started on port 8080\" resolves to that URL too) — for the browser tools, or for http_request against a backend-only endpoint. Needs no shell.",
       "parameters": {
         "additionalProperties": false,
         "properties": {

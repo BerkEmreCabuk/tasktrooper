@@ -8,6 +8,9 @@ func (p Policy) blockedReason(ip net.IP) string {
 	if ip == nil {
 		return "not an IP address"
 	}
+	if p.RequireLoopback {
+		return p.loopbackOnlyReason(ip)
+	}
 
 	// To4 unwraps v4-mapped v6, so the v4 rules below cover them.
 	if v4 := ip.To4(); v4 != nil {
@@ -26,6 +29,33 @@ func (p Policy) blockedReason(ip net.IP) string {
 		}
 	}
 	return p.reasonV6(ip16)
+}
+
+// loopbackOnlyReason is RequireLoopback's whole policy: everything that is not
+// 127.0.0.0/8 or ::1 is refused, deliberately bypassing reasonV4/reasonV6 (which
+// exist to find exceptions in an otherwise-public-only policy, the opposite
+// shape from "only loopback dials").
+func (p Policy) loopbackOnlyReason(ip net.IP) string {
+	if v4 := ip.To4(); v4 != nil {
+		if v4.IsLoopback() {
+			return ""
+		}
+		return "not a loopback address"
+	}
+	ip16 := ip.To16()
+	if ip16 == nil {
+		return "not an IP address"
+	}
+	if embedded := embeddedV4(ip16); embedded != nil {
+		if embedded.IsLoopback() {
+			return ""
+		}
+		return "not a loopback address"
+	}
+	if ip16.IsLoopback() {
+		return ""
+	}
+	return "not a loopback address"
 }
 
 func (p Policy) reasonV4(ip net.IP) string {

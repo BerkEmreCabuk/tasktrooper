@@ -2183,9 +2183,14 @@ func buildTriggerMessage(job RunJob, wf domain.Workflow, criteria []domain.Accep
 		"repository_id": job.RepositoryID.String(),
 		"task_type":     string(job.Task.TaskType),
 		"description":   job.Task.Description,
-		"column":        string(job.Task.Column),
-		"event_type":    string(job.Event.EventType),
-		"payload":       json.RawMessage(job.Event.Payload),
+		// task-decomposition puts the plan slice (files, interfaces, #step-N)
+		// here; without it every derived run only has description, and the
+		// slice is otherwise reachable only through task_chat or
+		// list_board_tasks.
+		"technical_description": job.Task.TechnicalDescription,
+		"column":                string(job.Task.Column),
+		"event_type":            string(job.Event.EventType),
+		"payload":               json.RawMessage(job.Event.Payload),
 	})
 	runIns := runInstruction(wf, job)
 	if job.ColumnInstruction != "" {
@@ -2200,10 +2205,23 @@ func buildTriggerMessage(job RunJob, wf domain.Workflow, criteria []domain.Accep
 }
 
 func closingStep(wf domain.Workflow, job RunJob) string {
-	if !wf.Has(job.Task.Column, domain.BehaviourBuildVerify) {
-		return prompt.Text(closingStepDefaultKey)
+	if wf.Has(job.Task.Column, domain.BehaviourBuildVerify) {
+		return prompt.Text(closingStepBuildVerifyKey)
 	}
-	return prompt.Text(closingStepBuildVerifyKey)
+	switch wf.KindOf(job.Task.Column) {
+	case domain.StageKindReview:
+		// code_review, in_qa, pm_uat: the run judges or tests, never edits —
+		// "state what you changed" never applies here.
+		return prompt.Text(closingStepReviewKey)
+	case domain.StageKindTerminal:
+		// done/released: the release engineer's own runs (an analiz task's
+		// done/released are the architect's decompose/release step and keep
+		// the default — it has no release verdict note to point to).
+		if job.Task.TaskType != domain.TaskTypeAnaliz {
+			return prompt.Text(closingStepReleaseKey)
+		}
+	}
+	return prompt.Text(closingStepDefaultKey)
 }
 
 func runInstruction(wf domain.Workflow, job RunJob) string {

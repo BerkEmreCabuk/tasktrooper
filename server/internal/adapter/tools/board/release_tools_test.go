@@ -97,6 +97,28 @@ func releaseToolKit(repoID uuid.UUID, releases *fakeReleaseService) *ToolKit {
 	return &ToolKit{Tasks: &fakeTaskManager{taskRepoID: repoID}, Releases: releases}
 }
 
+// fakeComponentResolverByID is a ComponentResolver that only needs to answer
+// GetComponent — the one get_release's P0-4 "component" field uses.
+type fakeComponentResolverByID struct {
+	components map[uuid.UUID]domain.Component
+	err        error
+}
+
+func (f *fakeComponentResolverByID) ComponentByPath(context.Context, uuid.UUID, string) (domain.Component, error) {
+	return domain.Component{}, fmt.Errorf("not implemented")
+}
+
+func (f *fakeComponentResolverByID) GetComponent(_ context.Context, id uuid.UUID) (domain.Component, error) {
+	if f.err != nil {
+		return domain.Component{}, f.err
+	}
+	comp, ok := f.components[id]
+	if !ok {
+		return domain.Component{}, fmt.Errorf("component %s not found", id)
+	}
+	return comp, nil
+}
+
 func releaseCtx(repoID, taskID uuid.UUID) context.Context {
 	return registry.ContextWithRepositoryID(registry.ContextWithTaskID(context.Background(), taskID), repoID)
 }
@@ -216,6 +238,66 @@ func TestGetReleaseToolReportsNextStepForBatch(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestGetReleaseToolReportsTheComponentPath is the P0-4 fix: a release only
+// carries ComponentID, and the runtime tools take a path — without this a
+// monorepo release gives the agent no way to tell query_runtime_logs which
+// component it is about, so it silently falls back to the root one.
+func TestGetReleaseToolReportsTheComponentPath(t *testing.T) {
+	repoID, taskID := uuid.New(), uuid.New()
+	compID := uuid.New()
+	fake := &fakeReleaseService{release: domain.Release{ID: uuid.New(), Status: domain.ReleaseAwaitingVerdict, ComponentID: &compID}}
+	kit := releaseToolKit(repoID, fake)
+	kit.Components = &fakeComponentResolverByID{components: map[uuid.UUID]domain.Component{compID: {ID: compID, Path: "apps/api"}}}
+
+	tool := newGetReleaseTool(kit)
+	res := tool.Execute(releaseCtx(repoID, taskID), `{}`)
+	if res.IsError {
+		t.Fatalf("unexpected error: %s", res.Content)
+	}
+	var payload struct {
+		Component string `json:"component"`
+	}
+	if err := json.Unmarshal([]byte(res.Content), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.Component != "apps/api" {
+		t.Fatalf("component = %q, want %q", payload.Component, "apps/api")
+	}
+}
+
+// TestGetReleaseToolOmitsComponentWhenUnresolvable covers both a release
+// with no ComponentID and a kit with no Components wired — neither should
+// error, both should just omit the field.
+func TestGetReleaseToolOmitsComponentWhenUnresolvable(t *testing.T) {
+	repoID, taskID := uuid.New(), uuid.New()
+
+	t.Run("no component id", func(t *testing.T) {
+		fake := &fakeReleaseService{release: domain.Release{ID: uuid.New(), Status: domain.ReleaseAwaitingVerdict}}
+		kit := releaseToolKit(repoID, fake)
+		kit.Components = &fakeComponentResolverByID{components: map[uuid.UUID]domain.Component{}}
+		res := newGetReleaseTool(kit).Execute(releaseCtx(repoID, taskID), `{}`)
+		if res.IsError {
+			t.Fatalf("unexpected error: %s", res.Content)
+		}
+		if strings.Contains(res.Content, `"component"`) {
+			t.Fatalf("expected no component field, got: %s", res.Content)
+		}
+	})
+
+	t.Run("no components resolver wired", func(t *testing.T) {
+		compID := uuid.New()
+		fake := &fakeReleaseService{release: domain.Release{ID: uuid.New(), Status: domain.ReleaseAwaitingVerdict, ComponentID: &compID}}
+		kit := releaseToolKit(repoID, fake)
+		res := newGetReleaseTool(kit).Execute(releaseCtx(repoID, taskID), `{}`)
+		if res.IsError {
+			t.Fatalf("unexpected error: %s", res.Content)
+		}
+		if strings.Contains(res.Content, `"component"`) {
+			t.Fatalf("expected no component field, got: %s", res.Content)
+		}
+	})
 }
 
 func TestGetReleaseToolExplainsAMissingRelease(t *testing.T) {

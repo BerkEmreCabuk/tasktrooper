@@ -505,13 +505,17 @@ func (l *Loop) runToolCalls(
 
 		out := tracker.observe(tc.Function.Name, tc.Function.Arguments, result.Content, result.IsError)
 
+		// Archived unconditionally (archiveImages itself is a no-op without
+		// images or an archiver) so the ids below do not depend on whether
+		// this run happens to carry an activity recorder.
+		imageIDs := l.archiveImages(ctx, result.Name, result.Images)
+
 		if rec := activity.FromContext(ctx); rec != nil {
 			preview := result.Content
 			if len(preview) > 500 {
 				preview = domain.TruncateHead(preview, 500)
 			}
 
-			imageIDs := l.archiveImages(ctx, result.Name, result.Images)
 			rec.Step("tool_call_result", map[string]any{
 				"tool": result.Name, "call_id": result.ToolCallID,
 				"image_attachment_ids": imageIDs,
@@ -526,6 +530,12 @@ func (l *Loop) runToolCalls(
 
 		if strings.TrimSpace(content) == "" && len(images) == 0 {
 			content = emptyResultNote(tc.Function.Name)
+		}
+		// The archive ids are otherwise visible only in the activity log, not
+		// to the model — so evidence (record_test_cases, review notes) could
+		// never cite a real attachment id, only describe the image from memory.
+		if len(imageIDs) > 0 {
+			content += attachmentIDsNote(imageIDs)
 		}
 		switch {
 		case out.Repeats >= repeatNoteThreshold:

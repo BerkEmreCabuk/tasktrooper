@@ -169,12 +169,22 @@ func developerToolPolicy() domain.ToolPolicy {
 	tools = append(tools, rolePRReadTools...)
 	tools = append(tools, rolePRReplyTools...)
 	tools = append(tools, rolePRCommitTools...)
+	// System-assigned work: prodops.openRemediationTask and deploy.CreateSetupTask
+	// hand incident remediation and "set up <env> deploy" tasks to this role.
+	tools = append(tools, "get_incident", "propose_incident_remedy", "resolve_incident", "list_incidents")
+	tools = append(tools, "get_deploy_target", "list_deploy_templates", "load_deploy_template")
+	tools = append(tools, "search_boilerplate_catalog")
+	// need_revision: the failed QA-gate jobs and their output say why the task came back.
+	tools = append(tools, "get_pipeline_status")
 	return domain.ToolPolicy{AllowTools: tools}
 }
 
 func productManagerToolPolicy() domain.ToolPolicy {
 	tools := make([]string, 0, len(roleWebTools)+len(roleCodeTools)+len(roleBrowserTools)+len(roleBoardReadTools)+len(roleBoardCreateTools)+len(roleBoardDeleteTools)+len(roleWorkspaceManageTools)+len(roleMemoryTools)+len(roleSkillTools)+4)
 	tools = append(tools, roleWebTools...)
+	// pm_uat: backend/API-only acceptance criteria are tested too, headless
+	// against the task's own preview — no "backend exception".
+	tools = append(tools, "http_request")
 	// Read-only code tools: the PM verifies real file/endpoint names for technical_description — no shell.
 	tools = append(tools, roleCodeTools...)
 	// pm_uat: the PM walks the critical flows itself, in the browser; get_deploy_target resolves a stage base_url when one exists.
@@ -241,7 +251,8 @@ func qaToolPolicy() domain.ToolPolicy {
 	// QA is the only role that WRITES test cases.
 	tools = append(tools, "list_test_cases", "record_test_cases", "set_test_case_result")
 	// Green CI and stage base_url for the suite; prod requests banned — the rule layer says so separately.
-	tools = append(tools, "get_pipeline_status", "get_deploy_target", "update_deploy_target")
+	// update_deploy_target is a write no QA instruction calls; QA reads the target, never records one.
+	tools = append(tools, "get_pipeline_status", "get_deploy_target")
 	// The task branch's own Vercel preview, the first choice of test environment when it is built from the PR head.
 	// start_task_preview runs the same checkout locally — QA already has the shell to hand-start a dev server, this is the shortcut.
 	tools = append(tools, "get_task_preview", "start_task_preview")

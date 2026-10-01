@@ -709,6 +709,11 @@ func (e *engine) registerBuiltinTools(cfg *domain.Config) error {
 		log.Info().Msg("web fetch tools enabled")
 	}
 
+	// Loopback-only, so it is registered independent of cfg.Tools.Web — a
+	// local preview this task started is not "the web" in the SSRF sense that
+	// flag guards fetch_url/download_file against.
+	e.reg.Register(web.NewHTTPRequestTool())
+
 	if cfg.Tools.Search.Enabled {
 		// No key gate any more: web_search implements its own keyless search
 		// (DuckDuckGo, falling back to Bing), so "enabled" is the whole answer.

@@ -69,6 +69,7 @@ export const lib = {
       run_terminal: "Terminal (shell)",
       web_search: "Web search",
       fetch_url: "Fetch URL",
+      http_request: "HTTP request (localhost)",
       codebase_search: "Codebase search",
       grep_code: "Grep code",
       get_repo_tree: "Repo tree",
