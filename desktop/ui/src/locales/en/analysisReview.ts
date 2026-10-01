@@ -19,6 +19,26 @@ export const analysisReview = {
     approveWithOpenBody:
       "Open comments ({count}) have not been sent to the agent. Approving moves the task to Done and leaves them unsent.",
   },
+  questions: {
+    heading: "Open questions",
+    kind: {
+      product: "Product",
+      technical: "Technical",
+    },
+    blockingBadge: "Blocking",
+    recommendedPrefix: "Recommended: ",
+    answerLabel: "Your answer",
+    answerPlaceholder: "Type your answer",
+    unanswered: "Unanswered",
+    recommendedStands: "Unanswered — recommended answer stands",
+    sendAnswers: "Send answers",
+    missingBlocking: "Answer {keys} before sending",
+    sent: "Answers sent ({count}). The agent picks the analysis back up.",
+    sendFailed: "The answers could not be sent",
+    answerFailed: "The answer could not be saved",
+    approveWithAnswersTitle: "Approve with unsent answers?",
+    approveNote: "Your answers to {count} question(s) will be applied when this task is split.",
+  },
   submit: {
     title: "Send your comments to the agent? ({count})",
     description:

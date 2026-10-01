@@ -149,6 +149,28 @@ func TaskIDFromContext(ctx context.Context) uuid.UUID {
 	return uuid.Nil
 }
 
+const taskTypeKey contextKey = "task_type"
+
+// ContextWithTaskType names the board task TYPE a run is working, so a
+// nested call that has no domain.BoardTask in hand (orchestrator.Executor's
+// subtask runner) can still tell an analiz task apart from every other kind
+// — see domain.EnsureAskUserTool's analiz exception in executor.go.
+func ContextWithTaskType(ctx context.Context, taskType string) context.Context {
+	if taskType == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, taskTypeKey, taskType)
+}
+
+func TaskTypeFromContext(ctx context.Context) string {
+	if v := ctx.Value(taskTypeKey); v != nil {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
 func ContextWithAgentID(ctx context.Context, id uuid.UUID) context.Context {
 	if id == uuid.Nil {
 		return ctx

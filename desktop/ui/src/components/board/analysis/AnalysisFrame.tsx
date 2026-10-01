@@ -7,7 +7,9 @@ import {
   createNonce,
   FRAME_SANDBOX,
   parseFrameMessage,
+  type FrameQuestion,
   type FrameSelection,
+  type QuestionsLabels,
 } from "@/components/board/analysis/srcdoc";
 import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/hooks/useI18n";
@@ -31,11 +33,14 @@ export interface AnalysisFrameHandle {
 interface AnalysisFrameProps {
   document: Pick<TaskDocument, "id" | "content" | "format">;
   annotations: FrameAnnotation[];
+  /** Drawn in the Open questions section at the top of the frame body, built from this structured data, never from the document's own HTML. */
+  questions?: FrameQuestion[];
   activeId: string | null;
   theme: "light" | "dark";
   onSelection: (selection: FrameSelection) => void;
   onFocusAnnotation: (id: string) => void;
   onAnchored: (found: Record<string, boolean>) => void;
+  onAnswer?: (id: string, text: string) => void;
   className?: string;
 }
 
@@ -44,8 +49,21 @@ interface AnalysisFrameProps {
  * opaque-origin iframe (see srcdoc.ts) that talks to this component only by
  * postMessage. Nothing goes in but the document and the annotations to draw.
  */
+const NOOP_ON_ANSWER = () => {};
+
 export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>(function AnalysisFrame(
-  { document: doc, annotations, activeId, theme, onSelection, onFocusAnnotation, onAnchored, className },
+  {
+    document: doc,
+    annotations,
+    questions = [],
+    activeId,
+    theme,
+    onSelection,
+    onFocusAnnotation,
+    onAnchored,
+    onAnswer = NOOP_ON_ANSWER,
+    className,
+  },
   ref,
 ) {
   const { t } = useI18n();
@@ -93,8 +111,30 @@ export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
-  const handlers = useRef({ onSelection, onFocusAnnotation, onAnchored });
-  handlers.current = { onSelection, onFocusAnnotation, onAnchored };
+  const handlers = useRef({ onSelection, onFocusAnnotation, onAnchored, onAnswer });
+  handlers.current = { onSelection, onFocusAnnotation, onAnchored, onAnswer };
+
+  const questionLabels: QuestionsLabels = useMemo(
+    () => ({
+      heading: t("analysisReview.questions.heading"),
+      kindProduct: t("analysisReview.questions.kind.product"),
+      kindTechnical: t("analysisReview.questions.kind.technical"),
+      blocking: t("analysisReview.questions.blockingBadge"),
+      recommendedPrefix: t("analysisReview.questions.recommendedPrefix"),
+      answerLabel: t("analysisReview.questions.answerLabel"),
+      answerPlaceholder: t("analysisReview.questions.answerPlaceholder"),
+      unanswered: t("analysisReview.questions.unanswered"),
+      recommendedStands: t("analysisReview.questions.recommendedStands"),
+    }),
+    [t],
+  );
+  // Same reasoning as `payload` above: only a real change (new answers, a
+  // newly recorded/withdrawn question) re-posts, so a poll never interrupts
+  // someone mid-sentence in an answer box — frameRuntime.ts additionally
+  // never overwrites the one textarea that currently has focus.
+  const questionsPayload = JSON.stringify([questionLabels, questions]);
+  const questionsRef = useRef(questions);
+  questionsRef.current = questions;
 
   const post = useCallback((message: Record<string, unknown>) => {
     iframeRef.current?.contentWindow?.postMessage(message, "*");
@@ -104,9 +144,17 @@ export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>
     post({ type: "tt:annotations", items: itemsRef.current });
   }, [post]);
 
+  const postQuestions = useCallback(() => {
+    post({ type: "tt:questions", labels: questionLabels, items: questionsRef.current });
+  }, [post, questionLabels]);
+
   useEffect(() => {
     postItems();
   }, [payload, postItems]);
+
+  useEffect(() => {
+    postQuestions();
+  }, [questionsPayload, postQuestions]);
 
   useEffect(() => {
     const onMessage = (event: MessageEvent) => {
@@ -117,6 +165,7 @@ export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>
       switch (message.type) {
         case "tt:ready":
           postItems();
+          postQuestions();
           break;
         case "tt:selection":
           handlers.current.onSelection({ quote: message.quote, prefix: message.prefix, suffix: message.suffix });
@@ -127,13 +176,21 @@ export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>
         case "tt:focus":
           handlers.current.onFocusAnnotation(message.id);
           break;
+        case "tt:answer":
+          handlers.current.onAnswer(message.id, message.text);
+          break;
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [postItems]);
+  }, [postItems, postQuestions]);
 
   useImperativeHandle(ref, () => ({ scrollTo: (id: string) => post({ type: "tt:scrollTo", id }) }), [post]);
+
+  const onFrameLoad = useCallback(() => {
+    postItems();
+    postQuestions();
+  }, [postItems, postQuestions]);
 
   return (
     <div className={cn("relative min-h-0 min-w-0", className)}>
@@ -148,7 +205,7 @@ export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>
           sandbox={FRAME_SANDBOX}
           srcDoc={srcdoc}
           referrerPolicy="no-referrer"
-          onLoad={postItems}
+          onLoad={onFrameLoad}
           className={cn("h-full w-full border-0", format === "html" ? "bg-white" : "bg-background")}
         />
       )}

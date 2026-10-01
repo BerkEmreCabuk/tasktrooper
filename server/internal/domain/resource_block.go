@@ -20,8 +20,15 @@ const ResourceHumanDecision = "human_decision"
 // a verdict is needed or something failed.
 const ResourceReleaseWatch = "release_watch"
 
+// ResourceAnalysisQuestions parks an analiz task that recorded a blocking
+// open question: the human answers it on the report page, not by a sweeper
+// noticing a resource is free, so this is released by
+// repository.Service.SubmitQuestions rather than a *_sweeper.go.
+const ResourceAnalysisQuestions = "analysis_questions"
+
 func ValidResource(name string) bool {
 	return name == ResourceMobileDevice || name == ResourceClaudeCodeQuota ||
 		name == ResourceDeployWatch || name == ResourceWorkOrder ||
-		name == ResourceHumanDecision || name == ResourceReleaseWatch
+		name == ResourceHumanDecision || name == ResourceReleaseWatch ||
+		name == ResourceAnalysisQuestions
 }

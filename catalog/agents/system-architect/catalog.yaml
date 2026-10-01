@@ -44,6 +44,8 @@ tool_policy:
         - claim_board_task
         - list_document_annotations
         - resolve_document_annotations
+        - record_open_questions
+        - list_open_questions
         - get_pipeline_status
         - get_task_pull_request
         - comment_on_pull_request

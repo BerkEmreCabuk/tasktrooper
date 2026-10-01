@@ -186,6 +186,15 @@ var AnalizDocumentTools = []string{
 	"update_task_document",
 }
 
+// OpenQuestionsTools let an analiz run record, edit and withdraw open
+// questions for the human instead of ask_user or prose in the report's risks
+// section. Granted alongside AnalizDocumentTools — anyone trusted to attach
+// the report is trusted to ask about it.
+var OpenQuestionsTools = []string{
+	"record_open_questions",
+	"list_open_questions",
+}
+
 // BoardProgressTools announce that work STARTED; neither produces the task's
 // deliverable. A subtask whose whole ledger is these two must not pass as
 // completed.
@@ -214,6 +223,7 @@ func buildRequiredAnalizTools() []string {
 	}
 	add(CodeExplorationTools...)
 	add(AnalizDocumentTools...)
+	add(OpenQuestionsTools...)
 	add(BoardProgressTools...)
 	add("add_task_comment", "list_task_comments", "list_task_documents", "create_board_task")
 	return out

@@ -32,6 +32,7 @@ import { AttachmentList } from "@/components/attachments/AttachmentList";
 import { PlanView } from "@/components/chat/PlanView";
 import { HumanUatDecision } from "@/components/board/HumanUatDecision";
 import { AnalizReviewDecision } from "@/components/board/AnalizReviewDecision";
+import { BlockedQuestionsBanner } from "@/components/board/analysis/BlockedQuestionsBanner";
 import { PipelineSection } from "@/components/board/PipelineSection";
 import { TaskPreviewsSection } from "@/components/board/TaskPreviewsSection";
 import { RELEASE_STATUS_VARIANT, ReleaseDrawer } from "@/components/projects/repository/deploy/ReleaseDrawer";
@@ -649,23 +650,32 @@ export function TaskDetailDrawer({
                         every question it asked, one per line — keep the breaks.
                         For a resource park the same field holds the block's
                         detail ("Claude AI usage limit reached"), so it reads the
-                        same way. */}
-                    {task.blocked_question && (
+                        same way. An analysis_questions park shows the actual
+                        pending questions instead — the human answers in the
+                        report, not here, so the generic detail line would be
+                        redundant with the structured list below it. */}
+                    {task.blocked_question && task.blocked_resource !== "analysis_questions" && (
                       <p className="whitespace-pre-line text-sm text-foreground">
                         {task.blocked_question}
                       </p>
                     )}
-                    {task.blocked_resource && (
-                      <p className="text-xs text-amber-700 dark:text-amber-400">
-                        {task.blocked_resource === "human_decision"
-                          ? t("boardArea.components.taskDetail.blockedHumanDecision")
-                          : task.blocked_resume_at
-                          ? t("boardArea.components.taskDetail.blockedResumeAt", {
-                              relative: formatResumeIn(task.blocked_resume_at),
-                              absolute: formatDate(task.blocked_resume_at),
-                            })
-                          : t("boardArea.components.taskDetail.blockedNoResume")}
-                      </p>
+                    {task.blocked_resource === "analysis_questions" ? (
+                      <BlockedQuestionsBanner task={task} repositoryId={repositoryId} />
+                    ) : (
+                      <>
+                        {task.blocked_resource && (
+                          <p className="text-xs text-amber-700 dark:text-amber-400">
+                            {task.blocked_resource === "human_decision"
+                              ? t("boardArea.components.taskDetail.blockedHumanDecision")
+                              : task.blocked_resume_at
+                              ? t("boardArea.components.taskDetail.blockedResumeAt", {
+                                  relative: formatResumeIn(task.blocked_resume_at),
+                                  absolute: formatDate(task.blocked_resume_at),
+                                })
+                              : t("boardArea.components.taskDetail.blockedNoResume")}
+                          </p>
+                        )}
+                      </>
                     )}
                     {task.blocked_session_id && task.assignee_agent_id && (
                       <Button asChild size="sm" variant="outline">

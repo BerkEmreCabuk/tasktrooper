@@ -25,6 +25,7 @@ export const lib = {
       deploy_watch: "Waiting for the deploy",
       work_order: "Waiting for blocking tasks",
       human_decision: "Needs a human decision",
+      analysis_questions: "Open questions need your answer",
     },
     blockedResourceFallback: "Waiting for a shared resource",
   },

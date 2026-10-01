@@ -143,12 +143,17 @@ func Default() Fixture {
 
 // requiredAnalizToolsSnapshot mirrors domain.RequiredAnalizTools at the time
 // migration 143 was written (CodeExplorationTools ++ AnalizDocumentTools ++
-// BoardProgressTools ++ the four extras) — see tool_policy.go.
+// BoardProgressTools ++ the four extras) — see tool_policy.go — PLUS every
+// later migration's own addition to the analyst role's required_tools
+// (migration 169: record_open_questions, list_open_questions), since
+// TestParityWithWorkflowtestDefault compares this fixture against the
+// result of running every migration, not only 143.
 var requiredAnalizToolsSnapshot = []string{
 	"codebase_search", "grep_code", "get_repo_tree", "get_symbol_skeleton", "expand_symbol_context", "read_file",
 	"add_task_document", "update_task_document",
 	"claim_board_task", "move_board_task",
 	"add_task_comment", "list_task_comments", "list_task_documents", "create_board_task",
+	"record_open_questions", "list_open_questions",
 }
 
 // ---- workflow.Reader / RoleResolver fakes ----

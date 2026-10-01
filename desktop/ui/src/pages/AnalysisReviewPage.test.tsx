@@ -2,19 +2,30 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BoardTask, TaskAnnotation, TaskDocument } from "@/api";
+import type { BoardTask, TaskAnnotation, TaskDocument, TaskQuestion } from "@/api";
 import { I18nProvider } from "@/hooks/useI18n";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { AnalysisReviewPage } from "@/pages/AnalysisReviewPage";
 
-const { listRepositoryTasks, listTaskDocuments, listTaskAnnotations, submitTaskAnnotations, updateRepositoryTask } =
-  vi.hoisted(() => ({
-    listRepositoryTasks: vi.fn(),
-    listTaskDocuments: vi.fn(),
-    listTaskAnnotations: vi.fn(),
-    submitTaskAnnotations: vi.fn(),
-    updateRepositoryTask: vi.fn(),
-  }));
+const {
+  listRepositoryTasks,
+  listTaskDocuments,
+  listTaskAnnotations,
+  submitTaskAnnotations,
+  updateRepositoryTask,
+  listTaskQuestions,
+  answerTaskQuestion,
+  submitTaskQuestions,
+} = vi.hoisted(() => ({
+  listRepositoryTasks: vi.fn(),
+  listTaskDocuments: vi.fn(),
+  listTaskAnnotations: vi.fn(),
+  submitTaskAnnotations: vi.fn(),
+  updateRepositoryTask: vi.fn(),
+  listTaskQuestions: vi.fn(),
+  answerTaskQuestion: vi.fn(),
+  submitTaskQuestions: vi.fn(),
+}));
 
 vi.mock("@/api", async () => {
   const actual = await vi.importActual<typeof import("@/api")>("@/api");
@@ -27,6 +38,9 @@ vi.mock("@/api", async () => {
       listTaskAnnotations,
       submitTaskAnnotations,
       updateRepositoryTask,
+      listTaskQuestions,
+      answerTaskQuestion,
+      submitTaskQuestions,
     },
   };
 });
@@ -85,6 +99,23 @@ function makeAnnotation(overrides: Partial<TaskAnnotation> = {}): TaskAnnotation
   };
 }
 
+function makeQuestion(overrides: Partial<TaskQuestion> = {}): TaskQuestion {
+  return {
+    id: "q1",
+    task_id: "task-1",
+    key: "Q1",
+    prompt: "Which cache backend?",
+    kind: "technical",
+    blocking: true,
+    recommended_answer: "",
+    status: "open",
+    answer: "",
+    created_at: "2026-09-20T00:00:00Z",
+    updated_at: "2026-09-20T00:00:00Z",
+    ...overrides,
+  };
+}
+
 function BoardProbe() {
   const location = useLocation();
   return <p>board at {location.pathname + location.search}</p>;
@@ -131,6 +162,9 @@ describe("AnalysisReviewPage", () => {
     });
     submitTaskAnnotations.mockReset();
     updateRepositoryTask.mockReset();
+    listTaskQuestions.mockReset().mockResolvedValue({ questions: [] });
+    answerTaskQuestion.mockReset();
+    submitTaskQuestions.mockReset();
   });
 
   it("opens the analiz HTML document in the sandboxed frame with its comments", async () => {
@@ -204,5 +238,59 @@ describe("AnalysisReviewPage", () => {
     listRepositoryTasks.mockResolvedValue({ tasks: [] });
     renderPage();
     expect(await screen.findByText("Task not found")).toBeInTheDocument();
+  });
+
+  it("disables Send answers while a blocking question is unanswered, naming it in the tooltip", async () => {
+    listRepositoryTasks.mockResolvedValue({
+      tasks: [makeTask({ column: "blocked", blocked_resource: "analysis_questions" })],
+    });
+    listTaskAnnotations.mockResolvedValue({ annotations: [] });
+    listTaskQuestions.mockResolvedValue({ questions: [makeQuestion({ blocking: true, status: "open" })] });
+    renderPage();
+
+    const sendAnswers = await screen.findByRole("button", { name: "Send answers" });
+    expect(sendAnswers).toBeDisabled();
+    expect(sendAnswers.getAttribute("title")).toContain("Q1");
+  });
+
+  it("sends the answers once every blocking question has one, and returns to the board", async () => {
+    listRepositoryTasks.mockResolvedValue({
+      tasks: [makeTask({ column: "blocked", blocked_resource: "analysis_questions" })],
+    });
+    listTaskAnnotations.mockResolvedValue({ annotations: [] });
+    listTaskQuestions.mockResolvedValue({
+      questions: [makeQuestion({ blocking: true, status: "answered", answer: "Redis" })],
+    });
+    submitTaskQuestions.mockResolvedValue({ submitted: 1, task: makeTask({ column: "in_progress" }) });
+    renderPage();
+
+    const sendAnswers = await screen.findByRole("button", { name: "Send answers" });
+    expect(sendAnswers).not.toBeDisabled();
+    fireEvent.click(sendAnswers);
+
+    await waitFor(() => expect(submitTaskQuestions).toHaveBeenCalledWith("repo-1", "task-1"));
+    expect(await screen.findByText("board at /board?task=task-1")).toBeInTheDocument();
+  });
+
+  it("counts an answered-unsubmitted question into Send comments, allowed with zero open annotations", async () => {
+    listTaskAnnotations.mockResolvedValue({ annotations: [] });
+    listTaskQuestions.mockResolvedValue({
+      questions: [makeQuestion({ blocking: false, status: "answered", answer: "Redis", submitted_at: null })],
+    });
+    renderPage();
+
+    const sendComments = await screen.findByRole("button", { name: "Send comments (1)" });
+    expect(sendComments).not.toBeDisabled();
+  });
+
+  it("notes unsent answers when approving, alongside unsent comments", async () => {
+    listTaskQuestions.mockResolvedValue({
+      questions: [makeQuestion({ blocking: false, status: "answered", answer: "Redis", submitted_at: null })],
+    });
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/will be applied when this task is split/)).toBeInTheDocument();
   });
 });

@@ -663,6 +663,23 @@
   {
     "type": "function",
     "function": {
+      "name": "list_open_questions",
+      "description": "READ every open question recorded on an analiz task, withdrawn ones included, each with its kind, whether it is blocking, its status and the human's answer (or recommended answer, for an unanswered non-blocking one). Call it after `resumed: questions_answered` or when the run context shows new answers, to see every question's current state before continuing the report from where it stopped.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"A-1\"). Optional in a task run — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "list_projects",
       "description": "List the projects on the board (id, name, description). Use to answer how many projects exist or what they are.",
       "parameters": {
@@ -833,6 +850,97 @@
           "task_id",
           "column"
         ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "record_open_questions",
+      "description": "Record open questions on an analiz task for the human to answer on the report page — never type them into the report HTML and never ask them with ask_user on this task type. `questions` ADDS up to 10 new ones; `update` edits a question you already recorded (you cannot change the PROMPT of one the human already answered — withdraw it and add a new one instead); `withdraw` removes questions an answer made moot. Default to non-blocking with your recommended answer; blocking is the exception for something the code and brief genuinely cannot settle. A blocking question still requires exploring first — a question the code already answers is not a question — and the report you attach before ending the run should say as far as you got. Returns the full current list (key, kind, blocking, status, answer).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "questions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "blocking": {
+                  "description": "true if the analysis cannot responsibly continue without an answer; false if a reasonable default exists.",
+                  "type": "boolean"
+                },
+                "kind": {
+                  "description": "\"product\" or \"technical\".",
+                  "enum": [
+                    "product",
+                    "technical"
+                  ],
+                  "type": "string"
+                },
+                "prompt": {
+                  "description": "The question itself, as the human will read it.",
+                  "type": "string"
+                },
+                "recommended_answer": {
+                  "description": "Required when blocking is false: the default you will proceed with if the human leaves it unanswered.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "prompt",
+                "kind",
+                "blocking"
+              ],
+              "type": "object"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"A-1\"). Optional in a task run — omit it there and the task in context is used.",
+            "type": "string"
+          },
+          "update": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "blocking": {
+                  "type": "boolean"
+                },
+                "key": {
+                  "description": "Which question to edit, e.g. \"Q2\".",
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "product",
+                    "technical"
+                  ],
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "string"
+                },
+                "recommended_answer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "withdraw": {
+            "items": {
+              "description": "Keys of questions to withdraw, e.g. \"Q3\".",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
         "type": "object"
       }
     }

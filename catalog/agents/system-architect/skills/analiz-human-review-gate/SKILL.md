@@ -56,21 +56,23 @@ When the report is written, self-reviewed, and attached via add_task_document (`
 You are re-dispatched (as the analiz task's assignee) when the human decides. The task's current column tells you which path:
 
 **Column is `done` → APPROVED.**
-1. Now create the per-project implementation tasks (project-split-decomposition + task-decomposition).
-2. Every one of them carries `derived_from: ["<this analiz task's key>"]`. Your report — spec and plan — is a document on THIS task and exists nowhere else — the reference is what puts it in front of the developer and what makes `list_task_documents` able to return it. A task without it is a task whose specification cannot be found.
-3. Every ordering between them goes in `blocked_by` (who codes first) and `deploy_depends_on` (who ships first), not in the description.
-4. `add_task_comment` listing every created task: title, assignee, project, and its order.
-5. `move_board_task` the analiz task to **released**. You are finished.
+1. Check for answered open questions first (`list_open_questions` if the context block doesn't already show them). An unanswered non-blocking question means its `recommended_answer` stands. If a human's answer contradicts the approved split or plan in a way this decomposition cannot absorb, do NOT decompose — `add_task_comment` naming the conflict and stop (open-questions-protocol).
+2. Now create the per-project implementation tasks (project-split-decomposition + task-decomposition).
+3. Every one of them carries `derived_from: ["<this analiz task's key>"]`. Your report — spec and plan — is a document on THIS task and exists nowhere else — the reference is what puts it in front of the developer and what makes `list_task_documents` able to return it. A task without it is a task whose specification cannot be found.
+4. Every ordering between them goes in `blocked_by` (who codes first) and `deploy_depends_on` (who ships first), not in the description.
+5. `add_task_comment` listing every created task: title, assignee, project, and its order.
+6. `move_board_task` the analiz task to **released**. You are finished.
 
 **The run is a revision (the task came back through `need_revision`) → REJECTED.**
 1. Read EVERY review comment. They are in your run context under "Review comments on your analysis document" — each with its id, the quoted passage and the human's comment. If that list says some were left out, or you are unsure you have them all, `list_document_annotations` with status `submitted` returns every one. Also read the task comments: the review's covering note is there.
 2. Read the report's source: `list_task_documents` on this task with the report's `document_id` and `raw: true`; follow `next_offset` until you have all of it.
 3. Fix each comment at the root of the concern (see root-cause-review reasoning — fix the cause, not the wording). Where a comment questions a fact about the code, re-read the code before you answer it.
-4. Revise the SAME report with `update_task_document` on its `document_id` — `edits` (each `old_text` copied exactly from the source) for targeted passages, `content` for a rewrite. Keep its sections and ids, and keep its TITLE unchanged (a new date creates a second document instead of revising this one). Never attach a second document. Leave `split` as the human approved unless a comment or a code re-read gives you a concrete reason to change it.
-5. Re-run the design and plan self-reviews on the revised report.
-6. `resolve_document_annotations` ONCE, with `{id, reply}` for every comment you were sent: the reply is one line saying what changed and where ("Replaced the queue with a cron job — see #design and #step-2"), or why you deliberately kept it.
-7. `add_task_comment` with a short summary of what changed. Then STOP: when the run ends with the report revised, the system moves the task back to **analiz_review** — do not move it yourself.
-8. **Create no implementation tasks.** A rejected analysis never spawns work.
+4. Honour every answered open question the same way (`list_open_questions` if you need the full list): fold the answer into the report and withdraw or replace any question it made moot. An unanswered non-blocking question means its `recommended_answer` stands — do not re-ask it (open-questions-protocol).
+5. Revise the SAME report with `update_task_document` on its `document_id` — `edits` (each `old_text` copied exactly from the source) for targeted passages, `content` for a rewrite. Keep its sections and ids, and keep its TITLE unchanged (a new date creates a second document instead of revising this one). Never attach a second document. Leave `split` as the human approved unless a comment or a code re-read gives you a concrete reason to change it.
+6. Re-run the design and plan self-reviews on the revised report.
+7. `resolve_document_annotations` ONCE, with `{id, reply}` for every comment you were sent: the reply is one line saying what changed and where ("Replaced the queue with a cron job — see #design and #step-2"), or why you deliberately kept it.
+8. `add_task_comment` with a short summary of what changed. Then STOP: when the run ends with the report revised, the system moves the task back to **analiz_review** — do not move it yourself.
+9. **Create no implementation tasks.** A rejected analysis never spawns work.
 
 ## Common Mistakes
 
@@ -81,6 +83,7 @@ You are re-dispatched (as the analiz task's assignee) when the human decides. Th
 - Attaching a revised report next to the old one — revise in place with `update_task_document`.
 - On rejection, tweaking wording instead of addressing the concern — the human will reject again.
 - Forgetting to list the intended project/task split in the review comment — the human is approving the split, so show it.
+- Decomposing while a human's answer to an open question still contradicts the approved split — resolve the conflict with the human first (open-questions-protocol).
 
 ## Red Flags — STOP
 

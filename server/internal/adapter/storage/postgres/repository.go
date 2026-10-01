@@ -1587,6 +1587,49 @@ func (s *BoardTaskStore) TakeBlockedResourceTask(ctx context.Context, resource s
 	return task, true, nil
 }
 
+// ReleaseAnalysisQuestionsBlock is TakeBlockedResourceTask narrowed to the
+// analysis_questions resource, with in_progress as its fallback instead of
+// todo: this resource only ever blocks a task that was in in_progress or
+// need_revision when its run ended, so blocked_origin_column is virtually
+// always set — the fallback is reached only if that invariant is somehow
+// violated, and in_progress is the least surprising place to land such a
+// task rather than todo, which would read as not yet started.
+func (s *BoardTaskStore) ReleaseAnalysisQuestionsBlock(ctx context.Context, taskID uuid.UUID) (domain.BoardTask, bool, error) {
+	row := s.pool.QueryRow(ctx, `
+		WITH claimed AS (
+			SELECT id FROM board_tasks
+			WHERE id = $2 AND blocked_resource = $1 AND blocked_at IS NOT NULL
+			FOR UPDATE SKIP LOCKED
+			LIMIT 1
+		), cleared AS (
+			UPDATE board_tasks bt
+			SET blocked_question      = NULL,
+			    blocked_resource      = NULL,
+			    blocked_at            = NULL,
+			    board_column          = COALESCE(NULLIF(bt.blocked_origin_column, ''), $3),
+			    blocked_origin_column = NULL,
+			    updated_at            = now()
+			FROM claimed c WHERE bt.id = c.id
+			RETURNING bt.id
+		)
+		`+boardTaskSelect+`
+		WHERE bt.id = (SELECT id FROM claimed)
+	`, domain.ResourceAnalysisQuestions, taskID, string(domain.TaskColumnInProgress))
+	task, err := scanBoardTask(row)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.BoardTask{}, false, nil
+	}
+	if err != nil {
+		return domain.BoardTask{}, false, fmt.Errorf("release analysis questions block: %w", err)
+	}
+	if task.BlockedOriginColumn != "" {
+		task.Column = task.BlockedOriginColumn
+	} else {
+		task.Column = domain.TaskColumnInProgress
+	}
+	return task, true, nil
+}
+
 // restoreBlockedOriginColumn returns the column a parked task belongs in. The
 // pre-UPDATE snapshot every claim reads still says 'blocked', and callers
 // dispatch off Column to pick the agents for the stage.

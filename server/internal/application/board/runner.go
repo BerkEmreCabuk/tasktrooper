@@ -829,6 +829,7 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 
 	runCtx := registry.ContextWithAgentID(registry.ContextWithRepositoryID(registry.ContextWithWorkspaceDir(ctx, workDir), job.RepositoryID), job.Run.AgentID)
 	runCtx = registry.ContextWithTaskID(runCtx, job.Task.ID)
+	runCtx = registry.ContextWithTaskType(runCtx, string(job.Task.TaskType))
 	runCtx, toolUsage := registry.ContextWithToolUsage(runCtx)
 	runCtx, tokenUsage := usageapp.ContextWithTokenUsage(runCtx)
 	if sessionID != uuid.Nil {
@@ -880,7 +881,7 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 	changedSinceVerdict := r.changedSinceByVerifiedSHA(runCtx, workDir, criteriaItems)
 	triggerMsg := buildTriggerMessage(job, wf, criteriaItems, changedSinceVerdict)
 
-	var scoreMsg, kpiMsg, memMsg, diffMsg, prMsg, pipelineMsg, revisionMsg, reviewMsg, clarificationsMsg, prevFailuresMsg, analysisMsg string
+	var scoreMsg, kpiMsg, memMsg, diffMsg, prMsg, pipelineMsg, revisionMsg, reviewMsg, clarificationsMsg, prevFailuresMsg, analysisMsg, questionsMsg string
 
 	if r.perfStore != nil {
 		if perfScore, perfErr := r.perfStore.GetScore(runCtx, agentRec.ID); perfErr == nil {
@@ -937,6 +938,7 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 		}
 	}
 	analysisMsg = r.analysisContext(ctx, job)
+	questionsMsg = r.openQuestionsContext(ctx, job)
 	comments := r.taskComments(ctx, job)
 	humanMsg := humanRequirementsMessage(comments)
 	if job.isRevision() {
@@ -980,6 +982,9 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 	}
 	if analysisMsg != "" {
 		history = append(history, domain.Message{Role: domain.RoleSystem, Content: analysisMsg})
+	}
+	if questionsMsg != "" {
+		history = append(history, domain.Message{Role: domain.RoleSystem, Content: questionsMsg})
 	}
 	if diffMsg != "" {
 		history = append(history, domain.Message{Role: domain.RoleSystem, Content: diffMsg})
@@ -1173,7 +1178,9 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 		}
 		if buildVerified {
 			r.advanceToCodeReview(ctx, job, wf, taskWorkspace, toolUsage)
-			r.advanceToAnalizReview(ctx, job, wf, toolUsage)
+			if !r.blockOnPendingQuestions(ctx, job) {
+				r.advanceToAnalizReview(ctx, job, wf, toolUsage)
+			}
 		} else {
 			log.Info().Str("task_id", job.Task.ID.String()).
 				Msg("hand-off: build verification failed after every fix round, task stays in the working column")

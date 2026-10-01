@@ -31,7 +31,8 @@ func TestMissingAnalizTools_DeveloperShapedPolicyIsMissingBoardCreateTools(t *te
 		"get_task_pull_request", "comment_on_pull_request", "commit_task_changes",
 	}}
 	got := domain.MissingAnalizTools(p)
-	assert.ElementsMatch(t, []string{"add_task_document", "update_task_document", "create_board_task"}, got)
+	assert.ElementsMatch(t, []string{"add_task_document", "update_task_document", "create_board_task",
+		"record_open_questions", "list_open_questions"}, got)
 }
 
 // Architect-shaped policy already holds every required tool, so routing an
@@ -45,6 +46,7 @@ func TestMissingAnalizTools_ArchitectShapedPolicyHasNoneMissing(t *testing.T) {
 		"list_task_documents", "list_acceptance_criteria", "set_criterion_completed", "cancel_criterion",
 		"list_test_cases", "list_projects", "list_repositories", "get_board_summary", "list_team",
 		"create_board_task", "add_task_document", "update_task_document", "attach_task_file",
+		"record_open_questions", "list_open_questions",
 		"claim_board_task",
 		"get_pipeline_status",
 		"get_task_pull_request", "comment_on_pull_request",

@@ -1,8 +1,8 @@
-import { FileText, Loader2, SearchX, Send } from "lucide-react";
+import { FileText, HelpCircle, Loader2, SearchX, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
-import { api, type BoardTask, type TaskAnnotation, type TaskDocument } from "@/api";
+import { api, type BoardTask, type TaskAnnotation, type TaskDocument, type TaskQuestion } from "@/api";
 import { AnalysisFrame, type AnalysisFrameHandle } from "@/components/board/analysis/AnalysisFrame";
 import { AnnotationsPanel } from "@/components/board/analysis/AnnotationsPanel";
 import { SubmitAnnotationsDialog } from "@/components/board/analysis/SubmitAnnotationsDialog";
@@ -17,7 +17,16 @@ import { Spinner } from "@/components/ui/spinner";
 import { useI18n } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
 import { useTheme } from "@/hooks/useTheme";
-import { annotationCounts, isRevising, pickReviewDocument } from "@/lib/analysis-review";
+import {
+  answeredUnsubmittedQuestions,
+  annotationCounts,
+  canSendAnswers,
+  isQuestionAnswerEditable,
+  isRevising,
+  pendingBlockingQuestions,
+  pickReviewDocument,
+  visibleQuestions,
+} from "@/lib/analysis-review";
 
 const REVISION_POLL_MS = 3000;
 
@@ -36,6 +45,7 @@ export function AnalysisReviewPage() {
   const [task, setTask] = useState<BoardTask | null>(null);
   const [documents, setDocuments] = useState<TaskDocument[]>([]);
   const [annotations, setAnnotations] = useState<TaskAnnotation[]>([]);
+  const [questions, setQuestions] = useState<TaskQuestion[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [anchored, setAnchored] = useState<Record<string, boolean>>({});
@@ -44,6 +54,7 @@ export function AnalysisReviewPage() {
   const [submitOpen, setSubmitOpen] = useState(false);
   const [approveConfirmOpen, setApproveConfirmOpen] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [sendingAnswers, setSendingAnswers] = useState(false);
   const frameRef = useRef<AnalysisFrameHandle>(null);
   // Bumped by every local annotation change, so a poll that left before the
   // change cannot land after it and put the old list back.
@@ -53,15 +64,19 @@ export function AnalysisReviewPage() {
 
   const refresh = useCallback(async () => {
     const version = mutationVersion.current;
-    const [tasks, docs, notes] = await Promise.allSettled([
+    const [tasks, docs, notes, qs] = await Promise.allSettled([
       api.listRepositoryTasks(repositoryId),
       api.listTaskDocuments(repositoryId, taskId),
       api.listTaskAnnotations(repositoryId, taskId),
+      api.listTaskQuestions(repositoryId, taskId),
     ]);
     if (tasks.status === "fulfilled") setTask((tasks.value.tasks ?? []).find((item) => item.id === taskId) ?? null);
     if (docs.status === "fulfilled") setDocuments(docs.value.documents ?? []);
     if (notes.status === "fulfilled" && version === mutationVersion.current) {
       setAnnotations(notes.value.annotations ?? []);
+    }
+    if (qs.status === "fulfilled" && version === mutationVersion.current) {
+      setQuestions(qs.value.questions ?? []);
     }
     const failed = [tasks, docs].find((result) => result.status === "rejected");
     return failed ? (failed.reason as unknown) : null;
@@ -113,6 +128,29 @@ export function AnalysisReviewPage() {
     [annotations, currentDocId],
   );
   const openCount = annotationCounts(annotations).open;
+
+  const blockedOnQuestions = task?.column === "blocked" && task?.blocked_resource === "analysis_questions";
+  const shownQuestions = useMemo(() => visibleQuestions(questions), [questions]);
+  const unansweredBlocking = useMemo(() => pendingBlockingQuestions(shownQuestions), [shownQuestions]);
+  const unsubmittedAnswers = useMemo(() => answeredUnsubmittedQuestions(shownQuestions), [shownQuestions]);
+  const canSend = canSendAnswers(shownQuestions);
+  const frameQuestions = useMemo(
+    () =>
+      task === null
+        ? []
+        : shownQuestions.map((question) => ({
+            id: question.id,
+            key: question.key,
+            kind: question.kind,
+            blocking: question.blocking,
+            prompt: question.prompt,
+            recommendedAnswer: question.recommended_answer,
+            answer: question.answer,
+            status: question.status,
+            editable: isQuestionAnswerEditable(question, task),
+          })),
+    [shownQuestions, task],
+  );
 
   useEffect(() => {
     setPending(null);
@@ -175,6 +213,33 @@ export function AnalysisReviewPage() {
     }
   };
 
+  const answerQuestion = useCallback(
+    async (id: string, text: string) => {
+      mutationVersion.current += 1;
+      try {
+        const { question } = await api.answerTaskQuestion(repositoryId, taskId, id, text);
+        setQuestions((prev) => prev.map((item) => (item.id === id ? question : item)));
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : t("analysisReview.questions.answerFailed"));
+        void refresh();
+      }
+    },
+    [repositoryId, taskId, refresh, t],
+  );
+
+  const sendAnswers = async () => {
+    setSendingAnswers(true);
+    try {
+      const result = await api.submitTaskQuestions(repositoryId, taskId);
+      toast.success(t("analysisReview.questions.sent", { count: result.submitted }));
+      navigate(boardPath);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("analysisReview.questions.sendFailed"));
+    } finally {
+      setSendingAnswers(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -230,20 +295,36 @@ export function AnalysisReviewPage() {
         {inReview && (
           <Button
             variant="outline"
-            onClick={() => (openCount > 0 ? setApproveConfirmOpen(true) : void approve())}
+            onClick={() => (openCount > 0 || unsubmittedAnswers.length > 0 ? setApproveConfirmOpen(true) : void approve())}
             disabled={approving}
           >
             {approving && <Loader2 className="animate-spin" />}
             {t("boardArea.components.taskDetail.analizReviewApprove")}
           </Button>
         )}
+        {blockedOnQuestions && (
+          <Button
+            onClick={() => void sendAnswers()}
+            disabled={sendingAnswers || !canSend}
+            title={
+              canSend
+                ? undefined
+                : t("analysisReview.questions.missingBlocking", {
+                    keys: unansweredBlocking.map((question) => question.key).join(", "),
+                  })
+            }
+          >
+            {sendingAnswers ? <Loader2 className="animate-spin" /> : <HelpCircle />}
+            {t("analysisReview.questions.sendAnswers")}
+          </Button>
+        )}
         <Button
           onClick={() => setSubmitOpen(true)}
-          disabled={!inReview || openCount === 0}
+          disabled={!inReview || (openCount === 0 && unsubmittedAnswers.length === 0)}
           title={inReview ? undefined : t("analysisReview.page.submitOnlyInReview")}
         >
           <Send />
-          {t("analysisReview.page.submit", { count: openCount })}
+          {t("analysisReview.page.submit", { count: openCount + unsubmittedAnswers.length })}
         </Button>
       </header>
       {revising && (
@@ -258,6 +339,7 @@ export function AnalysisReviewPage() {
             className="flex-1"
             document={currentDoc}
             annotations={frameAnnotations}
+            questions={frameQuestions}
             activeId={activeId}
             theme={theme}
             onSelection={(selection) => {
@@ -265,6 +347,7 @@ export function AnalysisReviewPage() {
             }}
             onFocusAnnotation={setActiveId}
             onAnchored={setAnchored}
+            onAnswer={(id, text) => void answerQuestion(id, text)}
           />
         ) : (
           <EmptyState
@@ -294,8 +377,19 @@ export function AnalysisReviewPage() {
       <ConfirmDialog
         open={approveConfirmOpen}
         onOpenChange={setApproveConfirmOpen}
-        title={t("analysisReview.page.approveWithOpenTitle")}
-        description={t("analysisReview.page.approveWithOpenBody", { count: openCount })}
+        title={
+          openCount > 0
+            ? t("analysisReview.page.approveWithOpenTitle")
+            : t("analysisReview.questions.approveWithAnswersTitle")
+        }
+        description={[
+          openCount > 0 ? t("analysisReview.page.approveWithOpenBody", { count: openCount }) : null,
+          unsubmittedAnswers.length > 0
+            ? t("analysisReview.questions.approveNote", { count: unsubmittedAnswers.length })
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" ")}
         confirmLabel={t("boardArea.components.taskDetail.analizReviewApprove")}
         variant="default"
         loading={approving}

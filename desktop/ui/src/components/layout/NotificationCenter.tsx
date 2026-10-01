@@ -96,7 +96,7 @@ export function NotificationCenter({ onAgentSeen }: NotificationCenterProps) {
 
   const handleItemClick = useCallback(
     (item: NotificationItem) => {
-      navigate(`/board?task=${encodeURIComponent(item.taskId)}`);
+      navigate(item.path ?? `/board?task=${encodeURIComponent(item.taskId)}`);
       if (item.agentId) onAgentSeen(item.agentId, item.createdAt);
       advanceCursor({ lastEventId: item.id, lastEventAt: item.createdAt });
     },

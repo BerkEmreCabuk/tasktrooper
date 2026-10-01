@@ -209,7 +209,13 @@ func (e *Executor) runTask(ctx context.Context, planID uuid.UUID, tc taskContext
 		return "", err
 	}
 
-	taskPolicy := domain.EnsureAskUserTool(domain.MergeToolPolicy(policy, agentRec.ToolPolicy))
+	// An analiz task never force-adds ask_user: asking there parks the report
+	// in a throwaway chat instead of the report page, and analysts use
+	// record_open_questions to ask the human instead.
+	taskPolicy := domain.MergeToolPolicy(policy, agentRec.ToolPolicy)
+	if registry.TaskTypeFromContext(ctx) != string(domain.TaskTypeAnaliz) {
+		taskPolicy = domain.EnsureAskUserTool(taskPolicy)
+	}
 	taskPolicy = domain.RestrictToPlannedTools(taskPolicy, tc.plannerTask.ToolNames)
 	model := agentRec.Model
 	if model == "" {

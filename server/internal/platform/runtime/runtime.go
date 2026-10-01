@@ -792,6 +792,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var relationStore port.TaskRelationStore
 	var documentStore port.TaskDocumentStore
 	var annotationStore port.TaskDocumentAnnotationStore
+	var questionStore port.TaskQuestionStore
 	var initiativeStore port.InitiativeProjectStore
 	var boardConfigStore port.BoardConfigStore
 	var roleStore port.RoleStore
@@ -856,6 +857,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			relationStore = pgstore.NewTaskRelationStore(pgDB)
 			documentStore = pgstore.NewTaskDocumentStore(pgDB)
 			annotationStore = pgstore.NewTaskDocumentAnnotationStore(pgDB)
+			questionStore = pgstore.NewTaskQuestionStore(pgDB)
 			initiativeStore = pgstore.NewInitiativeProjectStore(pgDB)
 			boardConfigStore = pgstore.NewBoardConfigStore(pgDB)
 			roleStore = pgstore.NewRoleStore(pgDB)
@@ -1507,6 +1509,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		repositorySvc.SetPublicBaseURL(cfg.Server.PublicBaseURL)
 		repositorySvc.SetTestCaseStore(testCaseStore)
 		repositorySvc.SetAnnotationStore(annotationStore)
+		repositorySvc.SetQuestionStore(questionStore)
 		// The index mirror's restorer, wired here rather than into the indexer's
 		// constructor (a dependency cycle: the repository service already holds
 		// the indexer). It stops a pass from walking a checkout that is not

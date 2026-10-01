@@ -25,6 +25,7 @@ export const lib: LibDict = {
       deploy_watch: "Deploy bekleniyor",
       work_order: "Bloke eden görevler bekleniyor",
       human_decision: "İnsan kararı gerekiyor",
+      analysis_questions: "Açık sorular cevabını bekliyor",
     },
     blockedResourceFallback: "Paylaşılan kaynak bekleniyor",
   },

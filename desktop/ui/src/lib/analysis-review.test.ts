@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { TaskAnnotation, TaskDocument } from "@/api";
-import { analysisReviewPath, annotationCounts, isRevising, pickReviewDocument } from "@/lib/analysis-review";
+import type { BoardTask, TaskAnnotation, TaskDocument, TaskQuestion } from "@/api";
+import {
+  analysisReviewPath,
+  answeredUnsubmittedQuestions,
+  annotationCounts,
+  canSendAnswers,
+  isQuestionAnswerEditable,
+  isRevising,
+  pendingBlockingQuestions,
+  pickReviewDocument,
+  visibleQuestions,
+} from "@/lib/analysis-review";
 
 function doc(id: string, overrides: Partial<TaskDocument> = {}): TaskDocument {
   return {
@@ -61,5 +71,74 @@ describe("analysis review helpers", () => {
       submitted: 1,
       resolved: 1,
     });
+  });
+});
+
+function question(overrides: Partial<TaskQuestion> = {}): TaskQuestion {
+  return {
+    id: "q1",
+    task_id: "task-1",
+    key: "Q1",
+    prompt: "Which cache?",
+    kind: "technical",
+    blocking: false,
+    recommended_answer: "The checkout cache",
+    status: "open",
+    answer: "",
+    created_at: "2026-09-20T00:00:00Z",
+    updated_at: "2026-09-20T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function boardTask(overrides: Partial<BoardTask> = {}): Pick<BoardTask, "column" | "blocked_resource"> {
+  return { column: "analiz_review", blocked_resource: undefined, ...overrides };
+}
+
+describe("open questions helpers", () => {
+  it("hides withdrawn questions", () => {
+    const questions = [question(), question({ id: "q2", status: "withdrawn" })];
+    expect(visibleQuestions(questions).map((q) => q.id)).toEqual(["q1"]);
+  });
+
+  it("finds pending-blocking questions: blocking and still open", () => {
+    const questions = [
+      question({ id: "q1", blocking: true, status: "open" }),
+      question({ id: "q2", blocking: true, status: "answered" }),
+      question({ id: "q3", blocking: false, status: "open" }),
+    ];
+    expect(pendingBlockingQuestions(questions).map((q) => q.id)).toEqual(["q1"]);
+  });
+
+  it("enables Send answers only once every blocking question is answered", () => {
+    const unanswered = [question({ blocking: true, status: "open" })];
+    const answered = [question({ blocking: true, status: "answered", answer: "Redis" })];
+    const noBlocking = [question({ blocking: false, status: "open" })];
+    expect(canSendAnswers(unanswered)).toBe(false);
+    expect(canSendAnswers(answered)).toBe(true);
+    expect(canSendAnswers(noBlocking)).toBe(true);
+    expect(canSendAnswers([])).toBe(true);
+  });
+
+  it("finds answered questions not yet delivered to the agent", () => {
+    const questions = [
+      question({ id: "q1", status: "answered", answer: "Redis", submitted_at: null }),
+      question({ id: "q2", status: "answered", answer: "Memcached", submitted_at: "2026-09-21T00:00:00Z" }),
+      question({ id: "q3", status: "open" }),
+    ];
+    expect(answeredUnsubmittedQuestions(questions).map((q) => q.id)).toEqual(["q1"]);
+  });
+
+  it("makes the answer editable while blocked on analysis_questions or in analiz_review, never once withdrawn", () => {
+    const blocked = boardTask({ column: "blocked", blocked_resource: "analysis_questions" });
+    const otherBlock = boardTask({ column: "blocked", blocked_resource: "human_decision" });
+    const review = boardTask({ column: "analiz_review" });
+    const inProgress = boardTask({ column: "in_progress" });
+
+    expect(isQuestionAnswerEditable(question(), blocked)).toBe(true);
+    expect(isQuestionAnswerEditable(question(), otherBlock)).toBe(false);
+    expect(isQuestionAnswerEditable(question(), review)).toBe(true);
+    expect(isQuestionAnswerEditable(question(), inProgress)).toBe(false);
+    expect(isQuestionAnswerEditable(question({ status: "withdrawn" }), review)).toBe(false);
   });
 });

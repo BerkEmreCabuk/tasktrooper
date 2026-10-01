@@ -14,6 +14,7 @@ The human reads the report in the task drawer, selects passages and comments on 
 - **Every claim a reviewer might question is plain text** — a paragraph, a table cell, a list item. Text inside an SVG or an image cannot be selected and commented on, so a diagram illustrates a point the prose already makes; it never carries a decision alone.
 - **Every section and every plan step has a stable `id`** (`summary`, `context`, `design`, `plan`, `step-3`, …). A revision keeps them; the implementation tasks you create later can cite `#step-3`, and a reviewer's comments stay findable.
 - **Developers read it as text.** Implementation tasks derived from this analysis get the report's text rendition in their run context (headings, paragraphs, lists, table rows, code blocks — markup dropped). Structure it so that rendition reads well: real headings, real lists, real tables.
+- **Open questions are not part of this document.** A genuine product decision the code can't settle is recorded with `record_open_questions` (open-questions-protocol), never written here and never asked with `ask_user`. The system renders every open question as an answer box above this report automatically — the `risks` section below is risks only.
 
 ## Required sections (in this order, with these ids)
 
@@ -23,7 +24,7 @@ The human reads the report in the task drawer, selects passages and comments on 
 4. **`diagrams` — Diagrams** (only where they help: a request flow, a state machine, a component boundary). Inline `<svg>` with a `<title>` — its title is what the text rendition shows. Omit the section rather than draw a box that restates a sentence.
 5. **`plan` — Implementation plan.** Numbered steps (`<ol class="steps">`, each `<li id="step-N">`): files to create/modify/test with exact paths, the interfaces each step consumes and produces, and the TDD cycle with the actual test code and the command to run. No placeholders — "add error handling", "similar to step 2" and "TBD" are plan failures (implementation-plan-authoring).
 6. **`split` — Task split.** One row per project/repository: the repository, the layer, the one-line scope of its implementation task, the plan steps it owns, and its order (`blocked_by` / `deploy_depends_on`). This is what the human is approving you to create.
-7. **`risks` — Risks & open questions.** Each risk with its mitigation; each open question numbered, marked product or technical, with your recommended answer. A product question you cannot resolve from the code also goes to the PM as a task comment.
+7. **`risks` — Risks.** Each risk with its mitigation. Open questions do not go here (or anywhere in the HTML) — record them with `record_open_questions` instead (open-questions-protocol); the system renders them above the report as answer boxes.
 
 ## HTML rules
 
@@ -87,7 +88,7 @@ svg .edge{stroke:var(--muted);stroke-width:1.5;fill:none}
   <li><a href="#summary">Summary</a></li><li><a href="#context">Context &amp; current state</a></li>
   <li><a href="#design">Proposed design</a></li><li><a href="#diagrams">Diagrams</a></li>
   <li><a href="#plan">Implementation plan</a></li><li><a href="#split">Task split</a></li>
-  <li><a href="#risks">Risks &amp; open questions</a></li>
+  <li><a href="#risks">Risks</a></li>
 </ol></nav>
 
 <section id="summary">
@@ -155,9 +156,8 @@ svg .edge{stroke:var(--muted);stroke-width:1.5;fill:none}
 </section>
 
 <section id="risks">
-  <h2>Risks &amp; open questions</h2>
+  <h2>Risks</h2>
   <div class="callout risk"><strong>Risk:</strong> large projects — mitigation: stream rows, cap at 50k.</div>
-  <ol><li><strong>(product)</strong> Include archived tasks? Recommended: no.</li></ol>
 </section>
 </main></body></html>
 ```
@@ -174,7 +174,7 @@ The report is revised in place, never replaced. After a review (the task comes b
 ## Self-review (before the run ends)
 
 - All seven sections present with their ids; the `plan` steps are `step-1…step-N`.
-- **Grounding pass** — before attaching, re-verify every claim, not just that you made some exploration call earlier: every path in `context` and `plan` exists (`get_repo_tree`/`grep_code`) or the step says *create*; every consumed symbol's signature matches what `get_symbol_skeleton` shows now; every third-party call matches the version locked in the lockfile; every verify command appears in `list_component_checks` or `get_project_brief`. Anything you cannot verify this way is removed from the plan or moved to `risks` as an open question — never left in as an assumption.
+- **Grounding pass** — before attaching, re-verify every claim, not just that you made some exploration call earlier: every path in `context` and `plan` exists (`get_repo_tree`/`grep_code`) or the step says *create*; every consumed symbol's signature matches what `get_symbol_skeleton` shows now; every third-party call matches the version locked in the lockfile; every verify command appears in `list_component_checks` or `get_project_brief`. Anything you cannot verify this way is removed from the plan; if it's a risk worth flagging, note it in `risks`; if only the human can decide it, record it with `record_open_questions` (open-questions-protocol) — never left in as an assumption.
 - No `<script>`, no external URL in `<link>`/`<img>`/`@import`/fonts.
 - Every decision and requirement is readable as text, not only inside a diagram.
 - Nothing is readable two ways; no TBD/TODO; the `split` table matches the plan's steps.

@@ -434,6 +434,10 @@ func (f *fakeReleaseTaskStore) TakeBlockedResourceTask(context.Context, string, 
 	return domain.BoardTask{}, false, nil
 }
 
+func (f *fakeReleaseTaskStore) ReleaseAnalysisQuestionsBlock(context.Context, uuid.UUID) (domain.BoardTask, bool, error) {
+	return domain.BoardTask{}, false, nil
+}
+
 func (f *fakeReleaseGit) RevertCommitOnDefaultBranch(context.Context, string, string, string) (string, error) {
 	return "", nil
 }

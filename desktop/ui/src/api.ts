@@ -946,6 +946,40 @@ export const ANNOTATION_QUOTE_MAX = 2000;
 export const ANNOTATION_BODY_MAX = 4000;
 export const ANNOTATION_CONTEXT_MAX = 200;
 
+export type TaskQuestionKind = "product" | "technical";
+export type TaskQuestionStatus = "open" | "answered" | "withdrawn";
+
+/**
+ * An open question the analyst recorded on an `analiz` task
+ * (`record_open_questions`). `blocking` ones park the task in `blocked` with
+ * `blocked_resource: "analysis_questions"` until every one of them is
+ * answered; non-blocking ones ride along to `analiz_review` and the analyst
+ * proceeds on `recommended_answer` until a human overrides it.
+ */
+export interface TaskQuestion {
+  id: string;
+  task_id: string;
+  key: string;
+  prompt: string;
+  kind: TaskQuestionKind;
+  blocking: boolean;
+  recommended_answer: string;
+  status: TaskQuestionStatus;
+  answer: string;
+  answered_at?: string | null;
+  submitted_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// Mirrors the server's validation limit (task_questions.answer).
+export const TASK_QUESTION_ANSWER_MAX = 4000;
+
+export interface SubmitTaskQuestionsResult {
+  task: BoardTask;
+  submitted: number;
+}
+
 /**
  * Metadata of a stored binary attachment (image/document). The bytes live in
  * Postgres and are served only by GET /v1/attachments/{id} — which requires
@@ -4418,6 +4452,25 @@ export const api = {
     request<SubmitTaskAnnotationsResult>(`/v1/repositories/${repositoryId}/tasks/${taskId}/annotations/submit`, {
       method: "POST",
       body: JSON.stringify(note?.trim() ? { note: note.trim() } : {}),
+    }),
+
+  listTaskQuestions: (repositoryId: string, taskId: string) =>
+    request<{ questions: TaskQuestion[] | null }>(`/v1/repositories/${repositoryId}/tasks/${taskId}/questions`),
+
+  // Allowed only while the task is blocked on analysis_questions or sitting in
+  // analiz_review (409 otherwise); an empty answer reopens the question.
+  answerTaskQuestion: (repositoryId: string, taskId: string, questionId: string, answer: string) =>
+    request<{ question: TaskQuestion }>(
+      `/v1/repositories/${repositoryId}/tasks/${taskId}/questions/${questionId}`,
+      { method: "PATCH", body: JSON.stringify({ answer }) },
+    ),
+
+  // Sends every answered-but-unsubmitted question, clears the block and
+  // re-dispatches the task; 422 if a pending blocking question is unanswered.
+  submitTaskQuestions: (repositoryId: string, taskId: string) =>
+    request<SubmitTaskQuestionsResult>(`/v1/repositories/${repositoryId}/tasks/${taskId}/questions/submit`, {
+      method: "POST",
+      body: JSON.stringify({}),
     }),
 
   listAcceptanceCriteria: (repositoryId: string, taskId: string) =>

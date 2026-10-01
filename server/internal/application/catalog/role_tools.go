@@ -223,6 +223,9 @@ func architectToolPolicy() domain.ToolPolicy {
 	// The human reviews an analysis passage by passage; these read those
 	// comments and answer them once the report is revised.
 	tools = append(tools, "list_document_annotations", "resolve_document_annotations")
+	// Open questions for the human, answered on the report page instead of
+	// ask_user or prose in the risks section.
+	tools = append(tools, "record_open_questions", "list_open_questions")
 	tools = append(tools, "get_pipeline_status")
 	// The architect reads the PR it is judging and answers threads; no commit_task_changes.
 	tools = append(tools, rolePRReadTools...)

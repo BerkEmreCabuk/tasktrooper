@@ -47,7 +47,7 @@ Turn an analiz task into a fully-formed technical understanding through investig
 
 ### 5. Resolve unknowns
 - Resolve technical unknowns from the code, never by assuming.
-- Only genuine PRODUCT decisions escalate — as numbered open questions in the report's `risks` section with your recommended answer. You have no `ask_user`, so you cannot post a question and wait for chat: the human answers at analiz_review. Never block on a question the codebase can answer.
+- Only genuine PRODUCT decisions escalate — record them with `record_open_questions`, never in the report's text and never with `ask_user` (you have no `ask_user` tool here). Default to non-blocking: a reasonable answer exists, so record it as `recommended_answer` and keep going. Mark one blocking only when proceeding on any guess would waste the implementation (open-questions-protocol has the worked examples). Never block on a question the codebase can answer.
 
 ## Output
 

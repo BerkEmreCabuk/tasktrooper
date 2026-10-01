@@ -25,6 +25,8 @@ func init() {
 		listTaskDocumentsToolName,
 		listDocumentAnnotationsToolName,
 		resolveDocumentAnnotationsToolName,
+		recordOpenQuestionsToolName,
+		listOpenQuestionsToolName,
 		listCriteriaToolName,
 		setCriterionToolName,
 		cancelCriterionToolName,

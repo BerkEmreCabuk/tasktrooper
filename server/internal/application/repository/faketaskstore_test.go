@@ -124,3 +124,7 @@ func (f *fakePackageTaskStore) ListBlockedByResource(context.Context, string, in
 func (f *fakePackageTaskStore) TakeBlockedResourceTask(context.Context, string, uuid.UUID) (domain.BoardTask, bool, error) {
 	return domain.BoardTask{}, false, nil
 }
+
+func (f *fakePackageTaskStore) ReleaseAnalysisQuestionsBlock(context.Context, uuid.UUID) (domain.BoardTask, bool, error) {
+	return domain.BoardTask{}, false, nil
+}

@@ -183,3 +183,7 @@ func (f *taskChatTaskStore) ListBlockedByResource(context.Context, string, int) 
 func (f *taskChatTaskStore) TakeBlockedResourceTask(context.Context, string, uuid.UUID) (domain.BoardTask, bool, error) {
 	return domain.BoardTask{}, false, nil
 }
+
+func (f *taskChatTaskStore) ReleaseAnalysisQuestionsBlock(context.Context, uuid.UUID) (domain.BoardTask, bool, error) {
+	return domain.BoardTask{}, false, nil
+}

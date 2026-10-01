@@ -41,6 +41,7 @@ import { useCachedState, useFirstLoad } from "@/hooks/useCachedState";
 import { tStatic, useI18n } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
 import { useProjectScope } from "@/hooks/useProjectScope";
+import { analysisReviewPath } from "@/lib/analysis-review";
 import {
   CACHE_AGENTS,
   CACHE_CONFIG,
@@ -513,6 +514,23 @@ export function BoardPage() {
                 >
                   {workOrderBlockerLabel(task.blocked_question || "")}
                 </Badge>
+              ) : task.blocked_resource === "analysis_questions" ? (
+                // Unlike every other resource park, this one is answerable —
+                // same clickable treatment as the plain clarification badge
+                // below, just pointed at the analysis report instead of chat.
+                <Link
+                  to={analysisReviewPath(task.repository_id, task.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  title={task.blocked_question || blockedResourceLabel(task.blocked_resource)}
+                >
+                  <Badge
+                    variant="outline"
+                    className="gap-1 border-amber-500/40 bg-amber-500/10 text-micro text-amber-600 hover:bg-amber-500/20 dark:text-amber-400"
+                  >
+                    <HelpCircle className="h-3 w-3" />
+                    {t("boardArea.board.answerQuestions")}
+                  </Badge>
+                </Link>
               ) : (
                 task.blocked_resource && (
                   <Badge

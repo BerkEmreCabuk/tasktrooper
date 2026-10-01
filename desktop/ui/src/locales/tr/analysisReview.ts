@@ -18,6 +18,26 @@ export const analysisReview: AnalysisReviewDict = {
     approveWithOpenBody:
       "Açık yorumlar ({count}) agent'a gönderilmedi. Onaylamak görevi Tamamlandı koluna taşır ve bu yorumlar gönderilmeden kalır.",
   },
+  questions: {
+    heading: "Açık sorular",
+    kind: {
+      product: "Ürün",
+      technical: "Teknik",
+    },
+    blockingBadge: "Engelleyici",
+    recommendedPrefix: "Önerilen: ",
+    answerLabel: "Cevabın",
+    answerPlaceholder: "Cevabını yaz",
+    unanswered: "Cevaplanmadı",
+    recommendedStands: "Cevaplanmadı — önerilen cevap geçerli",
+    sendAnswers: "Cevapları gönder",
+    missingBlocking: "Göndermeden önce {keys} sorusunu cevapla",
+    sent: "Cevaplar gönderildi ({count}). Agent analize devam ediyor.",
+    sendFailed: "Cevaplar gönderilemedi",
+    answerFailed: "Cevap kaydedilemedi",
+    approveWithAnswersTitle: "Gönderilmemiş cevaplarla onaylansın mı?",
+    approveNote: "{count} soruya verdiğin cevaplar, bu görev bölündüğünde uygulanacak.",
+  },
   submit: {
     title: "Yorumların agent'a gönderilsin mi? ({count})",
     description:

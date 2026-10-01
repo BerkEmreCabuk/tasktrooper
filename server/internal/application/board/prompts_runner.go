@@ -116,6 +116,14 @@ type analysisContextTruncNoteInput struct{ Key string }
 
 var analysisContextTruncNoteKey = prompt.Define("board.analysis_context_trunc_note", analysisContextTruncNoteInput{Key: "x"})
 
+type openQuestionsBlockDetailInput struct{ Lines []string }
+
+// openQuestionsBlockDetailKey is BlockOnResource's `detail` line when an
+// analiz run ends with a pending blocking question: see
+// blockOnPendingQuestions in questions_context.go.
+var openQuestionsBlockDetailKey = prompt.Define("board.open_questions_block_detail",
+	openQuestionsBlockDetailInput{Lines: []string{"Q1: Which queue should this use?"}})
+
 var ungroundedAnalysisGuardKey = prompt.Define("guard.ungrounded_analysis", struct{}{})
 var ungroundedQAGuardKey = prompt.Define("guard.ungrounded_qa", struct{}{})
 var noUIEvidenceGuardKey = prompt.Define("guard.no_ui_evidence", struct{}{})

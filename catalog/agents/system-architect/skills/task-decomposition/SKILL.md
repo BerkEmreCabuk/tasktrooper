@@ -52,11 +52,12 @@ Three orderings, three arguments, all pointing the same way — **this task come
 
 Task creation happens ONLY after the human approves the analysis (see analiz-human-review-gate). The analiz task is in the `done` column when you run this — that column IS the approval signal.
 
-1. create_board_task per slice, column=todo, with `assignee` set to the matching developer role (REQUIRED — an unassigned task is never dispatched and sits idle) and `derived_from` set to this analiz task. Call `list_team` to confirm the valid role names. Developers pick up their assigned tasks autonomously — no further human gate on implementation tasks.
-2. Create them in dependency order — the producer first — so each dependent can name the task it waits for by key in `blocked_by` / `deploy_depends_on`. If you only realise an order after the fact, `update_board_task` with `blocked_by` adds it.
-3. Putting every slice in `todo` at once is correct even when they are ordered: a task whose blocker is open is parked automatically and released the moment the blocker lands. Holding tasks back in `backlog` to fake an order is what the arguments replace.
-4. add_task_comment on the analiz task listing every created task: title, assignee, project, and its order (what it waits for and what ships after it).
-5. Move the analiz task to **released** — you are finished with it. (You never move it to `done`; the human does that as their approval action.)
+1. Check for answered open questions before creating anything (`list_open_questions` if the context block doesn't already show them; open-questions-protocol). Apply every answer, and an unanswered non-blocking question's `recommended_answer`, to the tasks you create. If an answer contradicts the approved split or plan in a way this decomposition cannot absorb, create nothing — `add_task_comment` naming the conflict and stop.
+2. create_board_task per slice, column=todo, with `assignee` set to the matching developer role (REQUIRED — an unassigned task is never dispatched and sits idle) and `derived_from` set to this analiz task. Call `list_team` to confirm the valid role names. Developers pick up their assigned tasks autonomously — no further human gate on implementation tasks.
+3. Create them in dependency order — the producer first — so each dependent can name the task it waits for by key in `blocked_by` / `deploy_depends_on`. If you only realise an order after the fact, `update_board_task` with `blocked_by` adds it.
+4. Putting every slice in `todo` at once is correct even when they are ordered: a task whose blocker is open is parked automatically and released the moment the blocker lands. Holding tasks back in `backlog` to fake an order is what the arguments replace.
+5. add_task_comment on the analiz task listing every created task: title, assignee, project, and its order (what it waits for and what ships after it).
+6. Move the analiz task to **released** — you are finished with it. (You never move it to `done`; the human does that as their approval action.)
 
 ## Red Flags
 
@@ -70,3 +71,4 @@ Task creation happens ONLY after the human approves the analysis (see analiz-hum
 - An order that exists only as "Depends on: …" prose → nothing enforces it; add `blocked_by` / `deploy_depends_on`.
 - A cycle refused at creation → your split is wrong, not the board. Merge the two tasks or move the shared piece into its own task that goes first.
 - Moving the analiz task to `done` yourself → `done` is the human's approval move and `analiz_review` is the system's; you move it only to `released`.
+- Decomposing while an open question's answer still contradicts the approved split — stop and comment instead (open-questions-protocol).

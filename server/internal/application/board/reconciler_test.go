@@ -563,6 +563,10 @@ func (f *fakeBoardTaskStore) TakeBlockedResourceTask(context.Context, string, uu
 	return domain.BoardTask{}, false, nil
 }
 
+func (f *fakeBoardTaskStore) ReleaseAnalysisQuestionsBlock(context.Context, uuid.UUID) (domain.BoardTask, bool, error) {
+	return domain.BoardTask{}, false, nil
+}
+
 func (s *ReconcilerSuite) TestOrphanedPendingRunIsRecoveredWellBeforeTheStaleWindow() {
 	assignee := uuid.New()
 	taskID := uuid.New()

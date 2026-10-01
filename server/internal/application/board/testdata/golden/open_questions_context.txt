@@ -1,0 +1,14 @@
+
+## Open questions — A-12 (CSV export)
+
+### Q1 (technical, blocking)
+Which queue should the worker use?
+Unanswered (blocking)
+
+### Q2 (product)
+Keep the old CSV export format?
+Unanswered — recommended answer stands: Keep it unchanged.
+
+### Q3 (product)
+Should the report link to the raw diff?
+Answer (human): No, link to the PR instead.

@@ -56,6 +56,6 @@ Look at the finished design sections with fresh eyes and fix issues inline:
 1. **Placeholder scan** — no "TBD", "TODO", incomplete sections, or vague requirements.
 2. **Internal consistency** — no section contradicts another; the architecture matches the component descriptions.
 3. **Scope check** — focused enough for ONE implementation plan? If not, decompose into sub-specs.
-4. **Ambiguity check** — could any requirement be read two different ways? Pick one reading and state it explicitly.
+4. **Ambiguity check** — could any requirement be read two different ways? When the code or the brief settles it, pick one reading and state it explicitly. When only the human can settle it — a genuine product choice, not a detail you can infer — record it with `record_open_questions` instead of guessing: non-blocking with your recommended reading when a default is defensible (the usual case), blocking only when proceeding on either reading would waste the implementation (open-questions-protocol).
 
 A design that fails any check is not ready — fix it before writing the plan section (implementation-plan-authoring).

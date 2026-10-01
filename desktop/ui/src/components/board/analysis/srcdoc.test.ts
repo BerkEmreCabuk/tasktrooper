@@ -5,6 +5,7 @@ import {
   FRAME_SANDBOX,
   frameCsp,
   markdownFrameHtml,
+  OPEN_QUESTIONS_ID,
   parseFrameMessage,
 } from "@/components/board/analysis/srcdoc";
 
@@ -134,5 +135,43 @@ describe("parseFrameMessage", () => {
     expect(parseFrameMessage({ type: "tt:selection", quote: "q", prefix: "x".repeat(201), suffix: "" })).toBeNull();
     expect(parseFrameMessage({ type: "tt:focus", id: "" })).toBeNull();
     expect(parseFrameMessage({ type: "tt:anchored", results: "all" })).toBeNull();
+  });
+
+  it("accepts a well-formed tt:answer, including an empty answer that reopens the question", () => {
+    expect(parseFrameMessage({ type: "tt:answer", id: "q1", text: "Ship it" })).toEqual({
+      type: "tt:answer",
+      id: "q1",
+      text: "Ship it",
+    });
+    expect(parseFrameMessage({ type: "tt:answer", id: "q1", text: "" })).toEqual({
+      type: "tt:answer",
+      id: "q1",
+      text: "",
+    });
+  });
+
+  it("rejects a tt:answer with a bad id or an over-long answer", () => {
+    expect(parseFrameMessage({ type: "tt:answer", id: "", text: "x" })).toBeNull();
+    expect(parseFrameMessage({ type: "tt:answer", id: 42, text: "x" })).toBeNull();
+    expect(parseFrameMessage({ type: "tt:answer", id: "q1", text: 42 })).toBeNull();
+    expect(parseFrameMessage({ type: "tt:answer", id: "q1", text: "x".repeat(4001) })).toBeNull();
+    expect(parseFrameMessage({ type: "tt:answer", id: "q1", text: "x".repeat(4000) })).toEqual({
+      type: "tt:answer",
+      id: "q1",
+      text: "x".repeat(4000),
+    });
+  });
+});
+
+describe("Open questions container", () => {
+  it("always adds an empty, hidden, skip-marked section as the first element of <body>", () => {
+    const srcdoc = buildAnalysisSrcdoc("<p>Report body</p>", { nonce: "n", script: "" });
+    const doc = parse(srcdoc);
+    const section = doc.body.firstElementChild!;
+    expect(section.id).toBe(OPEN_QUESTIONS_ID);
+    expect(section.hasAttribute("data-tt-skip")).toBe(true);
+    expect(section.hasAttribute("hidden")).toBe(true);
+    expect(section.textContent).toBe("");
+    expect(doc.querySelector("p")?.textContent).toBe("Report body");
   });
 });

@@ -6,4 +6,4 @@ You may run read-only commands in the workspace — `git log`, `git show`, an ex
 
 Tick each acceptance criterion your report fully answers with `set_criterion_completed`, in the same step that covered it. Never tick one the report does not answer — say so in your summary comment instead.
 
-Finish with a summary comment (approach, the report's title, the task split you intend), then STOP: when this run ends with the report attached/revised, the system moves the task to `analiz_review` for you — do NOT move it yourself and never plan a step for the move. The human approves there, and no implementation task is created before they do.
+Finish with a summary comment (approach, the report's title, the task split you intend), then STOP: when this run ends with the report attached/revised and no pending blocking question, the system moves the task to `analiz_review` for you — do NOT move it yourself and never plan a step for the move. A pending blocking question (`record_open_questions`) parks it in `blocked` instead, report attached as far as it got. The human approves at `analiz_review`, and no implementation task is created before they do.

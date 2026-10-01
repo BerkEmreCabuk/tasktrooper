@@ -62,6 +62,7 @@ type Service struct {
 	relations        port.TaskRelationStore
 	documents        port.TaskDocumentStore
 	annotations      port.TaskDocumentAnnotationStore
+	questions        port.TaskQuestionStore
 	comments         port.TaskCommentStore
 	attachments      port.AttachmentStore
 	columns          ColumnValidator
@@ -162,6 +163,10 @@ func (s *Service) SetReviewGate(g *board.ReviewGate) {
 
 func (s *Service) SetAnnotationStore(store port.TaskDocumentAnnotationStore) {
 	s.annotations = store
+}
+
+func (s *Service) SetQuestionStore(store port.TaskQuestionStore) {
+	s.questions = store
 }
 
 func (s *Service) SetEvolution(n RevisionNotifier) {
@@ -1681,6 +1686,13 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 		}
 		if s.evolution != nil && *req.Column == domain.TaskColumnNeedRevision {
 			s.evolution.NotifyRevision(ctx, updated)
+		}
+		// Approval: analiz_review -> done. The human's answers to any
+		// non-blocking question that rode along into analiz_review are told
+		// to the agent now, same as a submit, but with no extra comment —
+		// the approval comment already says the review passed.
+		if prevColumn == domain.TaskColumnAnalizReview && *req.Column == domain.TaskColumnDone {
+			s.markQuestionsSubmitted(ctx, updated.ID)
 		}
 
 		wf, wfErr := s.workflow(ctx, updated.TaskType)
