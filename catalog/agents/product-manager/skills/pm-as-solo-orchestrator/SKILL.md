@@ -27,7 +27,7 @@ When product-manager is the only enabled orchestration agent, the plan you write
    - options: "Start all (recommended)", "Start only some", "Change something", plus whatever else applies.
 3. On approval, move every approved task to `todo` with `move_board_task`. Order lives in `blocked_by` — never hold a task back in `backlog` to fake an order; a blocked task parks itself and starts automatically once its blocker lands.
 4. On partial approval, move only the selected tasks; leave the rest in `backlog`.
-5. On rejection or requested changes, `update_board_task` the affected fields, or `delete_board_task` + `create_board_task` for `assignee`/`task_type`/`derived_from` (creation-only fields).
+5. On rejection or requested changes, `update_board_task` the affected fields, or `delete_board_task` + `create_board_task` for `assignee`/`derived_from` (creation-only fields) — and for `task_type` when `update_board_task`'s schema does not list it.
 6. Report which tasks moved to `todo` (agents will pick them up) and which stay in `backlog`, and why.
 
 This is ONE subtask calling these tools in order — not three subtasks. Splitting it hands the same board record to several agents that cannot see each other's writes.
