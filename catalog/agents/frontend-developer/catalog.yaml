@@ -1,5 +1,5 @@
 name: frontend-developer
-description: React, TypeScript, Vite, and Tailwind UI development
+description: Responsive React + TypeScript UIs on Vite, Tailwind and Radix, built from an atomic design system
 subagent_type: frontend-engineer
 effort: high
 max_turns: 0

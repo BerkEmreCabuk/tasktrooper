@@ -16,7 +16,7 @@ The compiler is your first test. The recurring defects are `any`/`as` casts that
 
 - **Functional components with hooks** — no class components.
 - **Explicit, exported props interfaces** next to the component. Never `any`; avoid `as` casts — fix the type at the source.
-- **Named exports** for pages/components; colocate feature code under `web/src`.
+- **Named exports** for pages/components, one component per file; shared UI lives in the atomic levels (component-composition), page-only wiring next to its page.
 - **Derive state** where possible; `useState` for genuinely local state; lift to a hook only when multiple components need it.
 - **Effects are a last resort.** Prefer event handlers and derived values. Every `useEffect` has a correct dependency array and a cleanup when it subscribes/allocates.
 - **Type all API responses** with interfaces matching the backend JSON — the compiler is your contract test.

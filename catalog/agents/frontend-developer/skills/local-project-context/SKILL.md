@@ -53,7 +53,7 @@ Run the real command in this run and read the output — see verify-before-done.
 |-------|-------------|------------|
 | Go backend | `go build ./...` | `go test ./internal/...` (affected packages) |
 | Java backend | `./mvnw -q package` (or `quarkus build`) | `./mvnw test` |
-| Web frontend | `npm run build` (in `web/`) | `npm test` |
+| Web frontend | `npm run build` (in the frontend package directory) | `npm test` |
 | Flutter mobile | `flutter build` | `flutter test` |
 
 If the build or tests do not pass in this run, the task is not ready to move forward — say what failed.

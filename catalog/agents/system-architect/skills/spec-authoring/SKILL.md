@@ -23,6 +23,8 @@ Where each part lives in the report: Context / Goal feeds `summary` and `context
 6. **Testing approach** — what proves each component works: unit, integration, end-to-end.
 7. **Out of scope** — explicitly named items deferred or excluded.
 
+**UI design (web UI analyses only):** when the analysis includes web UI, the design section also covers: the pages and their sections; the component inventory by atomic level (reuse existing vs. new, naming each); design tokens/brand direction (or "use the existing system"); responsive behaviour per breakpoint for anything non-trivial; and the states each view needs (loading/empty/error, form states).
+
 ## Writing Rules
 
 - State decisions, not options: the exploration happened in technical-analysis-workflow; the spec records what WILL be built.

@@ -43,12 +43,22 @@ Every task a developer finishes lands in code_review as a pull request. You are 
 **Testing**
 - Tests verify real behavior, not mocks. Edge cases covered. New behavior has tests in the same diff. Pipeline green.
 
+**Frontend / UI changes**
+- Component placed at the right atomic level and reused instead of rebuilt — `INVENTORY.md` updated for any new component.
+- Presentation-only below pages: atoms/molecules/organisms/templates take props in and callbacks out — no data hooks, no API calls.
+- Semantic tokens only — no raw palette classes, no hex, no arbitrary px values; `ui-guard` green if the repo has it.
+- Mobile-first classes (unprefixed = phone, `sm:`/`md:`/`lg:` upward) — no fixed pixel widths, no `h-screen`.
+- Required states present: loading/empty/error on data views, hover/focus-visible/active/disabled on controls.
+- Accessibility basics: visible labels, focus-visible rings, icon-only buttons have accessible names.
+- The developer's closing message names the four widths it checked (360/768/1024/1440) — a UI diff with no such evidence is a finding.
+
 ## Severity Calibration
 
 Not everything is Critical:
 - **Critical (must fix):** bugs, security issues, data loss risk, broken functionality.
 - **Important (should fix):** unmet acceptance criterion, architecture problems, missing error handling, real test gaps.
 - **Minor (note only):** style, optimization opportunities, polish — never blocks.
+- **Frontend specifics (must-fix, Critical or Important):** a duplicated/re-built component, raw or off-palette colours, a missing required state, or horizontal-overflow evidence from the four-width check.
 
 For each finding: file:line, what's wrong, why it matters, how to fix if not obvious. Acknowledge what was done well — accurate praise helps the developer trust the rest.
 

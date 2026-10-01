@@ -22,20 +22,24 @@ The browser tools are the primary way to drive the app — no local Chromium set
 
 1. `browser_navigate` to the page under test.
 2. `browser_wait_for` the element or text that proves the page rendered (an eternal spinner or a timeout here is finding #1 — never screenshot a page you have not waited on).
-3. `browser_screenshot` the screen at desktop, then `browser_set_viewport` with `device: "mobile"` and screenshot it again — for every changed screen. The viewport switch emulates size, touch and the mobile user agent together, and answers the responsive question in words: whether the page scrolls sideways and which elements overflow. Report what it says; horizontal overflow is a finding.
+3. `browser_screenshot` the screen at all four widths of the four-width check — phone (`browser_set_viewport {device:"mobile", width:360}`), tablet (`{device:"tablet"}`), laptop (`{device:"desktop", width:1024}`), desktop (`{device:"desktop"}`) — for every changed screen. Each viewport switch emulates size, touch and the matching user agent together, and answers the responsive question in words: whether the page scrolls sideways and which elements overflow. Report what it says at each width; horizontal overflow is a finding.
 
 Interactive flows (login, forms, dialogs): `browser_fill` each field, `browser_click` the submit or action element, `browser_wait_for` the post-action state (URL, toast, new element), then `browser_screenshot` the result. Use `browser_read_dom` for what a screenshot cannot prove — an input's actual value, a disabled/aria state, the exact error text.
 
-Screenshot every meaningful step of every scenario, at desktop and — via `browser_set_viewport` — at mobile, for changed screens.
+Screenshot every meaningful step of every scenario, at all four widths — via `browser_set_viewport` — for changed screens.
 
 Fallback — only when you are building the automation suite (e2e-automation-project) or the browser tools are unavailable — drive the system's headless Chromium (`$CHROME_BIN`, `/usr/bin/chromium`, `--no-sandbox` in containers) via `run_terminal`:
 
 ```bash
 mkdir -p qa-evidence
 chromium --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
-  --window-size=1440,900 --screenshot=qa-evidence/01-board-desktop.png http://localhost:5173/board
+  --window-size=360,800 --screenshot=qa-evidence/01-board-phone.png http://localhost:5173/board
 chromium --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
-  --window-size=390,844 --screenshot=qa-evidence/01-board-mobile.png http://localhost:5173/board
+  --window-size=768,1024 --screenshot=qa-evidence/01-board-tablet.png http://localhost:5173/board
+chromium --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
+  --window-size=1024,768 --screenshot=qa-evidence/01-board-laptop.png http://localhost:5173/board
+chromium --headless=new --no-sandbox --disable-gpu --hide-scrollbars \
+  --window-size=1440,900 --screenshot=qa-evidence/01-board-desktop.png http://localhost:5173/board
 ```
 
 For scripted interactive flows in that fallback, use Playwright with the system browser (no browser download):
@@ -70,6 +74,13 @@ Look at each screenshot deliberately — per image, answer:
 - Mobile width: nothing unusable, no horizontal scroll?
 - Console: zero uncaught errors during the flow (capture them in the driver script when on the Playwright fallback). Failed network calls in the flow are findings.
 - Copy: right language for the app's locale, no placeholder text left in.
+- Consistency: the same control looks identical across screens, using design tokens — no off-palette colours?
+- Touch targets ≥44px on phone?
+- Long-content resilience: tried with the longest realistic names/words, not just sample data?
+- Navigation collapse on phone: the menu button opens and closes the menu correctly?
+- Tables usable on phone: stacked cards or a scrollable container, not squeezed unreadable?
+- Form states: inline errors next to the field, visible focus, a pending/submitting state, success feedback?
+- No generic placeholder/lorem copy left in?
 
 ## Evidence
 
