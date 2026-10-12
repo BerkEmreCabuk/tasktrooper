@@ -94,6 +94,17 @@ runner's own automatic post-run commit. Only the developer roles hold this
 tool: a reviewer that could commit would be putting its own name on the branch
 it is judging.
 
+Every commit ends with a trailer block: the task key (`Task: <key>`), the
+role that made the change as a co-author (`Frontend Developer
+<frontend-developer@agents.tasktrooper.ai>` — this is what tells you which
+agent wrote it), and TaskTrooper itself as a second co-author (`Task Trooper
+<agents@tasktrooper.ai>`). GitHub only links and credits a co-author when the
+trailer's address belongs to a GitHub account — the account's own noreply
+address is the simplest choice, since it needs no domain verification. Until
+`agents@tasktrooper.ai` is registered on one, GitHub still shows the
+TaskTrooper co-author, just without a profile link or a place in the
+repository's contributors graph.
+
 Task PRs are opened **ready for review**, not as drafts — GitHub refuses to
 merge a draft PR, so nothing here creates one that would first need to be
 un-drafted. `committed: false` is a normal, non-error result: either the
