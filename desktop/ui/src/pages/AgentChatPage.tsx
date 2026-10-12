@@ -657,6 +657,13 @@ export function AgentChatPage() {
           onSelect={selectSession}
           onCreate={handleCreateSession}
           onDelete={async (id) => {
+            // The server cancels this chat's in-flight turn when the session is
+            // deleted. Close the local stream first so that cancelled turn is
+            // not reported as a failed send while we navigate away from it.
+            if (activeSessionId === id) {
+              streamAbortRef.current?.abort();
+              streamAbortRef.current = null;
+            }
             await deleteSession(id);
             if (activeSessionId === id) {
               setActiveSessionId(null);

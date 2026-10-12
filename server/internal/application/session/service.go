@@ -278,6 +278,15 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
+	// A deleted chat must not leave its in-flight turn running: without this the
+	// agent kept working (and spending) after the row was gone, writing into a
+	// session nobody can open. Stop it through the same path the composer's stop
+	// button uses, so the run is marked cancelled and every replica's cancel
+	// watch agrees. A failure here is logged, not fatal — the delete proceeds.
+	if _, err := s.CancelSession(ctx, id, "session deleted"); err != nil {
+		log.Warn().Err(err).Str("session_id", id.String()).
+			Msg("stopping the chat's in-flight turn before delete failed")
+	}
 	if err := s.store.Delete(ctx, id); err != nil {
 		return err
 	}

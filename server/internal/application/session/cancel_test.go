@@ -30,6 +30,7 @@ type cancelSessionStore struct {
 
 	mu       sync.Mutex
 	appended []domain.SessionMessage
+	deleted  []uuid.UUID
 }
 
 func (s *cancelSessionStore) Get(_ context.Context, id uuid.UUID) (domain.Session, error) {
@@ -37,6 +38,19 @@ func (s *cancelSessionStore) Get(_ context.Context, id uuid.UUID) (domain.Sessio
 		return domain.Session{}, errors.New("no such session")
 	}
 	return s.session, nil
+}
+
+func (s *cancelSessionStore) Delete(_ context.Context, id uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleted = append(s.deleted, id)
+	return nil
+}
+
+func (s *cancelSessionStore) deletedIDs() []uuid.UUID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.deleted)
 }
 
 func (s *cancelSessionStore) ListMessages(context.Context, uuid.UUID) ([]domain.SessionMessage, error) {
@@ -270,6 +284,46 @@ func TestCancelSessionRejectsAnUnknownSession(t *testing.T) {
 
 	if _, err := svc.CancelSession(context.Background(), uuid.New(), ""); !errors.Is(err, domain.ErrSessionNotFound) {
 		t.Fatalf("CancelSession on an unknown session returned %v, want domain.ErrSessionNotFound", err)
+	}
+}
+
+func TestDeleteSessionStopsTheTurnAndRemovesTheRow(t *testing.T) {
+	svc, store, runs, llm := newCancelTestService(t)
+	sessionID := store.session.ID
+
+	sent := make(chan error, 1)
+	go func() {
+		_, err := svc.SendMessageStream(context.Background(), sessionID, domain.SessionMessageRequest{
+			Role: domain.RoleUser, Content: "do the thing",
+		}, domain.ToolPolicy{}, func(string) {})
+		sent <- err
+	}()
+	select {
+	case <-llm.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn never reached the model")
+	}
+
+	if err := svc.Delete(context.Background(), sessionID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	select {
+	case err := <-sent:
+		if !errors.Is(err, domain.ErrRunCancelled) {
+			t.Fatalf("SendMessageStream returned %v, want domain.ErrRunCancelled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn kept going after its chat was deleted")
+	}
+
+	for id, status := range runs.statuses() {
+		if status != domain.SessionRunStatusCancelled {
+			t.Fatalf("run %s ended as %q, want cancelled", id, status)
+		}
+	}
+	if got := store.deletedIDs(); len(got) != 1 || got[0] != sessionID {
+		t.Fatalf("deleted sessions = %v, want [%s]", got, sessionID)
 	}
 }
 
