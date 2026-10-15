@@ -260,6 +260,7 @@ export const boardArea: BoardAreaDict = {
       type: "Tür",
       priority: "Öncelik",
       project: "Proje",
+      component: "Bileşen",
       none: "Yok",
       description: "Açıklama",
       edit: "Düzenle",

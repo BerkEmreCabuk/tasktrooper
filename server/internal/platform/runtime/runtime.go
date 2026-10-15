@@ -2654,6 +2654,14 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				boardKit.Releases = releaseSvc
 				if taskPRSvc != nil {
 					taskPRSvc.SetReleaseOpener(releaseSvc)
+					releaseSvc.SetMergedFiles(taskPRSvc)
+				}
+				if repositorySvc != nil {
+					repositorySvc.SetComponentAssignedHook(func(ctx context.Context, repositoryID, componentID uuid.UUID) {
+						if _, err := releaseSvc.OpenPending(ctx, repositoryID, componentID); err != nil {
+							log.Warn().Err(err).Str("component_id", componentID.String()).Msg("release: opening releases for merged tasks after a component was assigned failed")
+						}
+					})
 				}
 				if modelSvc != nil {
 					modelSvc.SetDeliveryConfirmedHook(func(ctx context.Context, repositoryID, componentID uuid.UUID) {
@@ -2667,6 +2675,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				}
 				activateBoard = append(activateBoard, func() {
 					releaseSvc.Start(ctx, releaseapp.DefaultSweepInterval)
+					go retryUnresolvedMerges(ctx, repositoryStore, releaseSvc)
 				})
 
 				// The park's release mechanism: without it a task parked on a running

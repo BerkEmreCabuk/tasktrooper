@@ -291,6 +291,9 @@ func (f *fakeTasks) UpdateTask(_ context.Context, _, taskID uuid.UUID, req domai
 	if req.Column != nil {
 		t.Column = *req.Column
 	}
+	if req.ComponentID.Present {
+		t.ComponentID = req.ComponentID.Value
+	}
 	f.tasks[taskID] = t
 	return t, nil
 }

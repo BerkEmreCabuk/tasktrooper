@@ -1144,6 +1144,8 @@ export interface BoardTask {
   description: string;
   technical_description: string;
   initiative_project_id?: string;
+  /** The monorepo component the task belongs to; absent when none is recorded. */
+  component_id?: string;
   column: TaskColumn;
   position: number;
   priority: TaskPriority;
@@ -1245,6 +1247,8 @@ export interface UpdateBoardTaskInput {
   description?: string;
   technical_description?: string;
   initiative_project_id?: string | null;
+  /** null clears it. Naming a merged task's component retries its release. */
+  component_id?: string | null;
   column?: TaskColumn;
   position?: number;
   priority?: TaskPriority;

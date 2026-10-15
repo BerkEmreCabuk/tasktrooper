@@ -251,6 +251,7 @@ export const boardArea = {
       type: "Tipo",
       priority: "Prioridad",
       project: "Proyecto",
+      component: "Componente",
       none: "Ninguno",
       description: "Descripción",
       edit: "Editar",

@@ -251,6 +251,7 @@ export const boardArea = {
       type: "类型",
       priority: "优先级",
       project: "项目",
+      component: "组件",
       none: "无",
       description: "描述",
       edit: "编辑",

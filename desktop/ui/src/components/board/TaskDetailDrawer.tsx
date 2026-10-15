@@ -68,6 +68,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { useI18n } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
+import { useRepositoryModel } from "@/hooks/useRepositoryModel";
 import { useTaskTypes } from "@/hooks/useTaskTypes";
 import { desktopRunner } from "@/lib/desktop-bridge";
 import {
@@ -83,6 +84,7 @@ import {
   taskTypeOptions,
 } from "@/lib/project-board";
 import { analysisReviewPath } from "@/lib/analysis-review";
+import { componentLabel } from "@/lib/project-model";
 import { keepEqual } from "@/lib/stableState";
 import { formatDate, formatRelativeDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
@@ -173,6 +175,14 @@ export function TaskDetailDrawer({
   const initiativeName = task?.initiative_project_id
     ? initiativeProjects.find((p) => p.id === task.initiative_project_id)?.name
     : null;
+  const { model: repositoryModel } = useRepositoryModel(open && task ? repositoryId : undefined);
+  const componentOptions = useMemo(
+    () =>
+      (repositoryModel?.components ?? [])
+        .filter((c) => c.status === "active" || c.id === task?.component_id)
+        .map((c) => ({ id: c.id, label: componentLabel(c, repositoryName ?? repositoryModel?.repository.name ?? "") })),
+    [repositoryModel, repositoryName, task?.component_id],
+  );
 
   // Deploy dependencies get their own section (they are enforced at release
   // time); everything else stays in the descriptive relations list, so neither
@@ -332,6 +342,10 @@ export function TaskDetailDrawer({
 
   const handleInitiative = (value: string) => {
     patchTask({ initiative_project_id: value === "none" ? null : value });
+  };
+
+  const handleComponent = (value: string) => {
+    patchTask({ component_id: value === "none" ? null : value });
   };
 
   const saveDescription = async () => {
@@ -1149,6 +1163,26 @@ export function TaskDetailDrawer({
                             {initiativeProjects.map((p) => (
                               <SelectItem key={p.id} value={p.id}>
                                 {p.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                    {componentOptions.length > 0 && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="task-detail-component" className="text-xs text-muted-foreground">
+                          {t("boardArea.components.taskDetail.component")}
+                        </Label>
+                        <Select value={task.component_id ?? "none"} onValueChange={handleComponent} disabled={saving}>
+                          <SelectTrigger id="task-detail-component">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">{t("boardArea.components.taskDetail.none")}</SelectItem>
+                            {componentOptions.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.label}
                               </SelectItem>
                             ))}
                           </SelectContent>

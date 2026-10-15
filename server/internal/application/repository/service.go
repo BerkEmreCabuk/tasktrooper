@@ -123,6 +123,8 @@ type Service struct {
 	ciSetupMu sync.Mutex
 
 	createdObserver TaskCreatedObserver
+
+	componentAssigned func(ctx context.Context, repositoryID, componentID uuid.UUID)
 }
 
 // TaskCreatedObserver hears about every task CreateTask opens, with the
@@ -1714,6 +1716,7 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 	}
 	prevColumn := task.Column
 	prevAssignee := task.AssigneeAgentID
+	prevComponent := task.ComponentID
 	if req.Title != nil {
 		task.Title = *req.Title
 	}
@@ -1994,7 +1997,19 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 	if req.DeployDependsOn != nil || len(req.BlockedBy) > 0 {
 		updated = s.syncOrderNote(ctx, updated)
 	}
+	if s.componentAssigned != nil && req.ComponentID.Present && req.ComponentID.Value != nil &&
+		!assigneeEqual(prevComponent, req.ComponentID.Value) &&
+		updated.Column == domain.TaskColumnDone && strings.TrimSpace(updated.MergeCommitSHA) != "" {
+		s.componentAssigned(ctx, repositoryID, *req.ComponentID.Value)
+	}
 	return s.enrichTask(ctx, updated)
+}
+
+// SetComponentAssignedHook wires the release catch-up for a merged task left
+// in done with no component: naming its component later is the only signal
+// that it can ship now, and nothing else would retry the release for it.
+func (s *Service) SetComponentAssignedHook(fn func(ctx context.Context, repositoryID, componentID uuid.UUID)) {
+	s.componentAssigned = fn
 }
 
 // ConfirmBeforeDeploy records a human's confirmation that BeforeDeploy's

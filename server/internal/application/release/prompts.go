@@ -41,3 +41,7 @@ var manualStepLabeledKey = prompt.Define[manualStepLabeledInput]("briefs.release
 type afterDeployCommentInput struct{ Steps string }
 
 var afterDeployCommentKey = prompt.Define("briefs.release.after_deploy_comment", afterDeployCommentInput{Steps: "Enable the new_pricing flag for 100% of traffic."})
+
+var mergeOutsideComponentsKey = prompt.Define("notices.release_merge_outside_components", struct{}{})
+
+var noComponentKey = prompt.Define("notices.release_no_component", struct{}{})

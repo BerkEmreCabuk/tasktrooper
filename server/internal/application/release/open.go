@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 )
 
@@ -28,13 +29,150 @@ func (s *Service) OpenForMerge(ctx context.Context, repositoryID uuid.UUID, task
 	mergeSHA = strings.TrimSpace(mergeSHA)
 
 	component, name, ok := s.resolveComponent(ctx, repositoryID, task)
-	if !ok {
-		next := "This task has no component recorded, so nothing knows how it ships. " +
-			"The task stays in done until a human assigns it a component and confirms that component's delivery profile on the Deploy tab."
+	if ok {
+		return s.openForComponent(ctx, repositoryID, task, component, name, mergeSHA)
+	}
+	return s.openForMergeOwner(ctx, repositoryID, task, mergeSHA, s.ownerOfMerge(ctx, repositoryID, task))
+}
+
+// openForMergeOwner is OpenForMerge for a task whose component was never
+// recorded, decided by what the merge changed: the one component that owns
+// the changed files is recorded on the task and released through, and a
+// merge that touched no component at all (docs, top-level tooling) ships
+// nothing, so it is the release. Anything less certain — no project model,
+// files across components, a change list that could not be read — leaves
+// the task in done for a human, as before.
+func (s *Service) openForMergeOwner(ctx context.Context, repositoryID uuid.UUID, task domain.BoardTask, mergeSHA string, owner mergeOwner) domain.ReleaseOpening {
+	switch {
+	case owner.outside:
+		opening := s.openNone(ctx, repositoryID, task)
+		if opening.Released {
+			opening.Next = prompt.Text(mergeOutsideComponentsKey)
+			s.commentOnce(ctx, repositoryID, task.ID, opening.Next)
+		}
+		return opening
+	case owner.found:
+		opening := s.openForComponent(ctx, repositoryID, task, owner.component, owner.component.DisplayName(), mergeSHA)
+		// After opening, not before: recording the component wakes the
+		// delivery catch-up (OpenPending), which must find this task's
+		// release already there rather than open a second one.
+		s.recordComponent(ctx, repositoryID, task.ID, owner.component.ID)
+		return opening
+	default:
+		next := prompt.Text(noComponentKey)
 		s.commentOnce(ctx, repositoryID, task.ID, next)
 		return domain.ReleaseOpening{Unconfirmed: true, Next: next}
 	}
+}
 
+// MergedFiles reads the repository paths a task's merged pull request
+// changed. Implemented by board.TaskPRService; release cannot import board.
+type MergedFiles interface {
+	MergedTaskFiles(ctx context.Context, repositoryID uuid.UUID, task domain.BoardTask) ([]string, error)
+}
+
+// SetMergedFiles wires the merged-change reader after the task PR service is
+// built. Nil keeps the old rule: a task with no recorded component waits for
+// a human.
+func (s *Service) SetMergedFiles(m MergedFiles) { s.mergedFiles = m }
+
+type mergeOwner struct {
+	component domain.Component
+	found     bool
+	outside   bool
+}
+
+// ownerOfMerge reads which active component owns what a merge changed. A
+// repository with no active component has no model to judge by, so an empty
+// answer there is "unknown", never "outside".
+func (s *Service) ownerOfMerge(ctx context.Context, repositoryID uuid.UUID, task domain.BoardTask) mergeOwner {
+	if s.mergedFiles == nil || s.components == nil {
+		return mergeOwner{}
+	}
+	files, err := s.mergedFiles.MergedTaskFiles(ctx, repositoryID, task)
+	if err != nil {
+		log.Warn().Err(err).Str("task_id", task.ID.String()).Msg("release: reading the merged files to find the task's component failed")
+		return mergeOwner{}
+	}
+	if len(files) == 0 {
+		return mergeOwner{}
+	}
+	all, err := s.components.ListComponents(ctx, repositoryID)
+	if err != nil {
+		log.Warn().Err(err).Str("repository_id", repositoryID.String()).Msg("release: listing components to find the task's component failed")
+		return mergeOwner{}
+	}
+	active := activeComponents(all)
+	if len(active) == 0 {
+		return mergeOwner{}
+	}
+	owners := map[uuid.UUID]domain.Component{}
+	for _, f := range files {
+		if c, ok := domain.OwningComponent(active, f); ok {
+			owners[c.ID] = c
+		}
+	}
+	switch len(owners) {
+	case 0:
+		return mergeOwner{outside: true}
+	case 1:
+		for _, c := range owners {
+			return mergeOwner{component: c, found: true}
+		}
+	}
+	return mergeOwner{}
+}
+
+func (s *Service) recordComponent(ctx context.Context, repositoryID, taskID, componentID uuid.UUID) {
+	if s.tasks == nil {
+		return
+	}
+	id := componentID
+	if _, err := s.tasks.UpdateTask(ctx, repositoryID, taskID, domain.UpdateBoardTaskRequest{
+		ComponentID: domain.Nullable[uuid.UUID]{Present: true, Value: &id},
+	}); err != nil {
+		log.Warn().Err(err).Str("task_id", taskID.String()).Str("component_id", componentID.String()).
+			Msg("release: recording the component found from the merged files failed")
+	}
+}
+
+// RetryUnresolvedMerges gives merged tasks still waiting in done with no
+// component — merged before the merged files were read, or while the reader
+// was unavailable — the same decision a merge now gets. Only a task the
+// files now resolve is touched; one they still cannot place keeps the
+// comment it already has, and no second comment is posted.
+func (s *Service) RetryUnresolvedMerges(ctx context.Context, repositoryID uuid.UUID) int {
+	if s.tasks == nil || s.store == nil || s.mergedFiles == nil {
+		return 0
+	}
+	all, err := s.tasks.ListTasks(ctx, repositoryID)
+	if err != nil {
+		log.Warn().Err(err).Str("repository_id", repositoryID.String()).Msg("release: listing tasks to retry unresolved merges failed")
+		return 0
+	}
+	retried := 0
+	for _, task := range all {
+		sha := strings.TrimSpace(task.MergeCommitSHA)
+		if task.Column != domain.TaskColumnDone || sha == "" || task.ComponentID != nil {
+			continue
+		}
+		if _, _, ok := s.resolveComponent(ctx, repositoryID, task); ok {
+			continue
+		}
+		if _, err := s.store.ForTask(ctx, task.ID); !errors.Is(err, domain.ErrReleaseNotFound) {
+			continue
+		}
+		owner := s.ownerOfMerge(ctx, repositoryID, task)
+		if !owner.found && !owner.outside {
+			continue
+		}
+		s.openForMergeOwner(ctx, repositoryID, task, sha, owner)
+		retried++
+	}
+	return retried
+}
+
+func (s *Service) openForComponent(ctx context.Context, repositoryID uuid.UUID, task domain.BoardTask, component domain.Component, name, mergeSHA string) domain.ReleaseOpening {
 	profile, confirmed := domain.DeliveryConfirmed(component.Delivery)
 	if !confirmed {
 		mode := domain.DeliveryMode("")

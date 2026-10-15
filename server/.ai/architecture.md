@@ -489,8 +489,21 @@ card.
 merge (it never returns an error — a failure to open a release is reported in `Next`, with
 the task left in `done`, because the merge already happened and cannot be undone here):
 
-- No component resolvable (none recorded, more than one active component with no `.`-path
-  fallback) → `Unconfirmed: true`, one system comment, no release row.
+- No component recorded, and no single active component or `.`-path fallback → the merged
+  pull request's files decide (`MergedFiles`, `board.TaskPRService.MergedTaskFiles`, read
+  from GitHub so a checkout on another machine works the same; renames count at both paths;
+  a list at the adapter's 500-file cap is not trusted):
+  - one active component owns every file that has an owner → that component, recorded on
+    the task (after the release opens, so `OpenPending` finds the release instead of opening
+    a second one), then the rules below;
+  - no file has an owner, in a repository that has active components → nothing deploys it:
+    the task moves to `released` (`MoveReasonMergeReleasedNoDelivery`) with one comment;
+  - anything else (several components, no project model, files unreadable) →
+    `Unconfirmed: true`, one system comment, no release row.
+  Naming a merged `done` task's component later (`repository.Service.SetComponentAssignedHook`,
+  the task drawer's Component field) runs `OpenPending` for it, and once at boot
+  `RetryUnresolvedMerges` gives tasks merged before this rule the same decision, touching
+  only those the files now place.
 - Profile not `DeliveryConfirmed` → the same: `Unconfirmed: true`, one comment naming the
   component, no row.
 - `none` → the task moves straight to `released` (`MoveReasonMergeReleasedNoDelivery`);

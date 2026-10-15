@@ -264,6 +264,7 @@ type Service struct {
 	beforeDeploy BeforeDeployConfirmer
 	deployOrder  DeployOrder
 	locator      TaskLocator
+	mergedFiles  MergedFiles
 
 	healthWindow time.Duration
 
