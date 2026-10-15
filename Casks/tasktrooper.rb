@@ -10,8 +10,8 @@
 # release.yml's cask job refreshes version and sha256 after every release tag;
 # by hand: scripts/update-cask.sh <version> <path-to-dmg>
 cask "tasktrooper" do
-  version "0.3.2"
-  sha256 "e9cd12d072a737744b36a7002015d3c4b464236312c625338dd5e0a760b3f8ec"
+  version "0.3.3"
+  sha256 "914cd0e5e57498227d8dcd62f23940ff261e50a85a0bec1e38a2740482d59aa3"
 
   url "https://github.com/makifbaysal/tasktrooper/releases/download/v#{version}/TaskTrooper-#{version}-universal.dmg"
   name "TaskTrooper"
