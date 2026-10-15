@@ -183,8 +183,9 @@ whether a bad release may be rolled back automatically or only proposed.
    confirmed (see **Before you ship**, below).
    A task with no component set gets one from what its pull request changed:
    the one component that owns the changed files, or, when no component owns
-   any of them (documentation, top-level tooling), no deploy at all — the
-   merge is the release and the task moves to **Released**. When the files
+   any of them (documentation, top-level tooling, or a repository with no
+   components and no deploy target), no deploy at all — the merge is the
+   release and the task moves to **Released**. When the files
    span several components, set the **Component** field on the task; the
    release follows as soon as that component's delivery profile is confirmed.
 2. **The deploy happens** — immediately for `on_merge`, or once the release

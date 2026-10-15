@@ -132,18 +132,39 @@ func TestAMergeThatCannotBePlacedWaitsForAHuman(t *testing.T) {
 	}
 }
 
-func TestARepositoryWithNoComponentsNeverCallsAMergeOutsideThem(t *testing.T) {
+func TestARepositoryWithNothingThatDeploysReleasesAtMerge(t *testing.T) {
 	task := doneMergedTask("T-5")
 	task.RepositoryID = uuid.New()
 	f := newOpenFixture(task)
-	merged := &fakeMergedFiles{files: map[uuid.UUID][]string{task.ID: {"server/main.go"}}}
-	f.svc.SetMergedFiles(merged)
+	f.svc.legacy = &fakeDeployTargets{}
+	f.svc.SetMergedFiles(&fakeMergedFiles{files: map[uuid.UUID][]string{task.ID: {"docs/tasks.md"}}})
 
 	opening := f.svc.OpenForMerge(context.Background(), task.RepositoryID, task, mergeSHA)
 
-	assert.True(t, opening.Unconfirmed, "with no project model, files outside every component say nothing about what ships")
-	assert.False(t, opening.Released)
-	assert.Empty(t, f.tasks.updates)
+	assert.True(t, opening.Released, "no component and no deploy target: nothing could ship this but the merge")
+	assert.Empty(t, f.store.releases)
+}
+
+func TestARepositoryWithOnlyALegacyDeployTargetStillWaitsForAHuman(t *testing.T) {
+	cases := map[string]*fakeDeployTargets{
+		"a deploy target":        {targets: []domain.DeployTarget{{Env: domain.DeployEnvProd}}},
+		"deploy targets unknown": {listErr: errors.New("db down")},
+	}
+	for name, legacy := range cases {
+		t.Run(name, func(t *testing.T) {
+			task := doneMergedTask("T-5")
+			task.RepositoryID = uuid.New()
+			f := newOpenFixture(task)
+			f.svc.legacy = legacy
+			f.svc.SetMergedFiles(&fakeMergedFiles{files: map[uuid.UUID][]string{task.ID: {"server/main.go"}}})
+
+			opening := f.svc.OpenForMerge(context.Background(), task.RepositoryID, task, mergeSHA)
+
+			assert.True(t, opening.Unconfirmed)
+			assert.False(t, opening.Released)
+			assert.Empty(t, f.tasks.updates)
+		})
+	}
 }
 
 func TestARecordedComponentIsUsedWithoutReadingTheFiles(t *testing.T) {

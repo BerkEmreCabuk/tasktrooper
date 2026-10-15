@@ -496,9 +496,11 @@ the task left in `done`, because the merge already happened and cannot be undone
   - one active component owns every file that has an owner → that component, recorded on
     the task (after the release opens, so `OpenPending` finds the release instead of opening
     a second one), then the rules below;
-  - no file has an owner, in a repository that has active components → nothing deploys it:
-    the task moves to `released` (`MoveReasonMergeReleasedNoDelivery`) with one comment;
-  - anything else (several components, no project model, files unreadable) →
+  - no file has an owner → nothing deploys it: the task moves to `released`
+    (`MoveReasonMergeReleasedNoDelivery`) with one comment. A repository with no active
+    component counts only when it has no legacy deploy target either (one it cannot list
+    counts as having one);
+  - anything else (several components, a legacy deploy target, files unreadable) →
     `Unconfirmed: true`, one system comment, no release row.
   Naming a merged `done` task's component later (`repository.Service.SetComponentAssignedHook`,
   the task drawer's Component field) runs `OpenPending` for it, and once at boot

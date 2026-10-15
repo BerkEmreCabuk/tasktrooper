@@ -814,12 +814,14 @@ func (f *fakeStoreOps) StartBuild(_ context.Context, repositoryID uuid.UUID, pla
 
 // fakeDeployTargets is the legacy port.DeployTargetStore fallback.
 type fakeDeployTargets struct {
-	target domain.DeployTarget
-	err    error
+	target  domain.DeployTarget
+	err     error
+	targets []domain.DeployTarget
+	listErr error
 }
 
 func (f *fakeDeployTargets) ListByRepository(context.Context, uuid.UUID) ([]domain.DeployTarget, error) {
-	return nil, nil
+	return f.targets, f.listErr
 }
 func (f *fakeDeployTargets) ListAll(context.Context) ([]domain.DeployTarget, error) { return nil, nil }
 func (f *fakeDeployTargets) Get(context.Context, uuid.UUID, string, string) (domain.DeployTarget, error) {

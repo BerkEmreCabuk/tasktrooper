@@ -83,8 +83,9 @@ type mergeOwner struct {
 }
 
 // ownerOfMerge reads which active component owns what a merge changed. A
-// repository with no active component has no model to judge by, so an empty
-// answer there is "unknown", never "outside".
+// repository with no active component has nothing that could deploy the
+// change either, unless it still has a deploy target from before components
+// existed; only then is its answer "unknown" rather than "outside".
 func (s *Service) ownerOfMerge(ctx context.Context, repositoryID uuid.UUID, task domain.BoardTask) mergeOwner {
 	if s.mergedFiles == nil || s.components == nil {
 		return mergeOwner{}
@@ -104,7 +105,10 @@ func (s *Service) ownerOfMerge(ctx context.Context, repositoryID uuid.UUID, task
 	}
 	active := activeComponents(all)
 	if len(active) == 0 {
-		return mergeOwner{}
+		if s.hasLegacyDeployTarget(ctx, repositoryID) {
+			return mergeOwner{}
+		}
+		return mergeOwner{outside: true}
 	}
 	owners := map[uuid.UUID]domain.Component{}
 	for _, f := range files {
@@ -121,6 +125,18 @@ func (s *Service) ownerOfMerge(ctx context.Context, repositoryID uuid.UUID, task
 		}
 	}
 	return mergeOwner{}
+}
+
+func (s *Service) hasLegacyDeployTarget(ctx context.Context, repositoryID uuid.UUID) bool {
+	if s.legacy == nil {
+		return false
+	}
+	targets, err := s.legacy.ListByRepository(ctx, repositoryID)
+	if err != nil {
+		log.Warn().Err(err).Str("repository_id", repositoryID.String()).Msg("release: listing deploy targets to place a merge failed")
+		return true
+	}
+	return len(targets) > 0
 }
 
 func (s *Service) recordComponent(ctx context.Context, repositoryID, taskID, componentID uuid.UUID) {
