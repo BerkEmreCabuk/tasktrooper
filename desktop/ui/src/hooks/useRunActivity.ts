@@ -1,47 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type OrchestrationPlan, type SessionStep } from "@/api";
-import { getLiveStepSummary } from "@/lib/sessionGraph";
+import { isRunLive, mergeSteps } from "@/lib/activityFeed";
+import { keepEqual } from "@/lib/stableState";
 import { tStatic } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
 
-const TERMINAL_STEP_TYPES = new Set([
-  "orchestration_complete",
-  "verification_complete",
-  "verification_failed",
-  // A Claude Code run's own terminal steps. Without them a finished CLI run
-  // whose row status we do not have (the board passes one, the chat page does
-  // not) kept polling and kept the "Live" badge up forever, because its last
-  // step is neither an assistant_message nor any of the loop's endings.
-  "claude_code_result",
-  "llm_provider_code_quota_park",
-]);
-
-// Statuses the run row itself reports as over. The step stream cannot be
-// trusted alone: a run killed mid-flight (pod terminated, reconciler stale
-// sweep) simply stops emitting steps, so its last step is an ordinary one and
-// the graph showed "Live" with a spinning subtask forever.
-const TERMINAL_RUN_STATUSES = new Set(["completed", "failed", "cancelled", "canceled", "error"]);
-
-// Statuses that mean the run row itself is still in flight. The row is the
-// authority when we have it: the orchestration plan settles as soon as the last
-// subtask returns, but a board run keeps going after that — build/vet
-// verification, up to N LLM fix rounds, the commit and push. Treating the
-// settled plan as the end of the run stopped the poll mid-work and, because
-// every still-running subtask is rewritten as "interrupted" once the run is not
-// live, painted a working agent as failed.
-const LIVE_RUN_STATUSES = new Set(["running", "pending", "queued", "in_progress"]);
-
-function isRunComplete(steps: SessionStep[], plan: OrchestrationPlan | null): boolean {
-  if (plan) {
-    const status = plan.status.toLowerCase();
-    if (status === "completed" || status === "failed") return true;
-  }
-  if (steps.length === 0) return false;
-  const lastType = steps[steps.length - 1].step_type;
-  if (TERMINAL_STEP_TYPES.has(lastType)) return true;
-  if (!plan && lastType === "assistant_message") return true;
-  return false;
-}
+const PLAN_STEP = "orchestration_plan_created";
 
 export function useRunActivity(runId: string | null, enabled: boolean, runStatus?: string | null) {
   const [steps, setSteps] = useState<SessionStep[]>([]);
@@ -49,39 +13,73 @@ export function useRunActivity(runId: string | null, enabled: boolean, runStatus
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const activeRun = useRef<string | null>(null);
+  const inflight = useRef<string | null>(null);
+  const stepsRef = useRef<SessionStep[]>([]);
+  const planRef = useRef<OrchestrationPlan | null>(null);
+  const liveRef = useRef(false);
+  // Owed once the run stops being live: the poll that would have re-read the
+  // plan has stopped, and its final statuses land with the run's end.
+  const settleRead = useRef(false);
+
   const fetchData = useCallback(async () => {
-    if (!runId) return;
+    if (!runId || inflight.current === runId) return;
+    inflight.current = runId;
+    const settling = settleRead.current;
+    settleRead.current = false;
     try {
-      const [stepsRes, planRes] = await Promise.all([
-        api.runSteps(runId),
-        api.getRunPlan(runId).catch(() => null),
-      ]);
-      setSteps(stepsRes.steps ?? []);
-      setPlan(planRes);
+      const known = stepsRef.current;
+      const since = known.length > 0 ? known[known.length - 1].created_at : undefined;
+      const res = await api.runSteps(runId, since);
+      if (activeRun.current !== runId) return;
+      const merged = mergeSteps(stepsRef.current, res.steps ?? []);
+      const stepsChanged = merged !== stepsRef.current;
+      if (stepsChanged) {
+        stepsRef.current = merged;
+        setSteps(merged);
+      }
+      // A plan only moves when a step lands, so a quiet tick does not refetch it.
+      const wantPlan = planRef.current === null || settling || (liveRef.current && stepsChanged);
+      if (wantPlan && merged.some((s) => s.step_type === PLAN_STEP)) {
+        const next = await api.getRunPlan(runId).catch(() => null);
+        if (activeRun.current !== runId) return;
+        if (next) {
+          const kept = planRef.current === null ? next : keepEqual(planRef.current, next);
+          if (kept !== planRef.current) {
+            planRef.current = kept;
+            setPlan(kept);
+          }
+        }
+      }
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : tStatic("chatArea.chat.activityPanel.runLoadFailed"));
+      if (activeRun.current === runId) {
+        setError(e instanceof Error ? e.message : tStatic("chatArea.chat.activityPanel.runLoadFailed"));
+      }
     } finally {
-      setLoading(false);
+      if (inflight.current === runId) inflight.current = null;
+      if (activeRun.current === runId) {
+        setLoading(false);
+        // The settling read was asked for while a tick was in flight.
+        if (settleRead.current) void fetchData();
+      }
     }
   }, [runId]);
 
-  const complete = useMemo(() => {
-    const status = (runStatus ?? "").toLowerCase();
-    if (TERMINAL_RUN_STATUSES.has(status)) return true;
-    // A run row that says it is still running outranks anything the step stream
-    // or the settled plan suggests — see LIVE_RUN_STATUSES.
-    if (LIVE_RUN_STATUSES.has(status)) return false;
-    return isRunComplete(steps, plan);
-  }, [runStatus, steps, plan]);
-  const isLive = enabled && !!runId && !complete;
-  const liveSummary = getLiveStepSummary(steps, isLive);
+  const live = isRunLive(runStatus, steps, plan);
+  const isLive = enabled && !!runId && live;
+  liveRef.current = isLive;
 
   useEffect(() => {
+    activeRun.current = runId;
+    inflight.current = null;
+    stepsRef.current = [];
+    planRef.current = null;
+    settleRead.current = false;
+    setSteps([]);
+    setPlan(null);
+    setError(null);
     if (!runId || !enabled) {
-      setSteps([]);
-      setPlan(null);
-      setError(null);
       setLoading(false);
       return;
     }
@@ -89,7 +87,19 @@ export function useRunActivity(runId: string | null, enabled: boolean, runStatus
     void fetchData();
   }, [runId, enabled, fetchData]);
 
+  // The run row can turn terminal between two ticks; one last read picks up the
+  // steps written in that gap, and the plan, since polling stops the moment
+  // isLive drops.
+  const wasLive = useRef(false);
+  useEffect(() => {
+    if (wasLive.current && !isLive) {
+      settleRead.current = true;
+      void fetchData();
+    }
+    wasLive.current = isLive;
+  }, [isLive, fetchData]);
+
   usePolling(fetchData, 2000, isLive);
 
-  return { steps, plan, liveSummary, isLive, loading, error };
+  return { steps, plan, isLive, loading, error };
 }

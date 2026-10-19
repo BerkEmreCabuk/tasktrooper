@@ -3,11 +3,14 @@ import { useLocation } from "react-router-dom";
 import type { Agent, WorkspaceConfig } from "@/api";
 import { Header } from "@/components/layout/Header";
 import { WorkspaceSidebar } from "@/components/layout/WorkspaceSidebar";
+import { TemporaryLocalBanner } from "@/components/runner/TemporaryLocalBanner";
 import { useAgentUnread } from "@/hooks/useAgentUnread";
+import { useCatalogSync } from "@/hooks/useCatalogSync";
 
 interface WorkspaceShellProps {
   config: WorkspaceConfig | null;
   agents: Agent[];
+  leadAgent?: Agent | null;
   loading: boolean;
   fullBleed?: boolean;
   onRefresh: () => void;
@@ -17,6 +20,7 @@ interface WorkspaceShellProps {
 export function WorkspaceShell({
   config,
   agents,
+  leadAgent = null,
   loading,
   fullBleed = false,
   onRefresh,
@@ -32,6 +36,7 @@ export function WorkspaceShell({
   const activeAgentMatch = /^\/agents\/([^/]+)\/chat/.exec(location.pathname);
   const activeAgentId = activeAgentMatch ? activeAgentMatch[1] : null;
   const { unread: unreadAgentIds, markAgentSeen } = useAgentUnread(agents, activeAgentId);
+  const { progress: catalogSync } = useCatalogSync(onRefresh);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-background">
@@ -39,11 +44,15 @@ export function WorkspaceShell({
         onMenuClick={() => setMobileOpen(true)}
         sidebarCollapsed={collapsed}
         onAgentSeen={markAgentSeen}
+        leadAgent={leadAgent}
+        catalogSync={catalogSync}
       />
+      <TemporaryLocalBanner />
       <div className="flex min-h-0 flex-1 overflow-hidden">
         <WorkspaceSidebar
           config={config}
           agents={agents}
+          leadAgent={leadAgent}
           loading={loading}
           collapsed={collapsed}
           onToggle={() => setCollapsed((v) => !v)}

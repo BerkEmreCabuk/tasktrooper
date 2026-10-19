@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
 // device is what a mobile_* tool actually needs: issue a command, launch an
@@ -36,16 +37,48 @@ type device interface {
 // the tools turn into a domain.ResourceBlock and the board turns into a parked
 // task. With one phone registered that is exactly the old behaviour.
 type Pool struct {
-	mu sync.Mutex
+	mu       sync.Mutex
+	attacher port.TaskImageAttacher
 	// sessions is in registration order, so allocation is stable and the first
 	// phone stays the one a single-device installation always used.
 	sessions []*Session
 	// bound is run → phone for the length of a run. Keyed by the agent session
 	// id, which is what identifies "one run" everywhere else in this process.
 	bound map[uuid.UUID]*Session
+	hub   Hub
 }
 
 func NewPool() *Pool { return &Pool{bound: map[uuid.UUID]*Session{}} }
+
+// UseHub hands every phone, present and later registered, the keeper of an
+// on-demand hub.
+func (p *Pool) UseHub(h Hub) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.hub = h
+	sessions := append([]*Session(nil), p.sessions...)
+	p.mu.Unlock()
+	for _, s := range sessions {
+		s.setHub(h)
+	}
+}
+
+// InUse reports whether any phone is leased or mid-command: what keeps an
+// on-demand hub running past its idle time. Never blocks on a session busy on
+// the network — that one is in use by definition.
+func (p *Pool) InUse() bool {
+	if p == nil {
+		return false
+	}
+	for _, s := range p.snapshot() {
+		if !s.idleAndFree() {
+			return true
+		}
+	}
+	return false
+}
 
 // Reconfigure points the pool at the currently registered devices.
 //
@@ -68,6 +101,7 @@ func (p *Pool) Reconfigure(cfgs []Config) {
 		s, ok := existing[cfg.DeviceUDID]
 		if !ok {
 			s = NewSession(cfg)
+			s.hub = p.hub
 		} else {
 			s.Reconfigure(cfg)
 		}
@@ -269,4 +303,17 @@ func (p *Pool) ProbeDevice(ctx context.Context, udid string) bool {
 		}
 	}
 	return false
+}
+
+// SetTaskAttacher lets mobile_screenshot save a shot on the run's task.
+func (p *Pool) SetTaskAttacher(a port.TaskImageAttacher) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.attacher = a
+}
+
+func (p *Pool) TaskAttacher() port.TaskImageAttacher {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.attacher
 }

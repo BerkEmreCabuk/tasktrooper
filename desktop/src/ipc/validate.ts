@@ -14,15 +14,41 @@
  * have needed custom refinements for anyway.
  */
 
-import { CHILD_IDS, type ChildId, type NotificationPreferences, type UserSettings } from "./types.js";
+import { isReservedMcpName } from "./mcp-names.js";
+import {
+  BUILT_IN_PROVIDER_TYPES,
+  CHILD_IDS,
+  CUSTOM_PROVIDER_TYPE,
+  TOOLCHAIN_IDS,
+  type ChildId,
+  type ToolchainId,
+  type ProviderKeyType,
+  type NotificationPreferences,
+  type RunnerPairingBundle,
+  type UserSettings,
+} from "./types.js";
 import type {
+  AccountSignInRequest,
+  AnalyticsIdentifyRequest,
+  AnalyticsTrackRequest,
   ChatFocusRequest,
   ChooseDirectoryRequest,
   DiagnosticsRequest,
+  KeyRemoveRequest,
+  KeysPrefill,
+  KeysWindowPrefill,
+  KeySetRequest,
+  McpServerRemoveRequest,
+  McpServerSetRequest,
+  LogsStreamRequest,
   OpenExternalRequest,
+  PairRequest,
   PreflightRequest,
   RestartChildRequest,
   RevealRequest,
+  ToolchainIdRequest,
+  ToolchainIdsRequest,
+  ToolchainReportRequest,
 } from "./channels.js";
 import type { HostLogsRequest, HostOverrides, HostPreferences } from "./host.js";
 
@@ -154,6 +180,45 @@ export function validatePreflightRequest(raw: unknown): PreflightRequest {
   return o.force === undefined ? {} : { force: asBoolean(o.force, "preflight.force") };
 }
 
+export function validateToolchainReportRequest(raw: unknown): ToolchainReportRequest {
+  if (raw === undefined || raw === null) return {};
+  const o = asRecord(raw, "toolchain.report");
+  return o.force === undefined ? {} : { force: asBoolean(o.force, "toolchain.report.force") };
+}
+
+function asToolchainId(value: unknown, what: string): ToolchainId {
+  const id = asString(value, what, { max: 64 });
+  if (!(TOOLCHAIN_IDS as readonly string[]).includes(id)) fail(`${what}: not a tool this app installs`);
+  return id as ToolchainId;
+}
+
+/**
+ * Ids only, from the fixed list — the page never names a command, a package or
+ * a URL. More entries than there are tools is a malformed request rather than
+ * a long one; repeats are allowed and folded.
+ */
+export function validateToolchainIds(raw: unknown): ToolchainIdsRequest {
+  const o = asRecord(raw, "toolchain");
+  if (!Array.isArray(o.ids)) fail("toolchain.ids: expected a list");
+  if (o.ids.length > TOOLCHAIN_IDS.length) fail(`toolchain.ids: at most ${TOOLCHAIN_IDS.length}`);
+  const ids: ToolchainId[] = [];
+  o.ids.forEach((value: unknown, i) => {
+    const id = asToolchainId(value, `toolchain.ids[${i}]`);
+    if (!ids.includes(id)) ids.push(id);
+  });
+  return { ids };
+}
+
+export function validateToolchainId(raw: unknown): ToolchainIdRequest {
+  const o = asRecord(raw, "toolchain");
+  return { id: asToolchainId(o.id, "toolchain.id") };
+}
+
+export function validateLogsStream(raw: unknown): LogsStreamRequest {
+  const o = asRecord(raw, "logsStream");
+  return { on: asBoolean(o.on, "logsStream.on") };
+}
+
 export function validateRestartChild(raw: unknown): RestartChildRequest {
   const o = asRecord(raw, "restartChild");
   const child = asString(o.child, "restartChild.child", { max: 64 });
@@ -167,7 +232,7 @@ export function validateLogsRequest(raw: unknown): HostLogsRequest {
   const out: HostLogsRequest = {};
   if (o.child !== undefined) {
     const child = asString(o.child, "logs.child", { max: 64 });
-    if (child !== "supervisor" && !(CHILD_IDS as readonly string[]).includes(child)) {
+    if (child !== "supervisor" && child !== "runner" && !(CHILD_IDS as readonly string[]).includes(child)) {
       fail(`logs.child: unknown child ${child}`);
     }
     out.child = child as ChildId | "supervisor";
@@ -210,7 +275,134 @@ export function validateSettingsPatch(raw: unknown): Partial<UserSettings> {
   if (o.launchAtLogin !== undefined) out.launchAtLogin = asBoolean(o.launchAtLogin, "settings.launchAtLogin");
   if (o.autoConnect !== undefined) out.autoConnect = asBoolean(o.autoConnect, "settings.autoConnect");
   if (o.notifications !== undefined) out.notifications = asNotifications(o.notifications, "settings.notifications");
+  if (o.mode !== undefined) {
+    if (o.mode !== "local" && o.mode !== "account") fail("settings.mode: expected local or account");
+    out.mode = o.mode;
+  }
+  if (o.accountOrigin !== undefined) out.accountOrigin = asOriginShaped(o.accountOrigin, "settings.accountOrigin");
+  if (o.analytics !== undefined) out.analytics = asBoolean(o.analytics, "settings.analytics");
   return out;
+}
+
+/**
+ * The shape of an account origin, and only the shape: `http(s)://host[:port]`
+ * with nothing after it. Which schemes and hosts are acceptable on this build
+ * is `main/account/origin.ts`'s decision, made where it is used.
+ */
+function asOriginShaped(value: unknown, what: string): string {
+  const raw = asCleanNonEmpty(value, what, { max: 512 });
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    fail(`${what}: not a URL`);
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") fail(`${what}: expected http or https`);
+  if (url.username !== "" || url.password !== "") fail(`${what}: must not carry credentials`);
+  if ((url.pathname !== "/" && url.pathname !== "") || url.search !== "" || url.hash !== "") {
+    fail(`${what}: expected an origin, with no path, query or fragment`);
+  }
+  return `${url.protocol}//${url.host}`;
+}
+
+/**
+ * `account.signIn(origin?)`. The origin is optional — absent means the one
+ * this app would use anyway — and only its shape is checked here.
+ */
+export function validateSignIn(raw: unknown): AccountSignInRequest {
+  if (raw === undefined || raw === null) return {};
+  const o = asRecord(raw, "signIn");
+  return o.origin === undefined ? {} : { origin: asOriginShaped(o.origin, "signIn.origin") };
+}
+
+export function validateAnalyticsSet(raw: unknown): { on: boolean } {
+  const o = asRecord(raw, "analytics");
+  return { on: asBoolean(o.on, "analytics.on") };
+}
+
+// GA's own name rules (40 chars, letter first), applied to event and param names.
+const ANALYTICS_NAME = /^[a-z][a-z0-9_]{0,39}$/;
+// A param value is an id, an enum or a templated route — never free text. No
+// whitespace and no "@" keeps a title, a sentence or an email address out.
+const ANALYTICS_VALUE = /^[A-Za-z0-9_.:/-]{0,100}$/;
+const ANALYTICS_MAX_PARAMS = 10;
+const ANALYTICS_HASHED_USER = /^[0-9a-f]{64}$/;
+// Main's own events, and the names GA reserves for itself.
+const ANALYTICS_RESERVED_EVENTS = new Set([
+  "app_open",
+  "app_active",
+  "app_remove",
+  "app_update",
+  "error",
+  "first_open",
+  "first_visit",
+  "session_start",
+  "user_engagement",
+]);
+const ANALYTICS_RESERVED_PARAMS = new Set([
+  "session_id",
+  "engagement_time_msec",
+  "app_platform",
+  "app_version",
+  "platform",
+  "arch",
+  "mode",
+]);
+const ANALYTICS_RESERVED_PREFIX = /^(firebase_|ga_|google_)/;
+
+/**
+ * `analytics.track({ name, params })`. Anything that is not an id, an enum, a
+ * count or a templated route is refused: this is the gate that keeps a page's
+ * text out of what the desktop sends.
+ */
+export function validateAnalyticsTrack(raw: unknown): Required<AnalyticsTrackRequest> {
+  const o = asRecord(raw, "analytics.track");
+  const name = asString(o.name, "analytics.track.name", { max: 40 });
+  if (!ANALYTICS_NAME.test(name) || ANALYTICS_RESERVED_PREFIX.test(name) || ANALYTICS_RESERVED_EVENTS.has(name)) {
+    fail("analytics.track.name: not an allowed event name");
+  }
+  const params: Record<string, string | number> = {};
+  if (o.params !== undefined) {
+    const entries = Object.entries(asRecord(o.params, "analytics.track.params"));
+    if (entries.length > ANALYTICS_MAX_PARAMS) fail(`analytics.track.params: at most ${ANALYTICS_MAX_PARAMS}`);
+    for (const [key, value] of entries) {
+      if (!ANALYTICS_NAME.test(key) || ANALYTICS_RESERVED_PREFIX.test(key) || ANALYTICS_RESERVED_PARAMS.has(key)) {
+        fail(`analytics.track.params.${key}: not an allowed param name`);
+      }
+      if (typeof value === "number" && Number.isFinite(value)) params[key] = value;
+      else if (typeof value === "string" && ANALYTICS_VALUE.test(value)) params[key] = value;
+      else fail(`analytics.track.params.${key}: expected an id, an enum or a number`);
+    }
+  }
+  return { name, params };
+}
+
+export function validateAnalyticsIdentify(raw: unknown): AnalyticsIdentifyRequest {
+  const o = asRecord(raw, "analytics.identify");
+  if (o.userId === null) return { userId: null };
+  const userId = asString(o.userId, "analytics.identify.userId", { max: 64 });
+  if (!ANALYTICS_HASHED_USER.test(userId)) fail("analytics.identify.userId: expected a 64-character hex hash");
+  return { userId };
+}
+
+/**
+ * The shape of a pairing bundle crossing IPC: every field a clean, non-empty
+ * string. Shallow on purpose; `main/config/pairing.ts#asPairingBundle`
+ * re-validates (`tm_base_url` https or loopback) before anything is written,
+ * and the main process checks the bundle's origin against the account's.
+ */
+export function validatePairRequest(raw: unknown): PairRequest {
+  const o = asRecord(raw, "pair");
+  const b = asRecord(o.bundle, "pair.bundle");
+  const bundle: RunnerPairingBundle = {
+    runner_token: asCleanNonEmpty(b.runner_token, "pair.bundle.runner_token", { max: 4096 }),
+    tm_base_url: asCleanNonEmpty(b.tm_base_url, "pair.bundle.tm_base_url", { max: 512 }),
+    tenant_id: asCleanNonEmpty(b.tenant_id, "pair.bundle.tenant_id", { max: 256 }),
+    member_uid: asCleanNonEmpty(b.member_uid, "pair.bundle.member_uid", { max: 256 }),
+    paired_at: asCleanNonEmpty(b.paired_at, "pair.bundle.paired_at", { max: 64 }),
+    label: asCleanNonEmpty(b.label, "pair.bundle.label", { max: 256 }),
+  };
+  return { bundle };
 }
 
 /**
@@ -267,4 +459,209 @@ export function validateChooseDirectory(raw: unknown): ChooseDirectoryRequest {
     out.buttonLabel = asClean(o.buttonLabel, "chooseDirectory.buttonLabel", { max: 64 }).trim();
   }
   return out;
+}
+
+/**
+ * A provider id: the identifier rule the runner holds `providers` to — a
+ * built-in type's name, or a custom endpoint's UUID.
+ */
+const PROVIDER_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+function asProviderId(value: unknown, what: string): string {
+  const id = asCleanNonEmpty(value, what, { max: 64 });
+  if (!PROVIDER_ID.test(id)) fail(`${what}: letters, digits, '.', '_' and '-' only`);
+  return id;
+}
+
+/**
+ * The API-key window's `set`. Shape only — which id a type takes, whether a
+ * key may be left out and where it may travel are `main/keys/keys.ts`'s.
+ *
+ * No message here quotes a value it refuses: the key is one of them, and a
+ * refusal is read back by the page and may reach a log.
+ */
+export function validateKeySet(raw: unknown): KeySetRequest {
+  const o = asRecord(raw, "keys.set");
+  const type = asString(o.type, "keys.set.type", { max: 64 });
+  if (!(BUILT_IN_PROVIDER_TYPES as readonly string[]).includes(type) && type !== CUSTOM_PROVIDER_TYPE) {
+    fail("keys.set.type: not a provider type this app offers");
+  }
+  const out: KeySetRequest = { type: type as ProviderKeyType };
+  if (o.id !== undefined) out.id = asProviderId(o.id, "keys.set.id");
+  if (o.base_url !== undefined) {
+    const base = asClean(o.base_url, "keys.set.base_url", { max: 512 }).trim();
+    if (base !== "") out.base_url = base;
+  }
+  if (o.models !== undefined) {
+    if (!Array.isArray(o.models)) fail("keys.set.models: expected a list");
+    if (o.models.length > 32) fail("keys.set.models: at most 32");
+    out.models = o.models.map((m, i) => asCleanNonEmpty(m, `keys.set.models[${i}]`, { max: 256 }));
+  }
+  if (o.api_key !== undefined) {
+    if (typeof o.api_key !== "string") fail("keys.set.api_key: expected a string");
+    if (o.api_key.length > 4096) fail("keys.set.api_key: longer than 4096 characters");
+    if (CONTROL_CHARS.test(o.api_key)) fail("keys.set.api_key: contains control characters");
+    const key = o.api_key.trim();
+    if (key !== "") out.api_key = key;
+  }
+  return out;
+}
+
+const PREFILL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const PREFILL_LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
+
+function isPrefillAddress(raw: string): boolean {
+  try {
+    const url = new URL(raw);
+    if (url.username !== "" || url.password !== "") return false;
+    return url.protocol === "https:" || (url.protocol === "http:" && PREFILL_LOOPBACK.has(url.hostname));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * What the account's page may ask the key window to focus on. A key is not
+ * accepted at all: a field this does not name is dropped, and `api_key` is
+ * refused outright so a page that tries to send one learns it cannot.
+ */
+export function validateKeysPrefill(raw: unknown): KeysPrefill {
+  const o = asRecord(raw, "keys.prefill");
+  if ("api_key" in o) fail("keys.prefill: takes no key");
+  const type = asString(o.type, "keys.prefill.type", { max: 64 });
+  const builtIn = (BUILT_IN_PROVIDER_TYPES as readonly string[]).includes(type);
+  if (!builtIn && type !== CUSTOM_PROVIDER_TYPE) fail("keys.prefill.type: not a provider type this app offers");
+  const id = asString(o.id, "keys.prefill.id", { max: 64 });
+  if (builtIn ? id !== type : !PREFILL_UUID.test(id)) {
+    fail("keys.prefill.id: a built-in type's id is its type, a custom endpoint's a UUID");
+  }
+  const out: KeysPrefill = { id, type: type as ProviderKeyType };
+  if (o.base_url !== undefined) {
+    const base = asClean(o.base_url, "keys.prefill.base_url", { max: 512 }).trim();
+    if (base !== "") {
+      if (!isPrefillAddress(base)) fail("keys.prefill.base_url: must be https, or http to this computer");
+      out.base_url = base;
+    }
+  }
+  if (type === CUSTOM_PROVIDER_TYPE && out.base_url === undefined) {
+    fail("keys.prefill.base_url: a custom endpoint needs its address");
+  }
+  if (o.models !== undefined) {
+    if (!Array.isArray(o.models)) fail("keys.prefill.models: expected a list");
+    if (o.models.length > 32) fail("keys.prefill.models: at most 32");
+    out.models = o.models.map((m, i) => asCleanNonEmpty(m, `keys.prefill.models[${i}]`, { max: 256 }));
+  }
+  if (o.name !== undefined) {
+    const name = asClean(o.name, "keys.prefill.name", { max: 120 }).trim();
+    if (name !== "") out.name = name;
+  }
+  return out;
+}
+
+/**
+ * Either focus the account's page may hand the key window. `{mcp}` names one
+ * of this computer's MCP servers and the variables or headers it still needs;
+ * a value is refused outright, like a key in the provider form.
+ */
+export function validateKeysWindowPrefill(raw: unknown): KeysWindowPrefill {
+  const o = asRecord(raw, "keys.prefill");
+  if (!("mcp" in o)) return validateKeysPrefill(o);
+  if ("env" in o || "headers" in o || "value" in o) fail("keys.prefill: takes no value");
+  const out: KeysWindowPrefill = { mcp: asMcpName(o.mcp, "keys.prefill.mcp") };
+  if (o.secretNames !== undefined) {
+    if (!Array.isArray(o.secretNames)) fail("keys.prefill.secretNames: expected a list");
+    if (o.secretNames.length > 64) fail("keys.prefill.secretNames: at most 64");
+    out.secretNames = o.secretNames.map((n, i) => {
+      const name = asCleanNonEmpty(n, `keys.prefill.secretNames[${i}]`, { max: 128 });
+      if (!MCP_ENV_NAME.test(name) && !MCP_HEADER_NAME.test(name)) fail(`keys.prefill.secretNames[${i}]: not a variable or header name`);
+      return name;
+    });
+  }
+  return out;
+}
+
+export function validateKeyRemove(raw: unknown): KeyRemoveRequest {
+  const o = asRecord(raw, "keys.remove");
+  return { id: asProviderId(o.id, "keys.remove.id") };
+}
+
+const MCP_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,31}$/;
+const MCP_ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+const MCP_HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/;
+
+function asMcpName(value: unknown, what: string): string {
+  const name = asCleanNonEmpty(value, what, { max: 32 });
+  if (!MCP_NAME.test(name)) fail(`${what}: letters, digits and '-' only`);
+  return name;
+}
+
+/**
+ * A map of secrets (env variables, headers). Values may be empty — that keeps
+ * the stored one — and no refusal here quotes a value.
+ */
+function asSecretMap(value: unknown, what: string, keyPattern: RegExp, control: boolean): Record<string, string> {
+  const o = asRecord(value, what);
+  const entries = Object.entries(o);
+  if (entries.length > 64) fail(`${what}: at most 64`);
+  const out: Record<string, string> = {};
+  for (const [k, v] of entries) {
+    if (!keyPattern.test(k)) fail(`${what}: a name is not valid`);
+    if (typeof v !== "string") fail(`${what}: a value is not a string`);
+    if (v.length > 4096) fail(`${what}: a value is longer than 4096 characters`);
+    if (control ? CONTROL_CHARS.test(v) : v.includes("\u0000")) fail(`${what}: a value contains control characters`);
+    out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * The key window's MCP server `set`. Shape only — merging the stored secrets
+ * and what the runner will accept are `main/keys/keys.ts`'s and the store's.
+ */
+export function validateMcpServerSet(raw: unknown): McpServerSetRequest {
+  const o = asRecord(raw, "keys.mcp-set");
+  const out: McpServerSetRequest = { name: asMcpName(o.name, "keys.mcp-set.name") };
+  if (isReservedMcpName(out.name)) fail(`keys.mcp-set.name: '${out.name}' is reserved for TaskTrooper's own server`);
+  const command = o.command === undefined ? "" : asClean(o.command, "keys.mcp-set.command", { max: 1024 }).trim();
+  const url = o.url === undefined ? "" : asClean(o.url, "keys.mcp-set.url", { max: 2048 }).trim();
+  if ((command === "") === (url === "")) fail("keys.mcp-set: a server has a command or a url, not both and not neither");
+  if (url !== "") {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return fail("keys.mcp-set.url: not an address");
+    }
+    if (!/^https?:$/.test(parsed.protocol) || parsed.username !== "" || parsed.password !== "") {
+      fail("keys.mcp-set.url: must be http(s) without credentials in it");
+    }
+    if (o.args !== undefined || o.env !== undefined) fail("keys.mcp-set: an http server takes headers, not args or env");
+    out.url = url;
+    if (o.headers !== undefined) out.headers = asSecretMap(o.headers, "keys.mcp-set.headers", MCP_HEADER_NAME, true);
+    return withDisabled(out, o.disabled);
+  }
+  if (o.headers !== undefined) fail("keys.mcp-set: a command server takes args and env, not headers");
+  out.command = command;
+  if (o.args !== undefined) {
+    if (!Array.isArray(o.args)) fail("keys.mcp-set.args: expected a list");
+    if (o.args.length > 64) fail("keys.mcp-set.args: at most 64");
+    out.args = o.args.map((a, i) => {
+      const arg = asString(a, `keys.mcp-set.args[${i}]`, { max: 4096 });
+      if (arg.includes("\u0000")) fail(`keys.mcp-set.args[${i}]: contains a NUL`);
+      return arg;
+    });
+  }
+  if (o.env !== undefined) out.env = asSecretMap(o.env, "keys.mcp-set.env", MCP_ENV_NAME, false);
+  return withDisabled(out, o.disabled);
+}
+
+function withDisabled(out: McpServerSetRequest, disabled: unknown): McpServerSetRequest {
+  if (disabled === undefined) return out;
+  if (typeof disabled !== "boolean") fail("keys.mcp-set.disabled: expected true or false");
+  return { ...out, disabled };
+}
+
+export function validateMcpServerRemove(raw: unknown): McpServerRemoveRequest {
+  const o = asRecord(raw, "keys.mcp-remove");
+  return { name: asMcpName(o.name, "keys.mcp-remove.name") };
 }

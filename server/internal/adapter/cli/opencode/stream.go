@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/core"
@@ -38,24 +39,75 @@ type toolPart struct {
 	ID    string `json:"id"`
 	Tool  string `json:"tool"`
 	State struct {
-		Status string          `json:"status"`
-		Input  json.RawMessage `json:"input"`
-		Output string          `json:"output"`
+		Status   string          `json:"status"`
+		Input    json.RawMessage `json:"input"`
+		Output   string          `json:"output"`
+		Metadata struct {
+			SessionID       string `json:"sessionId"`
+			ParentSessionID string `json:"parentSessionId"`
+		} `json:"metadata"`
 	} `json:"state"`
 }
 
+const taskTool = "task"
+
+var taskResultID = regexp.MustCompile(`<task id="([^"]+)"`)
+
+// childSessionID is the subagent session a finished task call ran in. The
+// metadata is the source of truth; the output header is the fallback for
+// versions that omit it.
+func childSessionID(p toolPart) string {
+	if id := strings.TrimSpace(p.State.Metadata.SessionID); id != "" {
+		return id
+	}
+	if m := taskResultID.FindStringSubmatch(p.State.Output); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// finishPart is one step's spend: opencode emits a step_finish per model
+// step, so the run's total is their sum.
 type finishPart struct {
-	Reason string  `json:"reason"`
-	Cost   float64 `json:"cost"`
-	Tokens struct {
-		Input     int `json:"input"`
-		Output    int `json:"output"`
-		Reasoning int `json:"reasoning"`
-		Cache     struct {
-			Read  int `json:"read"`
-			Write int `json:"write"`
-		} `json:"cache"`
-	} `json:"tokens"`
+	Reason string      `json:"reason"`
+	Cost   float64     `json:"cost"`
+	Tokens tokenCounts `json:"tokens"`
+}
+
+// tokenCounts is opencode's own split, which is disjoint: input excludes both
+// cache buckets and output excludes reasoning, so its tokens.total is the sum
+// of all five. domain.Usage counts the cache buckets inside the prompt and
+// reasoning inside the completion.
+type tokenCounts struct {
+	Input     int `json:"input"`
+	Output    int `json:"output"`
+	Reasoning int `json:"reasoning"`
+	Cache     struct {
+		Read  int `json:"read"`
+		Write int `json:"write"`
+	} `json:"cache"`
+}
+
+func (t tokenCounts) toDomain() domain.Usage {
+	prompt := t.Input + t.Cache.Read + t.Cache.Write
+	completion := t.Output + t.Reasoning
+	return domain.Usage{
+		PromptTokens:     prompt,
+		CompletionTokens: completion,
+		TotalTokens:      prompt + completion,
+		CacheReadTokens:  t.Cache.Read,
+		CacheWriteTokens: t.Cache.Write,
+	}
+}
+
+func addUsage(a, b domain.Usage) domain.Usage {
+	return domain.Usage{
+		PromptTokens:     a.PromptTokens + b.PromptTokens,
+		CompletionTokens: a.CompletionTokens + b.CompletionTokens,
+		TotalTokens:      a.TotalTokens + b.TotalTokens,
+		CacheReadTokens:  a.CacheReadTokens + b.CacheReadTokens,
+		CacheWriteTokens: a.CacheWriteTokens + b.CacheWriteTokens,
+	}
 }
 
 type sink = core.Sink
@@ -70,6 +122,11 @@ func parseStream(r io.Reader, s sink) (outcome, error) {
 	sessionAnnounced := false
 	turnSeen := false
 	texts := textAccum{values: map[string]string{}}
+	// failure is the last error event no finished step has come after yet.
+	// opencode also reports errors it recovers from (it compacts an
+	// overflowing context and keeps going), so an error only ends the run
+	// when nothing finishes after it.
+	var failure *errorPayload
 
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -113,6 +170,11 @@ func parseStream(r io.Reader, s sink) (outcome, error) {
 					if isErr {
 						out.ToolFailures++
 					}
+					if p.Tool == taskTool && !isErr {
+						if id := childSessionID(p); id != "" {
+							out.ChildSessions = append(out.ChildSessions, id)
+						}
+					}
 					s.OnToolUse(p.CallID, p.Tool, string(p.State.Input))
 					s.OnToolResult(p.CallID, p.Tool, p.State.Output, isErr)
 				default:
@@ -124,30 +186,38 @@ func parseStream(r io.Reader, s sink) (outcome, error) {
 			if json.Unmarshal(ev.Part, &p) == nil {
 				out.SawResult = true
 				out.Status = p.Reason
-				out.CostUSD = p.Cost
-				out.Usage = domain.Usage{
-					PromptTokens:     p.Tokens.Input,
-					CompletionTokens: p.Tokens.Output,
-					TotalTokens:      p.Tokens.Input + p.Tokens.Output,
-					CacheReadTokens:  p.Tokens.Cache.Read,
+				out.CostUSD += p.Cost
+				out.Usage = addUsage(out.Usage, p.Tokens.toDomain())
+				if failure != nil {
+					out.RecoveredError = failure.describe()
+					failure = nil
 				}
 			}
 		case "error":
 			out.SawResult = true
-			out.IsError = true
+			failure = &errorPayload{}
 			if ev.Error != nil {
-				out.Status = ev.Error.Name
-				out.Text = ev.Error.Data.Message
+				failure = ev.Error
 			}
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return out, fmt.Errorf("read opencode stream: %w", err)
 	}
-	if strings.TrimSpace(out.Text) == "" {
-		out.Text = texts.join()
+	if failure != nil {
+		out.IsError = true
+		out.Status = failure.Name
+		out.Text = failure.describe()
+		return out, nil
 	}
+	out.Text = texts.join()
 	return out, nil
+}
+
+// describe is the error's own message, or its name when it carries none —
+// never the session's answer text, which is not what went wrong.
+func (e *errorPayload) describe() string {
+	return core.FirstNonEmpty(e.Data.Message, e.Name)
 }
 
 type textAccum struct {

@@ -10,6 +10,15 @@ export function unreachableCopy(isMac: boolean): string {
 }
 
 /**
+ * Account mode's version: the page comes from the account's origin, so what
+ * failed is the network path to it, and running locally for now is the other
+ * way on — without signing out.
+ */
+export function accountUnreachableCopy(origin: string): string {
+  return `This computer is signed in to ${origin}, and the window shows TaskTrooper from there. Check the internet connection, VPN or proxy and retry — or use TaskTrooper on this computer without the account for now. You stay signed in, tasks assigned to you there wait, and the next launch tries the account again.`;
+}
+
+/**
  * A plain-language cause for the failures a user can fix themselves, matched
  * on the supervisor's description, which carries the backend's own last line.
  * `undefined` leaves the generic copy in place: guessing a cause for an

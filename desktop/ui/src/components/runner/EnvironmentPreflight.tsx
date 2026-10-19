@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Notice } from "@/components/ui/notice";
 import { useI18n } from "@/hooks/useI18n";
+import { usePolling } from "@/hooks/usePolling";
 import type { DesktopPreflightItem, DesktopPreflightReport, DesktopRunnerHost } from "@/lib/desktop-bridge";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +28,12 @@ interface EnvironmentPreflightProps {
    * probe that could not run, which is never the same as "not ready".
    */
   onReport?: (result: { report: DesktopPreflightReport | null; error: string }) => void;
+  /**
+   * Draw only the required items that fail — nothing while everything holds.
+   * Settings → LLM uses it: the full checklist (Chrome, Appium, the Android
+   * SDK…) is setup's business, and only a blocker matters next to Connect.
+   */
+  blockersOnly?: boolean;
 }
 
 function StatusIcon({ item }: { item: DesktopPreflightItem }) {
@@ -63,7 +70,7 @@ function StatusIcon({ item }: { item: DesktopPreflightItem }) {
  * Absent (not disabled) outside the desktop shell and on a shell old enough
  * to predate this call.
  */
-export function EnvironmentPreflight({ host, onBlockingChange, onReport }: EnvironmentPreflightProps) {
+export function EnvironmentPreflight({ host, onBlockingChange, onReport, blockersOnly = false }: EnvironmentPreflightProps) {
   const { t } = useI18n();
   const [report, setReport] = useState<DesktopPreflightReport | null>(null);
   const [error, setError] = useState("");
@@ -77,12 +84,18 @@ export function EnvironmentPreflight({ host, onBlockingChange, onReport }: Envir
   const onReportRef = useRef(onReport);
   onReportRef.current = onReport;
 
+  // An unforced preflight() answers from the shell's last sweep, as a new
+  // object each time; the same generatedAt means nothing was re-probed.
+  const shownReport = useRef<DesktopPreflightReport | null>(null);
+
   const load = useCallback(
     async (force = false) => {
       if (!hasPreflight || !host) return;
       setLoading(true);
       try {
-        const next = await host.preflight(force);
+        const fetched = await host.preflight(force);
+        const next = shownReport.current?.generatedAt === fetched.generatedAt ? shownReport.current : fetched;
+        shownReport.current = next;
         setReport(next);
         setError("");
         onReportRef.current?.({ report: next, error: "" });
@@ -100,17 +113,10 @@ export function EnvironmentPreflight({ host, onBlockingChange, onReport }: Envir
   );
 
   useEffect(() => {
-    if (!hasPreflight) {
-      onBlockingChangeRef.current?.(null);
-      return;
-    }
-    void load();
-    const timer = window.setInterval(() => void load(), POLL_MS);
-    return () => window.clearInterval(timer);
-    // `load` excluded on purpose: it is stable per (hasPreflight, host), and
-    // including it would restart the poll on every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasPreflight, host]);
+    if (!hasPreflight) onBlockingChangeRef.current?.(null);
+  }, [hasPreflight]);
+
+  usePolling(() => load(), POLL_MS, hasPreflight);
 
   useEffect(() => {
     if (!report) return;
@@ -119,6 +125,39 @@ export function EnvironmentPreflight({ host, onBlockingChange, onReport }: Envir
   }, [report]);
 
   if (!hasPreflight) return null;
+
+  if (blockersOnly) {
+    const blockers = report?.items.filter((i) => i.required && i.status !== "ok") ?? [];
+    if (blockers.length === 0 && !error) return null;
+    return (
+      <Notice
+        variant={error ? "error" : "warning"}
+        title={error ? t("settingsPages.llm.claudeCode.preflight.loadFailed") : t("settingsPages.llm.claudeCode.preflight.blockersTitle")}
+      >
+        {error ? (
+          <p>{error}</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {blockers.map((item) => (
+              <li key={item.id}>
+                <span className="font-medium">{item.label}</span>
+                {item.remediation && <span> — {item.remediation}</span>}
+                {item.command && (
+                  <code className="mt-1 block break-all rounded bg-muted/60 px-1.5 py-1 font-mono text-micro">
+                    {item.command}
+                  </code>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+        <Button variant="outline" size="sm" className="mt-2" onClick={() => void load(true)} disabled={loading}>
+          <RefreshCw className={cn("mr-1.5 h-3.5 w-3.5", loading && "animate-spin")} />
+          {t("settingsPages.llm.claudeCode.preflight.refresh")}
+        </Button>
+      </Notice>
+    );
+  }
 
   return (
     <div className="mb-3 space-y-2">

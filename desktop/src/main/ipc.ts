@@ -1,5 +1,13 @@
 import { ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from "electron";
-import { CLOUD_CHANNELS, SHELL_CHANNELS, type ChooseDirectoryRequest } from "../ipc/channels.js";
+import {
+  CLOUD_CHANNELS,
+  KEYS_CHANNELS,
+  SHELL_CHANNELS,
+  type ChooseDirectoryRequest,
+  type KeySetRequest,
+  type KeysWindowPrefill,
+  type McpServerSetRequest,
+} from "../ipc/channels.js";
 import type {
   HostOverrides,
   HostPreferences,
@@ -8,26 +16,51 @@ import type {
   HostWorkspaceChoice,
 } from "../ipc/host.js";
 import type {
+  AccountMode,
+  AccountState,
+  AnalyticsState,
   AppInfo,
   CloudStatus,
   Diagnostics,
   LogLine,
   PreflightReport,
+  McpServersState,
+  ProviderKeysState,
+  RunnerPairingBundle,
+  RunnerPairingSummary,
   SupervisorSnapshot,
+  ToolchainId,
+  ToolchainJobState,
+  ToolchainReport,
   UpdateStatus,
 } from "../ipc/types.js";
+import type { McpServerConsent } from "./keys/keys.js";
 import {
   ValidationError,
+  validateAnalyticsIdentify,
+  validateAnalyticsSet,
+  validateAnalyticsTrack,
   validateChatFocus,
   validateChooseDirectory,
   validateDiagnosticsRequest,
+  validateKeyRemove,
+  validateKeySet,
+  validateKeysWindowPrefill,
+  validateMcpServerRemove,
+  validateMcpServerSet,
   validateLogsRequest,
+  validateLogsStream,
   validateOpenExternal,
   validateOverrides,
+  validatePairRequest,
   validatePreferences,
   validatePreflightRequest,
   validateRestartChild,
   validateReveal,
+  validateSignIn,
+  validateToolchainId,
+  validateToolchainIds,
+  validateToolchainReportRequest,
 } from "../ipc/validate.js";
 
 /**
@@ -48,8 +81,9 @@ import {
  *      second view, a popup, or the chrome's own renderer is not.
  *   2. Is it the TOP frame of that view? An iframe — including one injected by
  *      a compromised page — is a different frame and inherits nothing.
- *   3. Is that frame's origin still the trusted one? A view that navigated
- *      somewhere else keeps the preload but loses the powers.
+ *   3. Is that frame's origin still the trusted one — `app://tasktrooper` in
+ *      local mode, the account's origin in account mode, never both? A view
+ *      that navigated somewhere else keeps the preload but loses the powers.
  *
  * Any of those failing is a refusal, not a coerced default. `will-navigate` in
  * window.ts already prevents (3) from happening in the first place; this is
@@ -67,6 +101,38 @@ export interface IpcServices {
   /** Drain the tunnel, then hand off to Squirrel. Never returns. */
   restartToUpdate(): void;
 
+  // --- account mode ---
+  accountMode(): AccountMode;
+  accountState(): AccountState;
+  accountSignIn(origin?: string): Promise<AccountState>;
+  accountSignOut(): Promise<AccountState>;
+  /** Run locally for now, still signed in — the chrome's failure screen. */
+  accountUseLocalForNow(): Promise<AccountState>;
+  /** Bring up the API-key window. */
+  openKeys(prefill?: KeysWindowPrefill): void;
+  /** The account's MCP Servers page: this computer's own servers, the same list the key window keeps. */
+  accountMcpList(): McpServersState;
+  accountMcpSet(request: McpServerSetRequest): McpServersState;
+  accountMcpRemove(name: string): McpServersState;
+  /** What `accountMcpSet(request)` would run that is not running already; null when nothing. */
+  accountMcpConsent(request: McpServerSetRequest): McpServerConsent | null;
+  /** The native "Add the MCP server …?" dialog; true when the person agreed. */
+  confirmMcpServer(consent: McpServerConsent): Promise<boolean>;
+
+  analyticsState(): AnalyticsState;
+  setAnalytics(on: boolean): AnalyticsState;
+  trackAnalytics(name: string, params: Record<string, string | number>): void;
+  identifyAnalytics(userId: string | null): void;
+
+  // --- the API-key window ---
+  keysList(): ProviderKeysState;
+  keysSet(request: KeySetRequest): ProviderKeysState;
+  keysRemove(id: string): ProviderKeysState;
+  keysPrefill(): KeysWindowPrefill | null;
+  keysMcpList(): McpServersState;
+  keysMcpSet(request: McpServerSetRequest): McpServersState;
+  keysMcpRemove(name: string): McpServersState;
+
   // --- the web app's local half ---
   hostInfo(): { app: string; version: string; platform: string };
   /**
@@ -82,7 +148,15 @@ export interface IpcServices {
   disconnect(): Promise<HostRunnerSnapshot>;
   restartChild(child: string): Promise<HostRunnerSnapshot>;
   logs(req: { child?: string; afterSeq?: number; limit?: number }): LogLine[];
+  /** Push log batches to the page (true) or stop (false). */
+  streamLogs(on: boolean): void;
   clearLogs(): void;
+
+  // Account mode only.
+  pair(bundle: RunnerPairingBundle): Promise<HostRunnerSnapshot>;
+  unpair(): Promise<HostRunnerSnapshot>;
+  pairingInfo(): RunnerPairingSummary | null;
+  restartRunner(): Promise<HostRunnerSnapshot>;
 
   getSettings(): HostSettings;
   setPreferences(patch: HostPreferences): Promise<HostSettings>;
@@ -95,6 +169,25 @@ export interface IpcServices {
   preflight(force: boolean): Promise<PreflightReport>;
   diagnostics(force: boolean): Promise<Diagnostics>;
   setOverrides(patch: HostOverrides): Promise<Diagnostics>;
+
+  // --- toolchain setup ---
+  toolchainReport(force: boolean): Promise<ToolchainReport>;
+  /**
+   * The install order for `ids`: their missing dependencies first, nothing
+   * installed, nothing manual, nothing the running job already has queued.
+   */
+  toolchainPlan(ids: ToolchainId[]): Promise<ToolchainId[]>;
+  toolchainState(): ToolchainJobState;
+  /** Plans `ids` and starts (or appends to) the job. */
+  toolchainInstall(ids: ToolchainId[]): Promise<ToolchainJobState>;
+  /** Starts (or appends to) the job with exactly `planned`, which is already a plan — no planning again. */
+  toolchainEnqueue(planned: ToolchainId[]): ToolchainJobState;
+  /** The native "Install developer tools?" dialog for a plan; true when the person said Install. */
+  confirmToolchainInstall(planned: ToolchainId[]): Promise<boolean>;
+  toolchainCancel(): ToolchainJobState;
+  toolchainDismiss(): ToolchainJobState;
+  /** Opens the tool's page from the table in the real browser. */
+  toolchainOpenPage(id: ToolchainId): Promise<void>;
 }
 
 /** Answers "is this call really from the web app, right now?". */
@@ -121,6 +214,12 @@ export interface SenderGuard {
    * make it.
    */
   isShellSender(event: IpcMainInvokeEvent): boolean;
+  /**
+   * The API-key window's own page, its top frame — and nothing else: not the
+   * web app's view on either mode's origin, not the chrome. The only sender
+   * that may hand this process a key.
+   */
+  isKeysSender(event: IpcMainInvokeEvent): boolean;
 }
 
 /**
@@ -180,6 +279,30 @@ export function registerIpc(services: IpcServices, guard: SenderGuard): void {
   shell(SHELL_CHANNELS.updateRestart, () => {
     services.restartToUpdate();
   });
+  handle(SHELL_CHANNELS.accountState, () => services.accountState());
+  shell(SHELL_CHANNELS.accountUseLocalForNow, () => services.accountUseLocalForNow());
+
+  // --- the API-key window ---
+  /**
+   * The guard runs before the payload is read, like the cloud one: a sender
+   * that is not the key window learns nothing, including whether its key
+   * would have been accepted.
+   */
+  const keys = <T>(channel: string, fn: (payload: unknown) => T | Promise<T>): void => {
+    handle(channel, (payload, event) => {
+      if (!guard.isKeysSender(event)) {
+        throw new Error("refused: API keys are changed only in TaskTrooper's own API keys window.");
+      }
+      return fn(payload);
+    });
+  };
+  keys(KEYS_CHANNELS.list, () => services.keysList());
+  keys(KEYS_CHANNELS.set, (payload) => services.keysSet(validateKeySet(payload)));
+  keys(KEYS_CHANNELS.prefill, () => services.keysPrefill());
+  keys(KEYS_CHANNELS.remove, (payload) => services.keysRemove(validateKeyRemove(payload).id));
+  keys(KEYS_CHANNELS.mcpList, () => services.keysMcpList());
+  keys(KEYS_CHANNELS.mcpSet, (payload) => services.keysMcpSet(validateMcpServerSet(payload)));
+  keys(KEYS_CHANNELS.mcpRemove, (payload) => services.keysMcpRemove(validateMcpServerRemove(payload).name));
 
   // --- the web app ---
   cloud(CLOUD_CHANNELS.hostInfo, () => services.hostInfo());
@@ -198,21 +321,72 @@ export function registerIpc(services: IpcServices, guard: SenderGuard): void {
       // Only the refusal is logged, and it earns its line: a page that gets no
       // base calls its own origin instead, and that failure surfaces several
       // layers from this decision.
-      if (value === "") console.warn(`[${channel}] refused or not ready`);
+      if (value === "" && services.accountMode() === "local") console.warn(`[${channel}] refused or not ready`);
       event.returnValue = value;
     });
   };
   syncValue(CLOUD_CHANNELS.apiBase, () => services.apiBase());
   syncValue(CLOUD_CHANNELS.apiToken, () => services.apiToken());
+  syncValue(CLOUD_CHANNELS.accountMode, () => services.accountMode());
+
+  cloud(CLOUD_CHANNELS.accountState, () => services.accountState());
+  cloud(CLOUD_CHANNELS.accountSignIn, (payload) => services.accountSignIn(validateSignIn(payload).origin));
+  cloud(CLOUD_CHANNELS.accountSignOut, () => services.accountSignOut());
+  cloud(CLOUD_CHANNELS.accountOpenKeys, (payload) => {
+    services.openKeys(payload === undefined || payload === null ? undefined : validateKeysWindowPrefill(payload));
+  });
+
+  /**
+   * This computer's own MCP servers, from the account's page. A server is a
+   * command the runner starts here, so a change that runs something new waits
+   * for the person's yes in a native dialog, exactly as the toolchain's
+   * installs do; a remote page can ask, never agree.
+   */
+  const accountOnly = (): void => {
+    if (services.accountMode() !== "account") throw new Error("This computer's own MCP servers are kept in account mode only.");
+  };
+  cloud(CLOUD_CHANNELS.accountMcpList, () => {
+    accountOnly();
+    return services.accountMcpList();
+  });
+  let confirmingMcp = false;
+  cloud(CLOUD_CHANNELS.accountMcpSet, async (payload) => {
+    const request = validateMcpServerSet(payload);
+    accountOnly();
+    const consent = services.accountMcpConsent(request);
+    if (consent) {
+      if (confirmingMcp) throw new Error("busy");
+      confirmingMcp = true;
+      try {
+        if (!(await services.confirmMcpServer(consent))) throw new Error("declined");
+      } finally {
+        confirmingMcp = false;
+      }
+    }
+    return services.accountMcpSet(request);
+  });
+  cloud(CLOUD_CHANNELS.accountMcpRemove, (payload) => {
+    const { name } = validateMcpServerRemove(payload);
+    accountOnly();
+    return services.accountMcpRemove(name);
+  });
 
   cloud(CLOUD_CHANNELS.runnerSnapshot, () => services.runnerSnapshot());
   cloud(CLOUD_CHANNELS.runnerConnect, () => services.connect());
   cloud(CLOUD_CHANNELS.runnerDisconnect, () => services.disconnect());
   cloud(CLOUD_CHANNELS.runnerRestartChild, (payload) => services.restartChild(validateRestartChild(payload).child));
   cloud(CLOUD_CHANNELS.runnerLogs, (payload) => services.logs(validateLogsRequest(payload)));
+  cloud(CLOUD_CHANNELS.runnerLogsStream, (payload) => {
+    services.streamLogs(validateLogsStream(payload).on);
+  });
   cloud(CLOUD_CHANNELS.runnerClearLogs, () => {
     services.clearLogs();
   });
+
+  cloud(CLOUD_CHANNELS.runnerPair, (payload) => services.pair(validatePairRequest(payload).bundle));
+  cloud(CLOUD_CHANNELS.runnerUnpair, () => services.unpair());
+  cloud(CLOUD_CHANNELS.runnerPairingInfo, () => services.pairingInfo());
+  cloud(CLOUD_CHANNELS.runnerRestart, () => services.restartRunner());
 
   cloud(CLOUD_CHANNELS.settingsGet, () => services.getSettings());
   cloud(CLOUD_CHANNELS.settingsSetPreferences, (payload) => services.setPreferences(validatePreferences(payload)));
@@ -231,4 +405,58 @@ export function registerIpc(services: IpcServices, guard: SenderGuard): void {
   cloud(CLOUD_CHANNELS.preflight, (payload) => services.preflight(validatePreflightRequest(payload).force ?? false));
   cloud(CLOUD_CHANNELS.diagnostics, (payload) => services.diagnostics(validateDiagnosticsRequest(payload).force ?? false));
   cloud(CLOUD_CHANNELS.overridesSet, (payload) => services.setOverrides(validateOverrides(payload)));
+
+  // Both modes: Settings → General is the one place this switch lives — the
+  // local bundle's, or in account mode the account's own page.
+  cloud(CLOUD_CHANNELS.analyticsGet, () => services.analyticsState());
+  cloud(CLOUD_CHANNELS.analyticsSet, (payload) => services.setAnalytics(validateAnalyticsSet(payload).on));
+  cloud(CLOUD_CHANNELS.analyticsTrack, (payload) => {
+    const { name, params } = validateAnalyticsTrack(payload);
+    services.trackAnalytics(name, params);
+  });
+  cloud(CLOUD_CHANNELS.analyticsIdentify, (payload) => {
+    services.identifyAnalytics(validateAnalyticsIdentify(payload).userId);
+  });
+
+  /**
+   * Toolchain setup, in both modes. What runs is decided by the id and main's
+   * table, never by the page; the page can only choose which tools.
+   *
+   * An install asked for by the account's page — a remote origin — needs the
+   * person's own yes in a native dialog listing exactly what will be
+   * installed, and then installs exactly that list: a plan made again after
+   * the dialog could add a dependency nobody agreed to. One dialog at a time —
+   * a page cannot stack a second request behind the first one's answer.
+   * Local mode's page is this app's own bundle, the same code as this
+   * dialog, so it does not ask twice.
+   */
+  cloud(CLOUD_CHANNELS.toolchainReport, (payload) =>
+    services.toolchainReport(validateToolchainReportRequest(payload).force ?? false),
+  );
+  cloud(CLOUD_CHANNELS.toolchainPlan, (payload) => services.toolchainPlan(validateToolchainIds(payload).ids));
+  cloud(CLOUD_CHANNELS.toolchainState, () => services.toolchainState());
+  let confirming = false;
+  cloud(CLOUD_CHANNELS.toolchainInstall, async (payload) => {
+    const { ids } = validateToolchainIds(payload);
+    if (services.accountMode() !== "account") return services.toolchainInstall(ids);
+    if (confirming) throw new Error("busy");
+    confirming = true;
+    try {
+      const planned = await services.toolchainPlan(ids);
+      if (planned.length === 0) return services.toolchainState();
+      if (!(await services.confirmToolchainInstall(planned))) throw new Error("declined");
+      return services.toolchainEnqueue(planned);
+    } finally {
+      confirming = false;
+    }
+  });
+  cloud(CLOUD_CHANNELS.toolchainCancel, () => services.toolchainCancel());
+  cloud(CLOUD_CHANNELS.toolchainDismiss, () => services.toolchainDismiss());
+  cloud(CLOUD_CHANNELS.toolchainOpenPage, (payload) => services.toolchainOpenPage(validateToolchainId(payload).id));
+
+  cloud(CLOUD_CHANNELS.updateGet, () => services.updateStatus());
+  cloud(CLOUD_CHANNELS.updateCheck, () => services.checkForUpdate());
+  cloud(CLOUD_CHANNELS.updateRestart, () => {
+    services.restartToUpdate();
+  });
 }

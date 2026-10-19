@@ -213,7 +213,7 @@ func (e *Executor) runTask(ctx context.Context, planID uuid.UUID, tc taskContext
 	// in a throwaway chat instead of the report page, and analysts use
 	// record_open_questions to ask the human instead.
 	taskPolicy := domain.MergeToolPolicy(policy, agentRec.ToolPolicy)
-	if registry.TaskTypeFromContext(ctx) != string(domain.TaskTypeAnaliz) {
+	if !domain.TaskType(registry.TaskTypeFromContext(ctx)).IsDocumentWork() {
 		taskPolicy = domain.EnsureAskUserTool(taskPolicy)
 	}
 	taskPolicy = domain.RestrictToPlannedTools(taskPolicy, tc.plannerTask.ToolNames)
@@ -235,6 +235,7 @@ func (e *Executor) runTask(ctx context.Context, planID uuid.UUID, tc taskContext
 		return "", err
 	}
 	taskCtx := registry.ContextWithSubtaskWorkspace(ctx, subtaskWorkspace)
+	taskCtx = activity.WithStepTag(taskCtx, "task_key", tc.planTask.TaskKey)
 
 	if rec := activity.FromContext(ctx); rec != nil {
 		// model/provider are recorded together or an invalid-model name reads like a provider switch.

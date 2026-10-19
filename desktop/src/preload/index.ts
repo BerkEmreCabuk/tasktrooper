@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import { SHELL_BRIDGE_KEY, SHELL_CHANNELS, SHELL_EVENTS, type ShellBridge } from "../ipc/channels.js";
-import type { AppInfo, CloudStatus, SupervisorSnapshot, UpdateStatus } from "../ipc/types.js";
+import type { AccountState, AppInfo, CloudStatus, SupervisorSnapshot, UpdateStatus } from "../ipc/types.js";
 
 /**
  * The native chrome's preload.
@@ -15,12 +15,12 @@ import type { AppInfo, CloudStatus, SupervisorSnapshot, UpdateStatus } from "../
  * picker and the preflight moved to the hosted app's own Settings → Local
  * Runner page, over the cloud bridge, where every call is origin-checked.
  *
- * The exception is `restartToUpdate`, and it is worth being precise about why
- * it lives on THIS bridge rather than that one. Updating replaces the whole
- * app; it is not a capability to hand to a remote origin at any width. It is
- * driven from the title bar, which is our own code under `file://`, and the
- * main process still checks that the sender is this window before acting.
- * `checkForUpdate` is next to it for the same reason.
+ * The exceptions are `restartToUpdate`, which drives the chrome's update
+ * popup, and `useLocalForNow`, the failure screen's way on when the account's
+ * web app cannot be reached — locally, still signed in. The main process checks that the sender is this
+ * window before acting on either. Settings has its own copy of the update
+ * calls on the cloud bridge, behind that bridge's origin check; both reach the
+ * same updater.
  */
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -42,6 +42,10 @@ const bridge: ShellBridge = {
   onSupervisorState: (cb) => subscribe<SupervisorSnapshot>(SHELL_EVENTS.supervisorState, cb),
   onCloudStatus: (cb) => subscribe<CloudStatus>(SHELL_EVENTS.cloudStatus, cb),
   onUpdateStatus: (cb) => subscribe<UpdateStatus>(SHELL_EVENTS.updateStatus, cb),
+  onFullScreen: (cb) => subscribe<boolean>(SHELL_EVENTS.fullScreen, cb),
+  accountState: () => ipcRenderer.invoke(SHELL_CHANNELS.accountState) as Promise<AccountState>,
+  useLocalForNow: () => ipcRenderer.invoke(SHELL_CHANNELS.accountUseLocalForNow) as Promise<AccountState>,
+  onAccountState: (cb) => subscribe<AccountState>(SHELL_EVENTS.accountState, cb),
 };
 
 contextBridge.exposeInMainWorld(SHELL_BRIDGE_KEY, bridge);

@@ -8,6 +8,7 @@ import {
   FIRST_CHECK_DELAY_MS,
   UpdateService,
   feedNotFound,
+  installsOnQuit,
   feedUrlIsUsable,
   resolveFeed,
   signatureUnsupported,
@@ -210,6 +211,15 @@ describe("signatureUnsupported", () => {
   });
 });
 
+describe("installsOnQuit", () => {
+  it("is off only for a Linux package install, which is not an AppImage", () => {
+    expect(installsOnQuit("linux", {})).toBe(false);
+    expect(installsOnQuit("linux", { APPIMAGE: "/home/me/TaskTrooper.AppImage" })).toBe(true);
+    expect(installsOnQuit("darwin", {})).toBe(true);
+    expect(installsOnQuit("win32", {})).toBe(true);
+  });
+});
+
 describe("UpdateService", () => {
   function service(feedKind: "ok" | "github" | "none" = "ok") {
     const backend = new FakeBackend();
@@ -256,6 +266,18 @@ describe("UpdateService", () => {
     expect(backend.allowDowngrade).toBe(false);
   });
 
+  it("never installs on quit when told not to — a deb, whose installer is a root prompt", () => {
+    const backend = new FakeBackend();
+    new UpdateService({
+      backend,
+      feed: { kind: "bundled", provider: "generic", url: "https://example.com/linux/" },
+      onStatus: () => undefined,
+      installOnQuit: false,
+    }).start();
+    expect(backend.autoInstallOnAppQuit).toBe(false);
+    expect(backend.autoDownload).toBe(true);
+  });
+
   it("walks idle → checking → available → ready as the download progresses", async () => {
     const { backend, svc } = service();
     svc.start();
@@ -282,6 +304,15 @@ describe("UpdateService", () => {
     // one is the failure that would produce.
     await svc.check();
     expect(backend.checks).toBe(0);
+  });
+
+  it("only reports progress when the whole percent it shows has moved", () => {
+    const { backend, svc, seen } = service();
+    svc.start();
+    backend.emit("update-available", { version: "0.2.0" });
+    const before = seen.length;
+    for (const percent of [10.1, 10.2, 10.4, 10.6, 10.9, 11.2]) backend.emit("download-progress", { percent });
+    expect(seen.slice(before).map((s) => s.percent)).toEqual([10, 11]);
   });
 
   it("reports being up to date without holding on to a stale version", () => {

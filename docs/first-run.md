@@ -10,6 +10,41 @@ so quitting mid-setup, restarting the app, or disconnecting something next
 week all land you back on the right screen with nothing stale to work
 around.
 
+## Two choices before the sequence
+
+The first run asks two one-time questions, answered only once each and
+remembered in `localStorage` (`tt.firstRun.*`): **local or an account**, and
+**which team to start from**. Each is skipped once it has been answered.
+
+| Question | What it asks |
+|---|---|
+| Local or an account? | Run everything on this computer with no sign-in, or join your board and team from any device with an account. The account option hands the window over to the account's own web app (and is offered only when the desktop shell exposes `account.signIn()`); the local choice goes straight into the sequence. You can change it later in Settings, and signing out of an account returns this first-run question nothing — the choice is saved before the hand-over, so the app goes back to your chosen setup, not to "local or account?" again. |
+| What kind of team? | Pick a starting team: **Web application**, **Mobile application**, **Game**, **Data & analytics**, or **Custom**. A template preselects the catalog agents that team starts with; every agent is shown with a toggle and can be turned on or off before you confirm. Five **core agents** — product manager, system architect, QA, security and release engineer — are in every template and always on: their toggles are locked here, and later on each agent's settings page (the server refuses to disable or delete them too). The rest start from the template's choice and are toggled through each agent's `enabled` flag (`PUT /admin/agents/:id` on Confirm). |
+
+The team's agent list is not set in stone. The pencil next to **Team** in the
+sidebar opens **Edit team**: the same agent toggles (and template presets),
+preselected with the agents that are on right now; saving writes only the
+changed `enabled` flags and the core agents stay locked on. The product manager
+sees the switched-off agents too (`list_team` → `available_to_add`) and suggests
+which one to add when no enabled agent can do a piece of work. You can also open
+**Settings → Agents** to toggle any agent on or off — see
+[Role agents](role-agents.md) and [Your own agents](custom-agents.md).
+
+Editing an agent's role, runtime and tools, creating your own hand-made
+agents, and the Board/Roles/Workflows editors are hidden in the current
+shipping build and turned on only for advanced setups; the pages they live on
+describe them for when they return.
+
+## The two setup screens before the sequence
+
+After the two choices, and before the four-step sequence, two more screens run
+— both skippable, both available afterwards from Settings:
+
+| Screen | What it does |
+|---|---|
+| Get this computer ready | Offers the developer tools your team's agents use (git, Node.js, a JDK, the .NET SDK, Rust, Android SDK, Appium, Docker, …), installing the ones you pick in the background. Skip it, or come back from **Settings → Development environment**. |
+| Connect the services your team uses | Sets up the integrations your team is likely to need (GitHub, Vercel, cloud accounts, the mobile app stores). Nothing here is required; everything is also under **Settings → Integrations** later. |
+
 | Step | What it does |
 |---|---|
 | Check this Mac | Probes git, agent CLIs, and optional capabilities (Chrome, Xcode, Appium, the Android SDK) |
@@ -103,22 +138,25 @@ at any time from **Projects** once setup is done.
 
 ## What the app starts underneath
 
-Opening TaskTrooper starts up to three local processes, in this order:
+Opening TaskTrooper starts two local processes, in this order:
 
 | # | Process | Started by | Gates the window? |
 |---|---|---|---|
 | 1 | Embedder | App init, always | No |
 | 2 | Backend (`agent-server`, from `server/`) | The supervisor | **Yes** — the window appears only once `/health` answers 200 |
-| 3 | Appium | Beside the backend, if installed and nothing is already listening on port 4723 | No |
 
 The backend brings up its own embedded Postgres (downloading the binaries on
 the very first start, as noted above). The window itself doesn't appear until
 the backend is answering, because the page reads its API address from the
 same process that started it — there's nothing useful to show before then.
 
-Stopping the app stops the backend first (it may still hold agent sessions
-that are calling out to Appium), then Appium; the embedder is left running so
-a quick restart doesn't have to reload the embedding model.
+If Appium is installed, the backend starts an Appium hub on port 4723 itself,
+but only when a mobile task needs one, and stops it again after 10 idle
+minutes; a hub already listening there is used instead.
+
+Stopping the app stops the backend (which stops its Postgres and any Appium
+hub it started); the embedder is left running so a quick restart doesn't have
+to reload the embedding model.
 
 ### The tray and the offline screen
 

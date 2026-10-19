@@ -1,4 +1,5 @@
 import type { Dict } from "@/locales/en";
+import { activityArea } from "@/locales/tr/activityArea";
 import { addRepository } from "@/locales/tr/addRepository";
 import { agentArea } from "@/locales/tr/agentArea";
 import { analysisReview } from "@/locales/tr/analysisReview";
@@ -6,7 +7,10 @@ import { boardArea } from "@/locales/tr/boardArea";
 import { chatArea } from "@/locales/tr/chatArea";
 import { cloud } from "@/locales/tr/cloud";
 import { content } from "@/locales/tr/content";
+import { designSystem } from "@/locales/tr/designSystem";
+import { findings } from "@/locales/tr/findings";
 import { frame } from "@/locales/tr/frame";
+import { issues } from "@/locales/tr/issues";
 import { lib } from "@/locales/tr/lib";
 import { operations } from "@/locales/tr/operations";
 import { projectAdmin } from "@/locales/tr/projectAdmin";
@@ -16,10 +20,12 @@ import { release } from "@/locales/tr/release";
 import { repositoryPage } from "@/locales/tr/repositoryPage";
 import { settingsPages } from "@/locales/tr/settingsPages";
 import { setup } from "@/locales/tr/setup";
+import { toolchain } from "@/locales/tr/toolchain";
 
 // Turkish dictionary. Typed as Dict — must mirror en.ts keys exactly.
 export const tr: Dict = {
   common: {
+    close: "Kapat",
     save: "Kaydet",
     saving: "Kaydediliyor...",
     cancel: "İptal",
@@ -44,10 +50,29 @@ export const tr: Dict = {
   settings: {
     language: {
       label: "Dil",
-      help: "Asistan yanıtları ve sistem talimatları için kullanılır.",
+      help: "Uygulamanın dili; ajan yanıtları ve sistem talimatları da bu dilde olur.",
     },
     loadFailed: "Ayarlar yüklenemedi",
     savedToast: "Ayarlar kaydedildi",
+    sections: {
+      account: {
+        title: "Hesap",
+        description: "Panonun nerede durduğu ve işin nerede çalıştığı.",
+      },
+      preferences: {
+        title: "Tercihler",
+        description: "Dil ve bu uygulamanın sana gösterdiği bildirimler.",
+      },
+      agents: {
+        title: "Ajanlar",
+        description: "Her ajan çalışmasına uygulanan sınırlar ve kaynaklar.",
+      },
+      app: {
+        title: "Masaüstü uygulaması",
+        description: "Bu bilgisayardaki TaskTrooper için güncellemeler ve gizlilik.",
+      },
+      desktopOnly: "Güncellemeler, masaüstü bildirimleri ve anonim kullanım istatistikleri TaskTrooper masaüstü uygulamasından ayarlanır.",
+    },
     github: {
       statusUnavailable: "Durum alınamadı.",
       connected: "✓ Bağlı: {login} — ajanlar private repo oluşturabilir, push edebilir ve taslak PR açabilir.",
@@ -55,10 +80,74 @@ export const tr: Dict = {
       connect: "Token'ı kaydet",
       tokenPlaceholder: "ghp_… veya github_pat_…",
       tokenHelp:
-        "GitHub → Settings → Developer settings'ten alınan bir personal access token. repo, admin:repo_hook ve read:org izinleri gerekir. Saklanmadan önce GitHub'a karşı doğrulanır ve bu makinede şifreli tutulur.",
+        "GitHub → Settings → Developer settings'ten alınan bir personal access token. Klasik token'da repo, workflow, admin:repo_hook ve read:org; fine-grained token'da Contents, Pull requests, Workflows (okuma ve yazma) ve Webhooks izinleri gerekir. workflow olmadan hiçbir ajan CI dosyası ekleyemez ya da değiştiremez. Saklanmadan önce GitHub'a karşı doğrulanır ve bu makinede şifreli tutulur.",
       connectedToast: "GitHub bağlandı",
       connectFailedToast: "GitHub bağlantısı başarısız",
       disconnectedToast: "GitHub bağlantısı kaldırıldı",
+      missingScopesTitle: "Bu token'da eksik: {scopes}",
+      missingWorkflowScope: "workflow yetkisi olmadan GitHub, .github/workflows altında dosya ekleyen ya da değiştiren her push'u reddeder; hiçbir ajan CI kuramaz ya da düzeltemez. Bu yetkiyle yeni bir token oluştur, bağlantıyı kesip yenisini kaydet.",
+      fineGrainedHint: "Fine-grained token: Workflows: Read and write izni olduğundan emin ol, yoksa GitHub CI dosyalarına dokunan push'ları reddeder.",
+      connectWithGitHub: "GitHub ile bağlan",
+      connectWithGitHubHint: "github.com'da tek seferlik bir kodla giriş yap. Bağlantıyı TaskTrooper kendisi yeniler — token oluşturup yapıştırman gerekmez.",
+      deviceCodeTitle: "Bu kodu GitHub'a gir",
+      deviceCodeHint: "{url} adresini aç, giriş yap, kodu gir ve TaskTrooper'ı onayla. Bu pencere kendiliğinden devam eder.",
+      copyCode: "Kodu kopyala",
+      codeCopied: "Kod kopyalandı",
+      openGitHub: "GitHub'ı aç",
+      waitingForApproval: "Onayın bekleniyor…",
+      flowExpired: "Kod onaylanmadan süresi doldu.",
+      flowDenied: "Giriş GitHub'da reddedildi.",
+      tryAgain: "Tekrar dene",
+      cancel: "Vazgeç",
+      useTokenInstead: "Bunun yerine personal access token kullan",
+      useAppInstead: "Bunun yerine GitHub ile bağlan",
+      modeApp: "GitHub girişiyle",
+      modeToken: "erişim token'ı ile",
+      needsInstallTitle: "Uygulamayı repolarına kur",
+      needsInstallBody: "Bağlantı çalışıyor ama TaskTrooper uygulaması henüz hiçbir hesaba kurulu değil, bu yüzden hiçbir repoya erişemiyor. Hesabına ya da organizasyonuna kur ve All repositories seç; TaskTrooper'ın sonradan oluşturacağı repolar da kapsansın.",
+      installApp: "GitHub'da kur",
+      expiredTitle: "GitHub bağlantısının süresi doldu",
+      expiredBody: "Altı ay kullanılmadı ya da GitHub'da iptal edildi. Yeniden bağlan.",
+      runner: {
+        title: "Bu bilgisayarı GitHub Actions runner'ı olarak kullan",
+        description: "Seçtiğin repolardaki işler GitHub'ın makineleri yerine bu bilgisayarda koşar ve Actions dakikası harcamaz. Runner, TaskTrooper açıkken çalışır.",
+        warning: "Bu repolara push edilen kod bu bilgisayarda senin kullanıcınla çalışır. Yalnız yöneticisi olduğun private repolar eklenebilir.",
+        repositories: "Repolar",
+        noCandidates: "Projelerinden hiçbiri henüz GitHub'da değil.",
+        diskNote: "Her repo kendi runner kurulumunu alır, yaklaşık 450 MB.",
+        snippetHint: "Bir workflow job'u, runs-on satırı bu etiketleri yazdığında burada koşar:",
+        copySnippet: "runs-on satırını kopyala",
+        snippetCopied: "Kopyalandı",
+        enabledToast: "Bu bilgisayar artık GitHub Actions işlerini alıyor",
+        disabledToast: "Bu bilgisayar artık GitHub Actions işi almıyor",
+        unsupported: "GitHub Actions işlerini bu bilgisayarda koşturmak burada kullanılamıyor: GitHub bu bilgisayar için runner yayınlamıyor ya da TaskTrooper masaüstü uygulaması olarak çalışmıyor.",
+        lastJob: "Son iş: {job} · {result}",
+        states: {
+          stopped: "Kapalı",
+          installing: "Runner indiriliyor…",
+          starting: "GitHub'a bağlanıyor…",
+          idle: "İş bekliyor",
+          busy: "Koşuyor: {job}",
+          error: "Durdu, yeniden deneniyor",
+        },
+        errors: {
+          github_not_connected: "GitHub bağlı değil.",
+          forbidden: "GitHub runner eklenmesine izin vermedi. Repoda yönetici yetkin olmalı; fine-grained token'da ayrıca Administration: Read and write gerekir, GitHub ile girişte de uygulamanın Administration izni olmalı.",
+          not_found: "Bu GitHub bağlantısı repoyu göremiyor.",
+          public_repo: "{repo} public. Orada bir runner, herhangi birinin pull request'indeki kodu bu bilgisayarda çalıştırır.",
+          needs_admin: "{repo} reposuna runner eklemek için orada yönetici yetkisi gerekir.",
+          invalid_repo: "{repo} sahip/ad biçiminde bir repo değil.",
+          too_many_repos: "En fazla 5 repo.",
+          unsupported_platform: "GitHub bu bilgisayar için runner yayınlamıyor.",
+          download_failed: "Runner indirilemedi.",
+          start_failed: "Runner başlatılamadı.",
+          exited: "Runner iş almadan durdu.",
+          computer_away: "Bilgisayarınız bağlı değil. Üzerinde TaskTrooper masaüstü uygulamasını açın, runner kendiliğinden başlar.",
+          computer_not_ready: "Bilgisayarınız bağlı ama henüz bir GitHub runner çalıştıramıyor: {{repo}}",
+          computer_outdated: "Bilgisayarınızda GitHub runner çalıştırmak için TaskTrooper masaüstü uygulamasını güncelleyin.",
+          github_error: "GitHub isteği reddetti.",
+        },
+      },
     },
     boilerplate: {
       title: "Boilerplate Kataloğu",
@@ -70,7 +159,6 @@ export const tr: Dict = {
     notifications: {
       title: "Masaüstü bildirimleri",
       help: "Dikkatini gerektiren pano olayları için yerel bildirimler. Pencereyi kapatsan bile çalışmaya devam eder.",
-      unavailable: "Masaüstü bildirimleri yalnızca TaskTrooper uygulamasında kullanılabilir, tarayıcıda değil.",
       enabled: "Etkin",
       analizReview: "İncelemen için hazır analiz",
       humanUat: "UAT'ını bekliyor",
@@ -79,6 +167,52 @@ export const tr: Dict = {
       agentChatReplies: "Agent sohbet cevapları",
       loadFailed: "Ayarlar yüklenemedi",
       saveFailed: "Kaydetme başarısız",
+    },
+    account: {
+      localHelp: "TaskTrooper bu bilgisayarda, hesapsız çalışıyor. Bir ekiple çalışmak için hesaba bağlan: board hesapta durur, iş yine burada, kendi anahtarlarınla çalışır.",
+      signedIn: "{origin} hesabına bağlısın. Sana atanan görevler bu bilgisayarda çalışır.",
+      connect: "Hesaba bağlan",
+      connecting: "Bağlanıyor…",
+      signOut: "Çıkış yap",
+      signingOut: "Çıkış yapılıyor…",
+      runsTitle: "Devam eden {count} yerel çalışma var",
+      runsBody: "Bağlanmak yerel sunucuyu ve bu çalışmaları durdurur. Yerel veri olduğu gibi kalır; çıkış yapınca geri gelir.",
+      confirmTitle: "Yerel sunucu durdurulsun mu?",
+      confirmBody: "Bağlanmak bu bilgisayardaki yerel sunucuyu durdurur ve hesabın giriş sayfasını bu pencerede açar. Yerel veri olduğu gibi kalır; çıkış yapınca geri gelir.",
+      confirm: "Devam et",
+      cancel: "Vazgeç",
+      failed: "Geçiş tamamlanamadı",
+      unavailable: "Hesaplar yalnızca TaskTrooper masaüstü uygulamasında kullanılabilir.",
+      temporaryLocal: "{origin} hesabında oturumun açık, ama TaskTrooper'ı şimdilik bu bilgisayarda hesapsız kullanıyorsun. Sana atanan görevler sen dönene kadar bekler; bir sonraki açılışta hesap yeniden denenir.",
+      backToAccount: "Hesaba dön",
+      bannerTitle: "TaskTrooper şimdilik hesabın olmadan kullanılıyor",
+      bannerBody: "{origin} hesabında oturumun hâlâ açık. Sana orada atanan görevler sen dönene kadar bekler.",
+    },
+    analytics: {
+      label: "Kullanım istatistikleri",
+      help: "Hangi ekranları açtığınızı ve hangi özellikleri kullandığınızı, uygulama sürümü ve sistemle birlikte gönderir — görevleriniz, sohbetleriniz, kodunuz, dosya yollarınız veya e-postanız asla gönderilmez. Bir hesapla giriş yaptıysanız hesap kimliğinizin tek yönlü bir özeti de eklenir; böylece masaüstü, web ve mobil uygulamada tek kişi sayılırsınız. Kapatınca gönderim hemen durur ve bu kurulumun rastgele kimliği silinir.",
+      forcedOff: "TASKTROOPER_TELEMETRY veya DO_NOT_TRACK ortam değişkeni tarafından kapatıldı.",
+      saveFailed: "Bu ayar kaydedilemedi",
+    },
+    updates: {
+      title: "Güncellemeler",
+      help: "TaskTrooper birkaç saatte bir güncellemeleri kontrol eder ve arka planda indirir.",
+      currentVersion: "TaskTrooper {version} sürümünü kullanıyorsun.",
+      unavailable: "Güncellemeler yalnızca TaskTrooper masaüstü uygulamasında kullanılabilir, tarayıcıda değil.",
+      unsupported: "Bu derleme kendini güncelleyemiyor",
+      upToDate: "En güncel sürümdesin.",
+      check: "Güncellemeleri kontrol et",
+      checking: "Kontrol ediliyor…",
+      checkFailed: "Güncellemeler kontrol edilemedi",
+      lastChecked: "Son kontrol {when}",
+      downloading: "Güncelleme indiriliyor… %{percent}",
+      downloadingVersion: "TaskTrooper {version} indiriliyor… %{percent}",
+      ready: "Bir güncelleme yüklenmeye hazır.",
+      readyVersion: "TaskTrooper {version} yüklenmeye hazır.",
+      restart: "Yeniden başlat ve yükle",
+      restarting: "Yeniden başlatılıyor…",
+      restartHelp: "Önce yerel süreçler durdurulur, uygulama yeni sürümle yeniden açılır. Uygulamadan çıkmak da güncellemeyi yükler, ama yeniden açmaz.",
+      restartFailed: "Güncelleme için yeniden başlatılamadı",
     },
     concurrency: {
       title: "Eşzamanlılık sınırları",
@@ -97,10 +231,14 @@ export const tr: Dict = {
   agentArea,
   analysisReview,
   boardArea,
+  activityArea,
   chatArea,
   cloud,
   content,
+  designSystem,
+  findings,
   frame,
+  issues,
   lib,
   operations,
   projectAdmin,
@@ -110,4 +248,5 @@ export const tr: Dict = {
   repositoryPage,
   settingsPages,
   setup,
+  toolchain,
 };

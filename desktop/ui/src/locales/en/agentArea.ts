@@ -240,6 +240,7 @@ export const agentArea = {
     subagentType: "Subagent type",
     systemPrompt: "System prompt",
     enabled: "Enabled",
+    coreHint: "Core agent; it cannot be turned off.",
     catalog: {
       autoPull: {
         label: "Pull definition updates from the catalog",
@@ -272,6 +273,40 @@ export const agentArea = {
     performanceLink: "Performance",
     loading: "Loading...",
     emptyState: "Select a chat on the left or start a new chat.",
+    lead: {
+      description: "Turns your requests into board tasks, hands them to the team and brings the result back to you for acceptance.",
+      teamCount: "{count} agents on the team",
+      welcome: {
+        title: "What shall we work on?",
+        label: "Message {name}",
+        placeholder: "Request a feature, report a bug or ask about the board…",
+        send: "Send",
+        hint: "Enter to send · Shift+Enter for a new line",
+        failed: "Couldn't start a conversation",
+        suggestions: {
+          board: { label: "What's on the board?", message: "What's on the board right now?" },
+          feature: { label: "Request a feature", message: "I'd like a new feature: " },
+          bug: { label: "Report a bug", message: "I want to report a bug: " },
+          projects: { label: "Organize projects", message: "Help me organize my projects and repositories." },
+        },
+        flow: {
+          title: "How work flows",
+          steps: {
+            you: { label: "You", detail: "Request" },
+            lead: { label: "PM", detail: "Plans" },
+            analysis: { label: "Analysis", detail: "Architect" },
+            planApproval: { label: "Plan OK", detail: "You approve" },
+            design: { label: "Design", detail: "Designer" },
+            build: { label: "Build", detail: "Code + PR" },
+            review: { label: "Review", detail: "Architect + security" },
+            qa: { label: "QA", detail: "Tests" },
+            acceptance: { label: "PM check", detail: "UAT" },
+            approval: { label: "Sign-off", detail: "You approve" },
+            deploy: { label: "Deploy", detail: "Release" },
+          },
+        },
+      },
+    },
   },
   columns: {
     toast: {

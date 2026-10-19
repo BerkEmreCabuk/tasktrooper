@@ -94,15 +94,28 @@ runner's own automatic post-run commit. Only the developer roles hold this
 tool: a reviewer that could commit would be putting its own name on the branch
 it is judging.
 
+Every commit ends with a trailer block: the task key (`Task: <key>`), the
+role that made the change as a co-author (`Frontend Developer
+<frontend-developer@agents.tasktrooper.ai>` — this is what tells you which
+agent wrote it), and TaskTrooper itself as a second co-author (`Task Trooper
+<agents@tasktrooper.ai>`). GitHub only links and credits a co-author when the
+trailer's address belongs to a GitHub account — the account's own noreply
+address is the simplest choice, since it needs no domain verification. Until
+`agents@tasktrooper.ai` is registered on one, GitHub still shows the
+TaskTrooper co-author, just without a profile link or a place in the
+repository's contributors graph.
+
 Task PRs are opened **ready for review**, not as drafts — GitHub refuses to
 merge a draft PR, so nothing here creates one that would first need to be
 un-drafted. `committed: false` is a normal, non-error result: either the
 branch already matches the workspace, or the task has no working copy on this
 machine yet, and either way retrying would not help.
 
-When a task moves to PM UAT or Done, TaskTrooper also opens a PR via `gh pr
-create --fill --draft` if the earlier commit step has not already opened one,
-and appends the PR link as a system comment on the card.
+When a task reaches Code Review — and again at PM UAT or Done, if nothing
+opened one earlier — TaskTrooper also opens a PR via `gh pr create --fill`
+(no `--draft`; the direct API path sends `"draft": false`) if the earlier
+commit step has not already opened one, and appends the PR link as a system
+comment on the card.
 
 ## Review comments
 
@@ -122,12 +135,13 @@ reviewer and answers the threads it opens on a PR it is judging.
 ## Merging on Done
 
 Nothing in TaskTrooper merges a pull request except one tool call, made by one
-role, in one column: **`merge_task_pull_request`, held only by the QA agent,
-callable only once the task sits in Done.** The developer must not merge its
-own branch, the architect reviews it rather than lands it, and the product
-manager signs off on the product rather than on the git history — QA is the
-role that most recently exercised the built thing, and Done is the column
-that wakes it for exactly this reason.
+role, in one column: **`merge_task_pull_request`, held only by the release
+engineer, callable only once the task sits in Done.** The developer must not
+merge its own branch, the architect reviews it rather than lands it, and QA's
+job ends at its test verdict rather than at the git history. Done is the
+column that wakes the release engineer, which owns merging, shipping, watching
+production and rolling back (see [Deploy targets and recipes](deploy.md) →
+"Releases").
 
 The merge is a **squash merge**, and the task's branch is deleted afterward.
 Before it runs, every one of these has to hold:

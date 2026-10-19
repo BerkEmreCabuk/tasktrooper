@@ -4,8 +4,9 @@ import type { CloudStatus } from "../ipc/types.js";
 import { originOf } from "./services/app-scheme.js";
 
 /**
- * The window: a thin native chrome, and the bundled web app filling everything
- * below it.
+ * The window: a thin native chrome, and the web app filling everything below
+ * it — the bundled one on `app://tasktrooper` in local mode, the account's own
+ * from its origin in account mode.
  *
  * There are no tabs, and that is the point. The desktop app is the web app in a
  * window plus a supervisor; a second navigation model in the shell would be a
@@ -22,8 +23,15 @@ import { originOf } from "./services/app-scheme.js";
  *    attached to one origin.
  */
 
-/** Height of the shell's title bar, in CSS pixels. The view is inset below it. */
-export const CHROME_HEIGHT = 44;
+/**
+ * Height of the shell's title bar, in CSS pixels; the view is inset below it.
+ * Only macOS has one: it is the strip the traffic lights sit in, and Windows
+ * and Linux draw a native title bar of their own above the content instead.
+ * `src/renderer/App.tsx` draws the strip on the same condition.
+ */
+export function chromeHeight(platform: NodeJS.Platform = process.platform): number {
+  return platform === "darwin" ? 44 : 0;
+}
 
 /**
  * The route the window opens on.
@@ -32,17 +40,28 @@ export const CHROME_HEIGHT = 44;
  * the right first screen for somebody deciding whether to install this app and
  * the wrong one for somebody who already has.
  *
- * `/board` is where the SPA's own catch-all route sends everything else, so
- * this is the web app's idea of home rather than a second one invented here.
+ * `/home` is the SPA's own home route — the product manager's chat when there
+ * is one, the board otherwise — and its catch-all sends everything else there,
+ * so this is the web app's idea of home rather than a second one invented here.
  *
  * The landing page is not unreachable, only un-opened: it is same-origin, so a
  * link to `/` inside the app navigates there normally.
  */
-export const HOME_ROUTE = "/board";
+export const HOME_ROUTE = "/home";
 
 export interface WindowDeps {
-  /** Where the web app is served from: this app's own scheme. */
+  /**
+   * The one origin the web app's view may hold: this app's own scheme in local
+   * mode, the account's origin in account mode. Read on every navigation, so
+   * it follows a mode switch.
+   */
   origin: () => string;
+  /**
+   * The session partition a new view is created in. Undefined is the default
+   * session, which is local mode's; account mode keeps the remote origin's
+   * cookies and storage in a partition of its own (`main/account/origin.ts`).
+   */
+  partition?: () => string | undefined;
   /** Told whenever the web app starts loading, loads, or fails to. */
   onCloudStatus: (status: CloudStatus) => void;
   /**
@@ -52,6 +71,14 @@ export interface WindowDeps {
    * the tray's Quit still end the app.
    */
   quitStarted: () => boolean;
+  /**
+   * Windows is logging off or shutting down. It arrives on a window, not on
+   * `app`, and the session ends a few seconds later whatever this does — so it
+   * is the cue to start the drain, not something to wait for.
+   */
+  onSessionEnd?: () => void;
+  /** Told on entering and leaving full screen, so the chrome can drop its drag strip. */
+  onFullScreen?: (fullScreen: boolean) => void;
 }
 
 export class Shell {
@@ -64,6 +91,15 @@ export class Shell {
    * view attached early would be a page permanently pointed at nothing.
    */
   #ready = false;
+  /** The route the next view opens on; the home route when unset. */
+  #route: string | undefined;
+  /**
+   * Whether the window is where somebody can see it. The SPA's polls and
+   * animations pause only on `visibilityState` "hidden". Electron 41 on macOS
+   * already derives that from a hidden or minimized window; hiding the view as
+   * well stops it depending on every platform reporting the window's state.
+   */
+  #onScreen = true;
   readonly #deps: WindowDeps;
 
   constructor(deps: WindowDeps) {
@@ -71,11 +107,11 @@ export class Shell {
     this.#status = { state: "loading", url: this.startUrl };
   }
 
-  /** Where the window opens: the trusted origin, at the product's home route. */
+  /** Where the window opens: the trusted origin, at the product's home route (or the route `serve` was given). */
   get startUrl(): string {
     const origin = this.#deps.origin();
     try {
-      return new URL(HOME_ROUTE, origin).toString();
+      return new URL(this.#route ?? HOME_ROUTE, origin).toString();
     } catch {
       return origin;
     }
@@ -89,12 +125,21 @@ export class Shell {
     return this.#status;
   }
 
+  /** Whether the web app is loaded and in a window somebody can see — when it is, the page polls for itself. */
+  get pageOnScreen(): boolean {
+    return this.#cloud !== null && this.#status.state === "ready" && this.#onScreen;
+  }
+
   /** The web app's webContents, for the main process to message it. */
   get cloudContents(): Electron.WebContents | null {
     return this.#cloud?.webContents ?? null;
   }
 
-  create(): BrowserWindow {
+  /**
+   * `hidden` is for a start by the login item on Windows and Linux: the window
+   * exists, so the tray and a relaunch can show it, and nothing pops up at login.
+   */
+  create(opts: { hidden?: boolean } = {}): BrowserWindow {
     if (this.#window && !this.#window.isDestroyed()) return this.#window;
 
     const window = new BrowserWindow({
@@ -111,7 +156,9 @@ export class Shell {
       // center and reads as misaligned against the logo next to it.
       ...(process.platform === "darwin"
         ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 20, y: 22 } }
-        : {}),
+        : // The application menu (app-menu.ts) stays bound for its shortcuts;
+          // the bar itself only appears on Alt.
+          { autoHideMenuBar: true }),
       backgroundColor: "#0b0d13",
       webPreferences: {
         preload: path.join(app.getAppPath(), "dist", "preload", "index.cjs"),
@@ -124,10 +171,14 @@ export class Shell {
         webSecurity: true,
         // Our own UI has no reason to open a second renderer.
         webviewTag: false,
+        // Electron's default, pinned: one webContents with it off keeps the
+        // whole window drawing while hidden, the web app's view included.
+        backgroundThrottling: true,
       },
     });
 
-    window.once("ready-to-show", () => window.show());
+    this.#onScreen = !opts.hidden;
+    if (!opts.hidden) window.once("ready-to-show", () => window.show());
     // The default close action destroys the window (and the WebContentsView
     // riding on it — the React tree, the open SSE reader, every in-flight
     // chat's state) even though the product is a menu-bar app whose backend
@@ -142,7 +193,40 @@ export class Shell {
       this.#window = null;
       this.#cloud = null;
     });
+    if (process.platform === "win32" && this.#deps.onSessionEnd) {
+      const onSessionEnd = this.#deps.onSessionEnd;
+      window.on("session-end", () => onSessionEnd());
+    }
+    // macOS also raises hide/show for full occlusion and around the minimize
+    // animation; each is handled as it lands, so the last one wins. `focus` is
+    // the backstop: a window that has it is on screen, whatever was missed.
+    window.on("hide", () => this.#setOnScreen(false));
+    window.on("minimize", () => this.#setOnScreen(false));
+    window.on("show", () => this.#setOnScreen(true));
+    window.on("restore", () => this.#setOnScreen(true));
+    window.on("focus", () => {
+      this.#setOnScreen(true);
+      // The product lives in its own WebContentsView; focus coming back to the
+      // window (alt-tab, show from the tray) can otherwise land on the shell's
+      // own page and never reach the cloud view, leaving whatever field the user
+      // was typing in unreadable until they click it. Handing focus to the view
+      // re-enters the page, where useRestoreFocusOnReturn puts the caret back.
+      this.#cloud?.webContents.focus();
+    });
     window.on("resize", () => this.#layout());
+    // Full screen hides the traffic lights, so the strip kept for them would be
+    // dead space above the header; both transitions re-place the view. The
+    // view then covers the chrome's drag strip, and macOS still treats that
+    // strip as a drag region, so the chrome is told to drop it — otherwise
+    // every click on the page's header drags the window instead.
+    window.on("enter-full-screen", () => {
+      this.#layout();
+      this.#deps.onFullScreen?.(true);
+    });
+    window.on("leave-full-screen", () => {
+      this.#layout();
+      this.#deps.onFullScreen?.(false);
+    });
 
     hardenShellNavigation(window);
 
@@ -163,10 +247,30 @@ export class Shell {
    * Idempotent, and it has to be — it is called on every `server` event, which
    * includes every restart the backend makes on its own.
    */
-  serve(): void {
+  serve(route?: string): void {
     this.#ready = true;
+    if (route !== undefined && !this.#cloud) this.#route = route;
     const window = this.#window;
     if (window && !window.isDestroyed() && !this.#cloud) this.#attachCloud(window);
+  }
+
+  /**
+   * Take the web app's view down, for a mode switch: the next `serve()`
+   * creates a new one, in the partition and on the origin the new mode names.
+   * The old view's page — and with it every IPC sender check that named it —
+   * is gone before anything else about the switch happens.
+   */
+  retire(): void {
+    this.#ready = false;
+    this.#route = undefined;
+    const view = this.#cloud;
+    this.#cloud = null;
+    if (view) {
+      const window = this.#window;
+      if (window && !window.isDestroyed()) window.contentView.removeChildView(view);
+      if (!view.webContents.isDestroyed()) view.webContents.close();
+    }
+    this.#setStatus({ state: "loading", url: this.startUrl });
   }
 
   /**
@@ -182,6 +286,7 @@ export class Shell {
     if (window.isMinimized()) window.restore();
     window.show();
     window.focus();
+    this.#setOnScreen(true);
   }
 
   /** Retry after a failed load, or refresh on demand. */
@@ -207,8 +312,10 @@ export class Shell {
   }
 
   #attachCloud(window: BrowserWindow): void {
+    const partition = this.#deps.partition?.();
     const view = new WebContentsView({
       webPreferences: {
+        ...(partition !== undefined ? { partition } : {}),
         preload: path.join(app.getAppPath(), "dist", "preload", "cloud.cjs"),
         // Same three settings as the shell window, and here they are load
         // bearing rather than hygiene: this view's preload is the one that can
@@ -218,6 +325,7 @@ export class Shell {
         sandbox: true,
         webSecurity: true,
         webviewTag: false,
+        backgroundThrottling: true,
       },
     });
     view.setBackgroundColor("#0b0d13");
@@ -324,22 +432,35 @@ export class Shell {
 
   #setStatus(status: CloudStatus): void {
     this.#status = status;
-    // The view is hidden while it is not showing a working page, so the
-    // shell's own screen is visible rather than a white rectangle behind it.
-    this.#cloud?.setVisible(status.state === "ready");
+    this.#syncCloudVisibility();
     this.#deps.onCloudStatus(status);
   }
 
-  /** Position the web app under the title bar. */
+  #setOnScreen(onScreen: boolean): void {
+    this.#onScreen = onScreen;
+    this.#syncCloudVisibility();
+  }
+
+  /**
+   * The view is hidden while it is not showing a working page, so the shell's
+   * own screen is visible rather than a white rectangle behind it — and while
+   * the window is off screen, so the page sees `visibilityState` "hidden".
+   */
+  #syncCloudVisibility(): void {
+    this.#cloud?.setVisible(this.#status.state === "ready" && this.#onScreen);
+  }
+
+  /** Position the web app under the title bar — or flush to the top in full screen, where there is none. */
   #layout(): void {
     const window = this.#window;
     if (!window || window.isDestroyed() || !this.#cloud) return;
     const [width, height] = window.getContentSize();
+    const top = window.isFullScreen() ? 0 : chromeHeight();
     this.#cloud.setBounds({
       x: 0,
-      y: CHROME_HEIGHT,
+      y: top,
       width: Math.max(0, width),
-      height: Math.max(0, height - CHROME_HEIGHT),
+      height: Math.max(0, height - top),
     });
   }
 }
@@ -377,9 +498,9 @@ function hardenShellNavigation(window: BrowserWindow): void {
  *  - `will-navigate` refuses anything off the trusted origin and hands it to
  *    the real browser instead. A link to an external site opens in Safari;
  *    it does not become a page holding this bridge.
- *  - `setWindowOpenHandler` denies every popup for the same reason. There is no
- *    sign-in in this product, so there is no window worth making an exception
- *    for.
+ *  - `setWindowOpenHandler` denies every popup for the same reason. In account
+ *    mode the sign-in is the account's own page, on its own origin, in this
+ *    view; a popup would be a second page holding nothing and is not needed.
  *
  * The main process re-checks the origin on every IPC call regardless
  * (`main/ipc.ts`), because a policy is only as good as the case its author
@@ -416,9 +537,8 @@ function hardenCloudNavigation(
     onHttpError(url, httpResponseCode, httpStatusText);
   });
 
-  // There is no sign-in in this product, so there is no popup worth allowing:
-  // every window this page tries to open is a link, and links go to the user's
-  // real browser.
+  // No popup is worth allowing: every window this page tries to open is a link,
+  // and links go to the user's real browser.
   contents.setWindowOpenHandler(({ url }) => {
     openExternally(url);
     return { action: "deny" };

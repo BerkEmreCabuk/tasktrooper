@@ -40,6 +40,9 @@ const (
 	// on the ordinary path. Goes on the event rather than only on the pipeline
 	// row because the gate can be skipped with no pipeline row at all.
 	EventPayloadPipelineGate = "pipeline_gate"
+	// Marks a task_commented event whose comment dispatches nobody
+	// (CreateTaskCommentRequest.Informational).
+	EventPayloadInformational = "informational"
 
 	EventActorAgent  = "agent"
 	EventActorHuman  = "human"
@@ -52,8 +55,16 @@ const (
 	// No pipeline result ever arrived and the gate was opened anyway; distinct
 	// from passed because only one of them means the build was green.
 	MoveReasonPipelineGateOpened = "pipeline_gate_opened"
-	// Post-run build/vet checks still failed; task bounced to in_progress.
+	// Post-run build/vet checks still failed after every fix round; the task
+	// went back to need_revision (to the working column on a workflow with no
+	// need_revision stage).
 	MoveReasonVerificationFailed = "verification_failed"
+	// The run's plan verification verdict failed; same bounce as
+	// verification_failed, for the verdict gate.
+	MoveReasonPlanVerificationFailed = "plan_verification_failed"
+	// The workflow or a gate refused the automatic code_review/analiz_review
+	// hand-off; the task went back to need_revision with the reason commented.
+	MoveReasonHandoffRefused = "handoff_refused"
 	// Either a real deploy succeeded, or no workflow was mapped and the
 	// pipeline was skipped — which is on the pipeline row, not this code.
 	MoveReasonDeployReleased = "deploy_released"
@@ -104,6 +115,15 @@ const (
 	// The human sent answers to an analiz task's open questions
 	// (/questions/submit); the block clears and the analyst resumes with them.
 	MoveReasonQuestionsAnswered = "questions_answered"
+	// The run wrote a diff but executed no command, so the automatic
+	// code_review hand-off was refused and the task went back to the developer.
+	MoveReasonHandoffUnverified = "handoff_unverified"
+	// The run changed the UI but never looked at the screen; same bounce as
+	// handoff_unverified, for the visual evidence guard.
+	MoveReasonHandoffUnseenUI = "handoff_unseen_ui"
+	// GitHub refused the branch push because it changes a workflow file and
+	// the token lacks the workflow scope; a human has to save a better token.
+	MoveReasonPushWorkflowScope = "push_workflow_scope"
 )
 
 type BoardEvent struct {
@@ -135,6 +155,10 @@ type CreateTaskCommentRequest struct {
 	Content    string `json:"content"`
 	AuthorType string `json:"author_type,omitempty"`
 	AuthorID   string `json:"author_id,omitempty"`
+	// Informational comments are recorded and shown but wake no agent: a note
+	// that lands after the run it describes would otherwise start another
+	// one. Never read from a request body.
+	Informational bool `json:"-"`
 }
 
 type TaskAgentRun struct {
@@ -163,8 +187,12 @@ type TaskAgentRun struct {
 	// `--resume`; QuotaResumeAt is NULL on every run never parked.
 	CLISessionID  string     `json:"cli_session_id,omitempty"`
 	QuotaResumeAt *time.Time `json:"quota_resume_at,omitempty"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
+	// CLIProvider is the agent CLI that owns CLISessionID: a session id means
+	// nothing to another CLI, and an agent can change provider between runs.
+	// Empty on rows written before it was recorded.
+	CLIProvider LLMProviderType `json:"cli_provider,omitempty"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 type ActivityItem struct {

@@ -9,6 +9,8 @@
       { "slug": "board-and-columns", "title": "Board and columns" },
       { "slug": "tasks", "title": "Tasks, criteria and documents" },
       { "slug": "ordering-and-relations", "title": "Ordering and relations" },
+      { "slug": "issue-sync", "title": "GitHub and Jira issues" },
+      { "slug": "design-systems", "title": "Design systems" },
       { "slug": "quality-gates", "title": "Quality gates" }
     ]},
     { "title": "Agents", "pages": [
@@ -27,7 +29,9 @@
     { "title": "Delivery", "pages": [
       { "slug": "git-and-pull-requests", "title": "Git and pull requests" },
       { "slug": "deploy", "title": "Deploy targets and recipes" },
+      { "slug": "operations-console", "title": "Operations console" },
       { "slug": "incidents", "title": "Production incidents" },
+      { "slug": "data-sources", "title": "Data sources" },
       { "slug": "mobile-releases", "title": "Mobile devices and store releases" }
     ]},
     { "title": "Reference", "pages": [

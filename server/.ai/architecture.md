@@ -71,11 +71,35 @@ matching `Define` — partials are exempt, since they exist only to be pulled in
 
 ## MCP integration (client side)
 
-`mcp.Manager.LoadAndRegister` iterates `tools.mcp_servers`: `stdio` spawns the server via
-`mcp.CommandTransport`, `http` connects with `mcp.StreamableClientTransport`. Each
-server's tools are discovered with `session.ListTools` and registered as
-`mcp_<server_id>_<tool_name>` (no collisions with built-ins); calls dispatch back through
-`session.CallTool`.
+`mcp.Manager.LoadAndRegister` iterates the stored servers (`mcp_servers`, resolved by
+`application/mcp`): `stdio` spawns the server via `mcp.CommandTransport`, `http` connects
+with `mcp.StreamableClientTransport`. Each server's tools are discovered with
+`session.ListTools` and registered as `mcp_<server_id>_<tool_name>` (no collisions with
+built-ins); calls dispatch back through `session.CallTool`. One manager lives for the
+process (`reloadMCP` reuses it): it remembers what it registered and, through the optional
+`port.ToolUnregisterer`, drops the tools of a server that is gone after a reload.
+
+- **Access (migration 179).** Each executor implements `port.MCPServerTool`, so the
+  registry records `{server id, access}` per tool name and never re-derives the server from
+  the name (ids may contain `_`). `registry.IsToolAllowed`: an explicit
+  `allow_mcp_servers` admits exactly those servers; an empty one admits only `access =
+  'all'`. `DefinitionsForPolicy` and `ExecuteWithPolicy` apply it even to a zero policy;
+  `Definitions()` is the unfiltered admin listing.
+- **Results.** `TextContent` stays text; `ImageContent` in png/jpeg/gif/webp up to 5 MB
+  becomes `ToolResult.Images` (what `browser_screenshot` returns); other blocks keep their
+  JSON. `adapter/mcpserver` turns `Images` back into MCP image content for CLI sessions.
+- **OAuth.** `application/mcp` (`oauth.go`) runs the flow and implements
+  `port.MCPTokenSource`; `adapter/mcpoauth` is the `port.MCPOAuthProvider` (RFC 9728
+  resource metadata from the 401 challenge or well-known, RFC 8414/OIDC server metadata,
+  RFC 7591 registration, token endpoint with PKCE and the RFC 8707 `resource`), every
+  request through `urlguard`, no redirects on credential-bearing POSTs. Pending sign-ins
+  (state → server, PKCE verifier, redirect, client) live only in memory, single-use,
+  10 min. Tokens and client secrets are stored in `mcp_server_oauth`, encrypted with the
+  MCP secrets cipher. The manager's `authTransport` asks the token source per request
+  (refresh 1 min before expiry; on a 401, once, unless a newer token is stored), replays
+  the request, and records a surviving 401 as `auth_required` in health. The redirect is
+  `http://127.0.0.1:<port>` + `httpadapter.MCPOAuthCallbackPath`, a deliberate public path
+  (`isPublicPath`).
 
 ## Orchestration flow
 
@@ -243,6 +267,27 @@ that worked; otherwise the error signature classifies it as config / dependency 
 `incident_policy` decides what follows: `off` records only, `suggest` (default) opens a
 diagnosis task that must stop at a written proposal, `auto_fix` lets the task carry the fix
 through the board.
+
+Notifying is split the same way as everything else here: `prodops` decides *whether* (severity
+floor, a 30-minute re-notify cooldown keyed by (repository, env, fingerprint) — not incident id,
+which a flapping alert renews every cycle — that holds back only a repeat of the kind last told,
+never an opening after a told recovery or the other way round) and builds a channel-neutral
+`domain.Notification`; `application/notify` only *delivers*, fanning out to every registered,
+enabled `port.NotificationChannel` (bounded wait, failures logged). A new channel (Slack, email,
+iOS push) is a new adapter registered in runtime wiring — no incident code changes. Local mode
+registers only `desktop`; there is no `in_app` channel because the UI has no feed for
+notifications that are not about a board task (its bell is built from board events).
+`application/release` notifies the same way through the same service, under the shared
+`notify.Cooldown` keyed by (kind, release): `rollback_suggested` for a proposal written because
+`auto_rollback` is off (with an `approve_rollback` action) and `release_rolled_back` for a
+rollback an agent executed. Every notification carries a `domain.NotificationKind`.
+
+An alerter without the API key posts to `POST /v1/alerts/ingest/:token` (migration 187,
+`alert_ingest_tokens`, sha256 only); the handler resolves the token to its repository and runs the
+same `Normalize` → `Ingest` as the keyed webhook. Because the URL is the whole credential, each
+token is bounded in memory (`prodops.alertIngestGuard`, `prod_ops.alert_ingest`): a request bucket
+keyed by the token hash, and a rolling-hour cap on the NEW incidents it may open — an alert that
+folds into an open incident, or a recovery, is never refused by the cap.
 
 ## Run lifetime vs process lifetime (drain, heartbeat, stale sweep)
 
@@ -423,7 +468,9 @@ work now ends at its verdict in `in_qa`/`pm_uat`.
 `project_components.delivery` is a `Fact[domain.ComponentDelivery]` like `name`/`role`/`stack`
 — `mode` (`on_merge` | `dispatch` | `batch` | `none`), `executor` (`github_actions` | `vercel`
 | `local` | `store`), `workflow`, `tag_pattern`, `local_command`, `verify` (`soak_minutes`,
-`max_new_errors`, GET/HEAD-only `smoke` checks), `auto_rollback`. `domain.DeliveryConfirmed`
+`max_new_errors`, GET/HEAD-only `smoke` checks, the deploy impact thresholds
+`max_error_rate_delta`/`max_p95_delta_pct` the soak holds `application/deployimpact` to),
+`auto_rollback`. `domain.DeliveryConfirmed`
 is what a release may act on without asking: an `Override` always confirms; a `Detected`
 guess confirms only at `exact`/`high` confidence — a medium guess must not start dispatching
 production deploys nobody asked for.
@@ -465,8 +512,23 @@ card.
 merge (it never returns an error — a failure to open a release is reported in `Next`, with
 the task left in `done`, because the merge already happened and cannot be undone here):
 
-- No component resolvable (none recorded, more than one active component with no `.`-path
-  fallback) → `Unconfirmed: true`, one system comment, no release row.
+- No component recorded, and no single active component or `.`-path fallback → the merged
+  pull request's files decide (`MergedFiles`, `board.TaskPRService.MergedTaskFiles`, read
+  from GitHub so a checkout on another machine works the same; renames count at both paths;
+  a list at the adapter's 500-file cap is not trusted):
+  - one active component owns every file that has an owner → that component, recorded on
+    the task (after the release opens, so `OpenPending` finds the release instead of opening
+    a second one), then the rules below;
+  - no file has an owner → nothing deploys it: the task moves to `released`
+    (`MoveReasonMergeReleasedNoDelivery`) with one comment. A repository with no active
+    component counts only when it has no legacy deploy target either (one it cannot list
+    counts as having one);
+  - anything else (several components, a legacy deploy target, files unreadable) →
+    `Unconfirmed: true`, one system comment, no release row.
+  Naming a merged `done` task's component later (`repository.Service.SetComponentAssignedHook`,
+  the task drawer's Component field) runs `OpenPending` for it, and once at boot
+  `RetryUnresolvedMerges` gives tasks merged before this rule the same decision, touching
+  only those the files now place.
 - Profile not `DeliveryConfirmed` → the same: `Unconfirmed: true`, one comment naming the
   component, no row.
 - `none` → the task moves straight to `released` (`MoveReasonMergeReleasedNoDelivery`);
@@ -539,7 +601,8 @@ deploying again; nothing needs rolling back unless a broken build went out".
 
 ### The sweeper
 
-`SweepOnce` (default 30s, `Start`) lists every release in a `Watched()` status and advances
+`SweepOnce` (`Start`: every 30s while a release is watched, every 5 min otherwise; a write
+that leaves a release `Watched()`, or `Watch`, wakes an idle sweeper) lists every release in a `Watched()` status and advances
 each with an optimistic `store.Update(r, expect=oldStatus)` — `ErrReleaseWrongStatus` means
 someone else (another tick, an agent's `Finish`/`Rollback`) already moved it, and the release
 is skipped rather than fought over.
@@ -905,8 +968,9 @@ for — the other three are facts about the world outside the board. Everything 
 identical: `blocked_resource`, the `blocked` column with the reason, a comment naming every
 blocker, and a sweeper.
 
-`board.WorkOrderSweeper` (1 minute — the shortest of the four: one indexed query against the
-same database) is shaped like `DeploySweeper`, since the park is per-TASK: list without
+`board.WorkOrderSweeper` (every 5 minutes, only a backstop: a blocker reaching done/released
+wakes its dependants itself through `WakeDependentsOf`, and `SweepSoon` runs a pass right
+after a park is written or a task is deleted) is shaped like `DeploySweeper`, since the park is per-TASK: list without
 claiming, ask, take only the free ones. It asks the relation graph itself —
 `ListBlockingSources` returns the UNFINISHED sources of a task's `blocks` rows, so an empty
 answer *is* "everything it waited for is done". That one query also covers both ways a
@@ -959,9 +1023,13 @@ executor":
 
 ```
 domain.RequiresHostExecutor(agent.ProviderType)  →  executor (or a clear failure)
-r.orchSvc != nil                                 →  RunSolo        (unchanged)
-default                                          →  agentLoop.RunTask (unchanged)
+default                                          →  agentLoop.RunTask
 ```
+
+A board run never goes through the orchestrator (intake, planner, verifier):
+the task, its criteria and the stage instructions already are the plan, so an
+API-provider agent runs the loop directly. The orchestrator is chat-only and is
+not built at all when `orchestration.enabled` is false.
 
 Keying on the provider is what makes a host with no CLI say *"claude code binary not
 available on this host…"* instead of falling through to a loop that would open an HTTP
@@ -1181,7 +1249,12 @@ executor runs `claude -p --resume <id> <short continue prompt>` in the same work
 persona, no project context, no re-stated task, all of which the session holds and would read
 as a competing instruction. The id is only handed to the SAME agent whose park recorded it
 (`latestCLISession`), or a column dispatching to several agents would start two
-`claude --resume <same id>` processes in one workspace.
+`claude --resume <same id>` processes in one workspace, and only to the CLI that issued it:
+migration 175's `cli_provider` records which one did (an agent can change provider while
+parked; a park written before that column existed is still trusted). A resumed *revision* run is
+handed the review feedback as its prompt instead of the short continue prompt, because the
+park can land before the CLI ever started, leaving the parked session the one from before the
+task was sent back.
 
 Two brakes, because a park costs the task nothing and a *repeating* park is therefore
 invisible:
@@ -1218,10 +1291,11 @@ resume) rather than spawning a CLI that would just report the same 429 again. Th
 per-process, in memory, and lost on a restart — it is a fast-path short-circuit, not the
 durable park; migration 101's board-row park above is what actually survives one.
 
-**The concurrency cap.** With no cap, every board task whose column is free spawns its own
-`claude` session at once, and a burst that all hit the shared usage limit mid-work all park
-together — the opposite of a gate meant to slow the burn down. `Config.MaxConcurrentSessions`
-(0 → `DefaultMaxConcurrentSessions` = 3, negative → unlimited) backs a buffered-channel
+**The concurrency cap.** How many board runs start at once is the Settings limits'
+business (`max_concurrent_agents` / `max_concurrent_tasks`, 0 = unlimited, enforced by the
+board runner); the executor adds no default of its own, because a hidden cap made "0 =
+unlimited" in Settings untrue. An operator who wants a host-wide ceiling on top sets
+`Config.MaxConcurrentSessions` (0 or less → none), which backs a buffered-channel
 semaphore on the executor; `Execute` acquires a slot after the quota-gate check and before
 `resolveMCP` (so a queued run never mints and holds a per-run token while it waits), honouring
 context cancellation, and logs plus records a `claude_code_slot_wait` activity step when the
@@ -1303,12 +1377,26 @@ loop run's downstream: audit rows, the session action ledger, the tool-usage cou
 grounding gates read and the activity recorder all take attribution from it, and it carries
 the run's cancellation, so a stopped run's in-flight tool call dies with it.
 
-**What is served.** `DefinitionsForPolicy(run policy)` minus two groups:
+**What is served.** `DefinitionsForPolicy(run policy)` minus two groups (`ask_user` only
+sometimes — see below):
 
 | Dropped | Why |
 |---|---|
 | `run_terminal`, `read_file`, `write_file`, `edit_file`, `edit_lines`, `delete_file`, `move_file`, `grep_code`, `get_repo_tree` | The CLI's Bash/Read/Write/Edit/Grep/Glob are better at exactly these and are what the model was trained against. Two tools for one job is the classic way to make a model pick the worse one |
-| `ask_user` | It does not return a result — it parks the run on a human answer, and a live session would sit on an open call while the run around it was parked. Clarification for `claude_code` runs needs a suspendable session first |
+| `ask_user`, unless `Run.Ctx` carries a `domain.ClarificationSink` | It does not return a result — it parks the run on a human answer, and a live session cannot sit on an open call while the run around it is parked |
+
+**`ask_user` for a run that waits.** The board runner's agent-CLI branch and the chat's
+`runHostExecutedTurn` put a `domain.ClarificationSink` on the context they hand the
+executor, and the runner grants `ask_user` outside analiz (`cliAskPolicy`). For those runs
+the call is served: the endpoint records the question in the sink and answers
+`mcp.clarification_recorded` (end your turn now) instead of parking anything. Once the CLI
+exits, the caller reads the sink into `AgentResponse.Clarification` and takes the same path an
+API run's question takes — the board parks the task on the clarification chat, a chat turn
+persists the question card. The answer becomes a `[clarification]` task comment either way
+(`AnswerResumer.ResumeOnAnswer` for a parked task, `RecordTaskAnswer` for a task-bound chat).
+Claude Code's own `AskUserQuestion` card is in `--disallowedTools` on every session, board run
+and chat alike: in `-p` mode nobody answers it and nothing here translates it, so the MCP
+`ask_user` stays the one way a session asks.
 
 `codebase_search`, `get_symbol_skeleton` and `expand_symbol_context` deliberately **stay**:
 they are backed by the semantic index and the CLI has no equivalent. Every board and domain
@@ -1425,7 +1513,9 @@ Mobile device access (`mobile.*`) runs entirely through `adapter/localdevice` on
 machine — see "Local simulators and emulators" above for the full `remote_adb` /
 `ios_simulator` / `android_emulator` breakdown. There is no second, remote path: `mobile.Pool`
 talks to one Appium hub on this host, and a park (`ResourceBlock{mobile_device}`) is released
-by `DeviceSweeper` probing that same hub.
+by `DeviceSweeper` probing that same hub. With `APPIUM_BIN` set that hub is this process's
+child, run by `adapter/local/appiumhub` only while mobile tools use it (see
+`tool-reference.md`); a probe never starts it and reads it stopped as a free device.
 
 ## Single install, no isolation (migration 133)
 

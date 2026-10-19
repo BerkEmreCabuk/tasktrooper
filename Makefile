@@ -41,12 +41,14 @@ build:
 	npm --prefix desktop run build
 
 test:
-	cd server && go vet ./... && go test ./...
+	cd server && go vet ./... && go test ./... && go run ./cmd/skillvectors -catalog ../catalog -check
+	cd desktop/runner && go vet ./... && go test ./...
 	npm --prefix $(UI) run typecheck && npm --prefix $(UI) run build
 	cd desktop && npm run typecheck && npm run lint && npm test
 
 lint:
 	cd server && go vet ./...
+	cd desktop/runner && go vet ./...
 	npm --prefix $(UI) run typecheck
 	cd desktop && npm run typecheck && npm run lint
 

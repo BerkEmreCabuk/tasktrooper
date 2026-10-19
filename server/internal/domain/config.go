@@ -21,6 +21,7 @@ type Config struct {
 	ProdOps       ProdOpsConfig       `koanf:"prod_ops"`
 	Storeops      StoreopsConfig      `koanf:"storeops"`
 	DeployOps     DeployOpsConfig     `koanf:"deploy_ops"`
+	Alerting      AlertingConfig      `koanf:"alerting"`
 	ClaudeCode    ClaudeCodeConfig    `koanf:"claude_code"`
 	Antigravity   AntigravityConfig   `koanf:"antigravity"`
 	CursorAgent   CursorAgentConfig   `koanf:"cursor_agent"`
@@ -81,17 +82,27 @@ type ClaudeCodeConfig struct {
 	// SettingSources is a subset of user, project, local; empty means
 	// "project,local" — the operator's own ~/.claude settings are excluded.
 	SettingSources string `koanf:"setting_sources"`
-	// MaxConcurrentSessions bounds parallel CLI sessions; 0 means default (3),
-	// negative unlimited. The cap keeps the shared subscription limit from
-	// cutting every session off at once.
+	// MaxConcurrentSessions bounds parallel CLI sessions on this host; 0 or
+	// less means no cap of its own, leaving the Settings concurrency limits
+	// as the only ones.
 	MaxConcurrentSessions int `koanf:"max_concurrent_sessions"`
 }
 
 // ProdOpsConfig drives production monitoring: the health probe that watches
 // deploy targets and turns a dead environment into an incident.
 type ProdOpsConfig struct {
-	MonitorEnabled bool          `koanf:"monitor_enabled"`
-	ProbeInterval  time.Duration `koanf:"probe_interval"`
+	MonitorEnabled bool              `koanf:"monitor_enabled"`
+	ProbeInterval  time.Duration     `koanf:"probe_interval"`
+	AlertIngest    AlertIngestLimits `koanf:"alert_ingest"`
+}
+
+// AlertIngestLimits bounds what one alert ingest token can make this server
+// do, since a leaked token is otherwise unbounded incidents, tasks and agent
+// runs. Zero or less means the built-in default, never unlimited.
+type AlertIngestLimits struct {
+	RequestsPerMinute   int `koanf:"requests_per_minute"`
+	Burst               int `koanf:"burst"`
+	NewIncidentsPerHour int `koanf:"new_incidents_per_hour"`
 }
 
 // StoreopsConfig drives the mobile store monitor.
@@ -108,7 +119,63 @@ type DeployOpsConfig struct {
 	// attributed to the task that just released (the post-release watch and
 	// auto_rollback window); 0 means the package default (15m). Short on
 	// purpose: it authorises a rollback of a specific card.
-	HealthWindow time.Duration `koanf:"health_window"`
+	HealthWindow time.Duration      `koanf:"health_window"`
+	Impact       DeployImpactConfig `koanf:"impact"`
+}
+
+// DeployImpactConfig is how far a golden signal must move across a deploy to
+// count as improved or worse rather than neutral: ChangePct percent of its
+// value before the deploy (ThroughputChangePct for a rate where higher is
+// better, which swings more on its own), or RatioPoints percentage points for
+// a ratio signal (an error rate, crash-free users). A count where lower is
+// better must also move by an absolute floor: CountFloor for a gauge
+// (backlog, dead letters, restarts), RateFloor for a rate (errors/s), each at
+// least FloorPct percent of the larger of the two values. A latency in ms
+// must move by LatencyFloorMS, which also floors a soak's max_p95_delta_pct.
+// 0 or less means the default.
+type DeployImpactConfig struct {
+	ChangePct           float64 `koanf:"change_pct"`
+	RatioPoints         float64 `koanf:"ratio_points"`
+	ThroughputChangePct float64 `koanf:"throughput_change_pct"`
+	CountFloor          float64 `koanf:"count_floor"`
+	RateFloor           float64 `koanf:"rate_floor"`
+	FloorPct            float64 `koanf:"floor_pct"`
+	LatencyFloorMS      float64 `koanf:"latency_floor_ms"`
+}
+
+const (
+	DefaultImpactChangePct           = 10
+	DefaultImpactRatioPoints         = 0.5
+	DefaultImpactThroughputChangePct = 25
+	DefaultImpactCountFloor          = 1
+	DefaultImpactRateFloor           = 0.05
+	DefaultImpactFloorPct            = 5
+	DefaultImpactLatencyFloorMS      = 50
+)
+
+// WithDefaults fills every unset threshold with its default.
+func (c DeployImpactConfig) WithDefaults() DeployImpactConfig {
+	orDefault := func(v *float64, d float64) {
+		if *v <= 0 {
+			*v = d
+		}
+	}
+	orDefault(&c.ChangePct, DefaultImpactChangePct)
+	orDefault(&c.RatioPoints, DefaultImpactRatioPoints)
+	orDefault(&c.ThroughputChangePct, DefaultImpactThroughputChangePct)
+	orDefault(&c.CountFloor, DefaultImpactCountFloor)
+	orDefault(&c.RateFloor, DefaultImpactRateFloor)
+	orDefault(&c.FloorPct, DefaultImpactFloorPct)
+	orDefault(&c.LatencyFloorMS, DefaultImpactLatencyFloorMS)
+	return c
+}
+
+// AlertingConfig drives the alert rule evaluator. Zero or less means the
+// default (every minute, 200 rules per sweep).
+type AlertingConfig struct {
+	Enabled          bool          `koanf:"enabled"`
+	Interval         time.Duration `koanf:"interval"`
+	MaxRulesPerSweep int           `koanf:"max_rules_per_sweep"`
 }
 
 // EvolutionConfig drives agent self-evolution.
@@ -240,6 +307,10 @@ type IndexerConfig struct {
 	// EmbedConcurrency bounds embedding calls across every index job; 0 = the
 	// indexer's default (2).
 	EmbedConcurrency int `koanf:"embed_concurrency"`
+	// IndexGenerated keeps generated code and mocks in the code index; false
+	// (the default) leaves them out so they do not crowd real code out of
+	// search results.
+	IndexGenerated bool `koanf:"index_generated"`
 }
 
 // EmbeddingConfig paces embedding requests (one per chunk back to back used to
@@ -310,6 +381,9 @@ type BrowserConfig struct {
 type MobileConfig struct {
 	// HubURL is the Appium server base.
 	HubURL string `koanf:"hub_url"`
+	// AppiumBin, set, makes the hub at HubURL this process's to start when a
+	// mobile tool needs it and to stop when idle. Unset, whoever runs it does.
+	AppiumBin string `koanf:"appium_bin"`
 	// DeviceUDID pins which phone; Appium would otherwise take whatever adb
 	// lists first.
 	DeviceUDID string `koanf:"device_udid"`
@@ -336,6 +410,7 @@ type MCPServerConfig struct {
 	URL          string            `koanf:"url"`
 	Headers      map[string]string `koanf:"headers"`
 	AllowedTools []string          `koanf:"allowed_tools"`
+	Access       MCPAccess         `koanf:"access"`
 }
 
 type StorageConfig struct {

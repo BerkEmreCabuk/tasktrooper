@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/core"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/proctree"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/winshim"
 )
 
 const (
@@ -36,6 +38,7 @@ const (
 // With --stdio the server treats EOF on its stdin as the end of its lease.
 type privateServer struct {
 	cmd      *exec.Cmd
+	tree     *proctree.Tree
 	stdin    io.WriteCloser
 	url      string
 	password string
@@ -47,7 +50,7 @@ func startPrivateServer(ctx context.Context, bin, workDir string, env []string) 
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, bin, "serve", "--stdio", "--port", "0", "--hostname", "127.0.0.1")
+	cmd := winshim.Command(ctx, bin, "serve", "--stdio", "--port", "0", "--hostname", "127.0.0.1")
 	cmd.Dir = workDir
 	cmd.Env = append(append([]string{}, env...), "OPENCODE_PASSWORD="+password)
 	stdin, err := cmd.StdinPipe()
@@ -59,10 +62,11 @@ func startPrivateServer(ctx context.Context, bin, workDir string, env []string) 
 	cmd.Stdout = ready
 	cmd.Stderr = stderr
 	cmd.WaitDelay = serverStopGrace
-	if err := cmd.Start(); err != nil {
+	tree, err := proctree.Start(cmd)
+	if err != nil {
 		return nil, fmt.Errorf("start opencode server: %w", err)
 	}
-	s := &privateServer{cmd: cmd, stdin: stdin, password: password, done: make(chan struct{})}
+	s := &privateServer{cmd: cmd, tree: tree, stdin: stdin, password: password, done: make(chan struct{})}
 	go func() {
 		_ = cmd.Wait()
 		close(s.done)
@@ -173,13 +177,11 @@ func (s *privateServer) stop() {
 	_ = s.stdin.Close()
 	select {
 	case <-s.done:
-		return
 	case <-time.After(serverStopGrace):
+		s.tree.Close()
+		<-s.done
 	}
-	if s.cmd.Process != nil {
-		_ = s.cmd.Process.Kill()
-	}
-	<-s.done
+	s.tree.Close()
 }
 
 // locationDirectory is the directory 2.x keys the run's location on: `opencode

@@ -16,6 +16,10 @@ Do not add code comments unless truly necessary — a non-obvious invariant, a
 workaround, or a WHY that isn't clear from the code itself. Never explain WHAT
 the code does; well-named identifiers already do that.
 
+## Feature switch
+
+`src/lib/features.ts` exports `ADVANCED_TEAM_CONFIG` (false): Board/Roles/Workflows settings and hand-made agent creation are hidden and their routes redirect; the code stays.
+
 ## Frontend UI rule (mandatory)
 
 All UI in `src/` follows **Atomic Design**: atom → molecule → organism →
@@ -40,10 +44,13 @@ work; it is the authority, this section is the summary.
 
 ## Auth
 
-There is no login screen and no account. `src/lib/auth.ts` resolves one bearer
-token — the desktop shell's `window.__tasktrooperDesktop.apiToken`, else
-`VITE_API_KEY` — and `main.tsx` renders `ConfigErrorPage` when there is none.
-Nothing else in `src/` may read a credential.
+There is no login screen and no account in this bundle. `src/lib/auth.ts`
+resolves one bearer token — the desktop shell's
+`window.__tasktrooperDesktop.apiToken`, else `VITE_API_KEY` — and `main.tsx`
+renders `ConfigErrorPage` when there is none. Nothing else in `src/` may read a
+credential. The shell's account mode does not change that: it shows the
+account's own web app from its origin, not this bundle; from here,
+`account.signIn()` only hands the window over.
 
 ## API calls
 
@@ -61,15 +68,39 @@ Nothing else in `src/` may read a credential.
 `src/lib/desktop-bridge.ts` is one half of a contract whose other half is
 `../src/ipc/host.ts`. They are separate declarations because this app
 builds with no knowledge of that package; **change both together**. The shell
-exposes `info()`, `apiBase`, `apiToken` and `runner` (process supervision,
-preflight, settings, diagnostics); `runner.connect()`/`disconnect()` start and
-stop the **backend**, not a tunnel.
+exposes `info()`, `apiBase`, `apiToken`, `runner` (process supervision,
+preflight, settings, diagnostics) and `updates` (the auto-updater, for
+Settings); in local mode `runner.connect()`/`disconnect()` start and stop the
+**backend**. `account` (`signIn(origin?)`, `signOut()`, `state()`) switches
+the shell between local and account mode — Settings' Account card and the
+first-run screen call it; the page it is called from is replaced when it
+succeeds. `analytics` (`get()`, `set(on)`; bridge 4) is the usage statistics switch Settings → General and the first-run line read, and `track()`/`identify()` (bridge 7) are what `lib/analytics.ts` sends screen views, product events and the hashed member id through; `toolchain` (bridge 5: `report`, `plan`, `state`/`subscribe`, `install`, `cancel`, `dismiss`, `openPage` — ids only, never a command or URL) installs the developer tools the agents use, for the first-run toolchain step, the header chip and Settings → Development environment (`.ai/frontend-components.md` "Toolchain setup"); `bridgeVersion` (7) and `mode` are synchronous values;
+`runner.pair`/`unpair`/`pairing`/`restart` and the snapshot's `tunnel` are
+account mode's, used by the account's web app, not by this bundle.
+`account`, `toolchain`, `bridgeVersion` and `mode` are optional on this side: a browser and
+an older shell have none. Bridge 2 adds `account.openKeys()` — it opens the
+shell's own API-key window and takes and returns nothing; this bundle never
+sees a key, and does not call it (local mode keeps keys on Settings → LLM
+Connection; the account's own LLM page calls it) — and `state().temporaryLocal`, true while the shell runs this
+bundle locally for now with an account still signed in
+(`TemporaryLocalBanner`, the Account card's "Back to the account"). Bridge 6
+adds `account.mcp` (`list`, `set`, `remove`) and `openKeys({mcp, secretNames})`:
+this computer's own MCP servers, for the account's MCP Servers page; this
+bundle does not call them.
 
 ## Locales
 
-`src/locales/en.ts` is the source of truth and defines `Dict`; `tr.ts` is typed
-as `Dict`, so a missing or extra key fails `tsc`. Keys built at runtime escape
-that check — `npm run check:locales` compares the two flattened key sets.
+`src/locales/en.ts` is the source of truth and defines `Dict`; every other
+language (`tr`, `es`, `de`, `fr`, `pt`, `zh` — registered in
+`src/lib/languages.ts`) is typed as `Dict`, so a missing or extra key fails
+`tsc`. Keys built at runtime escape that check — `npm run check:locales`
+compares every language's flattened key set and `{placeholder}` names with
+`en`. A new English key needs a translation in every language.
+
+Only `en` is bundled with the app's entry (it is every lookup's fallback); the
+others are lazy chunks loaded by `loadLocale` in `hooks/useI18n` — `main.tsx`
+awaits the stored language before the first render and `setLang` switches only
+once its dictionary has loaded. Import a dictionary statically only in tests.
 
 ## Verify before committing
 

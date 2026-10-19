@@ -71,6 +71,9 @@ func (f *fakePMStore) SaveComponent(_ context.Context, c domain.Component) (doma
 func (f *fakePMStore) ListChecks(context.Context, uuid.UUID) ([]domain.ComponentCheck, error) {
 	return nil, nil
 }
+func (f *fakePMStore) ListChecksForRepositories(context.Context, []uuid.UUID) ([]domain.ComponentCheck, error) {
+	return nil, nil
+}
 func (f *fakePMStore) GetCheck(context.Context, uuid.UUID) (domain.ComponentCheck, error) {
 	return domain.ComponentCheck{}, port.ErrNotFound
 }
@@ -118,6 +121,9 @@ func (f *fakePMStore) GetScan(context.Context, uuid.UUID) (domain.ProjectScan, e
 }
 func (f *fakePMStore) LatestScan(context.Context, uuid.UUID) (domain.ProjectScan, error) {
 	return domain.ProjectScan{}, port.ErrNotFound
+}
+func (f *fakePMStore) LatestScans(context.Context, []uuid.UUID) (map[uuid.UUID]domain.ProjectScan, error) {
+	return map[uuid.UUID]domain.ProjectScan{}, nil
 }
 func (f *fakePMStore) FailInterruptedScans(context.Context) (int, error) { return 0, nil }
 
@@ -235,4 +241,40 @@ func TestUpdateProjectComponentDeliveryInvalidProfileIs400(t *testing.T) {
 	resp, err := app.Test(req)
 	require.NoError(t, err)
 	assert.Equal(t, fiber.StatusBadRequest, resp.StatusCode)
+}
+
+func TestUpdateProjectComponentReportsTheGateCITaskItOpened(t *testing.T) {
+	stack := domain.ComponentStack{Languages: []domain.StackItem{{Name: "Go"}}}
+	comp := domain.Component{
+		ID: uuid.New(), RepositoryID: uuid.New(), Path: ".", Status: domain.ComponentStatusActive,
+		Stack: domain.Detected(stack, domain.ConfidenceHigh),
+	}
+	store := newFakePMStore(comp)
+	repos := &fakePMRepos{repo: domain.Repository{ID: comp.RepositoryID, Name: "tasktrooper"}}
+	svc := projectmodel.NewService(projectmodel.Deps{Store: store, Repos: repos, Projector: repos, Pipelines: &fakePMPipelines{}})
+	svc.SetTaskCreator(fakeHTTPTasks{})
+	h := &Handler{projectModelSvc: svc}
+	app := fiber.New()
+	h.registerProjectModelRoutes(app)
+
+	status, body := send(t, app, "PATCH", "/v1/components/"+comp.ID.String(), `{"gates":{"coverage_enabled":true}}`)
+	require.Equal(t, fiber.StatusOK, status)
+
+	var got struct {
+		ID          uuid.UUID             `json:"id"`
+		Gates       domain.ComponentGates `json:"gates"`
+		GateCITasks []domain.GateCITask   `json:"gate_ci_tasks"`
+	}
+	require.NoError(t, json.Unmarshal(body, &got))
+	assert.Equal(t, comp.ID, got.ID, "the component's own fields stay at the top level")
+	require.Len(t, got.GateCITasks, 1)
+	assert.Equal(t, domain.QualityGateCoverage, got.GateCITasks[0].Gate)
+	assert.True(t, got.GateCITasks[0].Created)
+	assert.Equal(t, []string{"Go"}, got.GateCITasks[0].Languages)
+	require.NotNil(t, got.Gates.CoverageCITaskID)
+	assert.Equal(t, got.GateCITasks[0].TaskID, *got.Gates.CoverageCITaskID)
+
+	status, body = send(t, app, "PATCH", "/v1/components/"+comp.ID.String(), `{"name":"api"}`)
+	require.Equal(t, fiber.StatusOK, status)
+	assert.NotContains(t, string(body), "gate_ci_tasks")
 }

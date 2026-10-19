@@ -15,8 +15,9 @@ import (
 )
 
 type mergePRs struct {
-	pr  port.PullRequest
-	err error
+	pr    port.PullRequest
+	err   error
+	files []port.PullRequestFile
 }
 
 func (f *mergePRs) GetPullRequest(context.Context, string, string, string, int) (port.PullRequest, error) {
@@ -24,7 +25,7 @@ func (f *mergePRs) GetPullRequest(context.Context, string, string, string, int) 
 }
 
 func (f *mergePRs) ListPullRequestFiles(context.Context, string, string, string, int) ([]port.PullRequestFile, error) {
-	return nil, nil
+	return f.files, nil
 }
 
 func (f *mergePRs) PullRequestDiff(context.Context, string, string, string, int, int) (string, bool, error) {

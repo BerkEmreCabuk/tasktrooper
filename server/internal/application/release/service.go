@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/application/notify"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
@@ -43,6 +44,14 @@ type ParkedTasks interface {
 	// parked on a resource — the M2 watchdog's source of truth for a park
 	// hand-back never freed (a race, a crash, a dropped dispatch).
 	ListBlockedByResource(ctx context.Context, resource string, limit int) ([]domain.BoardTask, error)
+}
+
+// MergeHolds records on the task why MergeGate is refusing its merge (one of
+// domain.MergeHoldResources), so the board shows it. Satisfied directly by the
+// raw postgres board-task store; nil leaves the reason in the gate's comment.
+type MergeHolds interface {
+	HoldMerge(ctx context.Context, repositoryID, taskID uuid.UUID, resource, detail string) error
+	ReleaseMergeHold(ctx context.Context, taskID uuid.UUID, resources ...string) error
 }
 
 // MergeStateResetter clears a task's merge bookkeeping so a rolled-back task
@@ -164,6 +173,18 @@ type Store interface {
 	StartBuild(ctx context.Context, repositoryID uuid.UUID, platform, engine, actor string) (storeops.BuildStart, error)
 }
 
+// ImpactReader is deploy impact (application/deployimpact), read by the soak
+// and the impact endpoint.
+type ImpactReader interface {
+	ForRelease(ctx context.Context, r domain.Release) (domain.DeployImpact, error)
+}
+
+// Notifier is satisfied by notify.Service; whether and how often to notify is
+// decided here.
+type Notifier interface {
+	Notify(ctx context.Context, n domain.Notification)
+}
+
 // Deps wires the release service. Every field is optional except Store: a
 // nil dependency degrades its feature (no component resolved, no HTTP
 // probing, no rollback dispatch) rather than panicking, the same contract
@@ -171,8 +192,12 @@ type Store interface {
 type Deps struct {
 	Store port.ReleaseStore
 
-	Tasks        Tasks
-	ParkedTasks  ParkedTasks
+	Tasks       Tasks
+	ParkedTasks ParkedTasks
+	MergeHolds  MergeHolds
+	// Envs checks a component's production environment variables before its
+	// code ships; nil skips the check.
+	Envs         EnvGate
 	MergeState   MergeStateResetter
 	Waker        Waker
 	Components   Components
@@ -192,6 +217,12 @@ type Deps struct {
 	// in any order.
 	DeployOrder DeployOrder
 	Locator     TaskLocator
+	// Impact holds a soak to the profile's impact thresholds; nil skips them.
+	// SetImpact wires it once it is built.
+	Impact ImpactReader
+	// Notifier tells a human about a rollback proposal or an automatic
+	// rollback; nil tells no one.
+	Notifier Notifier
 
 	// HealthWindow is how long after a release's FinishedAt/DeployedAt a
 	// production incident is still attributed to it; defaults to
@@ -237,6 +268,8 @@ type Service struct {
 
 	tasks        Tasks
 	parked       ParkedTasks
+	holds        MergeHolds
+	envs         EnvGate
 	mergeState   MergeStateResetter
 	waker        Waker
 	components   Components
@@ -250,6 +283,7 @@ type Service struct {
 	beforeDeploy BeforeDeployConfirmer
 	deployOrder  DeployOrder
 	locator      TaskLocator
+	mergedFiles  MergedFiles
 
 	healthWindow time.Duration
 
@@ -267,8 +301,20 @@ type Service struct {
 
 	now func() time.Time
 
-	mu             sync.Mutex
-	lastErrorCheck map[uuid.UUID]time.Time
+	notifier       Notifier
+	notifyCooldown *notify.Cooldown
+
+	mu              sync.Mutex
+	scope           func(ctx context.Context) string
+	lastErrorCheck  map[pacingKey]time.Time
+	lastImpactCheck map[pacingKey]time.Time
+	impact          ImpactReader
+	attributed      map[uuid.UUID]attributedIncident
+
+	cadenceMu  sync.Mutex
+	watching   bool
+	watchNotes uint64
+	watchKick  chan struct{}
 }
 
 func New(d Deps) *Service {
@@ -276,6 +322,8 @@ func New(d Deps) *Service {
 		store:            d.Store,
 		tasks:            d.Tasks,
 		parked:           d.ParkedTasks,
+		holds:            d.MergeHolds,
+		envs:             d.Envs,
 		mergeState:       d.MergeState,
 		waker:            d.Waker,
 		components:       d.Components,
@@ -298,7 +346,16 @@ func New(d Deps) *Service {
 		refAlreadyExists: d.IsRefAlreadyExists,
 		ciUnavailable:    d.IsCIUnavailableText,
 		now:              d.Clock,
-		lastErrorCheck:   map[uuid.UUID]time.Time{},
+		notifier:         d.Notifier,
+		notifyCooldown:   notify.NewCooldown(notify.DefaultCooldown),
+		lastErrorCheck:   map[pacingKey]time.Time{},
+		lastImpactCheck:  map[pacingKey]time.Time{},
+		attributed:       map[uuid.UUID]attributedIncident{},
+		impact:           d.Impact,
+		watchKick:        make(chan struct{}, 1),
+	}
+	if d.Store != nil {
+		s.store = watchNotingStore{ReleaseStore: d.Store, note: s.noteWatching}
 	}
 	if s.refAlreadyExists == nil {
 		s.refAlreadyExists = func(error) bool { return false }
@@ -323,6 +380,60 @@ func New(d Deps) *Service {
 func (s *Service) SetClock(now func() time.Time) { s.now = now }
 
 func (s *Service) SetURLPolicy(p urlguard.Policy) { s.policy = p }
+
+// SetImpact wires deploy impact after the sweeper may already be running:
+// the signals it reads are built later in the boot sequence.
+func (s *Service) SetImpact(r ImpactReader) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.impact = r
+}
+
+// pacingKey is one release's soak pacing, within the scope that swept it.
+type pacingKey struct {
+	scope   string
+	release uuid.UUID
+}
+
+// SetScope keys the sweeper's in-process pacing by scope(ctx) as well, so a
+// process sweeping several tenants paces and forgets each one's releases
+// apart. Without it there is one scope. Call it before Start.
+func (s *Service) SetScope(scope func(ctx context.Context) string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.scope = scope
+}
+
+func (s *Service) scopeOf(ctx context.Context) string {
+	if s.scope == nil {
+		return ""
+	}
+	return s.scope(ctx)
+}
+
+func (s *Service) pacingKey(ctx context.Context, releaseID uuid.UUID) pacingKey {
+	return pacingKey{scope: s.scopeOf(ctx), release: releaseID}
+}
+
+func (s *Service) impactReader() ImpactReader {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.impact
+}
+
+// Impact is the release's deploy impact; with deploy impact not wired it is
+// unknown, with no signals.
+func (s *Service) Impact(ctx context.Context, releaseID uuid.UUID) (domain.DeployImpact, error) {
+	r, err := s.store.Get(ctx, releaseID)
+	if err != nil {
+		return domain.DeployImpact{}, err
+	}
+	reader := s.impactReader()
+	if reader == nil {
+		return domain.NewDeployImpact(r, s.now().UTC()), nil
+	}
+	return reader.ForRelease(ctx, r)
+}
 
 // ForAgent is ForTask stamped with AgentSeenAt: every release tool
 // (adapter/tools/board/release_tools.go) resolves through this, not ForTask

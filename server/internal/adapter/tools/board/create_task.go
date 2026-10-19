@@ -3,6 +3,7 @@ package board
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -250,6 +251,9 @@ func (t *createTaskTool) Execute(ctx context.Context, arguments string) domain.T
 		if err != nil {
 			return toolError(createBoardTaskToolName, err.Error())
 		}
+		if refusal := t.kit.disabledAssigneeRefusal(ctx, assigneeID); refusal != "" {
+			return toolError(createBoardTaskToolName, refusal)
+		}
 		req.AssigneeAgentID = &assigneeID
 	} else if args.AssigneeRole != "" {
 		roleAssignee, err := t.resolveAssigneeRole(ctx, args.AssigneeRole, repositoryID)
@@ -257,6 +261,9 @@ func (t *createTaskTool) Execute(ctx context.Context, arguments string) domain.T
 			return toolError(createBoardTaskToolName, err.Error())
 		}
 		if roleAssignee != nil {
+			if refusal := t.kit.disabledRoleRefusal(ctx, args.AssigneeRole, *roleAssignee); refusal != "" {
+				return toolError(createBoardTaskToolName, refusal)
+			}
 			req.AssigneeAgentID = roleAssignee
 		}
 	}
@@ -313,6 +320,9 @@ func (t *createTaskTool) Execute(ctx context.Context, arguments string) domain.T
 		req.BlockedBy = blockers
 	}
 	task, err := t.kit.Tasks.CreateTask(ctx, repositoryID, req)
+	if errors.Is(err, domain.ErrAssigneeNotAssignable) {
+		return toolError(createBoardTaskToolName, assigneeNotAssignableKey.Render(struct{}{}))
+	}
 	if err != nil {
 		return toolError(createBoardTaskToolName, err.Error())
 	}

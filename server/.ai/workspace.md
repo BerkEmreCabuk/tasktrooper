@@ -112,6 +112,10 @@ When a task moves to `pm_uat` or `done`, `repository.Service` creates a draft PR
 
 If a board run's response contains a clarification request (`ask_user`), the runner opens a new agent chat session (agent + repository bound) with the clarification stored on the assistant message, and sends a macOS notification via `osascript`.
 
+An agent CLI run reaches `ask_user` over MCP only when the runner can wait for the answer (see `domain.ClarificationSink` in `.ai/architecture.md`); its question takes the same path. Every answered question ends up on the task as a `[clarification]` comment: the answer in the parked task's chat resumes the run and records it, an answer in a task-bound chat (Discuss) records it as an informational comment, and an analiz task's open-question answers are summarised on submit and on approval.
+
+The product manager (`product_manager` role) is never a task's assignee: it works `pm_uat` through its column subscription. `repository.Service` refuses it on create, update and claim (`domain.ErrAssigneeNotAssignable`, HTTP code `assignee_not_assignable`), and a system-opened task whose role purpose resolves to it is left unassigned.
+
 ## API
 
 | Method | Path |
@@ -155,3 +159,12 @@ Everything above this section is the whole lifecycle: `ensureWorkingCopy` clones
 under `<workspace_root>/task-<id>`, and the agent catalog is materialised into that
 checkout. `repository.Service.EnsureIndexMirror` restores `root_path` from
 `remote_url` before an index pass the same way.
+
+## What the code index covers
+
+The indexer walks the repository root honouring `.gitignore` and a repository-root
+`.tasktrooperignore` (same pattern syntax; always applied), and keeps only files with an
+indexable extension. Generated code and mocks (mock/generated directories, `mock_*`,
+`*.pb.go`, `*_gen.go`, `// Code generated ... DO NOT EDIT.` and `@generated` headers, ...)
+are left out unless `indexer.index_generated` is `true`. Files that leave the list drop
+their chunks on the next incremental pass.

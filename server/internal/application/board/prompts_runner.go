@@ -18,6 +18,10 @@ var columnCodeReviewKey = prompt.Define("board.column_code_review", struct{}{})
 var columnPMUATKey = prompt.Define("board.column_pm_uat", struct{}{})
 var columnDoneKey = prompt.Define("board.column_done", struct{}{})
 var columnDoneAnalizKey = prompt.Define("board.column_done_analiz", struct{}{})
+var columnTodoDesignKey = prompt.Define("board.column_todo_design", struct{}{})
+var columnInProgressDesignKey = prompt.Define("board.column_in_progress_design", struct{}{})
+var columnNeedRevisionDesignKey = prompt.Define("board.column_need_revision_design", struct{}{})
+var columnDoneDesignKey = prompt.Define("board.column_done_design", struct{}{})
 var columnReleasedKey = prompt.Define("board.column_released", struct{}{})
 
 type columnPassToInput struct{ PassTo string }
@@ -99,6 +103,8 @@ type previousRunFailuresInput struct{ ErrorPattern string }
 var previousRunFailuresKey = prompt.Define("board.previous_run_failures", previousRunFailuresInput{ErrorPattern: "x"})
 
 var analysisContextIntroKey = prompt.Define("board.analysis_context_intro", struct{}{})
+var designContextIntroKey = prompt.Define("board.design_context_intro", struct{}{})
+var designContextRefHeaderKey = prompt.Define("board.design_context_ref_header", analysisContextRefHeaderInput{Label: "x", Key: "y"})
 
 type analysisContextNoDocsInput struct{ Label string }
 
@@ -153,7 +159,30 @@ var outOfBudgetCommentKey = prompt.Define("guard.out_of_budget_comment", outOfBu
 var handoffUnverifiedRunKey = prompt.Define("guard.handoff_unverified_run", struct{}{})
 var handoffUnseenUIKey = prompt.Define("guard.handoff_unseen_ui", struct{}{})
 
+var pushWorkflowScopeCommentKey = prompt.Define("notices.push_workflow_scope_comment", struct{}{})
+var pushWorkflowScopeDetailKey = prompt.Define("notices.push_workflow_scope_detail", struct{}{})
+
+type handoffFailedCommandsInput struct{ Failed int }
+
+var handoffFailedCommandsKey = prompt.Define("guard.handoff_failed_commands", handoffFailedCommandsInput{Failed: 3})
+
 type handoffReasonInput struct{ Reason string }
 
 var handoffCodeReviewRefusedKey = prompt.Define("guard.handoff_code_review_refused", handoffReasonInput{Reason: "x"})
 var handoffAnalizReviewRefusedKey = prompt.Define("guard.handoff_analiz_review_refused", handoffReasonInput{Reason: "x"})
+var handoffCodeReviewRefusedRevisionKey = prompt.Define("guard.handoff_code_review_refused_revision", handoffReasonInput{Reason: "x"})
+var handoffAnalizReviewRefusedRevisionKey = prompt.Define("guard.handoff_analiz_review_refused_revision", handoffReasonInput{Reason: "x"})
+
+type revisionResumeInput struct {
+	Task     string
+	Trigger  string
+	Feedback []string
+}
+
+var revisionResumeKey = prompt.Define("board.revision_resume", revisionResumeInput{
+	Task: "tt-12 Add a link", Trigger: "Fix the review comments.", Feedback: []string{"- [reviewer] rename it"},
+})
+
+type revisionPipelineFailureInput struct{ Report string }
+
+var revisionPipelineFailureKey = prompt.Define("board.revision_pipeline_failure", revisionPipelineFailureInput{Report: "job test failed"})

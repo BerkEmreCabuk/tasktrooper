@@ -2,10 +2,12 @@ package prompt
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/hostshell"
 )
 
 type scoreContextInput struct {
@@ -256,7 +258,31 @@ var (
 	languageInstructionKey    = Define("agent.language_instruction", struct{ Locale string }{Locale: "English"})
 	subtaskWorkspaceNoteKey   = Define("agent.subtask_workspace_note", struct{ Dir string }{Dir: "/tmp/subtask"})
 	skillsOnDiskKey           = Define("agent.skills_on_disk", struct{ CanCreate bool }{CanCreate: true})
+	subagentDelegationKey     = Define[struct{}]("agent.subagent_delegation", struct{}{})
+	hostEnvironmentKey        = Define("agent.host_environment", hostEnvironmentInput{OS: "Windows", Arch: "amd64", ShellName: "Git Bash", ShellKind: "posix", HasShell: true})
 )
+
+type hostEnvironmentInput struct {
+	OS        string
+	Arch      string
+	ShellName string
+	ShellKind string
+	HasShell  bool
+}
+
+// HostEnvironmentNote names the OS and the shell run_terminal hands commands
+// to. Without it a model on Windows writes macOS/Linux command lines, each one
+// fails, and the run spins until the loop guard stops it. withShell is false
+// for an agent CLI run, which executes commands through its own shell tool.
+func HostEnvironmentNote(host hostshell.Host, withShell bool) string {
+	return strings.TrimRight(hostEnvironmentKey.Render(hostEnvironmentInput{
+		OS:        host.OS,
+		Arch:      host.Arch,
+		ShellName: host.Shell.Name,
+		ShellKind: string(host.Shell.Kind),
+		HasShell:  withShell,
+	}), "\n")
+}
 
 func CommitLanguageGuidance() string {
 	return Text(commitLanguageGuidanceKey)
@@ -282,8 +308,23 @@ func LanguageInstruction(lang string) string {
 	return languageInstructionKey.Render(struct{ Locale string }{Locale: LocaleDisplayName(lang)})
 }
 
+// ShellPath is p as the model should write it in a command. In Git Bash a
+// Windows path's backslashes are escape characters — `cd C:\Users\me\ws`
+// lands in `C:Usersmews` — so on a POSIX shell the prompt carries forward
+// slashes, which bash and every Windows program both accept.
+func ShellPath(p string) string {
+	return shellPath(runtime.GOOS, hostshell.Default().Kind, p)
+}
+
+func shellPath(goos string, kind hostshell.Kind, p string) string {
+	if goos == "windows" && kind == hostshell.POSIX {
+		return strings.ReplaceAll(p, "\\", "/")
+	}
+	return p
+}
+
 func SubtaskWorkspaceNote(dir string) string {
-	return subtaskWorkspaceNoteKey.Render(struct{ Dir string }{Dir: dir})
+	return subtaskWorkspaceNoteKey.Render(struct{ Dir string }{Dir: ShellPath(dir)})
 }
 
 // For a CLI run only the invitation matters: listing the skills would rebuild the index this delivery mode exists to remove, the CLI already shows them.
@@ -327,11 +368,14 @@ func BuildSystemPromptFor(agent domain.Agent, skills []domain.Skill, stacks []do
 			parts = append(parts, rule)
 		}
 	}
+	parts = append(parts, HostEnvironmentNote(hostshell.Current(), delivery != SkillsOnDisk))
 	parts = append(parts, ToolSelectionGuidance())
 	parts = append(parts, RepeatCallGuidance())
-	// Same split as the skill index: a CLI run reaches TaskTrooper's tools over MCP, where ask_user is refused before any policy filtering, so naming it would point at a tool it does not hold.
+	// Same split as the skill index: a CLI run reaches TaskTrooper's tools over MCP, where ask_user is served only to a run that can wait for the answer and the CLI must end its own turn after asking.
 	if delivery == SkillsOnDisk {
 		parts = append(parts, CLIClarificationGuidance())
+		// Only the agent CLIs carry a subagent tool; an HTTP run is split by the orchestrator instead.
+		parts = append(parts, Text(subagentDelegationKey))
 	} else {
 		parts = append(parts, ClarificationGuidance())
 	}

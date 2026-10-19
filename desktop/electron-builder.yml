@@ -110,10 +110,13 @@ mac:
   # copy in ./bin — which is signed long after it was already copied into the
   # app, and therefore signs nothing that ships.
   #
-  # One entry, and adding a line for a binary that is not staged fails the whole
-  # build at the signing step, ten minutes in, with "No such file or directory".
+  # Adding a line for a binary that is not staged fails the whole build at the
+  # signing step, ten minutes in, with "No such file or directory" — every one
+  # here is built by `npm run package`.
   binaries:
     - Contents/Resources/bin/agent-server
+    - Contents/Resources/bin/executor
+    - Contents/Resources/bin/runner
   # Submits the signed .app to Apple and staples the ticket, using whichever of
   # APPLE_API_KEY / APPLE_API_KEY_ID / APPLE_API_ISSUER (preferred) or
   # APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD / APPLE_TEAM_ID is present in the
@@ -167,6 +170,17 @@ linux:
 
 appImage:
   artifactName: ${productName}-${version}-${arch}.${ext}
+
+# The AppImage runtime. The default ("0.0.0") is the legacy FUSE 2 runtime,
+# which needs libfuse.so.2 — not installed on a stock Ubuntu 22.04 or 24.04, so
+# the AppImage would not start there at all. 1.0.3 is the static runtime, which
+# carries its own FUSE 3 support, and whose AppRun adds --no-sandbox itself
+# only when unprivileged user namespaces are unavailable (Ubuntu 24.04's
+# AppArmor default) instead of on every launch. electron-builder 26 (the
+# version in package-lock) validates this key; a value it does not list fails
+# the build at config load.
+toolsets:
+  appimage: "1.0.3"
 
 deb:
   artifactName: ${productName}-${version}-${arch}.${ext}

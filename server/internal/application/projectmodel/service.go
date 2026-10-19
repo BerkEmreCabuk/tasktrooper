@@ -15,11 +15,9 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
-// Scanner is application/discovery behind an interface so tests can feed a
-// fixed ScanResult.
-type Scanner interface {
-	Scan(ctx context.Context, root string, emit func(domain.ScanEvent)) (domain.ScanResult, error)
-}
+// Scanner is application/discovery behind port.RepoScanner, so a test can feed
+// a fixed ScanResult and a checkout on another computer can be scanned there.
+type Scanner = port.RepoScanner
 
 type RepositoryReader interface {
 	Get(ctx context.Context, id uuid.UUID) (domain.Repository, error)
@@ -70,6 +68,14 @@ type Service struct {
 
 	deployMatcher DeployMatcher
 	environments  port.EnvironmentStore
+
+	findings port.FindingStore
+	tasks    TaskCreator
+	roles    port.RoleResolver
+
+	// gateTaskMu serializes opening gate CI tasks, so two edits switching
+	// the same gate on cannot both find no open task and open two.
+	gateTaskMu sync.Mutex
 
 	// deliveryConfirmedHook wakes the release service when a human confirms a
 	// component's delivery profile, so tasks already merged and waiting in
@@ -129,6 +135,6 @@ func (s *Service) SetDeliveryConfirmedHook(fn func(ctx context.Context, reposito
 	s.deliveryConfirmedHook = fn
 }
 
-// SetBackgroundContext is the process-lifetime context async scans run
-// under, so a request's cancellation never kills a scan it started.
+// SetBackgroundContext is the process-lifetime context the boot backfill runs
+// under. A scan runs on its caller's context instead (StartScan).
 func (s *Service) SetBackgroundContext(ctx context.Context) { s.bgCtx = ctx }

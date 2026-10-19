@@ -240,6 +240,7 @@ export const agentArea: AgentAreaDict = {
     subagentType: "Alt ajan tipi",
     systemPrompt: "Sistem istemi",
     enabled: "Etkin",
+    coreHint: "Çekirdek ajan; kapatılamaz.",
     catalog: {
       autoPull: {
         label: "Tanım güncellemelerini katalogdan çek",
@@ -272,6 +273,40 @@ export const agentArea: AgentAreaDict = {
     performanceLink: "Performans",
     loading: "Yükleniyor...",
     emptyState: "Soldan bir sohbet seçin veya yeni sohbet başlatın.",
+    lead: {
+      description: "İsteğini görevlere böler, ekibe dağıtır ve iş bitince kabul için sana getirir.",
+      teamCount: "{count} ajan bağlı",
+      welcome: {
+        title: "Bugün ne yapalım?",
+        label: "{name} için mesaj",
+        placeholder: "Bir özellik iste, bir hata bildir ya da board'u sor…",
+        send: "Gönder",
+        hint: "Enter ile gönder · Shift+Enter ile yeni satır",
+        failed: "Sohbet başlatılamadı",
+        suggestions: {
+          board: { label: "Board'da ne var?", message: "Board'da şu an ne var?" },
+          feature: { label: "Yeni özellik iste", message: "Yeni bir özellik istiyorum: " },
+          bug: { label: "Hata bildir", message: "Bir hata bildirmek istiyorum: " },
+          projects: { label: "Projeleri düzenle", message: "Projelerimi ve depolarımı düzenleyelim." },
+        },
+        flow: {
+          title: "İş nasıl akıyor",
+          steps: {
+            you: { label: "Sen", detail: "İstek" },
+            lead: { label: "PM", detail: "Planlar" },
+            analysis: { label: "Analiz", detail: "Mimar" },
+            planApproval: { label: "Plan onayı", detail: "Onaylarsın" },
+            design: { label: "Tasarım", detail: "Tasarımcı" },
+            build: { label: "Geliştirme", detail: "Kod + PR" },
+            review: { label: "Review", detail: "Mimar + güvenlik" },
+            qa: { label: "QA", detail: "Test" },
+            acceptance: { label: "PM kabulü", detail: "UAT" },
+            approval: { label: "Son onay", detail: "Onaylarsın" },
+            deploy: { label: "Deploy", detail: "Yayın" },
+          },
+        },
+      },
+    },
   },
   columns: {
     toast: {

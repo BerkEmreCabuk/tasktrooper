@@ -1,9 +1,11 @@
 // The bridge to the TaskTrooper desktop shell.
 //
-// The desktop app is this app in a window, plus the local machine. The shell
-// starts an embedded Postgres and the Go server on this Mac, serves these
-// assets, and runs the agent CLIs; every screen a user sees is served from
-// this origin.
+// The desktop app is this app in a window, plus the local machine. In local
+// mode the shell starts an embedded Postgres and the Go server on this Mac,
+// serves these assets from `app://tasktrooper`, and runs the agent CLIs. In
+// account mode it stops all of that, shows the account's web app from the
+// account's own origin, and runs the runner instead; `account` switches
+// between the two.
 //
 // What the shell adds is the set of things a browser tab cannot do: supervise
 // those child processes, open a native folder picker, and report what this Mac
@@ -25,9 +27,12 @@
 /**
  * The processes the shell supervises. `agent-server` is the Go backend this
  * app talks to, so `connect()`/`disconnect()` on the host below start and stop
- * the backend itself.
+ * the backend itself. `runner` is account mode's one child, which supervises
+ * that instead of the local set — see `restart()` below. The Appium hub is not
+ * one of them: the backend, or in account mode the runner, starts it when a
+ * mobile call needs one.
  */
-export type DesktopChildId = "embedder" | "agent-server" | "appium";
+export type DesktopChildId = "embedder" | "agent-server" | "runner";
 
 export type DesktopChildState =
   | "idle"
@@ -75,7 +80,46 @@ export interface DesktopRunnerSnapshot {
   since: number;
   children: DesktopChild[];
   blocker?: DesktopBlocker;
+  /** Account mode only — the runner's tunnel to the control plane. */
+  tunnel?: DesktopTunnelStatus;
 }
+
+/**
+ * The runner's reverse tunnel to the control plane, account mode only. The
+ * runner opens no port, so this is the only readiness signal a person has.
+ * `auth-failed` is terminal — the control plane rejected this computer's
+ * token, and retrying changes nothing until it is paired again.
+ */
+export type DesktopTunnelState = "unknown" | "attached" | "detached" | "reconnecting" | "auth-failed";
+
+export interface DesktopTunnelStatus {
+  state: DesktopTunnelState;
+  changedAt: number;
+  /** One sentence for a person, present for `reconnecting` and `auth-failed`. */
+  detail?: string;
+  /** Epoch ms the next reconnect attempt is due, while `reconnecting`. */
+  retryAt?: number;
+  /** How many streams the tunnel served before it detached. */
+  streams?: number;
+}
+
+/**
+ * What `POST /api/runner/pair` returns, and what the runner is configured
+ * from. Field names are the control plane's own — a projection, never a
+ * translation, so a renamed field fails loudly at the boundary.
+ */
+export interface RunnerPairingBundle {
+  runner_token: string;
+  tm_base_url: string;
+  tenant_id: string;
+  member_uid: string;
+  paired_at: string;
+  /** The device label this computer was paired under. */
+  label: string;
+}
+
+/** The stored bundle, minus the token — what a page is allowed to see. */
+export type RunnerPairingSummary = Omit<RunnerPairingBundle, "runner_token">;
 
 export interface DesktopLogLine {
   /** Monotonic within a session; used to de-duplicate overlapping batches. */
@@ -161,6 +205,12 @@ export interface DesktopDiagnostics {
  * something that was never the problem.
  */
 export const DESKTOP_PREFLIGHT_IDS = [
+  // Account mode only: the bundled runner, standing in for `agent-server`,
+  // the executor it starts, and whether this computer can run an agent at
+  // all — the member's own API keys, or an agent CLI.
+  "runner",
+  "executor",
+  "api-keys",
   "agent-server",
   "postgres",
   "git",
@@ -264,6 +314,19 @@ export interface DesktopRunnerHost {
   disconnect(): Promise<DesktopRunnerSnapshot>;
   restartChild(child: DesktopChildId): Promise<DesktopRunnerSnapshot>;
 
+  /**
+   * Account mode only. `pair` takes the bundle `POST /api/runner/pair`
+   * returned; the shell refuses one for another origin than the account's,
+   * stores it encrypted and starts the runner. `unpair` stops the runner and
+   * forgets it. `pairing` is the stored bundle WITHOUT its token, `null` when
+   * this computer has never paired.
+   */
+  pair(bundle: RunnerPairingBundle): Promise<DesktopRunnerSnapshot>;
+  unpair(): Promise<DesktopRunnerSnapshot>;
+  pairing(): Promise<RunnerPairingSummary | null>;
+  /** Restart the runner — account mode's `restartChild`, one child, no id. */
+  restart(): Promise<DesktopRunnerSnapshot>;
+
   logs(req?: { child?: DesktopChildId | "supervisor"; afterSeq?: number; limit?: number }): Promise<DesktopLogLine[]>;
   subscribeLogs(cb: (lines: DesktopLogLine[]) => void): () => void;
   clearLogs(): Promise<void>;
@@ -303,11 +366,305 @@ export interface DesktopRunnerHost {
   preflight(force?: boolean): Promise<DesktopPreflightReport>;
 }
 
+/** Mirrors `UpdatePhase` in `desktop/src/ipc/types.ts`. */
+export type DesktopUpdatePhase = "unsupported" | "idle" | "checking" | "current" | "available" | "ready" | "error";
+
+export interface DesktopUpdateStatus {
+  phase: DesktopUpdatePhase;
+  /** The version on the feed, once one is known. Never the running version. */
+  version?: string;
+  /** 0–100 while downloading. */
+  percent?: number;
+  /** One sentence for a person: what is happening, or what went wrong. */
+  detail?: string;
+  /** Epoch ms of the last completed check, successful or not. */
+  checkedAt?: number;
+  feed?: string;
+}
+
+/**
+ * Auto-update. The same updater the shell's popup and tray drive; the app
+ * downloads in the background and `restart()` only applies a staged update.
+ */
+export interface DesktopUpdatesHost {
+  status(): Promise<DesktopUpdateStatus>;
+  subscribe(cb: (status: DesktopUpdateStatus) => void): () => void;
+  check(): Promise<DesktopUpdateStatus>;
+  /** Stops the local processes, installs and relaunches. A no-op unless `ready`. */
+  restart(): Promise<void>;
+}
+
+/**
+ * Which provider the shell's API-key window should ask a token for. Identity
+ * and address only: there is no key field, and the shell refuses one. `id` is
+ * a built-in type name (`anthropic`, `openai`, `gemini`, `groq`) or a custom
+ * endpoint's UUID.
+ */
+export interface DesktopKeysPrefill {
+  id: string;
+  type: "anthropic" | "openai" | "gemini" | "groq" | "openai_compatible";
+  base_url?: string;
+  models?: string[];
+  name?: string;
+}
+
+/**
+ * Which of this computer's own MCP servers the shell's API-key window should
+ * open on, and the variables (stdio) or headers (http) it still needs a value
+ * for (bridge 6). Names only: the shell refuses a value.
+ */
+export interface DesktopMcpKeysPrefill {
+  mcp: string;
+  secretNames?: string[];
+}
+
+/**
+ * One of this computer's own MCP servers as the shell lists it (bridge 6):
+ * a name, its command or address (without the query), and which variables or
+ * headers hold a value — never a value.
+ */
+export interface DesktopMcpServer {
+  name: string;
+  transport: "stdio" | "http";
+  command?: string;
+  args?: string[];
+  url?: string;
+  secretNames: string[];
+  hasSecret: boolean;
+  disabled?: boolean;
+}
+
+export interface DesktopMcpServersState {
+  servers: DesktopMcpServer[];
+  /** True when the change restarted this computer's runner to take effect. */
+  runnerRestarting: boolean;
+}
+
+/**
+ * A server to add or change. In `env` and `headers` an empty value keeps the
+ * stored one and a name left out is dropped; `disabled` left out keeps it on
+ * or off. Never put a secret here: open the key window for it.
+ */
+export interface DesktopMcpServerSetRequest {
+  name: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  disabled?: boolean;
+}
+
+/**
+ * This computer's own MCP servers (bridge 6, account mode only) — the list
+ * the key window keeps and the runner serves. `set` rejects with "declined"
+ * when the person says no to the shell's native "Add the MCP server …?"
+ * dialog, which a change that runs something new waits for, and with "busy"
+ * while that dialog is open.
+ */
+export interface DesktopAccountMcpHost {
+  list(): Promise<DesktopMcpServersState>;
+  set(request: DesktopMcpServerSetRequest): Promise<DesktopMcpServersState>;
+  remove(name: string): Promise<DesktopMcpServersState>;
+}
+
+/**
+ * What `account.state()` answers, as far as this page reads it — the shell's
+ * own answer is a superset. `temporaryLocal`: signed in, but running locally
+ * for now because the account's page could not be reached (bridge 2).
+ */
+export interface DesktopAccountState {
+  mode: "local" | "account";
+  origin?: string;
+  temporaryLocal?: boolean;
+}
+
+/**
+ * The usage count (bridge 4). `available` is false in a
+ * build that carries no analytics configuration, where there is nothing to
+ * switch; `forcedOff` is the environment overriding the stored choice.
+ */
+export interface DesktopAnalyticsState {
+  available: boolean;
+  enabled: boolean;
+  forcedOff: boolean;
+}
+
+export interface DesktopAnalyticsHost {
+  get(): Promise<DesktopAnalyticsState>;
+  set(on: boolean): Promise<DesktopAnalyticsState>;
+  /** Bridge 7: one screen view or product event; main drops it while the count is off. */
+  track?(event: { name: string; params?: Record<string, string | number> }): Promise<void>;
+  /** Bridge 7: the member's one-way hashed id, or null on sign-out. */
+  identify?(userId: string | null): Promise<void>;
+}
+
+/**
+ * The developer tools the shell can install for the team's agents, by id —
+ * mirrors `TOOLCHAIN_IDS` in `desktop/src/ipc/types.ts`, in the same order.
+ * The page only ever sends these ids: every command, URL and package name
+ * lives in the shell's own table.
+ */
+export const DESKTOP_TOOLCHAIN_IDS = [
+  "homebrew",
+  "git",
+  "claude-code",
+  "node",
+  "python",
+  "uv",
+  "chrome",
+  "xcode",
+  "xcode-clt",
+  "cocoapods",
+  "jdk",
+  "android-sdk",
+  "appium",
+  "appium-xcuitest",
+  "appium-uiautomator2",
+  "flutter",
+  "docker",
+  "go",
+  "dotnet",
+  "rust",
+  "osv-scanner",
+  "duckdb",
+  "godot",
+  "unity-hub",
+] as const;
+export type ToolchainId = (typeof DESKTOP_TOOLCHAIN_IDS)[number];
+
+/**
+ * auto: runs unattended in the background (the OS may still show its own password/UAC prompt).
+ * interactive: starts a system installer or a Terminal window the person finishes; the shell
+ *   polls detection until the tool appears (or a 30-minute timeout).
+ * manual: nothing to run here; `url` is where the person installs it from.
+ */
+export type ToolchainInstallKind = "auto" | "interactive" | "manual";
+
+export interface ToolchainItem {
+  id: ToolchainId;
+  /** Product name, never translated: "Node.js", "Android SDK". */
+  label: string;
+  status: "installed" | "missing" | "unusable";
+  version?: string;
+  path?: string;
+  /** English, what was observed when it explains the status. */
+  detail?: string;
+  /** How it is installed ON THIS OS. */
+  installKind: ToolchainInstallKind;
+  /** Short channel name for a person: "Homebrew", "winget", "npm", "App Store". */
+  method?: string;
+  /** Display-only form of what will run ("brew install node"). Never sent back. */
+  command?: string;
+  /** Present for `manual` (and as docs for the others). */
+  url?: string;
+  /** Other ids that must be installed first ON THIS OS. */
+  dependsOn: ToolchainId[];
+}
+
+export interface ToolchainReport {
+  generatedAt: number;
+  platform: "darwin" | "win32" | "linux";
+  /** Only the ids that apply on this OS (no `xcode` on Windows), in `DESKTOP_TOOLCHAIN_IDS` order. */
+  items: ToolchainItem[];
+}
+
+/**
+ * `waiting`: an interactive step's system installer or Terminal window is
+ * open, and the shell is polling for the result. `skipped`: already installed
+ * when its turn came, or a dependency failed (`error` says which).
+ */
+export type ToolchainStepState = "queued" | "running" | "waiting" | "done" | "failed" | "skipped" | "cancelled";
+
+export interface ToolchainJobStep {
+  id: ToolchainId;
+  label: string;
+  state: ToolchainStepState;
+  installKind: ToolchainInstallKind;
+  startedAt?: number;
+  finishedAt?: number;
+  /** 0..100 within this step when known (downloads); absent otherwise. */
+  percent?: number;
+  /** English, one line, what is happening now. */
+  detail?: string;
+  /** English, one line, why it failed / was skipped. */
+  error?: string;
+  /** Last ≤ 40 output lines, each ≤ 300 chars. */
+  log?: string[];
+}
+
+export interface ToolchainJobState {
+  /** idle: nothing has run (or the last result was dismissed). done: finished, see each step. */
+  phase: "idle" | "running" | "done";
+  jobId?: string;
+  startedAt?: number;
+  finishedAt?: number;
+  /** Install order (dependencies first). */
+  steps: ToolchainJobStep[];
+  /** 0..100 over the steps; done, failed, skipped and cancelled count as finished. */
+  percent: number;
+  /** Something installed only reaches running agents after the backend/runner restarts. */
+  restartRecommended?: boolean;
+}
+
+/**
+ * Installs the developer tools the team's agents use (bridge 5). One job at a
+ * time, run by the shell's main process, so it outlives this page.
+ */
+export interface DesktopToolchainHost {
+  /** Detection for this OS. Joins an in-flight sweep; `force` starts a fresh one. */
+  report(force?: boolean): Promise<ToolchainReport>;
+  /** What `install(ids)` would run: ids + their missing dependencies, dependencies first, installed ones dropped. */
+  plan(ids: ToolchainId[]): Promise<ToolchainId[]>;
+  state(): Promise<ToolchainJobState>;
+  subscribe(cb: (state: ToolchainJobState) => void): () => void;
+  /**
+   * Starts a job, or appends to the running one. Resolves with the new state
+   * right away — never waits for the installs. In account mode the shell asks
+   * first and rejects with "declined" when the person cancels.
+   */
+  install(ids: ToolchainId[]): Promise<ToolchainJobState>;
+  /** Stops the running step and cancels the queued ones. */
+  cancel(): Promise<ToolchainJobState>;
+  /** Clears a finished job back to `idle`. No-op while running. */
+  dismiss(): Promise<ToolchainJobState>;
+  /** Opens the item's own `url` (from the shell's table, never from the page) in the real browser. */
+  openPage(id: ToolchainId): Promise<void>;
+}
+
 /** The hook the desktop preload installs on `window`. Absent in a browser. */
 export interface TaskTrooperDesktopHost {
   info?: () => Promise<{ app: string; version: string; platform: string }>;
   /** The local half. Absent in a browser. */
   runner?: DesktopRunnerHost;
+  /**
+   * Account mode. Absent in a browser and in a shell that predates it — the
+   * first-run screen only offers "Hesapla" when `signIn` is here.
+   */
+  account?: {
+    /** While `temporaryLocal`, goes back to the account still signed in to. */
+    signIn(origin?: string): Promise<void>;
+    /** The one call that forgets the account, `temporaryLocal` or not. */
+    signOut(): Promise<void>;
+    state(): Promise<DesktopAccountState>;
+    /**
+     * Bridge 2: bring up the shell's own API-key window. Returns nothing —
+     * the keys are typed into that window, never into a page. Bridge 3: the
+     * optional `prefill` focuses it on one provider, which it then asks only
+     * for a token; an older shell ignores the argument. Bridge 6: a
+     * `DesktopMcpKeysPrefill` opens it on one of this computer's MCP servers.
+     * Absent in older shells.
+     */
+    openKeys?(prefill?: DesktopKeysPrefill | DesktopMcpKeysPrefill): Promise<void>;
+    /** Bridge 6. Absent in a browser and in older shells. */
+    mcp?: DesktopAccountMcpHost;
+  };
+  /** Absent in a browser, and in a shell older than the Settings update card. */
+  updates?: DesktopUpdatesHost;
+  /** Bridge 4. Absent in a browser and in older shells. */
+  analytics?: DesktopAnalyticsHost;
+  /** Bridge 5. Absent in a browser and in older shells. */
+  toolchain?: DesktopToolchainHost;
   /**
    * Where this app's API calls go: "http://127.0.0.1:<port>", no path suffix.
    *
@@ -318,6 +675,24 @@ export interface TaskTrooperDesktopHost {
   apiBase?: string;
   /** The bearer token for that server, generated on first run. Sync, same reason. */
   apiToken?: string;
+  /**
+   * Bumped when the bridge gains something a page may need to feature-test.
+   * 1: `account`, `mode` and the runner's pairing calls. Absent before that.
+   * 2: `account.openKeys()` and `account.state().temporaryLocal`.
+   * 3: `account.openKeys(prefill)` focuses the key window on one provider.
+   * 4: `analytics.get()` / `analytics.set(on)`.
+   * 5: `toolchain` — detect and install the developer tools the agents use.
+   * 6: `account.mcp` and `account.openKeys({mcp})` — this computer's own MCP servers.
+   * 7: `analytics.track(event)` / `analytics.identify(userId)`.
+   */
+  bridgeVersion?: number;
+  /**
+   * Which world this page is in, synchronously: "account" when the shell shows
+   * the account's web app from its own origin (no `apiBase`, no `apiToken` —
+   * that page signs in with its own cookie). Absent in older shells, where it
+   * is always local.
+   */
+  mode?: "local" | "account";
 }
 
 declare global {
@@ -336,4 +711,20 @@ declare global {
  */
 export function desktopRunner(): DesktopRunnerHost | null {
   return window.__tasktrooperDesktop?.runner ?? null;
+}
+
+export function desktopUpdates(): DesktopUpdatesHost | null {
+  return window.__tasktrooperDesktop?.updates ?? null;
+}
+
+export function desktopAnalytics(): DesktopAnalyticsHost | null {
+  return window.__tasktrooperDesktop?.analytics ?? null;
+}
+
+export function desktopAccount(): NonNullable<TaskTrooperDesktopHost["account"]> | null {
+  return window.__tasktrooperDesktop?.account ?? null;
+}
+
+export function desktopToolchain(): DesktopToolchainHost | null {
+  return window.__tasktrooperDesktop?.toolchain ?? null;
 }

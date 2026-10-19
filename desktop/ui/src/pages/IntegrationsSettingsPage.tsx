@@ -1,66 +1,49 @@
-import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { api, type StoreCredentialView } from "@/api";
 import { AppStoreConnectCard } from "@/components/admin/AppStoreConnectCard";
 import { CloudAccountsCard } from "@/components/admin/CloudAccountsCard";
 import { GitHubCard } from "@/components/admin/GitHubCard";
 import { GooglePlayCard } from "@/components/admin/GooglePlayCard";
-import { PageHeader } from "@/components/admin/PageHeader";
+import { IntegrationSection } from "@/components/admin/IntegrationCard";
+import { IssueSyncCard } from "@/components/admin/IssueSyncCard";
+import { JiraCard } from "@/components/admin/JiraCard";
 import { Skeleton } from "@/components/ui/skeleton";
-import { tStatic, useI18n } from "@/hooks/useI18n";
+import { useI18n } from "@/hooks/useI18n";
+import { useStoreCredentials } from "@/hooks/useStoreCredentials";
 
-/**
- * Settings → Integrations: every outside account TaskTrooper signs in to.
- *
- * GitHub's OAuth callback is a fixed redirect to /settings, which this page is
- * not — so its card is told to park this path, and SettingsPage forwards the
- * answer here.
- */
 export function IntegrationsSettingsPage() {
   const { t } = useI18n();
-  const [credentials, setCredentials] = useState<StoreCredentialView[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  // Not keyed on `t`: a language switch must not refire this and blank the
-  // store cards while the vault is re-read.
-  const load = useCallback(async () => {
-    try {
-      setCredentials(await api.listStoreCredentials());
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : tStatic("settingsPages.integrations.loadFailed"));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const credentialFor = (provider: StoreCredentialView["provider"]) =>
-    credentials.find((c) => c.provider === provider);
+  const { loading, reload, credentialFor } = useStoreCredentials({ onError: (message) => toast.error(message) });
+  const load = () => void reload();
 
   return (
-    <>
-      <PageHeader
-        title={t("settingsPages.integrations.title")}
-        description={t("settingsPages.integrations.description")}
-      />
-      <div className="grid gap-x-4 lg:grid-cols-2">
-        <GitHubCard />
-        <CloudAccountsCard />
-        {loading ? (
-          <>
-            <Skeleton className="mt-4 h-72 w-full" />
-            <Skeleton className="mt-4 h-72 w-full" />
-          </>
-        ) : (
-          <>
-            <AppStoreConnectCard credential={credentialFor("asc")} onChanged={() => void load()} />
-            <GooglePlayCard credential={credentialFor("google_play")} onChanged={() => void load()} />
-          </>
-        )}
+    <div className="grid items-start gap-x-6 gap-y-8 lg:grid-cols-2">
+      <div className="min-w-0 space-y-8">
+        <IntegrationSection title={t("settingsPages.integrations.sections.code")}>
+          <GitHubCard showRunner />
+        </IntegrationSection>
+        <IntegrationSection title={t("settingsPages.integrations.sections.stores")}>
+          {loading ? (
+            <>
+              <Skeleton className="h-20 w-full rounded-xl" />
+              <Skeleton className="h-20 w-full rounded-xl" />
+            </>
+          ) : (
+            <>
+              <AppStoreConnectCard credential={credentialFor("asc")} onChanged={load} />
+              <GooglePlayCard credential={credentialFor("google_play")} onChanged={load} />
+            </>
+          )}
+        </IntegrationSection>
       </div>
-    </>
+      <div className="min-w-0 space-y-8">
+        <IntegrationSection title={t("settingsPages.integrations.sections.cloud")}>
+          <CloudAccountsCard />
+        </IntegrationSection>
+        <IntegrationSection title={t("settingsPages.integrations.sections.issues")}>
+          <JiraCard />
+          <IssueSyncCard />
+        </IntegrationSection>
+      </div>
+    </div>
   );
 }

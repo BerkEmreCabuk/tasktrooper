@@ -49,26 +49,29 @@ hour.
 
 ## Concurrency caps
 
-Two independent caps limit how much work runs at once, at different levels:
+How many board runs start at once is set in **Settings → Concurrency
+limits**: the most agent runs and the most distinct tasks running at the same
+time. `0` in either field means unlimited, and that is the default.
 
 | Setting | Default | What it limits |
 |---|---|---|
-| `claude_code.max_concurrent_sessions` | 3 | How many board CLI sessions on Claude Code run at the same time. `-1` removes the cap |
+| Settings → max concurrent agents / tasks | 0 (unlimited) | How many board runs, and how many different tasks, run at the same time |
+| `claude_code.max_concurrent_sessions` | unset (no cap) | An optional host-wide cap on Claude Code sessions, on top of the Settings limits |
 | `orchestration.max_parallel_tasks` | 3 | How many subtasks inside one chat orchestration plan run in parallel |
 
-`max_concurrent_sessions` exists because the subscription's usage limit is
-shared across every session on the account: letting an unbounded number of
-sessions run in parallel just means they all hit the same wall together, in
-less wall-clock time, without getting any more work done for it. Chat turns
-never queue on this cap — only board CLI sessions do.
+Every session on one Claude subscription shares its usage limit, so many
+sessions in parallel reach that limit together, sooner, without getting more
+work done. If that happens often, lower the agent limit in Settings. A task
+still runs one agent at a time whatever the limits say: its runs share one
+workspace, so a second reviewer on the same task waits for the first.
 
 ## 429 and 529 pacing for API providers
 
 An agent on an HTTP provider (OpenAI, Anthropic, Gemini, Groq, or a custom
 endpoint) hits a different kind of limit — a `429` (rate limited) or `529`
 (Anthropic's "overloaded", not billing-related) response — and that is paced
-rather than parked: retried with backoff starting around half a second and
-doubling up to an 8-second cap, honoring the provider's `Retry-After` header
+rather than parked: retried with backoff starting around two seconds and
+doubling up to a 60-second cap, honoring the provider's `Retry-After` header
 when it sends one. `529` is treated exactly like `429` for pacing purposes,
 but is never reported as the account having run out — an overloaded API
 says nothing about how much of your quota is left.
@@ -76,8 +79,10 @@ says nothing about how much of your quota is left.
 ## How it shows on the board
 
 A parked task shows its blocking reason directly on the card and in its
-detail view. For a Claude Code usage limit, that reads **"Claude usage limit
-reached"**; the same mechanism is what shows a mobile device wait ("Waiting
+detail view. For a Claude Code usage limit, the card's badge reads **"LLM
+Provider limit reached"**, and the detail view shows the driver's own line
+underneath it (**"Claude Code usage limit reached"**); the same mechanism is
+what shows a mobile device wait ("Waiting
 for a test device"), a pending deploy ("Waiting for the deploy"), or a task
 waiting on another task it depends on ("Waiting for blocking tasks") — a
 usage-limit park is one instance of a more general "this task is blocked on

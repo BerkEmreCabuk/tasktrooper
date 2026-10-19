@@ -11,43 +11,52 @@ import type {
   UserSettings,
 } from "../../ipc/types.js";
 import { CHILD_IDS, GATING_CHILD_IDS } from "../../ipc/types.js";
+import { keyStoreHelp } from "../config/keystore.js";
 import type { LocalSecrets } from "../config/secrets.js";
 import {
-  APPIUM_BASE_URL,
-  appiumHubIsAnswering,
   dataDir,
   embedderScriptPath,
   emptyReport,
   firstBlocker,
   itemById,
   postgresCacheDir,
-  preflight,
+  startPreflight,
 } from "../services/detect.js";
 import { waitForHealth } from "../services/health.js";
+import { loginShellPathKnown } from "../services/login-env.js";
+import { PreflightCache } from "../services/preflight-cache.js";
+import { PREFLIGHT_REUSE_MS, PreflightSweeps, primeLoginShellPath, type Sweep } from "../services/preflight-sweep.js";
 import { ensureWorkspace } from "../config/workspace.js";
+import { join } from "node:path";
 import { SupervisedChild, type ChildSpec } from "./child.js";
+import { ChildRegistry, reapWithin } from "./reaper.js";
 import { parseEmbedderListening } from "./embedder-log.js";
 import { LogStore } from "./log-buffer.js";
-import { agentServerEnv, appiumArgs, childEnv } from "./env.js";
-import { parseServerLine } from "./server-log.js";
+import { agentServerEnv, childEnv, spawnFingerprint } from "./env.js";
+import { parseServerListening, renderServerLine, serverLineLevel } from "./server-log.js";
+import type { ToolchainRuntime } from "../toolchain/runtime-env.js";
 
 /**
  * The supervisor: one start, one process that matters, and a state machine the
  * UI subscribes to.
  *
  *   preflight  → every required environment check must pass, or the start is
- *                refused and the refusal NAMES the check that failed.
+ *                refused and the refusal NAMES the check that failed. Only the
+ *                gating half of the sweep is waited for (see
+ *                `startPreflight`); the rest finishes beside the start, and a
+ *                backend whose environment it turns out to change is
+ *                restarted once with the full answers.
  *   start      → the embedder (already running since app init), then the
- *                backend, and, when this Mac has Appium, a hub beside it.
+ *                backend.
  *   ready      → the backend prints `LISTENING http://127.0.0.1:<port>` and
  *                then answers `GET /health` with a 200. Only at that point does
  *                this app have an API base to hand the window.
  *
- * **Appium is a child and deliberately not a gate.** It starts beside the
- * backend rather than before it, nothing waits for it, and its absence or its
- * crash never becomes the supervisor's state — `GATING_CHILD_IDS` is what says
- * so. A start that failed because an optional capability was slow is the shape
- * this app exists to avoid.
+ * **Appium is not a child of this app.** When it is installed the backend is
+ * told where it is (`APPIUM_BIN`) and starts a hub itself, the first time a
+ * mobile tool needs one, and stops it once idle: only the backend sees the
+ * calls that need it, and a hub is a ~100 MB Node process most installs with
+ * Appium never use.
  *
  * Everything a start script asked a human for, this decides: the binary paths
  * (detected), the port (the backend picks it), the database (embedded), the
@@ -68,6 +77,12 @@ export interface SupervisorEvents {
    * until something reloads it. `main/index.ts` is what notices.
    */
   server: [baseUrl: string | null];
+  /**
+   * The embedder's loopback URL, on every `EMBEDDER_LISTENING` line. Account
+   * mode passes it on to a running runner: the embedder runs in both modes
+   * and a restart moves it to another port.
+   */
+  embedder: [url: string];
 }
 
 /**
@@ -97,9 +112,24 @@ const LOG_FLUSH_MS = 120;
  */
 const EMBEDDER_URL_WAIT_MS = 8_000;
 
+const REAP_CAP_MS = 5_000;
+
+/**
+ * Between the backend's exit and the message that quotes its last line. The
+ * exit can be reported before the pipes have delivered the line that explains
+ * it, which is usually the whole diagnosis.
+ */
+const EXIT_DRAIN_MS = 100;
+
+function optionalRuntime(runtime: ToolchainRuntime | undefined): { toolchainRuntime?: ToolchainRuntime } {
+  return runtime ? { toolchainRuntime: runtime } : {};
+}
+
 export class Supervisor extends EventEmitter<SupervisorEvents> {
   readonly #children = new Map<ChildId, SupervisedChild>();
-  readonly #logs = new LogStore();
+  // The backend's zerolog lines are stored raw and rendered when read: far
+  // more of them are written than are ever looked at.
+  readonly #logs = new LogStore(2000, { "agent-server": renderServerLine });
 
   #state: SupervisorState = "idle";
   #step: ChildId | undefined;
@@ -124,8 +154,31 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
 
   #settings: UserSettings | null = null;
   #secrets: LocalSecrets | null = null;
+  /** Why `#secrets` is null, when the store said — a locked Linux keyring reads differently from a first run. */
+  #secretsError: string | undefined;
   #overrides: Overrides = {};
+  /** The newest COMPLETE report. A gating report is only ever used by the start that waited for it. */
   #preflight: PreflightReport = emptyReport();
+  #preflightSweep = 0;
+
+  readonly #preflightCache = new PreflightCache(join(app.getPath("userData"), "preflight-cache.json"));
+  readonly #sweeps = new PreflightSweeps({
+    start: ({ overrides, force }) =>
+      startPreflight({ overrides, force, cache: this.#preflightCache, loginPathKnown: loginShellPathKnown() }),
+    onSweep: (sweep) => this.#watchSweep(sweep),
+  });
+
+  /**
+   * Which sweep the running backend's environment came from, and what that
+   * environment was built from (`spawnFingerprint`). `final` when it was
+   * that sweep's complete report, which leaves nothing to reconcile.
+   */
+  #spawnedFrom: { sweepId: number; fingerprint: string; final: boolean } | null = null;
+
+  /** Waiters for the backend's next `LISTENING` line. */
+  readonly #listeningWaiters = new Set<(url: string) => void>();
+  /** Waiters for the embedder's `EMBEDDER_LISTENING` line. */
+  readonly #embedderWaiters = new Set<(url: string) => void>();
 
   #startAbort: AbortController | null = null;
   #pendingLogs: LogLine[] = [];
@@ -133,10 +186,27 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
   /** Serialises start/stop so two clicks cannot interleave two teardowns. */
   #transition: Promise<unknown> = Promise.resolve();
 
-  constructor() {
+  readonly #registry = new ChildRegistry(join(app.getPath("userData"), "children.json"), (line) =>
+    this.#note(line),
+  );
+  #reaped: Promise<void> = Promise.resolve();
+  /** The sweep in flight, which a second caller joins rather than racing. */
+  #reaping: Promise<void> | null = null;
+
+  /** Read at every backend spawn: what the toolchain installed since the last one counts. */
+  readonly #toolchainRuntime: () => ToolchainRuntime | undefined;
+
+  constructor(options: { toolchainRuntime?: () => ToolchainRuntime } = {}) {
     super();
+    this.#toolchainRuntime = options.toolchainRuntime ?? (() => undefined);
     for (const id of CHILD_IDS) {
-      const child = new SupervisedChild({ id, command: "", args: [], env: {}, restart: true });
+      const child = new SupervisedChild(
+        { id, command: "", args: [], env: {}, restart: true },
+        {
+          onSpawn: (entry) => this.#registry.record(entry),
+          onExit: (cid, pid) => this.#registry.forget(cid, pid),
+        },
+      );
       child.on("log", (stream, text) => this.#onChildLog(id, stream, text));
       child.on("state", () => this.#emitState());
       child.on("crashed", () => this.#onChildCrashed(id));
@@ -175,49 +245,132 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     return this.#serverReady ? this.#serverUrl : null;
   }
 
+  /** The newest complete report, or an empty one before any sweep has finished. */
   get preflight(): PreflightReport {
     return this.#preflight;
   }
 
   // --- configuration -------------------------------------------------------
 
-  configure(opts: { secrets: LocalSecrets | null; settings: UserSettings; overrides: Overrides }): void {
+  configure(opts: {
+    secrets: LocalSecrets | null;
+    secretsError?: string;
+    settings: UserSettings;
+    overrides: Overrides;
+  }): void {
     this.#secrets = opts.secrets;
+    this.#secretsError = opts.secretsError;
     this.#settings = opts.settings;
     this.#overrides = opts.overrides;
   }
 
-  /** Re-run the environment checks without starting anything. */
-  async detect(): Promise<PreflightReport> {
-    this.#preflight = await preflight({ overrides: this.#overrides });
-    this.#emitState();
-    return this.#preflight;
+  /**
+   * The environment checks, complete, without starting anything.
+   *
+   * Joins a sweep already running and reuses one that finished within
+   * `maxAgeMs` (`PREFLIGHT_REUSE_MS` by default) — the launch's detection and
+   * the launch's start are the same sweep. `force` always runs a new one.
+   */
+  detect(opts: { force?: boolean; maxAgeMs?: number } = {}): Promise<PreflightReport> {
+    return this.#sweep(opts).complete;
+  }
+
+  /**
+   * Put the login PATH an earlier launch recorded to use, and start this
+   * launch's own login shell. Call once, as early as possible: the first
+   * sweep's lookups then need not wait for a shell to read its profile.
+   */
+  warmUp(): void {
+    void primeLoginShellPath(this.#preflightCache);
+  }
+
+  #sweep(opts: { force?: boolean; maxAgeMs?: number }): Sweep {
+    return this.#sweeps.sweep({ overrides: this.#overrides, ...opts });
+  }
+
+  #watchSweep(sweep: Sweep): void {
+    sweep.complete.then(
+      (report) => {
+        if (sweep.id >= this.#preflightSweep) {
+          this.#preflight = report;
+          this.#preflightSweep = sweep.id;
+        }
+        this.#emitState();
+        this.#reconcile(sweep, report);
+      },
+      (err: unknown) => this.#note(`Checking this machine failed: ${describe(err)}`),
+    );
+  }
+
+  /**
+   * The backend was started on a gating report; its sweep's complete report
+   * just arrived. When the two disagree on anything the backend's environment
+   * is built from — a `claude` that turned out too old, a CLI only the fresh
+   * login PATH could find — restart it once, on the complete report, so it is
+   * not left running with an environment the setup screen contradicts.
+   */
+  #reconcile(sweep: Sweep, report: PreflightReport): void {
+    const spawned = this.#spawnedFrom;
+    if (!spawned || spawned.final || spawned.sweepId !== sweep.id) return;
+    if (spawnFingerprint(report) === spawned.fingerprint) {
+      spawned.final = true;
+      return;
+    }
+    void this.#serialise(async () => {
+      if (this.#spawnedFrom !== spawned || !this.running) return;
+      this.#note("The full check of this machine changed what the local server needs to know; restarting it.");
+      await this.#stop("stopped");
+      await this.#connect(sweep);
+    });
   }
 
   // --- lifecycle -----------------------------------------------------------
 
   /**
-   * Start the embedder, unconditionally — not gated behind the backend the way
-   * Appium is. Called once, from `main/index.ts`, as early in app init as
-   * possible: the backend is handed this child's resolved loopback URL, and a
-   * cold model download benefits from every second before that.
+   * Start the embedder, unconditionally — not gated behind the backend. Called
+   * once, from `main/index.ts`, as early in app init as possible: the backend
+   * is handed this child's resolved loopback URL, and a cold model download
+   * benefits from every second before that.
    *
    * Never throws. A Mac where this cannot start is not a reason to refuse the
    * backend, only a reason embeddings stay unavailable until it can.
    */
   async startEmbedder(): Promise<void> {
+    await this.reapStale();
     const child = this.#child("embedder");
     child.update(this.#embedderSpec());
     try {
       await child.start();
       // Marked healthy on spawn, not on a probe: this child gates nothing, so
       // there is no readiness worth waiting for beyond the process existing.
-      // Its model-loaded state is a fact for `POST /v1/embeddings` callers (a
-      // 503 until then), not for this state machine.
+      // Its model state is a fact for `POST /v1/embeddings` callers (a 503
+      // until the download is done, then a load on the first request), not for
+      // this state machine.
       child.markHealthy();
     } catch (err) {
       this.#note(`embedder did not start: ${describe(err)}. Embeddings are unavailable until it does.`);
     }
+  }
+
+  /**
+   * Kill children an earlier run of this app left running. Called at boot,
+   * before every embedder spawn, and on wake from sleep — an orphan the boot's
+   * bounded sweep gave up on would otherwise run until the next launch.
+   * `connect()` waits for the latest one. Joins a sweep already in flight;
+   * bounded, never rejects, and never touches a child this run started.
+   */
+  reapStale(): Promise<void> {
+    if (!this.#reaping) {
+      this.#reaping = reapWithin(REAP_CAP_MS, {
+        registry: this.#registry,
+        userData: app.getPath("userData"),
+        log: (line) => this.#note(line),
+      }).finally(() => {
+        this.#reaping = null;
+      });
+      this.#reaped = this.#reaping;
+    }
+    return this.#reaping;
   }
 
   connect(): Promise<SupervisorSnapshot> {
@@ -248,10 +401,13 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     return this.#serialise(async () => {
       const child = this.#child(id);
       child.resetBackoff();
+      // The next one binds a different port (`PORT=0`), and a remembered URL
+      // would have the readiness wait poll the old one.
+      if (id === "agent-server") this.#forgetServer();
       await child.stop();
       // The embedder restarts regardless of `this.running`: unlike the backend
-      // and Appium it is not scoped to a start session, so a manual restart
-      // from Diagnostics must work whether or not the backend is up.
+      // it is not scoped to a start session, so a manual restart from
+      // Diagnostics must work whether or not the backend is up.
       if (id !== "embedder" && !this.running) return this.snapshot();
       await this.#startChild(id);
       return this.snapshot();
@@ -266,29 +422,33 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     return next;
   }
 
-  async #connect(): Promise<SupervisorSnapshot> {
+  /** `reuse` is the sweep to start from: a reconcile restarts on the very report that asked for it. */
+  async #connect(reuse?: Sweep): Promise<SupervisorSnapshot> {
     if (this.running) return this.snapshot();
 
     const settings = this.#settings;
     const secrets = this.#secrets;
     if (!settings) return this.#fail("no settings loaded");
     if (!secrets) {
-      return this.#fail(
-        "This Mac has no local credentials yet, and macOS would not provide an encryption key to make them. " +
-          "Unlock the login keychain and try again.",
-      );
+      if (this.#secretsError) return this.#fail(this.#secretsError);
+      const { failure, remedy } = keyStoreHelp();
+      return this.#fail(`This machine has no local credentials yet: ${failure}. ${remedy}.`);
     }
 
     this.#blocker = undefined;
     this.#setState("preflight");
 
-    this.#note("Checking what this Mac can do…");
-    this.#preflight = await preflight({ overrides: this.#overrides });
+    this.#note("Checking what this machine can do…");
+    // The sweep and the stale-child reaper run side by side, and only the
+    // spawn waits for both: neither needs the other, and on Windows each can
+    // take seconds (PowerShell process listings; a probe per CLI).
+    const sweep = reuse ?? this.#sweep({ maxAgeMs: PREFLIGHT_REUSE_MS });
+    const [gated] = await Promise.all([sweep.result ? Promise.resolve(sweep.result) : sweep.gating, this.#reaped]);
 
     // REFUSED, not attempted, while a required check fails, and the refusal
     // names the check. Starting anyway would move the failure into a Claude
     // Code session minutes later, which is what this preflight exists to end.
-    const blocker = firstBlocker(this.#preflight);
+    const blocker = firstBlocker(gated);
     if (blocker) {
       this.#blocker = blocker;
       return this.#fail(`${blocker.title}. ${blocker.remediation}`);
@@ -310,17 +470,17 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       this.#note("The embedding engine has not bound a port yet; starting without it. Search will be unavailable.");
     }
 
-    const spec = this.#agentServerSpec(secrets, embeddingsBaseURL);
+    // The freshest answer this sweep has by now: its complete half may have
+    // landed while the workspace and the embedder were being waited for.
+    const report = sweep.result ?? gated;
+    const spec = this.#agentServerSpec(report, secrets, embeddingsBaseURL);
     if ("error" in spec) return this.#fail(spec.error);
+    this.#spawnedFrom = { sweepId: sweep.id, fingerprint: spawnFingerprint(report), final: sweep.result !== null };
 
     const child = this.#child("agent-server");
     child.resetCounters();
     child.setEnabled(true);
     child.update(spec.value);
-
-    // Decided before the backend starts, because the backend is told at spawn
-    // whether it has a hub to proxy to, and reads that once.
-    await this.#configureAppium();
 
     this.#serverUrl = null;
     this.#serverReady = false;
@@ -338,13 +498,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       return this.#fail(`The local server failed to start: ${describe(err)}`);
     }
 
-    // Beside the backend and not before it. Nothing below waits for the hub: a
-    // mobile task that arrives in the two seconds Appium takes to bind sees a
-    // 502 naming the address, which is a better answer than a start that took
-    // two seconds longer for everyone who never touches a device.
-    await this.#startAppium();
-
-    const ready = await this.#waitForServer(abort.signal, () => child.running);
+    const ready = await this.#waitForServer(abort.signal, child);
     if (!ready.ok) {
       if (abort.signal.aborted) {
         await this.#stop("stopped");
@@ -373,28 +527,20 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       this.#note("Stopping…");
     }
 
-    // A drain, never a kill, and the ORDER matters: the backend goes first,
-    // whatever its position in CHILD_IDS. It is the process holding the Claude
-    // Code sessions that may still be calling Appium, so stopping the hub first
-    // would pull it out from under a run that has not finished draining. The
-    // embedder is excluded entirely — it survives a plain Disconnect so a
-    // restart does not pay for a model reload; `drain()` stops it separately.
-    const stopOrder: ChildId[] = [
-      "agent-server",
-      ...CHILD_IDS.filter((id) => id !== "agent-server" && id !== "embedder"),
-    ];
-    for (const id of stopOrder) {
-      const child = this.#child(id);
-      if (child.state === "idle" || child.state === "skipped") continue;
-      this.#step = id;
+    // A drain, never a kill: the backend stops its runs, its Appium hub and
+    // its Postgres itself. The embedder is left running — it survives a plain
+    // Disconnect so a restart does not pay for a model reload; `drain()` stops
+    // it separately.
+    const backend = this.#child("agent-server");
+    if (backend.state !== "idle" && backend.state !== "skipped") {
+      this.#step = "agent-server";
       this.#emitState();
-      await child.stop();
+      await backend.stop();
     }
 
     this.#step = undefined;
-    this.#serverUrl = null;
-    this.#serverReady = false;
-    this.emit("server", null);
+    this.#spawnedFrom = null;
+    this.#forgetServer();
     if (final !== "failed") {
       this.#setState(final);
       this.#note("Stopped.");
@@ -410,11 +556,18 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     return child;
   }
 
+  #forgetServer(): void {
+    this.#serverUrl = null;
+    this.#serverReady = false;
+    this.emit("server", null);
+  }
+
   #agentServerSpec(
+    report: PreflightReport,
     secrets: LocalSecrets,
     embeddingsBaseURL: string | null,
   ): { value: ChildSpec } | { error: string } {
-    const server = itemById(this.#preflight, "agent-server");
+    const server = itemById(report, "agent-server");
     if (!server?.path) return { error: "The server binary is missing from this copy of TaskTrooper." };
     return {
       value: {
@@ -423,7 +576,8 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
         args: [],
         stdinPipe: true,
         env: agentServerEnv({
-          preflight: this.#preflight,
+          preflight: report,
+          ...optionalRuntime(this.#toolchainRuntime()),
           dataDir: dataDir(),
           postgresCacheDir: postgresCacheDir(),
           apiToken: secrets.api_token,
@@ -433,68 +587,6 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
         restart: true,
       },
     };
-  }
-
-  /**
-   * Decide whether this app runs an Appium hub, and say so on Status either
-   * way.
-   *
-   * Three outcomes, and the middle one is why this is a decision rather than an
-   * unconditional spawn:
-   *
-   *   not installed          → disabled, with the sentence that installs it.
-   *   already on the port    → disabled, and ADOPTED. Somebody is running their
-   *                            own hub, with their own drivers and plugins.
-   *                            Starting a second one would lose the port, crash,
-   *                            and restart-loop against a working server.
-   *   installed and nothing
-   *   on the port            → this app runs it.
-   *
-   * In all three the backend is told the same address, because it is the same
-   * hub as far as the proxy is concerned.
-   */
-  async #configureAppium(): Promise<void> {
-    const child = this.#child("appium");
-    child.resetCounters();
-
-    const appium = itemById(this.#preflight, "appium");
-    if (appium?.status !== "ok" || !appium.path) {
-      child.setEnabled(false, appium?.remediation ?? "Appium is not installed, so mobile automation is unavailable.");
-      return;
-    }
-    if (await appiumHubIsAnswering()) {
-      child.setEnabled(
-        false,
-        `An Appium server is already running on ${APPIUM_BASE_URL}; TaskTrooper is using it rather than starting a second one.`,
-      );
-      return;
-    }
-    child.setEnabled(true);
-    child.update({
-      id: "appium",
-      command: appium.path,
-      args: appiumArgs(),
-      // Appium needs no secret and is given none: a clean PATH and the Android
-      // SDK root, which is everything its drivers look for.
-      env: childEnv(this.#preflight),
-      restart: true,
-    });
-  }
-
-  /** Start the hub, if `#configureAppium` decided this app runs one. */
-  async #startAppium(): Promise<void> {
-    const child = this.#child("appium");
-    if (!child.status().enabled) return;
-    try {
-      await child.start();
-      // Healthy on spawn rather than on a probe: the hub gates nothing, so a
-      // readiness wait here would only make every start slower.
-      child.markHealthy();
-    } catch (err) {
-      // Never fatal. This is the whole difference between a capability and a
-      // dependency, and the reason Appium is not in `GATING_CHILD_IDS`.
-      this.#note(`Appium did not start: ${describe(err)}. Mobile automation is unavailable until it does.`);
-    }
   }
 
   /**
@@ -508,18 +600,44 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       id: "embedder",
       command: process.execPath,
       args: [embedderScriptPath(), "--cache-dir", app.getPath("userData")],
-      env: { ...childEnv(this.#preflight), ELECTRON_RUN_AS_NODE: "1" },
+      // Closing its stdin is how it is asked to stop, and the parent pid is how
+      // it notices this process died without closing anything.
+      stdinPipe: true,
+      env: {
+        ...childEnv(this.#preflight, { ownBinary: true }),
+        ELECTRON_RUN_AS_NODE: "1",
+        TASKTROOPER_EXIT_ON_STDIN_CLOSE: "1",
+        TASKTROOPER_PARENT_PID: String(process.pid),
+      },
       restart: true,
     };
   }
 
-  async #resolveEmbedderUrl(): Promise<string | null> {
-    if (this.#embedderUrl) return this.#embedderUrl;
-    const deadline = Date.now() + EMBEDDER_URL_WAIT_MS;
-    while (!this.#embedderUrl && Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    return this.#embedderUrl;
+  /**
+   * The embedder's URL for account mode's runner: the one it printed, or the
+   * next one within the same bound the backend waits, or null.
+   */
+  embedderUrl(): Promise<string | null> {
+    return this.#resolveEmbedderUrl();
+  }
+
+  /**
+   * Resolved by the embedder's own line the moment it is read, or with null at
+   * the bound. Now that the start no longer waits on a whole preflight, this
+   * is often the last thing it waits on, and a 100 ms poll was most of it.
+   */
+  #resolveEmbedderUrl(): Promise<string | null> {
+    if (this.#embedderUrl) return Promise.resolve(this.#embedderUrl);
+    return new Promise((resolve) => {
+      const finish = (url: string | null): void => {
+        clearTimeout(timer);
+        this.#embedderWaiters.delete(finish);
+        resolve(url);
+      };
+      const timer = setTimeout(() => finish(this.#embedderUrl), EMBEDDER_URL_WAIT_MS);
+      timer.unref?.();
+      this.#embedderWaiters.add(finish);
+    });
   }
 
   /**
@@ -535,15 +653,15 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
    */
   async #waitForServer(
     signal: AbortSignal,
-    alive: () => boolean,
+    child: SupervisedChild,
   ): Promise<{ ok: true } | { ok: false; message: string }> {
-    const listening = await this.#waitForListening(signal, alive);
+    const listening = await this.#waitForListening(signal, child);
     if (!listening.ok) return listening;
 
     this.#note("Waiting for the local server to finish starting…");
     const health = await waitForHealth(`${listening.url}/health`, {
       timeoutMs: HEALTH_TIMEOUT_MS,
-      alive,
+      alive: () => child.running,
       signal,
     });
     if (health.ok) return { ok: true };
@@ -557,42 +675,59 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     };
   }
 
+  /**
+   * Resolved by the `LISTENING` line itself (`#onChildLog`), by the child's
+   * exit, by the deadline or by an abort — whichever is first. Nothing polls:
+   * the line is acted on the moment it is read.
+   */
   #waitForListening(
     signal: AbortSignal,
-    alive: () => boolean,
+    child: SupervisedChild,
   ): Promise<{ ok: true; url: string } | { ok: false; message: string }> {
     if (this.#serverUrl) return Promise.resolve({ ok: true, url: this.#serverUrl });
-    const deadline = Date.now() + LISTENING_TIMEOUT_MS;
+    if (signal.aborted) return Promise.resolve({ ok: false, message: "Cancelled." });
     return new Promise((resolve) => {
+      let drain: NodeJS.Timeout | undefined;
       const finish = (result: { ok: true; url: string } | { ok: false; message: string }): void => {
-        clearInterval(timer);
+        clearTimeout(deadline);
+        clearTimeout(drain);
+        this.#listeningWaiters.delete(onListening);
+        child.off("exited", onExit);
         signal.removeEventListener("abort", onAbort);
         resolve(result);
       };
+      const onListening = (url: string): void => finish({ ok: true, url });
       const onAbort = (): void => finish({ ok: false, message: "Cancelled." });
+      const exitedNow = (): void =>
+        finish(
+          this.#serverUrl
+            ? { ok: true, url: this.#serverUrl }
+            : { ok: false, message: describeServerExit(this.#lastAgentServerLine()) },
+        );
+      const onExit = (): void => {
+        drain = setTimeout(exitedNow, EXIT_DRAIN_MS);
+      };
 
-      const timer = setInterval(() => {
-        if (this.#serverUrl) return finish({ ok: true, url: this.#serverUrl });
-        if (!alive()) {
-          return finish({ ok: false, message: describeServerExit(this.#lastAgentServerLine()) });
-        }
-        if (Date.now() >= deadline) {
-          return finish({
+      const deadline = setTimeout(
+        () =>
+          finish({
             ok: false,
             message:
               `The local server did not open a port within ${LISTENING_TIMEOUT_MS / 1000}s. ` +
               "A first start downloads Postgres, so a slow or blocked network is the usual cause.",
-          });
-        }
-      }, 250);
-      timer.unref?.();
+          }),
+        LISTENING_TIMEOUT_MS,
+      );
+      deadline.unref?.();
+      this.#listeningWaiters.add(onListening);
       signal.addEventListener("abort", onAbort, { once: true });
+      if (child.running) child.once("exited", onExit);
+      else onExit();
     });
   }
 
   #lastAgentServerLine(): string | undefined {
-    const lines = this.#logs.read("agent-server");
-    return lines.length > 0 ? lines[lines.length - 1]?.text : undefined;
+    return this.#logs.last("agent-server")?.text;
   }
 
   #onChildLog(id: ChildId, stream: "stdout" | "stderr", text: string): void {
@@ -603,15 +738,23 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     if (!app.isPackaged) console.warn(`[${id}] ${text.trimEnd()}`);
 
     if (id === "agent-server") {
-      const parsed = parseServerLine(text);
-      if (parsed.listening !== undefined) this.#serverUrl = parsed.listening;
-      this.#queueLog(this.#logs.append(id, stream, parsed.text, parsed.level));
+      const listening = parseServerListening(text);
+      if (listening !== undefined) {
+        this.#serverUrl = listening;
+        for (const waiter of [...this.#listeningWaiters]) waiter(listening);
+      }
+      this.#queueLog(this.#logs.append(id, stream, listening !== undefined ? text.trim() : text, serverLineLevel(text)));
       return;
     }
 
     if (id === "embedder") {
       const port = parseEmbedderListening(text);
-      if (port !== undefined) this.#embedderUrl = `http://127.0.0.1:${port}`;
+      if (port !== undefined) {
+        const url = `http://127.0.0.1:${port}`;
+        this.#embedderUrl = url;
+        for (const waiter of [...this.#embedderWaiters]) waiter(url);
+        this.emit("embedder", url);
+      }
       this.#queueLog(this.#logs.append(id, stream, text));
       return;
     }
@@ -635,21 +778,6 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     }
 
     if (!this.running) return;
-
-    // Appium crashing costs mobile automation until it is back; it is not the
-    // app going away, and reporting it as `degraded` would put a warning in
-    // front of everyone who never touches a device.
-    if (id !== "agent-server") {
-      const delay = child.scheduleRestart(() => {
-        void this.#serialise(async () => {
-          if (!this.running) return;
-          await this.#startChild(id);
-        });
-      });
-      this.#note(`${id} ${child.status().detail ?? "exited"}; restarting in ${Math.round(delay / 1000)}s`);
-      this.#emitState();
-      return;
-    }
 
     // The API base is gone with the process that was serving it, and the next
     // one will bind a DIFFERENT port — `PORT=0`. Saying so now is what keeps
@@ -677,6 +805,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     const child = this.#child(id);
     if (!child.status().enabled) return;
 
+    if (id === "embedder") await this.reapStale();
     this.#note(`Restarting ${id}…`);
     try {
       await child.start();
@@ -685,9 +814,9 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
       return;
     }
 
-    // Only the backend has a readiness to wait for. Appium and the embedder are
-    // up when their process is up; a probe here would be a gate on a capability
-    // that gates nothing.
+    // Only the backend has a readiness to wait for. The embedder is up when its
+    // process is up; a probe here would be a gate on a capability that gates
+    // nothing.
     if (id !== "agent-server") {
       child.markHealthy();
       this.#note(`${id} is back up.`);
@@ -695,7 +824,7 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
     }
 
     const abort = new AbortController();
-    const ready = await this.#waitForServer(abort.signal, () => child.running);
+    const ready = await this.#waitForServer(abort.signal, child);
     if (!ready.ok) {
       this.#note(`${id} did not become ready after restarting: ${ready.message}`);
       return;
@@ -711,10 +840,10 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
 
   /**
    * `running` vs `degraded`. Only the GATING children count, which today is the
-   * backend. Appium is a capability: a Mac whose hub is mid-restart still runs
-   * every task that does not touch a device, and colouring the tray icon for it
-   * would train people to ignore the one state that means their work is not
-   * running.
+   * backend. The embedder is a capability: a Mac whose embedder is mid-restart
+   * still runs every task that does not need embeddings, and colouring the tray
+   * icon for it would train people to ignore the one state that means their
+   * work is not running.
    */
   #recomputeState(): void {
     if (!this.running) {
@@ -764,15 +893,19 @@ export class Supervisor extends EventEmitter<SupervisorEvents> {
    * streaming its output through the backend emits hundreds of lines a second,
    * and one IPC message per line is a renderer that spends its frame budget on
    * postMessage.
+   *
+   * And they are not pushed at all while nobody listens: the ring keeps them,
+   * and a view that opens later catches up with `logs(child, afterSeq)`.
    */
   #queueLog(line: LogLine): void {
+    if (this.listenerCount("logs") === 0) return;
     this.#pendingLogs.push(line);
     if (this.#logFlushTimer) return;
     this.#logFlushTimer = setTimeout(() => {
       this.#logFlushTimer = null;
-      const batch = this.#pendingLogs;
+      const batch = this.#pendingLogs.map((pending) => this.#logs.render(pending));
       this.#pendingLogs = [];
-      if (batch.length > 0) this.emit("logs", batch);
+      if (batch.length > 0 && this.listenerCount("logs") > 0) this.emit("logs", batch);
     }, LOG_FLUSH_MS);
     this.#logFlushTimer.unref?.();
   }

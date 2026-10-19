@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, Outlet, Route, Routes } from "react-router-dom";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import type { Agent } from "@/api";
 import { AgentChatPage } from "@/pages/AgentChatPage";
@@ -75,7 +75,7 @@ const agent: Agent = {
   created_at: "2026-09-17T10:00:00Z",
 };
 
-function renderChatPage(initialEntry = "/agents/agent-1/chat") {
+function renderChatPage(initialEntry: string | { pathname: string; state?: unknown } = "/agents/agent-1/chat") {
   return render(
     <I18nProvider>
       <MemoryRouter initialEntries={[initialEntry]}>
@@ -250,6 +250,24 @@ describe("AgentChatPage server-driven typing indicator and focus refresh", () =>
     expect(screen.queryByLabelText("Assistant is typing")).not.toBeInTheDocument();
   });
 
+  it("re-reads an idle session's activity every 10s, not every 2s", async () => {
+    sessionActivity.mockReset().mockResolvedValue({ runs: [{ ...runningRun, status: "completed" }] });
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      renderChatPage("/agents/agent-1/chat/session-1");
+      await waitFor(() => expect(sessionActivity).toHaveBeenCalled());
+      await act(async () => {});
+      const settled = sessionActivity.mock.calls.length;
+
+      await act(() => vi.advanceTimersByTimeAsync(2000));
+      expect(sessionActivity.mock.calls.length).toBe(settled);
+      await act(() => vi.advanceTimersByTimeAsync(8000));
+      expect(sessionActivity.mock.calls.length).toBe(settled + 1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("refreshes the message list and session activity when the window regains focus", async () => {
     sessionActivity.mockReset().mockResolvedValue({ runs: [] });
 
@@ -286,5 +304,150 @@ describe("AgentChatPage server-driven typing indicator and focus refresh", () =>
     expect(reportChatFocus).toHaveBeenLastCalledWith(null);
 
     delete window.__tasktrooperDesktop;
+  });
+});
+
+describe("AgentChatPage lead agent", () => {
+  const session = {
+    id: "session-1",
+    title: "Rex ile sohbet",
+    model: "",
+    agent_id: "agent-1",
+    created_at: "2026-09-23T10:00:00Z",
+    updated_at: "2026-09-23T10:00:00Z",
+  };
+  const teammate: Agent = { ...agent, id: "agent-2", name: "Dev" };
+
+  beforeEach(() => {
+    Element.prototype.scrollIntoView = vi.fn();
+    getAgent.mockReset().mockResolvedValue(agent);
+    listFiles.mockReset().mockResolvedValue({ files: [] });
+    listAgents.mockReset().mockResolvedValue({ agents: [] });
+    listInitiativeProjects.mockReset().mockResolvedValue({ projects: [] });
+    listRepositories.mockReset().mockResolvedValue({ repositories: [] });
+    listAgentSessions.mockReset().mockResolvedValue({ sessions: [session] });
+    getSession.mockReset().mockResolvedValue({ session, messages: [], actions: [] });
+    sessionActivity.mockReset().mockResolvedValue({ runs: [] });
+    activeRuns.mockReset().mockResolvedValue({ runs: [] });
+    sendSessionMessageWithRecovery.mockReset().mockResolvedValue({
+      status: "response",
+      response: { message: { role: "assistant", content: "ok" } },
+      messages: [],
+      actions: [],
+    });
+  });
+
+  function renderInWorkspace(leadId: string, initialEntry = "/agents/agent-1/chat") {
+    const context = {
+      agents: [agent, teammate],
+      leadAgent: { ...agent, id: leadId },
+      workspaceLoading: false,
+      teamPreparing: false,
+      config: null,
+      refreshWorkspace: () => {},
+    };
+    return render(
+      <I18nProvider>
+        <MemoryRouter initialEntries={[initialEntry]}>
+          <Routes>
+            <Route element={<Outlet context={context} />}>
+              <Route path="agents/:agentId/chat" element={<AgentChatPage />} />
+              <Route path="agents/:agentId/chat/:sessionId" element={<AgentChatPage />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+  }
+
+  it("sends the router-state autoSend message exactly once", async () => {
+    renderChatPage({ pathname: "/agents/agent-1/chat/session-1", state: { autoSend: "Merhaba PM" } });
+
+    await waitFor(() => expect(sendSessionMessageWithRecovery).toHaveBeenCalledTimes(1));
+    expect(sendSessionMessageWithRecovery.mock.calls[0][1]).toBe("Merhaba PM");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sendSessionMessageWithRecovery).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends the @-mentions handed over with autoSend, like ones picked in this composer", async () => {
+    const repo = { kind: "repository" as const, id: "r-1", name: "acme-web" };
+    renderChatPage({
+      pathname: "/agents/agent-1/chat/session-1",
+      state: { autoSend: "@acme-web kupon ekleyelim", autoSendMentions: [repo] },
+    });
+
+    await waitFor(() => expect(sendSessionMessageWithRecovery).toHaveBeenCalledTimes(1));
+    expect(sendSessionMessageWithRecovery.mock.calls[0][2].mentions).toEqual([repo]);
+  });
+
+  it("gives the lead its own header but a normal chat page — the welcome lives on /home", async () => {
+    renderInWorkspace("agent-1");
+
+    expect(await screen.findByText("1 agents on the team")).toBeInTheDocument();
+    expect(screen.getByText("Select a chat on the left or start a new chat.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "What shall we work on?" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the plain empty state for a non-lead agent", async () => {
+    renderInWorkspace("agent-2");
+
+    expect(await screen.findByText("Select a chat on the left or start a new chat.")).toBeInTheDocument();
+    expect(screen.queryByText("1 agents on the team")).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentChatPage message queue", () => {
+  const session = {
+    id: "session-1",
+    title: "Rex ile sohbet",
+    model: "",
+    agent_id: "agent-1",
+    created_at: "2026-09-23T10:00:00Z",
+    updated_at: "2026-09-23T10:00:00Z",
+  };
+  const runningRun = { id: "run-1", request_id: "req-1", status: "running", started_at: "2026-09-23T10:00:00Z" };
+
+  beforeEach(() => {
+    localStorage.clear();
+    Element.prototype.scrollIntoView = vi.fn();
+    getAgent.mockReset().mockResolvedValue(agent);
+    listFiles.mockReset().mockResolvedValue({ files: [] });
+    listAgents.mockReset().mockResolvedValue({ agents: [] });
+    listInitiativeProjects.mockReset().mockResolvedValue({ projects: [] });
+    listRepositories.mockReset().mockResolvedValue({ repositories: [] });
+    listAgentSessions.mockReset().mockResolvedValue({ sessions: [session] });
+    getSession.mockReset().mockResolvedValue({ session, messages: [], actions: [] });
+    activeRuns.mockReset().mockResolvedValue({ runs: [] });
+    sessionActivity.mockReset().mockResolvedValue({ runs: [runningRun] });
+    sendSessionMessageWithRecovery.mockReset().mockResolvedValue({
+      status: "response",
+      response: { message: { role: "assistant", content: "ok" } },
+      messages: [],
+      actions: [],
+    });
+  });
+
+  it("queues a message sent during a run and sends it once, merged, when the run ends", async () => {
+    renderChatPage("/agents/agent-1/chat/session-1");
+    await screen.findByLabelText("Assistant is typing");
+
+    const textarea = screen.getByPlaceholderText(/message/i);
+    fireEvent.change(textarea, { target: { value: "first follow-up" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.change(textarea, { target: { value: "second follow-up" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(await screen.findByText("first follow-up")).toBeInTheDocument();
+    expect(screen.getAllByText("Queued")).toHaveLength(2);
+    expect(sendSessionMessageWithRecovery).not.toHaveBeenCalled();
+
+    sessionActivity.mockReset().mockResolvedValue({ runs: [{ ...runningRun, status: "completed" }] });
+    fireEvent.focus(window);
+
+    await waitFor(() => expect(sendSessionMessageWithRecovery).toHaveBeenCalledTimes(1));
+    expect(sendSessionMessageWithRecovery.mock.calls[0][1]).toBe("first follow-up\n\nsecond follow-up");
+    await waitFor(() => expect(screen.queryByText("Queued")).not.toBeInTheDocument());
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sendSessionMessageWithRecovery).toHaveBeenCalledTimes(1);
   });
 });

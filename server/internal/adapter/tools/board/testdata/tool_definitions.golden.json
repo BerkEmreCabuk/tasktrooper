@@ -284,11 +284,11 @@
             "type": "boolean"
           },
           "assignee": {
-            "description": "Who handles this task: the responsible agent's name (e.g. \"system-architect\", \"backend-developer\") or its UUID. Set this so the assignee is dispatched automatically. Use list_team to see valid names.",
+            "description": "Who handles this task: the responsible agent's name (e.g. \"system-architect\", \"backend-developer\") or its UUID. Set this so the assignee is dispatched automatically. Use list_team to see valid names. Never the product manager: it cannot hold a board task.",
             "type": "string"
           },
           "assignee_role": {
-            "description": "Assign by ROLE instead of by agent name: the role key (e.g. \"developer\", \"qa\") whose agent for this task's repository area should be assigned. Ignored when assignee is also set — assignee wins. Use list_team to see role keys and which areas they cover.",
+            "description": "Assign by ROLE instead of by agent name: the role key (e.g. \"developer\", \"qa\") whose agent for this task's repository area should be assigned. Ignored when assignee is also set — assignee wins. Use list_team to see role keys and which areas they cover. product_manager is refused.",
             "type": "string"
           },
           "before_deploy": {
@@ -296,7 +296,7 @@
             "type": "string"
           },
           "blocked_by": {
-            "description": "Work ordering: task UUIDs or board keys (e.g. [\"T-1\"]) that must be FINISHED (done or released) before anyone starts this task. THIS task waits for the ones you list — same direction as deploy_depends_on. Enforced: while any of them is open this task is parked in `blocked` instead of being dispatched, and it is picked up automatically the moment the last one lands. Use it when one task's code has to exist before the next can be written; use deploy_depends_on when the order is about shipping, and both when it is both. A cycle is refused at creation.",
+            "description": "Work ordering: task UUIDs or board keys (e.g. [\"T-1\"]) that must be FINISHED (done or released; a design task only once released, after its designer wrote the hand-off) before anyone starts this task. THIS task waits for the ones you list, and an approved design task among them hands this task its documents — same direction as deploy_depends_on. Enforced: while any of them is open this task is parked in `blocked` instead of being dispatched, and it is picked up automatically the moment the last one lands. Use it when one task's code has to exist before the next can be written; use deploy_depends_on when the order is about shipping, and both when it is both. A cycle is refused at creation.",
             "items": {
               "type": "string"
             },
@@ -405,6 +405,64 @@
   {
     "type": "function",
     "function": {
+      "name": "declare_env_vars",
+      "description": "Declare the environment variables your change needs in its deployed environment, in the same run that adds the code reading them. Before the task ships, TaskTrooper sets value and generated variables on the deploy target itself and asks a human on the task for human_secret and human_bcrypt ones; the merge waits until every non-optional variable is set. You never see, choose or handle a secret value — so never generate, write, commit or comment one, and do not ask the human for it yourself. Keep .env.example in step: an undeclared name found there still blocks the ship until a human classifies it. Re-declaring a name updates it; a human's own classification of a name is kept.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\"). Optional in a run that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          },
+          "vars": {
+            "description": "Every environment variable your change makes the deployed app read — new, renamed, or newly required. One entry each.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "description": "What the app uses it for, in one line — a person reads it when entering the value.",
+                  "type": "string"
+                },
+                "kind": {
+                  "description": "value: a non-secret literal you know now (owner/repo, a branch name, a public URL) — put it in value. generated: a random secret nobody has to know (a session, signing or encryption key). human_secret: a credential only a person can obtain (an API key, a personal access token). human_bcrypt: the bcrypt hash of a password a person chooses (the app compares a password against it). optional: the deployed app runs without it — leave it unset there.",
+                  "enum": [
+                    "value",
+                    "generated",
+                    "human_secret",
+                    "human_bcrypt",
+                    "optional"
+                  ],
+                  "type": "string"
+                },
+                "name": {
+                  "description": "The variable's name exactly as the code reads it (e.g. SESSION_SECRET).",
+                  "type": "string"
+                },
+                "value": {
+                  "description": "Only for kind=value, and only a non-secret. Never put a key, token, password or hash here.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "kind"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "vars"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "delete_board_task",
       "description": "Delete a board task permanently, with everything on it: comments, acceptance criteria, documents and relations. There is no undo. Use it when the user asks for a task to be removed — a duplicate, a task opened by mistake, or work that was merged into another task. When several tasks are being merged into one, delete the ones that were merged away instead of leaving them open. A task that has left backlog/todo is refused unless force=true: past those columns it carries a branch and a work history, and cancelled work belongs in a terminal column, not erased.",
       "parameters": {
@@ -479,6 +537,23 @@
       "parameters": {
         "additionalProperties": false,
         "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_deploy_impact",
+      "description": "Read what the release covering this task did to its component in production: for each golden signal with a confirmed binding (request rate, error rate, p95 latency for a backend; backlog, consume rate, errors for a worker; page views, LCP, INP for a frontend; crash-free users, cold start, ANR for mobile), its mean over the hour before the deploy (`before`), the hour after it (`after`) and that same hour a day earlier (`baseline`), with `delta`, `delta_pct`, `higher_is_better` and a per-signal `verdict` (`improved`, `neutral`, `worse`, `unknown`); the overall `verdict` is the worst of them. A move the baseline also shows is read as the time of day, not the deploy, and stays `neutral`. `pending: true` means the hour after the deploy is not over yet and `after` covers only what has passed. `verdict: \"unknown\"` with no signals means nothing is bound (or the release never deployed) — not that production is fine. The result also carries the release's own `auto_rollback`: with it on, `rollback_release` executes; with it off, `rollback_release` only writes a proposal and a human is asked to approve it. It changes nothing and never parks the run. Read it whenever an incident lands in a release's window, and before a verdict, beside the logs and errors — never as the only evidence.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
         "type": "object"
       }
     }
@@ -784,7 +859,7 @@
     "type": "function",
     "function": {
       "name": "list_team",
-      "description": "List the orchestration team: each agent's name, role description, whether it is enabled, which roles it holds (with the repo areas each covers), and which board columns it is subscribed to. Use to see who is on the team and which role handles which kind of work before assigning or decomposing.",
+      "description": "List the orchestration team. `team` is who works now: each enabled agent's name, role description, which roles it holds (with the repo areas each covers), and which board columns it is subscribed to. `available_to_add` is the agents that exist but are switched off, each with its name, catalog slug, role description and roles; the user can switch them on from the pencil (\"Edit team\") next to \"Team\" in the sidebar. Assign work only to agents in `team`. When no agent in `team` fits the work, name the agent in `available_to_add` that does.",
       "parameters": {
         "additionalProperties": false,
         "properties": {},
@@ -981,7 +1056,7 @@
                   "type": "string"
                 },
                 "evidence": {
-                  "description": "Command + output, request/response, or — for a screenshot — the url and viewport browser_screenshot reported and what it showed (it saves no file, so never a path).",
+                  "description": "Command + output, request/response, or — for a screenshot — the url and viewport browser_screenshot reported and what it showed, plus the file name it was saved under when you passed attach_to_task (without it no file is saved, so never a path).",
                   "type": "string"
                 },
                 "expected": {
@@ -1287,13 +1362,14 @@
             "type": "string"
           },
           "blocked_by": {
-            "description": "Work ordering: task UUIDs or board keys that must be FINISHED (done or released) before anyone starts this task — THIS task waits for them. ADDS to the task's existing blockers rather than replacing them, so send only the ones you are adding. Enforced: while any blocker is open the task is parked in `blocked` instead of being dispatched, and it is picked up automatically when the last one lands. A cycle is refused.",
+            "description": "Work ordering: task UUIDs or board keys that must be FINISHED (done or released; a design task only once released, after its designer wrote the hand-off) before anyone starts this task — THIS task waits for them, and an approved design task among them hands this task its documents. ADDS to the task's existing blockers rather than replacing them, so send only the ones you are adding. Enforced: while any blocker is open the task is parked in `blocked` instead of being dispatched, and it is picked up automatically when the last one lands. A cycle is refused.",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "column": {
+            "description": "Put the task in this board column. For workflow moves prefer move_board_task; this is for sending your own task back to todo in the same call that adds the blocker it now waits for.",
             "type": "string"
           },
           "component": {

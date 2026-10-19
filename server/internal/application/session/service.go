@@ -88,6 +88,9 @@ func (s *Service) SetChatExecutor(e port.ChatExecutor) {
 
 type AnswerResumer interface {
 	ResumeOnAnswer(ctx context.Context, sessionID uuid.UUID, answer string) bool
+	// RecordTaskAnswer leaves a task-bound chat's answered question on the task,
+	// where the board's next run on it reads what was settled.
+	RecordTaskAnswer(ctx context.Context, repositoryID, taskID uuid.UUID, question, answer string)
 }
 
 func (s *Service) SetAnswerResumer(r AnswerResumer) {
@@ -275,6 +278,15 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	if err != nil {
 		return err
 	}
+	// A deleted chat must not leave its in-flight turn running: without this the
+	// agent kept working (and spending) after the row was gone, writing into a
+	// session nobody can open. Stop it through the same path the composer's stop
+	// button uses, so the run is marked cancelled and every replica's cancel
+	// watch agrees. A failure here is logged, not fatal — the delete proceeds.
+	if _, err := s.CancelSession(ctx, id, "session deleted"); err != nil {
+		log.Warn().Err(err).Str("session_id", id.String()).
+			Msg("stopping the chat's in-flight turn before delete failed")
+	}
 	if err := s.store.Delete(ctx, id); err != nil {
 		return err
 	}
@@ -322,6 +334,7 @@ func (s *Service) SendMessage(ctx context.Context, sessionID uuid.UUID, req doma
 	if s.resumeBlockedTask(ctx, sessionID, req) {
 		return s.ackResumedAnswer(ctx, sessionID), nil
 	}
+	s.recordTaskChatAnswer(ctx, sess, req)
 
 	history, err := s.buildMessageHistory(ctx, sessionID)
 	if err != nil {
@@ -348,7 +361,8 @@ func (s *Service) SendMessage(ctx context.Context, sessionID uuid.UUID, req doma
 	if err != nil {
 		return domain.AgentResponse{}, err
 	}
-	ctx, history, err = s.prepareRunContext(ctx, sess, sessionID, workspaceDir, settings.DefaultLanguage, history, taskBinding, s.effectiveToolPolicy(ctx, sess, policy))
+	ctx, history, err = s.prepareRunContext(ctx, sess, sessionID, workspaceDir, settings.DefaultLanguage, history, taskBinding,
+		domain.CeilToolPolicy(s.effectiveToolPolicy(ctx, sess, policy), req.ToolCeiling))
 	if err != nil {
 		return domain.AgentResponse{}, err
 	}
@@ -358,7 +372,7 @@ func (s *Service) SendMessage(ctx context.Context, sessionID uuid.UUID, req doma
 		return domain.AgentResponse{}, err
 	}
 	model := resolveChatModel(req.Model, sess.Model, agentModel)
-	effectivePolicy := domain.UpliftWorkspaceTools(domain.MergeToolPolicy(policy, agentPolicy))
+	effectivePolicy := domain.CeilToolPolicy(domain.UpliftWorkspaceTools(domain.MergeToolPolicy(policy, agentPolicy)), req.ToolCeiling)
 
 	history, err = s.applyContextPipeline(ctx, sessionID, history, model, agentProvider)
 	if err != nil {
@@ -378,6 +392,8 @@ func (s *Service) SendMessage(ctx context.Context, sessionID uuid.UUID, req doma
 	// may end the run early.
 	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(runCtx))
 	defer cancelRun()
+	runCtx, endTurnScope := withTurnScope(runCtx, sessionID)
+	defer endTurnScope()
 	handle, deregister := s.registerRun(sessionID, rec.RunID(), cancelRun)
 	defer deregister()
 	if rec != nil {
@@ -446,6 +462,42 @@ func (s *Service) resumeBlockedTask(ctx context.Context, sessionID uuid.UUID, re
 		return false
 	}
 	return s.answerResumer.ResumeOnAnswer(context.WithoutCancel(ctx), sessionID, answer)
+}
+
+// A task-bound chat's question parks nothing, so resumeBlockedTask never sees
+// its answer; without this the answer lived only in the chat transcript.
+func (s *Service) recordTaskChatAnswer(ctx context.Context, sess domain.Session, req domain.SessionMessageRequest) {
+	if s.answerResumer == nil || req.Role != domain.RoleUser || sess.TaskID == nil || sess.ProjectID == nil {
+		return
+	}
+	answer := strings.TrimSpace(req.Content)
+	if answer == "" {
+		return
+	}
+	msgs, err := s.store.ListMessages(ctx, sess.ID)
+	if err != nil {
+		log.Warn().Err(err).Str("session_id", sess.ID.String()).Msg("task chat: reading the question an answer replies to failed")
+		return
+	}
+	asked := answeredClarification(msgs)
+	if asked == nil {
+		return
+	}
+	s.answerResumer.RecordTaskAnswer(context.WithoutCancel(ctx), *sess.ProjectID, *sess.TaskID,
+		prompt.FormatClarificationQuestions(*asked), answer)
+}
+
+// Only the first reply after the question answers it; anything later is the
+// conversation moving on.
+func answeredClarification(msgs []domain.SessionMessage) *domain.ClarificationRequest {
+	if len(msgs) < 2 || msgs[len(msgs)-1].Role != domain.RoleUser {
+		return nil
+	}
+	prev := msgs[len(msgs)-2]
+	if prev.Role != domain.RoleAssistant {
+		return nil
+	}
+	return prev.Clarification
 }
 
 func (s *Service) ackResumedAnswer(ctx context.Context, sessionID uuid.UUID) domain.AgentResponse {
@@ -527,6 +579,7 @@ func (s *Service) SendMessageStream(ctx context.Context, sessionID uuid.UUID, re
 		}
 		return resp, nil
 	}
+	s.recordTaskChatAnswer(ctx, sess, req)
 
 	history, err := s.buildMessageHistory(ctx, sessionID)
 	if err != nil {
@@ -553,7 +606,8 @@ func (s *Service) SendMessageStream(ctx context.Context, sessionID uuid.UUID, re
 	if err != nil {
 		return domain.AgentResponse{}, err
 	}
-	ctx, history, err = s.prepareRunContext(ctx, sess, sessionID, workspaceDir, settings.DefaultLanguage, history, taskBinding, s.effectiveToolPolicy(ctx, sess, policy))
+	ctx, history, err = s.prepareRunContext(ctx, sess, sessionID, workspaceDir, settings.DefaultLanguage, history, taskBinding,
+		domain.CeilToolPolicy(s.effectiveToolPolicy(ctx, sess, policy), req.ToolCeiling))
 	if err != nil {
 		return domain.AgentResponse{}, err
 	}
@@ -563,7 +617,7 @@ func (s *Service) SendMessageStream(ctx context.Context, sessionID uuid.UUID, re
 		return domain.AgentResponse{}, err
 	}
 	model := resolveChatModel(req.Model, sess.Model, agentModel)
-	effectivePolicy := domain.UpliftWorkspaceTools(domain.MergeToolPolicy(policy, agentPolicy))
+	effectivePolicy := domain.CeilToolPolicy(domain.UpliftWorkspaceTools(domain.MergeToolPolicy(policy, agentPolicy)), req.ToolCeiling)
 
 	history, err = s.applyContextPipeline(ctx, sessionID, history, model, agentProvider)
 	if err != nil {
@@ -583,6 +637,8 @@ func (s *Service) SendMessageStream(ctx context.Context, sessionID uuid.UUID, re
 	// may end the run early.
 	runCtx, cancelRun := context.WithCancel(context.WithoutCancel(runCtx))
 	defer cancelRun()
+	runCtx, endTurnScope := withTurnScope(runCtx, sessionID)
+	defer endTurnScope()
 	handle, deregister := s.registerRun(sessionID, rec.RunID(), cancelRun)
 	defer deregister()
 	if rec != nil {
@@ -661,6 +717,13 @@ func (s *Service) ListRunSteps(ctx context.Context, runID uuid.UUID) ([]domain.S
 	return s.activityStore.ListStepsByRun(ctx, runID)
 }
 
+func (s *Service) ListRunStepsSince(ctx context.Context, runID uuid.UUID, since time.Time) ([]domain.SessionStep, error) {
+	if s.activityStore == nil {
+		return nil, fmt.Errorf("activity tracking not enabled")
+	}
+	return s.activityStore.ListStepsByRunSince(ctx, runID, since)
+}
+
 func (s *Service) ListActiveRuns(ctx context.Context) ([]domain.SessionRun, error) {
 	if s.activityStore == nil {
 		return nil, fmt.Errorf("activity tracking not enabled")
@@ -706,17 +769,18 @@ func (s *Service) applyContextPipeline(ctx context.Context, sessionID uuid.UUID,
 			history = injected
 		}
 	}
-	if s.summarizer != nil && s.contextCfg.SummarizeThreshold > 0 {
+	// The configured budget is all zeros by default — each model's own limits
+	// fill it — so a chat is summarised and trimmed against its model's window
+	// instead of never.
+	budget := appcontext.ResolveBudget(s.budget, appcontext.LimitsFor(provider, model))
+	if s.summarizer != nil {
 		var err error
-		history, err = appcontext.SummarizeRollingFor(ctx, s.budget, s.summarizer, history, model, provider)
+		history, err = appcontext.SummarizeRollingFor(ctx, budget, s.summarizer, history, model, provider)
 		if err != nil {
 			return nil, err
 		}
 	}
-	if s.budget.MaxTokens > 0 {
-		history = s.budget.Apply(history)
-	}
-	return history, nil
+	return budget.Apply(history), nil
 }
 
 func (s *Service) buildMessageHistory(ctx context.Context, sessionID uuid.UUID) ([]domain.Message, error) {
@@ -888,6 +952,11 @@ func (s *Service) prepareRunContext(
 }
 
 func (s *Service) parkTurnOnQuota(ctx context.Context, sessionID uuid.UUID, req domain.SessionMessageRequest, policy domain.ToolPolicy, block *domain.QuotaBlock, lang string) error {
+	if req.NoQuotaPark || len(req.ToolCeiling) > 0 {
+		notice := domain.NewQuotaNotice(block, lang)
+		s.appendAssistantError(ctx, sessionID, notice)
+		return notice
+	}
 	if err := s.store.ParkPendingTurn(context.WithoutCancel(ctx), sessionID, req, policy, block.ResumeAt); err != nil {
 		log.Warn().Err(err).Str("session_id", sessionID.String()).Msg("could not park a quota-blocked chat turn; the user will have to resend it")
 		notice := domain.NewQuotaNotice(block, lang)

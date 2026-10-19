@@ -1,5 +1,5 @@
-import { Bot, Check, CircleStop, Clock, Cog, ExternalLink, FileText, FlaskConical, GitBranch, GitPullRequest, HelpCircle, History, Loader2, MessageSquare, MessagesSquare, Minus, PackageCheck, Paperclip, Plus, Rocket, RotateCcw, User, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { Bot, Check, Clock, Cog, ExternalLink, FileText, FlaskConical, GitBranch, GitPullRequest, HelpCircle, History, Loader2, MessageSquare, MessagesSquare, Minus, PackageCheck, Paperclip, Plus, Rocket, User, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
@@ -13,12 +13,12 @@ import {
   type InitiativeProject,
   type Release,
   type Repository,
-  type SessionRun,
   type TaskAgentRun,
   type TaskComment,
   type TaskColumn,
   type TaskDocument,
   type TaskPriority,
+  type TaskReviews,
   type TaskTestCase,
   type TestCaseStatus,
   type TaskType,
@@ -26,20 +26,23 @@ import {
   type BoardMember,
 } from "@/api";
 import { MultiSelectPicker } from "@/components/admin/MultiSelectPicker";
-import { ActivityPanel } from "@/components/chat/ActivityPanel";
 import { AttachmentDropzone } from "@/components/attachments/AttachmentDropzone";
 import { AttachmentList } from "@/components/attachments/AttachmentList";
-import { PlanView } from "@/components/chat/PlanView";
 import { HumanUatDecision } from "@/components/board/HumanUatDecision";
+import { TaskAgentRunsSection } from "@/components/board/TaskAgentRunsSection";
 import { AnalizReviewDecision } from "@/components/board/AnalizReviewDecision";
+import { CodeReviewApprovals } from "@/components/board/CodeReviewApprovals";
 import { BlockedQuestionsBanner } from "@/components/board/analysis/BlockedQuestionsBanner";
 import { PipelineSection } from "@/components/board/PipelineSection";
 import { TaskPreviewsSection } from "@/components/board/TaskPreviewsSection";
 import { RELEASE_STATUS_VARIANT, ReleaseDrawer } from "@/components/projects/repository/deploy/ReleaseDrawer";
 import { TaskAssigneeFields } from "@/components/board/TaskAssigneeFields";
+import { TaskDesignSection } from "@/components/board/TaskDesignSection";
 import { TaskDocumentList } from "@/components/board/TaskDocumentList";
 import { TaskHistory } from "@/components/board/TaskHistory";
+import { TaskIssueLink } from "@/components/issues/TaskIssueLink";
 import { MarkdownContent } from "@/components/markdown/MarkdownContent";
+import { EnvVarsCard } from "@/components/projects/repository/deploy/EnvVarsCard";
 import { MarkdownField } from "@/components/markdown/MarkdownField";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,23 +68,34 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { useI18n } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
-import { useRunActivity } from "@/hooks/useRunActivity";
+import { useRepositoryModel } from "@/hooks/useRepositoryModel";
 import { useTaskTypes } from "@/hooks/useTaskTypes";
 import { desktopRunner } from "@/lib/desktop-bridge";
-import { subtaskActivityByKey } from "@/lib/sessionGraph";
 import {
+  beforeDeploySteps,
   blockedResourceLabel,
   columnLabel,
   formatResumeIn,
-  runStatusVariant,
+  isBeforeDeployPending,
+  isMergeHold,
   TASK_PRIORITY_OPTIONS,
   taskPriorityLabel,
   taskTypeLabel,
   taskTypeOptions,
 } from "@/lib/project-board";
 import { analysisReviewPath } from "@/lib/analysis-review";
+import { componentLabel } from "@/lib/project-model";
+import { keepEqual } from "@/lib/stableState";
 import { formatDate, formatRelativeDate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
+import { logEvent } from "@/lib/analytics";
+
+// While an agent works on the task it writes comments, documents and criteria,
+// so the drawer follows closely; otherwise it only has to notice someone
+// else's edit, and seven requests every 2s would be pure load.
+const LIVE_DETAILS_POLL_MS = 2000;
+const IDLE_DETAILS_POLL_MS = 10000;
+const ACTIVE_RUN_STATUSES = new Set(["pending", "running"]);
 
 interface TaskDetailDrawerProps {
   open: boolean;
@@ -95,23 +109,6 @@ interface TaskDetailDrawerProps {
   repositories: Repository[];
   onUpdated: () => void;
 }
-
-// The server only accepts a stop while the run is still open, and a rerun only
-// once it has settled — mirroring that here keeps a doomed request off the wire.
-const STOPPABLE_RUN_STATUSES = new Set(["pending", "running"]);
-const RERUNNABLE_RUN_STATUSES = new Set(["completed", "failed", "cancelled"]);
-
-// prompt keeps the server's contract: it is the TOTAL prompt size, with the
-// cache counters as subsets of it — total spend is prompt + completion.
-interface TokenTally {
-  prompt: number;
-  completion: number;
-  cacheRead: number;
-  cacheWrite: number;
-}
-
-const formatTokenCount = (n: number) =>
-  new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(n);
 
 export function TaskDetailDrawer({
   open,
@@ -135,9 +132,9 @@ export function TaskDetailDrawer({
   const [criteria, setCriteria] = useState<AcceptanceCriterion[]>([]);
   const [testCases, setTestCases] = useState<TaskTestCase[]>([]);
   const [release, setRelease] = useState<Release | null>(null);
+  const [reviews, setReviews] = useState<TaskReviews | null>(null);
   const [releaseDrawerOpen, setReleaseDrawerOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
-  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [submittingComment, setSubmittingComment] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
@@ -179,6 +176,14 @@ export function TaskDetailDrawer({
   const initiativeName = task?.initiative_project_id
     ? initiativeProjects.find((p) => p.id === task.initiative_project_id)?.name
     : null;
+  const { model: repositoryModel } = useRepositoryModel(open && task ? repositoryId : undefined);
+  const componentOptions = useMemo(
+    () =>
+      (repositoryModel?.components ?? [])
+        .filter((c) => c.status === "active" || c.id === task?.component_id)
+        .map((c) => ({ id: c.id, label: componentLabel(c, repositoryName ?? repositoryModel?.repository.name ?? "") })),
+    [repositoryModel, repositoryName, task?.component_id],
+  );
 
   // Deploy dependencies get their own section (they are enforced at release
   // time); everything else stays in the descriptive relations list, so neither
@@ -200,34 +205,40 @@ export function TaskDetailDrawer({
   // listAllTasks, which does not populate acceptance_criteria, so the drawer
   // used to show "0" for every task and the 2s poll reverted each tick.
   // Settled per call so one failing section doesn't blank the others.
-  const loadDetails = useCallback(async () => {
-    if (!task || !repositoryId) return;
-    const [c, r, d, cr, at, tc, rel] = await Promise.allSettled([
-      api.listTaskComments(repositoryId, task.id),
-      api.listTaskAgentRuns(repositoryId, task.id),
-      api.listTaskDocuments(repositoryId, task.id),
-      api.listAcceptanceCriteria(repositoryId, task.id),
-      api.listTaskAttachments(repositoryId, task.id),
-      api.listTestCases(repositoryId, task.id),
-      api.listReleases(repositoryId, { taskId: task.id, limit: 1 }),
-    ]);
-    if (c.status === "fulfilled") setComments(c.value.comments ?? []);
-    if (r.status === "fulfilled") setRuns(r.value.runs ?? []);
-    if (d.status === "fulfilled") setDocuments(d.value.documents ?? []);
-    if (cr.status === "fulfilled") setCriteria(cr.value.items ?? []);
-    if (at.status === "fulfilled") setAttachments(at.value.attachments ?? []);
-    if (tc.status === "fulfilled") setTestCases(tc.value.items ?? []);
-    if (rel.status === "fulfilled") setRelease(rel.value.releases[0] ?? null);
-  }, [repositoryId, task]);
-
   // Reset the editing state only when a different task is shown. The board polls
   // and re-derives `task` from the fresh list, so a `task`-identity dependency
   // fired every two seconds — closing the open editor, discarding whatever the
-  // user had typed, and collapsing the selected run.
+  // user had typed.
   const taskID = task?.id ?? null;
+  const taskIDRef = useRef(taskID);
+  taskIDRef.current = taskID;
+
+  // Each slice keeps its previous value when the answer did not change, so an
+  // idle tick re-renders nothing.
+  const loadDetails = useCallback(async () => {
+    if (!taskID || !repositoryId) return;
+    const [c, r, d, cr, at, tc, rel, rv] = await Promise.allSettled([
+      api.listTaskComments(repositoryId, taskID),
+      api.listTaskAgentRuns(repositoryId, taskID),
+      api.listTaskDocuments(repositoryId, taskID),
+      api.listAcceptanceCriteria(repositoryId, taskID),
+      api.listTaskAttachments(repositoryId, taskID),
+      api.listTestCases(repositoryId, taskID),
+      api.listReleases(repositoryId, { taskId: taskID, limit: 1 }),
+      api.listTaskReviews(repositoryId, taskID),
+    ]);
+    if (taskIDRef.current !== taskID) return;
+    if (c.status === "fulfilled") setComments((prev) => keepEqual(prev, c.value.comments ?? []));
+    if (r.status === "fulfilled") setRuns((prev) => keepEqual(prev, r.value.runs ?? []));
+    if (d.status === "fulfilled") setDocuments((prev) => keepEqual(prev, d.value.documents ?? []));
+    if (cr.status === "fulfilled") setCriteria((prev) => keepEqual(prev, cr.value.items ?? []));
+    if (at.status === "fulfilled") setAttachments((prev) => keepEqual(prev, at.value.attachments ?? []));
+    if (tc.status === "fulfilled") setTestCases((prev) => keepEqual(prev, tc.value.items ?? []));
+    if (rel.status === "fulfilled") setRelease((prev) => keepEqual(prev, rel.value.releases[0] ?? null));
+    if (rv.status === "fulfilled") setReviews((prev) => keepEqual(prev, rv.value));
+  }, [repositoryId, taskID]);
   useEffect(() => {
     if (!open || !task) return;
-    setSelectedRunId(null);
     setEditingDescription(false);
     setEditingTechnical(false);
     setDescriptionDraft(task.description);
@@ -261,86 +272,32 @@ export function TaskDetailDrawer({
     };
   }, [open, repositoryId, taskID]);
 
+  const runActive = runs.some((run) => ACTIVE_RUN_STATUSES.has(run.status));
+  usePolling(loadDetails, runActive ? LIVE_DETAILS_POLL_MS : IDLE_DETAILS_POLL_MS, open && !!taskID);
+
+  // Opening is covered by the poll's own first tick. After that, a changed
+  // task (the board keeps an unchanged card's identity) means something moved
+  // it — an agent picking it up, a column change — and is worth a read now
+  // rather than at the next idle tick.
+  const seenTask = useRef<BoardTask | null>(null);
   useEffect(() => {
-    if (open && task) loadDetails();
-  }, [open, task, loadDetails]);
-
-  usePolling(loadDetails, 2000, open && !!task);
-
-  // "What is the agent doing right now" is the first question the card is opened
-  // with, and the activity below the run list only renders for a selected run —
-  // so a live run selects itself as soon as the list arrives. Guarded on the
-  // current selection, never on the runs themselves: picking another run (or
-  // deselecting) must survive the 2s poll.
-  useEffect(() => {
-    if (!open || selectedRunId) return;
-    const live = runs.find((r) => r.session_run_id && STOPPABLE_RUN_STATUSES.has(r.status));
-    if (live?.session_run_id) setSelectedRunId(live.session_run_id);
-  }, [open, runs, selectedRunId]);
-
-  const selectedTaskRun = runs.find((run) => run.session_run_id === selectedRunId) ?? null;
-
-  // Per-agent token totals across every run of this task, for the summary
-  // block above the run list. Runs with no recorded usage (pre-migration rows,
-  // runs that died before their first LLM call) contribute nothing.
-  const agentTokenTotals = useMemo(() => {
-    const byAgent = new Map<string, TokenTally>();
-    for (const r of runs) {
-      const prompt = r.prompt_tokens ?? 0;
-      const completion = r.completion_tokens ?? 0;
-      if (prompt + completion === 0) continue;
-      const acc = byAgent.get(r.agent_id) ?? { prompt: 0, completion: 0, cacheRead: 0, cacheWrite: 0 };
-      acc.prompt += prompt;
-      acc.completion += completion;
-      acc.cacheRead += r.cache_read_tokens ?? 0;
-      acc.cacheWrite += r.cache_write_tokens ?? 0;
-      byAgent.set(r.agent_id, acc);
+    if (!open || !task) {
+      seenTask.current = null;
+      return;
     }
-    return [...byAgent.entries()];
-  }, [runs]);
-
-  const tokenLine = useCallback(
-    (u: TokenTally) => {
-      const parts = [
-        `${formatTokenCount(u.prompt)} ${t("boardArea.components.taskDetail.tokenIn")}`,
-        `${formatTokenCount(u.completion)} ${t("boardArea.components.taskDetail.tokenOut")}`,
-      ];
-      if (u.cacheRead > 0) parts.push(`${formatTokenCount(u.cacheRead)} ${t("boardArea.components.taskDetail.tokenCacheRead")}`);
-      if (u.cacheWrite > 0) parts.push(`${formatTokenCount(u.cacheWrite)} ${t("boardArea.components.taskDetail.tokenCacheWrite")}`);
-      parts.push(`${formatTokenCount(u.prompt + u.completion)} ${t("boardArea.components.taskDetail.tokenTotal")}`);
-      return parts.join(" · ");
-    },
-    [t],
-  );
-  const {
-    steps: runSteps,
-    plan: runPlan,
-    liveSummary,
-    isLive: runIsLive,
-    loading: runActivityLoading,
-  } = useRunActivity(selectedRunId, open && !!selectedRunId, selectedTaskRun?.status);
-
-  // The plan says which subtasks ran; the step stream says what happened inside
-  // each one. The card is only readable with both.
-  const runSubtaskActivity = useMemo(
-    () => subtaskActivityByKey(runSteps, runPlan, runIsLive),
-    [runSteps, runPlan, runIsLive],
-  );
-
-  const selectedSessionRun: SessionRun | null = selectedRunId
-    ? {
-        id: selectedRunId,
-        request_id: selectedTaskRun?.id ?? "",
-        status: selectedTaskRun?.status ?? "unknown",
-        started_at: selectedTaskRun?.created_at ?? new Date().toISOString(),
-      }
-    : null;
+    const opening = seenTask.current === null;
+    seenTask.current = task;
+    if (!opening) void loadDetails();
+  }, [open, task, loadDetails]);
 
   const patchTask = async (data: Parameters<typeof api.updateRepositoryTask>[2]) => {
     if (!task) return;
     setSaving(true);
     try {
-      await api.updateRepositoryTask(repositoryId, task.id, data);
+      const updated = await api.updateRepositoryTask(repositoryId, task.id, data);
+      if (data.column !== undefined && updated.column !== task.column) {
+        logEvent("task_move", { from_column: task.column, to_column: updated.column });
+      }
       onUpdated();
       toast.success(t("boardArea.components.taskDetail.updated"));
     } catch (e) {
@@ -389,6 +346,10 @@ export function TaskDetailDrawer({
 
   const handleInitiative = (value: string) => {
     patchTask({ initiative_project_id: value === "none" ? null : value });
+  };
+
+  const handleComponent = (value: string) => {
+    patchTask({ component_id: value === "none" ? null : value });
   };
 
   const saveDescription = async () => {
@@ -654,12 +615,51 @@ export function TaskDetailDrawer({
                         pending questions instead — the human answers in the
                         report, not here, so the generic detail line would be
                         redundant with the structured list below it. */}
-                    {task.blocked_question && task.blocked_resource !== "analysis_questions" && (
-                      <p className="whitespace-pre-line text-sm text-foreground">
-                        {task.blocked_question}
-                      </p>
-                    )}
-                    {task.blocked_resource === "analysis_questions" ? (
+                    {task.blocked_question &&
+                      task.blocked_resource !== "analysis_questions" &&
+                      !isMergeHold(task.blocked_resource) && (
+                        <p className="whitespace-pre-line text-sm text-foreground">
+                          {task.blocked_question}
+                        </p>
+                      )}
+                    {/* A merge hold says what the merge waits for and, when
+                        that is the reader, offers the one action that
+                        resolves it right here — the before-deploy section
+                        further down is easy to miss on a long card. */}
+                    {isMergeHold(task.blocked_resource) ? (
+                      <>
+                        {task.blocked_resource === "deploy_order" && task.blocked_question && (
+                          <p className="whitespace-pre-line text-sm text-foreground">
+                            {task.blocked_question}
+                          </p>
+                        )}
+                        {task.blocked_resource === "before_deploy" && (
+                          <MarkdownContent
+                            content={beforeDeploySteps(task.before_deploy) || task.blocked_question || ""}
+                          />
+                        )}
+                        <p className="text-xs text-amber-700 dark:text-amber-400">
+                          {t(`boardArea.components.taskDetail.mergeHold.${task.blocked_resource}`, {
+                            detail: task.blocked_question ?? "",
+                          })}
+                        </p>
+                        {task.blocked_resource === "before_deploy" && (
+                          <Button size="sm" variant="outline" onClick={() => setBeforeDeployConfirmOpen(true)}>
+                            {t("boardArea.components.taskDetail.beforeDeployConfirmButton")}
+                          </Button>
+                        )}
+                        {task.blocked_resource === "delivery_profile" && (
+                          <Button asChild size="sm" variant="outline">
+                            <Link to={`/repositories/${repositoryId}?tab=deploy`}>
+                              {t("boardArea.components.taskDetail.mergeHoldOpenDeploy")}
+                            </Link>
+                          </Button>
+                        )}
+                        {task.blocked_resource === "deploy_env" && (
+                          <EnvVarsCard repositoryId={repositoryId} pendingOnly onSettled={onUpdated} />
+                        )}
+                      </>
+                    ) : task.blocked_resource === "analysis_questions" ? (
                       <BlockedQuestionsBanner task={task} repositoryId={repositoryId} />
                     ) : (
                       <>
@@ -742,6 +742,16 @@ export function TaskDetailDrawer({
                     <MarkdownContent content={task.technical_description} />
                   )}
                 </section>
+
+                {/* Distinct keys: these two are siblings, and a shared key made React
+                    duplicate the design section on every poll that re-rendered them. */}
+                <TaskDesignSection
+                  key={`design-${task.id}`}
+                  repositoryId={repositoryId}
+                  taskId={task.id}
+                  repositoryName={repositoryName}
+                  active={open}
+                />
 
                 <Separator />
 
@@ -910,7 +920,7 @@ export function TaskDetailDrawer({
                               relative: formatRelativeDate(task.before_deploy_confirmed_at),
                             })}
                           </p>
-                        ) : (
+                        ) : isBeforeDeployPending(task) ? (
                           <Notice variant="warning" title={t("boardArea.components.taskDetail.beforeDeployPending")}>
                             <Button
                               size="sm"
@@ -921,7 +931,7 @@ export function TaskDetailDrawer({
                               {t("boardArea.components.taskDetail.beforeDeployConfirmButton")}
                             </Button>
                           </Notice>
-                        )}
+                        ) : null}
                       </>
                     ) : (
                       <p className="text-xs text-muted-foreground">
@@ -1046,149 +1056,17 @@ export function TaskDetailDrawer({
 
                 <Separator />
 
-                <section className="space-y-3">
-                  <Label className="text-muted-foreground">{t("boardArea.components.taskDetail.agentRuns", { count: runs.length })}</Label>
-                  {agentTokenTotals.length > 0 && (
-                    <div className="space-y-1 rounded-lg border border-border bg-muted/10 px-3 py-2">
-                      <p className="text-micro font-medium text-muted-foreground">{t("boardArea.components.taskDetail.tokenUsage")}</p>
-                      {agentTokenTotals.map(([agentId, tally]) => (
-                        <div key={agentId} className="flex flex-wrap items-baseline justify-between gap-x-2 text-micro">
-                          <span className="font-medium">
-                            {agents.find((a) => a.id === agentId)?.name ?? t("boardArea.components.taskDetail.agentFallback")}
-                          </span>
-                          <span className="text-muted-foreground">{tokenLine(tally)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {runs.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">{t("boardArea.components.taskDetail.noRuns")}</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {runs.map((r) => {
-                        const agentName = agents.find((a) => a.id === r.agent_id)?.name ?? t("boardArea.components.taskDetail.agentFallback");
-                        const active = selectedRunId === r.session_run_id;
-                        const busy = runActionId === r.id;
-                        const canStop = STOPPABLE_RUN_STATUSES.has(r.status);
-                        // A blocked task is waiting on the human, so handing it a
-                        // fresh run would only bounce off the server's gate.
-                        const canRerun = !task.blocked_at && RERUNNABLE_RUN_STATUSES.has(r.status);
-                        return (
-                          <div
-                            key={r.id}
-                            className={cn(
-                              "flex items-start gap-1 rounded-lg border transition-colors",
-                              active ? "border-primary bg-primary/5" : "border-border hover:bg-muted/30",
-                            )}
-                          >
-                            <button
-                              type="button"
-                              className="min-w-0 flex-1 px-3 py-2.5 text-left"
-                              onClick={() => setSelectedRunId(r.session_run_id ?? null)}
-                              disabled={!r.session_run_id}
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-sm font-medium">{agentName}</span>
-                                <Badge variant={runStatusVariant(r.status)}>{r.status}</Badge>
-                              </div>
-                              {r.summary && (
-                                <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{r.summary}</p>
-                              )}
-                              <p className="mt-1 text-micro text-muted-foreground">{formatRelativeDate(r.created_at)}</p>
-                              {(r.prompt_tokens ?? 0) + (r.completion_tokens ?? 0) > 0 && (
-                                <p className="mt-1 text-micro text-muted-foreground">
-                                  {tokenLine({
-                                    prompt: r.prompt_tokens ?? 0,
-                                    completion: r.completion_tokens ?? 0,
-                                    cacheRead: r.cache_read_tokens ?? 0,
-                                    cacheWrite: r.cache_write_tokens ?? 0,
-                                  })}
-                                </p>
-                              )}
-                            </button>
-                            {canStop && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="mt-1.5 mr-1.5 shrink-0 gap-1"
-                                disabled={busy}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setStopRunId(r.id);
-                                }}
-                              >
-                                {busy ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <CircleStop className="h-3.5 w-3.5" />
-                                )}
-                                {t("boardArea.components.taskDetail.runStop")}
-                              </Button>
-                            )}
-                            {canRerun && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="mt-1.5 mr-1.5 shrink-0 gap-1"
-                                disabled={busy}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  rerunRun(r.id);
-                                }}
-                              >
-                                {busy ? (
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                ) : (
-                                  <RotateCcw className="h-3.5 w-3.5" />
-                                )}
-                                {t("boardArea.components.taskDetail.runRerun")}
-                              </Button>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {selectedRunId && (
-                    <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-3">
-                      {runIsLive && liveSummary && (
-                        <Badge variant="info" className="gap-1">
-                          <Loader2 className="h-3 w-3 animate-spin" />
-                          {liveSummary}
-                        </Badge>
-                      )}
-                      {runActivityLoading && !runSteps.length ? (
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          {t("boardArea.components.taskDetail.runLoading")}
-                        </div>
-                      ) : (
-                        <>
-                          <ActivityPanel
-                            embedded
-                            activeRuns={runIsLive && selectedSessionRun ? [selectedSessionRun] : []}
-                            runs={selectedSessionRun ? [selectedSessionRun] : []}
-                            selectedRunId={selectedRunId}
-                            onSelectRun={setSelectedRunId}
-                            steps={runSteps}
-                            plan={runPlan}
-                            isLive={runIsLive}
-                          />
-                          {runPlan && (
-                            <div className="rounded-lg border border-border bg-card p-3">
-                              <p className="mb-2 text-xs font-medium text-muted-foreground">{t("boardArea.components.taskDetail.orchestrationPlan")}</p>
-                              <PlanView
-                                plan={runPlan}
-                                agentNameMap={agentNameMap}
-                                activityByTaskKey={runSubtaskActivity}
-                              />
-                            </div>
-                          )}
-                        </>
-                      )}
-                    </div>
-                  )}
-                </section>
+                <TaskAgentRunsSection
+                  key={`runs-${task.id}`}
+                  task={task}
+                  runs={runs}
+                  agents={agents}
+                  agentNameMap={agentNameMap}
+                  active={open}
+                  runActionId={runActionId}
+                  onStop={setStopRunId}
+                  onRerun={(runId) => void rerunRun(runId)}
+                />
 
                 <Separator />
 
@@ -1295,6 +1173,26 @@ export function TaskDetailDrawer({
                         </Select>
                       </div>
                     )}
+                    {componentOptions.length > 0 && (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="task-detail-component" className="text-xs text-muted-foreground">
+                          {t("boardArea.components.taskDetail.component")}
+                        </Label>
+                        <Select value={task.component_id ?? "none"} onValueChange={handleComponent} disabled={saving}>
+                          <SelectTrigger id="task-detail-component">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">{t("boardArea.components.taskDetail.none")}</SelectItem>
+                            {componentOptions.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
                     <div className="col-span-2">
                       <TaskAssigneeFields
                         agents={memberAgents}
@@ -1305,6 +1203,8 @@ export function TaskDetailDrawer({
                       />
                     </div>
                   </section>
+
+                  <TaskIssueLink repositoryId={repositoryId} taskId={task.id} />
 
                   {/* The pull request lives HERE, with the task's other
                       properties, and not in the content column beside the
@@ -1347,6 +1247,8 @@ export function TaskDetailDrawer({
                       )}
                     </section>
                   )}
+
+                  <CodeReviewApprovals reviews={reviews} inCodeReview={task.column === "code_review"} />
 
                   {task.pr_url && <TaskPreviewsSection key={task.id} repositoryId={repositoryId} taskId={task.id} />}
 

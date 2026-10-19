@@ -139,7 +139,7 @@ func applyDefaults(cfg *domain.Config) {
 		cfg.Evolution.MaxRuleChanges = 3
 	}
 	if cfg.Evolution.MaxSkillsPerAgent <= 0 {
-		cfg.Evolution.MaxSkillsPerAgent = 25
+		cfg.Evolution.MaxSkillsPerAgent = 100
 	}
 	if cfg.Evolution.MaxRulesPerAgent <= 0 {
 		cfg.Evolution.MaxRulesPerAgent = 15
@@ -165,6 +165,13 @@ func applyDefaults(cfg *domain.Config) {
 	if cfg.DeployOps.PollInterval <= 0 {
 		cfg.DeployOps.PollInterval = 2 * time.Minute
 	}
+	if cfg.Alerting.Interval <= 0 {
+		cfg.Alerting.Interval = time.Minute
+	}
+	if cfg.Alerting.MaxRulesPerSweep <= 0 {
+		cfg.Alerting.MaxRulesPerSweep = 200
+	}
+	cfg.DeployOps.Impact = cfg.DeployOps.Impact.WithDefaults()
 
 	if strings.TrimSpace(cfg.ClaudeCode.Binary) == "" {
 		cfg.ClaudeCode.Binary = "claude"

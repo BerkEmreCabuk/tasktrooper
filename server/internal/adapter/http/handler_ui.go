@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
@@ -64,7 +65,8 @@ func isServerPath(path string) bool {
 		path == "/health" || path == "/metrics" || strings.HasPrefix(path, "/docs") ||
 		// The Claude Code tool endpoint. Answering a JSON-RPC call with an HTML
 		// page makes the CLI report a parse error rather than a missing route.
-		path == mcpserver.Path
+		path == mcpserver.Path ||
+		path == MCPOAuthCallbackPath
 }
 
 func (h *Handler) registerEmbeddedUI(app *fiber.App, assets fs.FS) {
@@ -105,6 +107,18 @@ func (h *Handler) isPublicPath(path string) bool {
 	// below, because it is a decision, not a side effect of the path we
 	// happened to pick.
 	if path == mcpserver.Path {
+		return true
+	}
+	// The browser returning from an MCP server's authorization server holds
+	// no credential of ours. The single-use state it carries is what
+	// authenticates it (MCPOAuthCallback), so the API key is not asked for.
+	if path == MCPOAuthCallbackPath {
+		return true
+	}
+	// An external alerter holds no API key; the token in the path is its
+	// credential, checked by IngestAlertWithToken. One segment only, so a route
+	// added under the prefix later is not public by accident.
+	if isAlertIngestPath(path) {
 		return true
 	}
 	if !strings.HasPrefix(path, "/v1") && !strings.HasPrefix(path, "/admin") {
@@ -237,13 +251,26 @@ func (h *Handler) RunSteps(c *fiber.Ctx) error {
 	if err != nil {
 		return badRequest(c, "invalid run id")
 	}
+	var since *time.Time
+	if raw := c.Query("since"); raw != "" {
+		t, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			return badRequest(c, "invalid since")
+		}
+		since = &t
+	}
 	ctx := h.enrichContext(c)
 	runID, taskRun, ok := h.activityRunID(ctx, id)
 	if !ok {
 		// A queued board run that never started has nothing behind it yet.
 		return c.JSON(fiber.Map{"steps": []domain.SessionStep{}, "count": 0})
 	}
-	steps, err := h.sessionSvc.ListRunSteps(ctx, runID)
+	var steps []domain.SessionStep
+	if since != nil {
+		steps, err = h.sessionSvc.ListRunStepsSince(ctx, runID, *since)
+	} else {
+		steps, err = h.sessionSvc.ListRunSteps(ctx, runID)
+	}
 	if err != nil {
 		return internalError(c, err)
 	}

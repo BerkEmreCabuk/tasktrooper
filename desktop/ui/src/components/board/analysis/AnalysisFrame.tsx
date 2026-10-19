@@ -1,5 +1,6 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import type { TaskAnnotationStatus, TaskDocument } from "@/api";
+import { CanvasZoomControls } from "@/components/board/analysis/CanvasZoomControls";
 import { buildFrameScript } from "@/components/board/analysis/frameRuntime";
 import { renderMarkdownFrameHtml } from "@/components/board/analysis/markdownFrame";
 import {
@@ -7,6 +8,7 @@ import {
   createNonce,
   FRAME_SANDBOX,
   parseFrameMessage,
+  type CanvasPage,
   type FrameQuestion,
   type FrameSelection,
   type QuestionsLabels,
@@ -28,19 +30,30 @@ export interface FrameAnnotation {
 
 export interface AnalysisFrameHandle {
   scrollTo: (id: string) => void;
+  /** Canvas only: frame one page of the document (an id from `onOutline`). */
+  goToPage: (id: string) => void;
 }
 
 interface AnalysisFrameProps {
   document: Pick<TaskDocument, "id" | "content" | "format">;
-  annotations: FrameAnnotation[];
+  /** Omit, with the handlers below, for a read-only view (no highlights, selections ignored). */
+  annotations?: FrameAnnotation[];
   /** Drawn in the Open questions section at the top of the frame body, built from this structured data, never from the document's own HTML. */
   questions?: FrameQuestion[];
-  activeId: string | null;
+  activeId?: string | null;
   theme: "light" | "dark";
-  onSelection: (selection: FrameSelection) => void;
-  onFocusAnnotation: (id: string) => void;
-  onAnchored: (found: Record<string, boolean>) => void;
+  onSelection?: (selection: FrameSelection) => void;
+  onFocusAnnotation?: (id: string) => void;
+  onAnchored?: (found: Record<string, boolean>) => void;
   onAnswer?: (id: string, text: string) => void;
+  /** The iframe's accessible title; defaults to "Analysis document". */
+  title?: string;
+  /** Show an HTML document as a pan-and-zoom canvas (design mockups); markdown ignores it. */
+  canvas?: boolean;
+  /** Canvas only: the document's pages, each time the frame lays it out. */
+  onOutline?: (pages: CanvasPage[]) => void;
+  /** Canvas only: the page in view changed — by panning (`view`) or by `goToPage` (`goto`). */
+  onPageChange?: (id: string | null, cause: "view" | "goto") => void;
   className?: string;
 }
 
@@ -49,19 +62,24 @@ interface AnalysisFrameProps {
  * opaque-origin iframe (see srcdoc.ts) that talks to this component only by
  * postMessage. Nothing goes in but the document and the annotations to draw.
  */
-const NOOP_ON_ANSWER = () => {};
+const NOOP = () => {};
+const NO_ANNOTATIONS: FrameAnnotation[] = [];
 
 export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>(function AnalysisFrame(
   {
     document: doc,
-    annotations,
+    annotations = NO_ANNOTATIONS,
     questions = [],
-    activeId,
+    activeId = null,
     theme,
-    onSelection,
-    onFocusAnnotation,
-    onAnchored,
-    onAnswer = NOOP_ON_ANSWER,
+    onSelection = NOOP,
+    onFocusAnnotation = NOOP,
+    onAnchored = NOOP,
+    onAnswer = NOOP,
+    title,
+    canvas = false,
+    onOutline = NOOP,
+    onPageChange = NOOP,
     className,
   },
   ref,
@@ -69,12 +87,16 @@ export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>
   const { t } = useI18n();
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [srcdoc, setSrcdoc] = useState<string | null>(null);
+  const [zoom, setZoom] = useState<number | null>(null);
   const format = documentFormat(doc);
   const markdownTheme = format === "markdown" ? theme : null;
+  const canvasMode = canvas && format === "html";
 
   useEffect(() => {
     let cancelled = false;
-    const build = (html: string) => buildAnalysisSrcdoc(html, { nonce: createNonce(), script: FRAME_SCRIPT });
+    setZoom(null);
+    const build = (html: string) =>
+      buildAnalysisSrcdoc(html, { nonce: createNonce(), script: FRAME_SCRIPT, canvas: canvasMode });
     if (markdownTheme === null) {
       setSrcdoc(build(doc.content));
       return;
@@ -90,7 +112,7 @@ export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>
     return () => {
       cancelled = true;
     };
-  }, [doc.id, doc.content, markdownTheme]);
+  }, [doc.id, doc.content, markdownTheme, canvasMode]);
 
   const items = useMemo(
     () =>
@@ -111,8 +133,8 @@ export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>
   const itemsRef = useRef(items);
   itemsRef.current = items;
 
-  const handlers = useRef({ onSelection, onFocusAnnotation, onAnchored, onAnswer });
-  handlers.current = { onSelection, onFocusAnnotation, onAnchored, onAnswer };
+  const handlers = useRef({ onSelection, onFocusAnnotation, onAnchored, onAnswer, onOutline, onPageChange });
+  handlers.current = { onSelection, onFocusAnnotation, onAnchored, onAnswer, onOutline, onPageChange };
 
   const questionLabels: QuestionsLabels = useMemo(
     () => ({
@@ -179,13 +201,29 @@ export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>
         case "tt:answer":
           handlers.current.onAnswer(message.id, message.text);
           break;
+        case "tt:zoom":
+          setZoom(message.zoom);
+          break;
+        case "tt:outline":
+          handlers.current.onOutline(message.pages);
+          break;
+        case "tt:page":
+          handlers.current.onPageChange(message.id, message.cause);
+          break;
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [postItems, postQuestions]);
 
-  useImperativeHandle(ref, () => ({ scrollTo: (id: string) => post({ type: "tt:scrollTo", id }) }), [post]);
+  useImperativeHandle(
+    ref,
+    () => ({
+      scrollTo: (id: string) => post({ type: "tt:scrollTo", id }),
+      goToPage: (id: string) => post({ type: "tt:goto", page: id }),
+    }),
+    [post],
+  );
 
   const onFrameLoad = useCallback(() => {
     postItems();
@@ -201,12 +239,19 @@ export const AnalysisFrame = forwardRef<AnalysisFrameHandle, AnalysisFrameProps>
       ) : (
         <iframe
           ref={iframeRef}
-          title={t("analysisReview.page.frameTitle")}
+          title={title ?? t("analysisReview.page.frameTitle")}
           sandbox={FRAME_SANDBOX}
           srcDoc={srcdoc}
           referrerPolicy="no-referrer"
           onLoad={onFrameLoad}
           className={cn("h-full w-full border-0", format === "html" ? "bg-white" : "bg-background")}
+        />
+      )}
+      {canvasMode && srcdoc !== null && (
+        <CanvasZoomControls
+          zoom={zoom}
+          onAction={(action) => post({ type: "tt:zoom", action })}
+          className="absolute bottom-3 right-3"
         />
       )}
     </div>

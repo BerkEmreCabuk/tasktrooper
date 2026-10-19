@@ -8,6 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { useI18n } from "@/hooks/useI18n";
 import { analysisReviewPath } from "@/lib/analysis-review";
+import { isDesignTask } from "@/lib/design-system";
+import { logEvent } from "@/lib/analytics";
 
 interface AnalizReviewDecisionProps {
   task: BoardTask;
@@ -28,6 +30,7 @@ export function AnalizReviewDecision({ task, repositoryId, onUpdated, documents 
   const [openComments, setOpenComments] = useState(0);
   const hasDocuments = documents.length > 0;
   const inReview = task.column === "analiz_review";
+  const design = isDesignTask(task);
 
   useEffect(() => {
     setDeclining(false);
@@ -55,6 +58,7 @@ export function AnalizReviewDecision({ task, repositoryId, onUpdated, documents 
     setSaving(true);
     try {
       await api.updateRepositoryTask(repositoryId, task.id, { column: "done" });
+      logEvent("task_review", { decision: "approve", gate: "analysis" });
       onUpdated();
       toast.success(t("boardArea.components.taskDetail.analizReviewApproved"));
     } catch (e) {
@@ -79,6 +83,7 @@ export function AnalizReviewDecision({ task, repositoryId, onUpdated, documents 
       await api.updateRepositoryTask(repositoryId, task.id, { column: "need_revision" });
       setDeclining(false);
       setReason("");
+      logEvent("task_review", { decision: "send_back", gate: "analysis" });
       onUpdated();
       toast.success(t("boardArea.components.taskDetail.analizReviewDeclined"));
     } catch (e) {
@@ -96,6 +101,9 @@ export function AnalizReviewDecision({ task, repositoryId, onUpdated, documents 
           {t("boardArea.components.taskDetail.analizReviewHeading")}
         </h3>
       </div>
+      {design && (
+        <p className="text-sm text-muted-foreground">{t("analysisReview.page.designApproveHint")}</p>
+      )}
       {!declining ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button onClick={approve} disabled={saving}>
@@ -117,7 +125,11 @@ export function AnalizReviewDecision({ task, repositoryId, onUpdated, documents 
             id="analiz-review-decline-reason"
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder={t("boardArea.components.taskDetail.analizReviewDeclinePlaceholder")}
+            placeholder={
+              design
+                ? t("analysisReview.design.declinePlaceholder")
+                : t("boardArea.components.taskDetail.analizReviewDeclinePlaceholder")
+            }
             rows={4}
             disabled={saving}
             autoFocus
@@ -142,8 +154,13 @@ export function AnalizReviewDecision({ task, repositoryId, onUpdated, documents 
           <Link to={analysisReviewPath(repositoryId, task.id)}>
             <FileSearch />
             {openComments > 0
-              ? t("boardArea.components.taskDetail.analizReviewOpenReviewCount", { count: openComments })
-              : t("boardArea.components.taskDetail.analizReviewOpenReview")}
+              ? t(
+                  design
+                    ? "analysisReview.design.openReviewCount"
+                    : "boardArea.components.taskDetail.analizReviewOpenReviewCount",
+                  { count: openComments },
+                )
+              : t(design ? "analysisReview.design.openReview" : "boardArea.components.taskDetail.analizReviewOpenReview")}
           </Link>
         </Button>
       )}

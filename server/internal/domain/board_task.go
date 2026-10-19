@@ -19,6 +19,11 @@ var ErrTaskAlreadyClaimed = errors.New("task is already assigned to another agen
 // run talked into naming a planted task must not act on its repository.
 var ErrTaskOutsideRepository = errors.New("board task belongs to a different repository than this run")
 
+// ErrAssigneeNotAssignable refuses an assignee that holds a role the board
+// never hands work to (RoleKeyProductManager): the PM reaches its tasks through
+// column subscriptions, so a task assigned to it waits for nobody.
+var ErrAssigneeNotAssignable = errors.New("the product manager cannot be assigned a board task")
+
 type TaskType string
 
 const (
@@ -26,11 +31,12 @@ const (
 	TaskTypeAnaliz    TaskType = "analiz"
 	TaskTypeBug       TaskType = "bug"
 	TaskTypeTechnical TaskType = "technical"
+	TaskTypeDesign    TaskType = "design"
 )
 
 func ValidTaskType(t TaskType) bool {
 	switch t {
-	case TaskTypeTask, TaskTypeAnaliz, TaskTypeBug, TaskTypeTechnical:
+	case TaskTypeTask, TaskTypeAnaliz, TaskTypeBug, TaskTypeTechnical, TaskTypeDesign:
 		return true
 	default:
 		return false
@@ -41,7 +47,15 @@ func ValidTaskType(t TaskType) bool {
 // agents may still branch and try things in the local task workspace, but none
 // of it is pushed or opened as a pull request.
 func (t TaskType) PublishesBranch() bool {
-	return t != TaskTypeAnaliz
+	return !t.IsDocumentWork()
+}
+
+// IsDocumentWork is true for the types whose deliverable is a document the
+// human approves in analiz_review — an analysis or a design — rather than a
+// diff: they ask through record_open_questions instead of ask_user and never
+// open a pull request.
+func (t TaskType) IsDocumentWork() bool {
+	return t == TaskTypeAnaliz || t == TaskTypeDesign
 }
 
 // TaskKeyPrefix is the letter a task's key starts with: T-1 for work, B-1 for
@@ -55,6 +69,8 @@ func TaskKeyPrefix(t TaskType) string {
 		return "A"
 	case TaskTypeTechnical:
 		return "TC"
+	case TaskTypeDesign:
+		return "D"
 	default:
 		return "T"
 	}
@@ -72,6 +88,8 @@ func TaskTypeForKeyPrefix(prefix string) (TaskType, bool) {
 		return TaskTypeAnaliz, true
 	case "TC":
 		return TaskTypeTechnical, true
+	case "D":
+		return TaskTypeDesign, true
 	default:
 		return "", false
 	}
@@ -326,6 +344,9 @@ type BoardTask struct {
 	// ColumnEnteredAt is when the task entered its current column; nil for
 	// tasks that predate the span ledger.
 	ColumnEnteredAt *time.Time `json:"column_entered_at,omitempty"`
+	// AgentRunning is true while any of the task's agent runs is in status
+	// running, so a board view can poll a task's activity only while it moves.
+	AgentRunning bool `json:"agent_running"`
 	// BeforeDeploy / AfterDeploy / RollbackPlan are the release runbook, each
 	// surfaced at the moment it applies. Pointers: nil means "not written".
 	BeforeDeploy *string `json:"before_deploy,omitempty"`
@@ -419,7 +440,18 @@ const (
 )
 
 // BeforeDeployPending reports steps a human still has to perform before this
-// task may ship.
+// task may ship. The generated order note is not such a step: the deploy order
+// it describes is enforced by the release gate on its own, so a field holding
+// nothing else must not wait for a human.
 func (t BoardTask) BeforeDeployPending() bool {
-	return t.BeforeDeploy != nil && strings.TrimSpace(*t.BeforeDeploy) != "" && t.BeforeDeployConfirmedAt == nil
+	return t.BeforeDeploySteps() != "" && t.BeforeDeployConfirmedAt == nil
+}
+
+// BeforeDeploySteps is the human-written part of BeforeDeploy, without the
+// generated order note.
+func (t BoardTask) BeforeDeploySteps() string {
+	if t.BeforeDeploy == nil {
+		return ""
+	}
+	return StripOrderNote(*t.BeforeDeploy)
 }

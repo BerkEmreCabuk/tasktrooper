@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
 
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/secrets"
@@ -67,6 +68,8 @@ type Service struct {
 	mu sync.Mutex
 
 	pendingPush map[renewTarget]bool
+
+	tb *testBuilds
 }
 
 func NewService(d Deps) *Service {
@@ -329,6 +332,15 @@ func (s *Service) LinkStoreApp(ctx context.Context, repositoryID uuid.UUID, plat
 		app.AppName = name
 	}
 
+	// A failed read leaves the row where it was; the monitor reads the console
+	// again on its next sweep, so the link itself is not refused over it.
+	if presence, err := s.storePresence(ctx, app); err != nil {
+		log.Warn().Err(err).Str("repository_id", repositoryID.String()).Str("platform", platform).
+			Msg("storeops: reading the linked app's store state failed")
+	} else {
+		app, _ = adoptStorePresence(app, presence, time.Now())
+	}
+
 	stored, err := s.apps.Upsert(ctx, app)
 	if err != nil {
 		return domain.MobileStoreApp{}, fmt.Errorf("storeops: persisting the store app link: %w", err)
@@ -361,6 +373,7 @@ func (s *Service) storeTracks(ctx context.Context, app domain.MobileStoreApp) (d
 		if err != nil {
 			return domain.StoreTracks{}, err
 		}
+		s.skipTestBuilds(ctx, client, app)
 		tracks, err := client.Tracks(ctx, app.StoreAppID)
 		if err != nil {
 			return domain.StoreTracks{}, fmt.Errorf("storeops: reading TestFlight and App Store channels for %s: %w", app.Identifier, err)

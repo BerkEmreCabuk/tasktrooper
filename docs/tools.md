@@ -8,8 +8,9 @@ set of named tools. A [tool policy](tool-policies.md) decides which of these
 a given agent may call; this page describes what each tool does. "Typically
 held by" reflects the default role policies TaskTrooper ships with
 (`backend-developer`, `frontend-developer`, `mobile-developer`,
-`system-architect`, `qa-agent`, `product-manager`) — your own agents and
-[custom agents](custom-agents.md) can be granted any subset.
+`data-scientist`, `game-developer`, `product-manager`, `system-architect`,
+`qa-agent`, `release-engineer`, `security-agent`, `ui-designer`) — your own
+agents and [custom agents](custom-agents.md) can be granted any subset.
 
 ## Shell and files
 
@@ -30,13 +31,18 @@ held by" reflects the default role policies TaskTrooper ships with
 | Tool | What it does | Typically held by |
 |---|---|---|
 | `fetch_url` | HTTP GET, HTML responses stripped to visible text | Every role that holds `roleWebTools` — developers, `product-manager`, `system-architect`, `qa-agent` |
+| `http_request` | A full HTTP request (any method, headers, body) against a running build — how PM UAT tests a backend- or API-only acceptance criterion headless | `product-manager` |
 | `download_file` | Downloads a binary asset (image, font, icon) into the workspace | Rides with the workspace write tools; lost in review/QA verdict columns |
 | `web_search` | Keyless web search (DuckDuckGo, falling back to Bing) | Same roles as `fetch_url` |
 | `search_boilerplate_catalog` | Searches the shared boilerplate repository for a starter stack to copy instead of writing one from scratch | Developer roles |
 
 ## Code exploration
 
-Read-only, and available even on a repository with no semantic index yet.
+Read-only. Only `read_file` (above), `grep_code` and `get_repo_tree` work on
+a repository with no semantic index yet — they read the files directly.
+`codebase_search`, `expand_symbol_context` and `get_symbol_skeleton` need the
+index and refuse until one is built, and refuse again on a stale one until it
+has been re-indexed.
 
 | Tool | What it does | Typically held by |
 |---|---|---|
@@ -55,6 +61,7 @@ Read-only, and available even on a repository with no semantic index yet.
 | `create_board_task` | Creates a task | `product-manager` (and any agent granted `roleBoardCreateTools`) |
 | `move_board_task` | Moves a task to another column | Every role |
 | `update_board_task` | Updates a task's fields (including `before_deploy`/`after_deploy`/`rollback_plan`) | Every role |
+| `declare_env_vars` | Declares an environment variable the change makes the deployed app read, so the merge waits until it is set | Developer roles |
 | `claim_board_task` | Claims an unassigned task | Every role |
 | `delete_board_task` | Permanently deletes a task and everything on it | `product-manager` only |
 | `add_task_comment` | Comments on a task | Every role |
@@ -62,6 +69,9 @@ Read-only, and available even on a repository with no semantic index yet.
 | `add_task_document` | Attaches a document (spec, plan) to a task | `product-manager`, `system-architect` (create roles) |
 | `update_task_document` | Edits an attached document | Same as `add_task_document` |
 | `list_task_documents` | Reads a task's attached documents in full | Every role |
+| `record_open_questions` | Records the open questions an analysis raises, answered by the human on the report page | `system-architect` (on an `analiz` task) |
+| `list_open_questions` | Reads those questions and the human's answers back | `system-architect` (on an `analiz` task) |
+| `ask_user` | Asks the human numbered clarifying questions and blocks the run until they answer | Every role, while the run is allowed to ask |
 | `attach_task_file` | Links an already-uploaded file to a task | `product-manager`, `system-architect` |
 | `list_acceptance_criteria` | Reads a task's acceptance criteria | Every role |
 | `set_criterion_completed` | Marks a criterion done | Developer roles (whichever role implements it) |
@@ -79,6 +89,9 @@ Read-only, and available even on a repository with no semantic index yet.
 | `get_project_brief` | Reads the structured project model's brief: what a repository/component is, what it runs, what it talks to; fetched on demand, never injected into a run's context | `system-architect`, developer roles, `qa-agent`, `product-manager` |
 | `list_component_checks` | Lists each component's CI checks — workflow, purpose, gate, the exact local command that reproduces it | `system-architect`, developer roles, `qa-agent` |
 | `list_links` | Lists what a component talks to and what talks to it (other components, system resources) | `system-architect`, developer roles, `qa-agent`, `product-manager` |
+| `get_design_system` | Reads the design system a repository follows — the project base, the repository's layer and the merged tokens, with lint findings; `files: true` also returns `DESIGN.md`, `design/tokens.json`, `design/tokens.css` and `design/INVENTORY.md` to write into the repository | Every role |
+| `propose_design_system` | Proposes a new version of a project's base or a repository's layer from a `design` task; approved with the task | `ui-designer` |
+| `request_design_system` | Opens the design task that derives or updates a design system from existing code — what the Design System tab's button does | `ui-designer`, `system-architect`, `product-manager` |
 
 ## Cloud runtime
 
@@ -95,7 +108,8 @@ tab" otherwise.
 | `query_runtime_logs` | Reads an environment's live application logs (not a CI job's output — that is `get_deploy_logs`), newest first | Developer roles, `qa-agent` |
 | `list_runtime_errors` | Lists an environment's runtime errors, grouped and deduplicated, with a `new` flag for errors that started in the window | `system-architect`, developer roles, `qa-agent` |
 | `list_deployments` | Lists an environment's recent deployments as the provider reports them | Developer roles, `qa-agent` |
-| `get_task_preview` | Finds the task branch's own Vercel preview deployment: status, branch URL, the commit it was built from, and how to get past Deployment Protection | `qa-agent` |
+| `get_task_preview` | Finds the task branch's own Vercel preview deployment: status, branch URL, the commit it was built from, and how to get past Deployment Protection | `qa-agent`, `product-manager` |
+| `start_task_preview` | Builds and starts the task's own checkout locally and returns its URL — the fallback when there is no hosted preview to find | `qa-agent`, `product-manager` |
 
 ## Pull requests
 
@@ -122,12 +136,13 @@ See [Deploy targets and recipes](deploy.md) → "Releases" for the full flow.
 | `run_smoke_checks` | Runs the release's frozen smoke checks against production right now, read-only | `release-engineer` only |
 | `finish_release` | Confirms a release as shipped; the only way a task reaches Released | `release-engineer` only, and only Done/Released |
 | `rollback_release` | Rolls a release back off production: reverts the merge, redeploys or lets the provider's own push-to-deploy redeploy (instant provider rollback only for an `on_merge` component); refused while a newer release of the component is open or has already shipped | `release-engineer` only, and only Done/Released |
+| `get_deploy_impact` | Reads what a release did to its component's golden signals: the hour before the deploy against the hour after and the same hour a day earlier, a verdict per signal and overall, and whether the release may roll back on its own | `release-engineer` only |
 | `get_deploy_logs` | Reads the log behind a deploy (a release's failed job by default), summarized | `release-engineer` only |
-| `list_deploy_templates` | Lists the deploy recipe catalog | `release-engineer`, `product-manager` (via `get_deploy_target`) |
+| `list_deploy_templates` | Lists the deploy recipe catalog | Developer roles (they get the "set up `<env>` deploy" tasks) — not the release engineer or the PM |
 | `load_deploy_template` | Reads one recipe in full | Same as above |
 | `get_deploy_target` | How a repository ships to an environment (the legacy per-env address record, unrelated to a component's delivery profile) | `release-engineer`, `product-manager` |
 | `update_deploy_target` | Records the address an environment actually answers at (`base_url`/`health_url`/`logs_url`/`app_url` only) | `release-engineer`, `product-manager` |
-| `record_local_deploy` | Records a break-glass deploy run made from a machine directly, so the Deployments page still reflects it | Ops-facing agents with board/deploy write access |
+| `record_local_deploy` | Records a break-glass deploy run made from a machine directly, in the same deploy-run history as the GitHub Actions runs | Ops-facing agents with board/deploy write access |
 
 `get_deploy_logs` reads a CI/Actions job's output; a bound environment's own live logs and grouped errors come from `query_runtime_logs`/`list_runtime_errors` in [Cloud runtime](#cloud-runtime) instead.
 
@@ -153,7 +168,7 @@ security](data-and-security.md)).
 | Tool | What it does | Typically held by |
 |---|---|---|
 | `browser_navigate` | Opens a URL | Developer roles, `system-architect`, `qa-agent`, `product-manager` |
-| `browser_screenshot` | Captures the current page | Same |
+| `browser_screenshot` | Captures the current page; with `attach_to_task` it also saves the image on the task | Same, and `ui-designer` |
 | `browser_click` | Clicks an element | Same |
 | `browser_fill` | Fills a form field | Same |
 | `browser_read_dom` | Reads the page's DOM/text | Same |
@@ -170,7 +185,7 @@ run stays on it. Registered at all only when a device is attached; see
 | Tool | What it does | Typically held by |
 |---|---|---|
 | `mobile_launch_app` | Installs/launches the app on the claimed device | `qa-agent`, `mobile-developer`, `product-manager` (UAT) |
-| `mobile_screenshot` | Captures the device screen | Same |
+| `mobile_screenshot` | Captures the device screen; with `attach_to_task` it also saves the image on the task | Same |
 | `mobile_read_ui` | Reads the current screen's UI tree | Same |
 | `mobile_tap` | Taps a coordinate or element | Same |
 | `mobile_type_text` | Types into the focused field | Same |
@@ -204,8 +219,11 @@ See [Skills and rules](skills-and-rules.md).
 
 MCP tools are named `mcp_<server_id>_<original_tool_name>`; their parameters
 and descriptions come straight from the MCP server's own tool definitions.
-`GET /v1/tools` shows which are currently active. See [MCP
-servers](mcp-servers.md) for adding one.
+`GET /v1/tools` shows which are currently active. A server you add reaches only
+the agents whose tool policy names it unless you make it available to all
+agents; images a tool returns reach the model as pictures. See [MCP
+servers](mcp-servers.md) for adding one and for signing in to hosted servers
+with OAuth.
 
 The reverse direction also exists: a Claude Code CLI session TaskTrooper
 spawns gets the registry's own tools back over `/mcp`, named

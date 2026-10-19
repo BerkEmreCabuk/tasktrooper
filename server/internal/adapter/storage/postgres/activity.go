@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -100,12 +101,28 @@ func (a *ActivityStore) ListRunsBySession(ctx context.Context, sessionID uuid.UU
 func (a *ActivityStore) ListStepsByRun(ctx context.Context, runID uuid.UUID) ([]domain.SessionStep, error) {
 	rows, err := a.pool.Query(ctx, `
 		SELECT id, run_id, step_type, payload, created_at
-		FROM session_steps WHERE run_id = $1 ORDER BY created_at ASC
+		FROM session_steps WHERE run_id = $1 ORDER BY created_at ASC, id ASC
 	`, runID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanSteps(rows)
+}
+
+func (a *ActivityStore) ListStepsByRunSince(ctx context.Context, runID uuid.UUID, since time.Time) ([]domain.SessionStep, error) {
+	rows, err := a.pool.Query(ctx, `
+		SELECT id, run_id, step_type, payload, created_at
+		FROM session_steps WHERE run_id = $1 AND created_at >= $2 ORDER BY created_at ASC, id ASC
+	`, runID, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanSteps(rows)
+}
+
+func scanSteps(rows pgx.Rows) ([]domain.SessionStep, error) {
 	var steps []domain.SessionStep
 	for rows.Next() {
 		var s domain.SessionStep
@@ -120,14 +137,48 @@ func (a *ActivityStore) ListStepsByRun(ctx context.Context, runID uuid.UUID) ([]
 	return steps, rows.Err()
 }
 
+func (a *ActivityStore) FailInterruptedRuns(ctx context.Context) (int, error) {
+	tag, err := a.pool.Exec(ctx, `
+		UPDATE session_runs SET status = $1, completed_at = now()
+		WHERE status = $2
+	`, domain.SessionRunStatusFailed, domain.SessionRunStatusRunning)
+	if err != nil {
+		return 0, fmt.Errorf("fail interrupted runs: %w", err)
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// A session run has no heartbeat of its own, so a row whose server died reads
+// 'running' forever. The boot sweep settles those on a database this process
+// started; on any other, a run past activeRunMaxAge that has shown no sign of
+// life (a step, or its board run's heartbeat) within activeRunQuietFor is not
+// reported active, so one dead row cannot hold the desktop awake for good.
+const (
+	activeRunMaxAge   = "6 hours"
+	activeRunQuietFor = "30 minutes"
+)
+
 func (a *ActivityStore) ListActiveRuns(ctx context.Context) ([]domain.SessionRun, error) {
 	rows, err := a.pool.Query(ctx, `
 		SELECT sr.id, sr.session_id, sr.request_id, sr.status, sr.model, sr.started_at, sr.completed_at,
 			s.agent_id, s.title
 		FROM session_runs sr
 		LEFT JOIN sessions s ON s.id = sr.session_id
-		WHERE sr.status = 'running' ORDER BY sr.started_at DESC
-	`)
+		WHERE sr.status = 'running'
+		  AND (
+			sr.started_at > now() - $1::interval
+			OR EXISTS (
+				SELECT 1 FROM session_steps st
+				WHERE st.run_id = sr.id AND st.created_at > now() - $2::interval
+			)
+			OR EXISTS (
+				SELECT 1 FROM task_agent_runs tar
+				WHERE tar.session_run_id = sr.id AND tar.status = 'running'
+				  AND tar.updated_at > now() - $2::interval
+			)
+		  )
+		ORDER BY sr.started_at DESC
+	`, activeRunMaxAge, activeRunQuietFor)
 	if err != nil {
 		return nil, err
 	}

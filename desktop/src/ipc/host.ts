@@ -14,23 +14,44 @@
  * structurally identical instead — a change here that is not made there shows
  * up as a page that calls a method the shell does not have.
  *
- * There is no sign-in anywhere in this product, so nothing on this bridge is a
- * credential for a person. `apiToken` is the bearer for a loopback server this
- * same process started; it is the one value that travels shell → page, and it
- * grants access to nothing that is not already on this machine.
+ * Nothing on this bridge is a credential for a person. In local mode
+ * `apiToken` is the bearer for a loopback server this same process started; it
+ * is the one value that travels shell → page, and it grants access to nothing
+ * that is not already on this machine. In account mode the page is the
+ * account's web app on its own origin and signs in there with its own cookie:
+ * it gets no `apiBase` and no `apiToken`, and the pairing it hands this side
+ * goes in, never back out (`runner.pairing()` omits the token).
  */
 
 import type {
+  AccountMode,
+  AccountState,
+  AnalyticsState,
   Blocker,
   ChildId,
   ChildState,
   Diagnostics,
   LogLine,
+  McpServersState,
   NotificationPreferences,
   PreflightReport,
+  RunnerPairingBundle,
+  RunnerPairingSummary,
+  ToolchainId,
+  ToolchainItem,
+  ToolchainJobState,
+  ToolchainJobStep,
+  ToolchainReport,
+  TunnelStatus,
+  UpdateStatus,
   WorkspaceCheck,
 } from "./types.js";
-import type { ChooseDirectoryRequest } from "./channels.js";
+import type {
+  AnalyticsTrackRequest,
+  ChooseDirectoryRequest,
+  KeysWindowPrefill,
+  McpServerSetRequest,
+} from "./channels.js";
 
 /**
  * One child process, as the page renders it.
@@ -41,7 +62,7 @@ import type { ChooseDirectoryRequest } from "./channels.js";
 export interface HostChild {
   id: ChildId;
   state: ChildState;
-  /** False for a child this Mac cannot run — Appium, absent or already running. */
+  /** False for a child this Mac cannot run. Nothing sets it today. */
   enabled: boolean;
   restarts: number;
   detail?: string;
@@ -71,6 +92,8 @@ export interface HostRunnerSnapshot {
    * sentence.
    */
   blocker?: Blocker;
+  /** Account mode only — the runner's tunnel to the control plane. */
+  tunnel?: TunnelStatus;
 }
 
 /** The whole user-facing configuration. Four fields, and one of them is a path. */
@@ -134,6 +157,18 @@ export interface DesktopRunnerHost {
   disconnect(): Promise<HostRunnerSnapshot>;
   restartChild(child: ChildId): Promise<HostRunnerSnapshot>;
 
+  /**
+   * Account mode only. `pair` takes the bundle `POST /api/runner/pair`
+   * returned, refuses one for another origin than the account's, stores it
+   * encrypted and starts the runner; `unpair` stops the runner and forgets it.
+   * `pairing` is the stored bundle WITHOUT its token, `null` when unpaired.
+   */
+  pair(bundle: RunnerPairingBundle): Promise<HostRunnerSnapshot>;
+  unpair(): Promise<HostRunnerSnapshot>;
+  pairing(): Promise<RunnerPairingSummary | null>;
+  /** Restart the runner — account mode's `restartChild`, one child, no id. */
+  restart(): Promise<HostRunnerSnapshot>;
+
   logs(req?: HostLogsRequest): Promise<LogLine[]>;
   subscribeLogs(cb: (lines: LogLine[]) => void): () => void;
   clearLogs(): Promise<void>;
@@ -177,6 +212,106 @@ export interface DesktopRunnerHost {
 }
 
 /**
+ * Auto-update, for Settings. The same service the chrome's popup and the tray
+ * read; this is a second window onto it, not a second updater.
+ */
+export interface DesktopUpdatesHost {
+  status(): Promise<UpdateStatus>;
+  subscribe(cb: (status: UpdateStatus) => void): () => void;
+  /** One request to the feed. Resolves with the status, never rejects on a failed check. */
+  check(): Promise<UpdateStatus>;
+  /**
+   * Drain the local processes, install the staged update and relaunch. A
+   * no-op unless the status is `ready`.
+   */
+  restart(): Promise<void>;
+}
+
+/**
+ * The usage count. `set(false)` stops sending at once and deletes the
+ * install's random id and the stored member id.
+ */
+export interface DesktopAnalyticsHost {
+  get(): Promise<AnalyticsState>;
+  set(on: boolean): Promise<AnalyticsState>;
+  /** One screen view or product event; ids, enums and counts only. Dropped while the count is off. */
+  track(event: AnalyticsTrackRequest): Promise<void>;
+  /** The signed-in member's one-way hashed id, or null on sign-out. Sent only in account mode. */
+  identify(userId: string | null): Promise<void>;
+}
+
+/**
+ * Toolchain setup: what this computer has of the developer tools agents use,
+ * and installing the missing ones in the background.
+ *
+ * Ids in, never a command: what runs for an id on this OS is main's table.
+ * `install` from the account's remote page is confirmed by the person in a
+ * native dialog first and rejects with "declined" when they say no.
+ */
+export interface DesktopToolchainHost {
+  /** Detection for this OS. Joins an in-flight sweep; `force` starts a fresh one. */
+  report(force?: boolean): Promise<ToolchainReport>;
+  /** What `install(ids)` would run: ids + their missing dependencies, dependencies first, installed ones dropped. */
+  plan(ids: ToolchainId[]): Promise<ToolchainId[]>;
+  state(): Promise<ToolchainJobState>;
+  subscribe(cb: (state: ToolchainJobState) => void): () => void;
+  /** Starts a job, or appends to the running one (deduped). Resolves with the new state right away — never waits for the installs. */
+  install(ids: ToolchainId[]): Promise<ToolchainJobState>;
+  /** Stops the running step (kills its process tree) and cancels the queued ones. */
+  cancel(): Promise<ToolchainJobState>;
+  /** Clears a finished job back to `idle` (the header chip goes away). No-op while running. */
+  dismiss(): Promise<ToolchainJobState>;
+  /** Opens the item's own `url` (from main's table, never from the page) in the real browser. */
+  openPage(id: ToolchainId): Promise<void>;
+}
+
+/**
+ * Local or account, switched at runtime.
+ *
+ * `signIn` stops the local backend and loads the account's sign-in page in
+ * this window; the web app there pairs the runner with `runner.pair`.
+ * `signOut` stops the runner and the executor, forgets the pairing, clears the
+ * account's session and starts the local backend again. Local data is left
+ * as it was. Both resolve once the switch is done — or never, for the page
+ * that asked, when the switch replaced that page. `state()` carries more than
+ * the page's half declares (`switching`, `paired`, `error`); it is a
+ * superset, so the two stay assignable.
+ *
+ * While the member runs locally for now (`state().temporaryLocal`), `signIn`
+ * goes back to the account they are still signed in to, and `signOut` is the
+ * one call that forgets it.
+ *
+ * `openKeys` brings up the API-key window, which is this app's own — the keys
+ * are typed there, never into the page that asked. It answers nothing and its
+ * optional `prefill` names a provider (id, type, address, models, name) or an
+ * MCP server and the variables it still needs (`{mcp, secretNames}`), but
+ * never carries a key or a value, so the account's page can offer the button
+ * without ever holding one.
+ *
+ * `mcp` (bridge 6) is this computer's own MCP servers, the list the key
+ * window keeps and the runner serves: `list()` answers names, commands and
+ * addresses (without their query) and which variables or headers hold a value,
+ * never a value. `set()` changes one with the key window's rules (an empty
+ * value keeps the stored one, a name left out is dropped, `disabled` switches
+ * it off); one that would run something new rejects with "declined" unless
+ * the person agrees in a native dialog, and with "busy" while that dialog is
+ * open. Account mode only.
+ */
+export interface DesktopAccountMcpHost {
+  list(): Promise<McpServersState>;
+  set(request: McpServerSetRequest): Promise<McpServersState>;
+  remove(name: string): Promise<McpServersState>;
+}
+
+export interface DesktopAccountHost {
+  signIn(origin?: string): Promise<void>;
+  signOut(): Promise<void>;
+  state(): Promise<AccountState>;
+  openKeys(prefill?: KeysWindowPrefill): Promise<void>;
+  mcp: DesktopAccountMcpHost;
+}
+
+/**
  * What the web app finds on `window.__tasktrooperDesktop`.
  *
  * The presence of this object IS the "we are running in the desktop shell"
@@ -198,7 +333,38 @@ export interface DesktopHost {
    * same reason `apiBase` is.
    */
   apiToken?: string;
+  /**
+   * Bumped when the bridge gains something a page may need to feature-test.
+   * 1: `account`, `mode` and the runner's pairing calls.
+   * 2: `account.openKeys()` and `account.state().temporaryLocal`.
+   * 3: `account.openKeys(prefill)` focuses the key window on one provider.
+   * 4: `analytics.get()` / `analytics.set(on)`.
+   * 5: `toolchain` — detecting and installing the developer tools agents use.
+   * 6: `account.mcp` and `account.openKeys({mcp})` — this computer's own MCP servers.
+   * 7: `analytics.track(event)` / `analytics.identify(userId)`.
+   */
+  bridgeVersion: 7;
+  /** Which world this page is in, read synchronously before the first render. */
+  mode: AccountMode;
+  account: DesktopAccountHost;
   runner: DesktopRunnerHost;
+  updates: DesktopUpdatesHost;
+  analytics: DesktopAnalyticsHost;
+  toolchain: DesktopToolchainHost;
 }
 
-export type { ChooseDirectoryRequest };
+export type {
+  AccountMode,
+  AccountState,
+  ChooseDirectoryRequest,
+  McpServersState,
+  McpServerSetRequest,
+  RunnerPairingBundle,
+  RunnerPairingSummary,
+  ToolchainId,
+  ToolchainItem,
+  ToolchainJobState,
+  ToolchainJobStep,
+  ToolchainReport,
+  UpdateStatus,
+};

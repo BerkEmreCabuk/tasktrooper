@@ -3,13 +3,25 @@ import {
   ValidationError,
   validateChatFocus,
   validateChooseDirectory,
+  validateKeyRemove,
+  validateKeysPrefill,
+  validateKeysWindowPrefill,
+  validateKeySet,
+  validateLogsStream,
+  validateMcpServerSet,
   validateOpenExternal,
   validateOverrides,
   validatePreferences,
   validateRestartChild,
+  validatePairRequest,
   validateReveal,
   validateSettingsPatch,
+  validateSignIn,
+  validateToolchainId,
+  validateToolchainIds,
+  validateToolchainReportRequest,
 } from "./validate.js";
+import { TOOLCHAIN_IDS } from "./types.js";
 
 const NOTIFICATIONS = {
   enabled: true,
@@ -27,7 +39,7 @@ const NOTIFICATIONS = {
  */
 describe("validateRestartChild", () => {
   it("accepts the children this supervisor actually runs", () => {
-    for (const child of ["embedder", "agent-server", "appium"]) {
+    for (const child of ["embedder", "agent-server"]) {
       expect(validateRestartChild({ child }).child).toBe(child);
     }
   });
@@ -42,6 +54,8 @@ describe("validateRestartChild", () => {
       { child: "" },
       // Gone with the tunnel; a payload naming it must not resolve to a child.
       { child: "runner" },
+      // The backend runs the hub now; there is no process here to restart.
+      { child: "appium" },
       { child: "database" },
       { child: 3 },
     ];
@@ -189,5 +203,261 @@ describe("validateChooseDirectory", () => {
     expect(() => validateChooseDirectory({ title: "Bad\ntitle" })).toThrow(ValidationError);
     expect(() => validateChooseDirectory({ defaultPath: "Bad\0path" })).toThrow(ValidationError);
     expect(() => validateChooseDirectory({ buttonLabel: "Bad\rlabel" })).toThrow(ValidationError);
+  });
+});
+
+describe("validateLogsStream", () => {
+  it("takes a boolean and nothing else", () => {
+    expect(validateLogsStream({ on: true })).toEqual({ on: true });
+    expect(validateLogsStream({ on: false })).toEqual({ on: false });
+    for (const bad of [undefined, null, {}, { on: "yes" }, { on: 1 }, []]) {
+      expect(() => validateLogsStream(bad)).toThrow(ValidationError);
+    }
+  });
+});
+
+/**
+ * Account mode's payloads. The mode itself is never one of them: a page can
+ * ask to sign in or out, and only the settings file (read through
+ * `validateSettingsPatch`) carries `mode`.
+ */
+describe("account mode", () => {
+  it("reads the mode and the origin from the settings file, and refuses anything else there", () => {
+    expect(validateSettingsPatch({ mode: "account", accountOrigin: "https://app.tasktrooper.ai/" })).toEqual({
+      mode: "account",
+      accountOrigin: "https://app.tasktrooper.ai",
+    });
+    expect(() => validateSettingsPatch({ mode: "cloud" })).toThrow(ValidationError);
+    expect(() => validateSettingsPatch({ accountOrigin: "https://app.tasktrooper.ai/login" })).toThrow(ValidationError);
+    expect(() => validateSettingsPatch({ accountOrigin: "file:///etc" })).toThrow(ValidationError);
+  });
+
+  it("keeps the page's preferences unable to switch modes", () => {
+    expect(validatePreferences({ mode: "account", accountOrigin: "https://evil.example" })).toEqual({});
+  });
+
+  it("takes an optional origin for signing in, shaped as an origin", () => {
+    expect(validateSignIn(undefined)).toEqual({});
+    expect(validateSignIn({})).toEqual({});
+    expect(validateSignIn({ origin: "https://acme.example" })).toEqual({ origin: "https://acme.example" });
+    expect(() => validateSignIn({ origin: "https://acme.example/x?y" })).toThrow(ValidationError);
+    expect(() => validateSignIn({ origin: 42 })).toThrow(ValidationError);
+  });
+
+  it("checks a pairing bundle's every field before it reaches the main process", () => {
+    const bundle = {
+      runner_token: "rtok",
+      tm_base_url: "https://app.tasktrooper.ai",
+      tenant_id: "t",
+      member_uid: "m",
+      paired_at: "2026-10-09T00:00:00Z",
+      label: "laptop",
+    };
+    expect(validatePairRequest({ bundle }).bundle).toEqual(bundle);
+    expect(() => validatePairRequest({ bundle: { ...bundle, runner_token: "" } })).toThrow(ValidationError);
+    expect(() => validatePairRequest({ bundle: { ...bundle, label: "a\nb" } })).toThrow(ValidationError);
+    expect(() => validatePairRequest({})).toThrow(ValidationError);
+  });
+});
+
+/**
+ * The API-key window's payloads. A key is checked for shape and never quoted
+ * back: every refusal names the field, not the value.
+ */
+describe("validateKeySet", () => {
+  const KEY = "sk-ant-SHAPE-ONLY-123";
+
+  it("keeps what a set may carry, trimming the key and dropping an empty one", () => {
+    expect(validateKeySet({ type: "anthropic", api_key: `  ${KEY} `, models: ["claude-sonnet-4-5"] })).toEqual({
+      type: "anthropic",
+      api_key: KEY,
+      models: ["claude-sonnet-4-5"],
+    });
+    expect(validateKeySet({ type: "openai", api_key: "" })).toEqual({ type: "openai" });
+    expect(validateKeySet({ id: "8f0e7c0a-1b2c-4d5e-9f00-0123456789ab", type: "openai_compatible", base_url: " https://x.example/v1 " })).toEqual({
+      id: "8f0e7c0a-1b2c-4d5e-9f00-0123456789ab",
+      type: "openai_compatible",
+      base_url: "https://x.example/v1",
+    });
+  });
+
+  it("refuses a type this app does not offer, an agent CLI's above all", () => {
+    for (const type of ["claude_code", "cursor_agent", "", 3]) {
+      expect(() => validateKeySet({ type, api_key: KEY }), String(type)).toThrow(ValidationError);
+    }
+  });
+
+  it("refuses a malformed field without quoting the key", () => {
+    for (const payload of [
+      { type: "anthropic", api_key: `${KEY}\r\nX: 1` },
+      { type: "anthropic", api_key: 42 },
+      { type: "anthropic", api_key: KEY, id: "-flag" },
+      { type: "anthropic", api_key: KEY, models: "gpt" },
+      { type: "anthropic", api_key: KEY, models: Array.from({ length: 33 }, (_, i) => `m${i}`) },
+    ]) {
+      let message = "";
+      try {
+        validateKeySet(payload);
+      } catch (err) {
+        message = (err as Error).message;
+      }
+      expect(message, JSON.stringify(payload)).not.toBe("");
+      expect(message).not.toContain(KEY);
+    }
+  });
+
+  it("removes by an identifier only", () => {
+    expect(validateKeyRemove({ id: "openai" })).toEqual({ id: "openai" });
+    expect(() => validateKeyRemove({ id: "../x" })).toThrow(ValidationError);
+    expect(() => validateKeyRemove({})).toThrow(ValidationError);
+  });
+});
+
+describe("validateKeysPrefill", () => {
+  const UUID = "8f0e7c0a-1b2c-4d5e-9f00-0123456789ab";
+
+  it("accepts a built-in type named by itself and a custom endpoint named by a UUID", () => {
+    expect(validateKeysPrefill({ id: "anthropic", type: "anthropic" })).toEqual({ id: "anthropic", type: "anthropic" });
+    expect(
+      validateKeysPrefill({
+        id: UUID,
+        type: "openai_compatible",
+        base_url: " https://llm.example/v1 ",
+        models: ["m1", "m2"],
+        name: " Team gateway ",
+      }),
+    ).toEqual({ id: UUID, type: "openai_compatible", base_url: "https://llm.example/v1", models: ["m1", "m2"], name: "Team gateway" });
+  });
+
+  it("allows http only to this computer", () => {
+    for (const host of ["127.0.0.1:11434", "localhost:1234", "[::1]:8080"]) {
+      expect(validateKeysPrefill({ id: UUID, type: "openai_compatible", base_url: `http://${host}/v1` }).base_url).toBe(
+        `http://${host}/v1`,
+      );
+    }
+    for (const base_url of ["http://llm.example/v1", "ftp://llm.example", "https://user:pw@llm.example/v1", "not a url"]) {
+      expect(() => validateKeysPrefill({ id: UUID, type: "openai_compatible", base_url }), base_url).toThrow(ValidationError);
+    }
+  });
+
+  it("refuses ids that do not match the type, and types this app does not offer", () => {
+    for (const payload of [
+      { id: "openai", type: "anthropic" },
+      { id: "my-endpoint", type: "openai_compatible", base_url: "https://x.example" },
+      { id: UUID, type: "anthropic" },
+      { id: "claude_code", type: "claude_code" },
+      { id: UUID, type: "openai_compatible" },
+    ]) {
+      expect(() => validateKeysPrefill(payload), JSON.stringify(payload)).toThrow(ValidationError);
+    }
+  });
+
+  it("takes no key, and says so without quoting one", () => {
+    const KEY = "sk-NEVER-IN-A-PREFILL";
+    let message = "";
+    try {
+      validateKeysPrefill({ id: "openai", type: "openai", api_key: KEY });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).not.toBe("");
+    expect(message).not.toContain(KEY);
+  });
+});
+
+describe("validateMcpServerSet", () => {
+  it("accepts an ordinary name", () => {
+    expect(validateMcpServerSet({ name: "notes", command: "/bin/notes" }).name).toBe("notes");
+  });
+
+  it("refuses the name TaskTrooper's own server holds, in any case", () => {
+    for (const name of ["tasktrooper", "TaskTrooper", "TASKTROOPER"]) {
+      expect(() => validateMcpServerSet({ name, command: "/bin/notes" })).toThrow(ValidationError);
+    }
+  });
+
+  it("takes a switch as true or false only", () => {
+    expect(validateMcpServerSet({ name: "notes", command: "/bin/notes", disabled: true }).disabled).toBe(true);
+    expect(validateMcpServerSet({ name: "wiki", url: "https://wiki.example/mcp", disabled: false }).disabled).toBe(false);
+    expect(validateMcpServerSet({ name: "notes", command: "/bin/notes" })).not.toHaveProperty("disabled");
+    expect(() => validateMcpServerSet({ name: "notes", command: "/bin/notes", disabled: "yes" })).toThrow(ValidationError);
+  });
+});
+
+describe("validateKeysWindowPrefill", () => {
+  it("takes a provider as validateKeysPrefill does", () => {
+    expect(validateKeysWindowPrefill({ id: "anthropic", type: "anthropic" })).toEqual({ id: "anthropic", type: "anthropic" });
+    expect(() => validateKeysWindowPrefill({ id: "openai", type: "openai", api_key: "sk" })).toThrow(ValidationError);
+  });
+
+  it("takes an MCP server's name and the variable or header names it needs, never a value", () => {
+    expect(validateKeysWindowPrefill({ mcp: "github", secretNames: ["Authorization", "GITHUB_TOKEN"] })).toEqual({
+      mcp: "github",
+      secretNames: ["Authorization", "GITHUB_TOKEN"],
+    });
+    for (const bad of [
+      { mcp: "bad name" },
+      { mcp: "github", env: { GITHUB_TOKEN: "x" } },
+      { mcp: "github", headers: { Authorization: "x" } },
+      { mcp: "github", secretNames: "GITHUB_TOKEN" },
+      { mcp: "github", secretNames: ["NAME WITH SPACES"] },
+    ]) {
+      expect(() => validateKeysWindowPrefill(bad), JSON.stringify(bad)).toThrow(ValidationError);
+    }
+  });
+});
+
+/**
+ * Toolchain payloads are ids from a fixed list and nothing else: every
+ * command, package and URL lives in the main process, so a page that names one
+ * is refused rather than ignored.
+ */
+describe("validateToolchainIds", () => {
+  it("accepts known ids, folding repeats in first-seen order", () => {
+    expect(validateToolchainIds({ ids: ["node", "appium", "node"] })).toEqual({ ids: ["node", "appium"] });
+    expect(validateToolchainIds({ ids: [] })).toEqual({ ids: [] });
+    expect(validateToolchainIds({ ids: [...TOOLCHAIN_IDS] }).ids).toEqual([...TOOLCHAIN_IDS]);
+  });
+
+  it("refuses an unknown id, a command, a non-list and a missing list", () => {
+    const refused: unknown[] = [
+      undefined,
+      null,
+      ["node"],
+      {},
+      { ids: "node" },
+      { ids: ["node", "rm -rf /"] },
+      { ids: ["brew install wget"] },
+      { ids: ["https://evil.example/install.sh"] },
+      { ids: [3] },
+      { ids: [null] },
+      { ids: ["Node"] },
+    ];
+    for (const payload of refused) {
+      expect(() => validateToolchainIds(payload), JSON.stringify(payload) ?? "undefined").toThrow(ValidationError);
+    }
+  });
+
+  it("refuses more entries than there are tools, even when they are repeats", () => {
+    const ids = Array.from({ length: TOOLCHAIN_IDS.length + 1 }, () => "git");
+    expect(() => validateToolchainIds({ ids })).toThrow(ValidationError);
+  });
+});
+
+describe("validateToolchainId", () => {
+  it("takes one known id", () => {
+    expect(validateToolchainId({ id: "xcode" })).toEqual({ id: "xcode" });
+    for (const bad of [undefined, {}, { id: "" }, { id: "xcode\n" }, { id: "https://apps.apple.com" }, { id: ["xcode"] }]) {
+      expect(() => validateToolchainId(bad), JSON.stringify(bad) ?? "undefined").toThrow(ValidationError);
+    }
+  });
+});
+
+describe("validateToolchainReportRequest", () => {
+  it("takes an optional boolean force, and refuses a truthy string", () => {
+    expect(validateToolchainReportRequest(undefined)).toEqual({});
+    expect(validateToolchainReportRequest({})).toEqual({});
+    expect(validateToolchainReportRequest({ force: true })).toEqual({ force: true });
+    expect(() => validateToolchainReportRequest({ force: "yes" })).toThrow(ValidationError);
   });
 });

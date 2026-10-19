@@ -21,10 +21,12 @@ type Service struct {
 	roleAdmin      RoleAdmin
 	// nil means CLI-only.
 	providers LLMProviders
-	// Shared ceiling with evolution's max_skills_per_agent; set by runtime wiring.
-	skillBudget int
 	// Nil means no runner is attached — correct on every host without an agent CLI installed.
 	hostExecutor HostExecutorProbe
+	progress     syncProgress
+
+	shippedVectors  port.SkillVectorSource
+	embeddingEngine port.EmbeddingSourceResolver
 }
 
 type HostExecutorProbe func(domain.LLMProviderType) bool
@@ -48,7 +50,7 @@ func (s *Service) SeedingInProgress() bool {
 }
 
 func NewService(store port.CatalogStore, llm port.LLMClient, embeddingModel string) *Service {
-	return &Service{store: store, llm: llm, embeddingModel: embeddingModel, skillBudget: 25}
+	return &Service{store: store, llm: llm, embeddingModel: embeddingModel}
 }
 
 func (s *Service) SetTemplateStore(store port.AgentTemplateStore) {
@@ -123,7 +125,7 @@ func (s *Service) CreateSkillForAgent(ctx context.Context, agentID uuid.UUID, re
 	if tags == nil {
 		tags = []string{}
 	}
-	emb, err := s.llm.Embed(ctx, req.Name+"\n"+req.Description+"\n"+req.Content, s.embeddingModel)
+	emb, err := s.embedSkill(ctx, req.Name, req.Description, req.Content)
 	if err != nil {
 		return domain.Skill{}, fmt.Errorf("embed skill: %w", err)
 	}
@@ -163,14 +165,15 @@ func (s *Service) UpdateSkillForAgent(ctx context.Context, agentID, skillID uuid
 	if req.Content == "" {
 		return domain.Skill{}, invalidInput("content is required")
 	}
-	if _, err := s.GetSkillForAgent(ctx, agentID, skillID); err != nil {
+	current, err := s.GetSkillForAgent(ctx, agentID, skillID)
+	if err != nil {
 		return domain.Skill{}, err
 	}
 	stackID, err := s.resolveTechStack(ctx, agentID, req.TechStackID)
 	if err != nil {
 		return domain.Skill{}, err
 	}
-	emb, err := s.llm.Embed(ctx, req.Name+"\n"+req.Description+"\n"+req.Content, s.embeddingModel)
+	emb, err := s.embedSkill(ctx, req.Name, req.Description, req.Content)
 	if err != nil {
 		return domain.Skill{}, fmt.Errorf("embed skill: %w", err)
 	}
@@ -178,9 +181,11 @@ func (s *Service) UpdateSkillForAgent(ctx context.Context, agentID, skillID uuid
 	if tags == nil {
 		tags = []string{}
 	}
+	// catalog_sha survives an edit: it is the revision the edit was made on, which is how the catalog sync tells an edit from a stale copy.
 	updated, err := s.store.UpdateSkill(ctx, domain.Skill{
 		ID: skillID, AgentID: agentID, Name: req.Name, Description: req.Description, Category: req.Category,
 		Tags: tags, Content: req.Content, Embedding: emb, Enabled: req.Enabled, TechStackID: stackID,
+		CatalogSha: current.CatalogSha,
 	})
 	if err != nil {
 		return domain.Skill{}, err
@@ -342,6 +347,11 @@ func (s *Service) UpdateAgent(ctx context.Context, id uuid.UUID, req domain.Upda
 	if err != nil {
 		return domain.Agent{}, err
 	}
+	// Only the switch off is refused: a core agent left disabled by an older
+	// build stays editable until someone turns it back on.
+	if domain.IsCoreAgentSlug(existing.CatalogSlug) && existing.Enabled && !req.Enabled {
+		return domain.Agent{}, invalidInput("%s is a core agent and cannot be disabled", existing.Name)
+	}
 	req = dropStaleModels(existing, req)
 	autoPull := existing.AutoPullAgentUpdates
 	if req.AutoPullAgentUpdates != nil {
@@ -377,6 +387,13 @@ func dropStaleModels(existing domain.Agent, req domain.UpdateAgentRequest) domai
 }
 
 func (s *Service) DeleteAgent(ctx context.Context, id uuid.UUID) error {
+	existing, err := s.store.GetAgent(ctx, id)
+	if err != nil {
+		return err
+	}
+	if domain.IsCoreAgentSlug(existing.CatalogSlug) {
+		return invalidInput("%s is a core agent and cannot be deleted", existing.Name)
+	}
 	return s.store.DeleteAgent(ctx, id)
 }
 

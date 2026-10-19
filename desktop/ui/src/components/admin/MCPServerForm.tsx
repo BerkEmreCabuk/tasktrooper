@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { MCPEnvSchemaField, MCPServerView } from "@/api";
+import type { MCPAccess, MCPEnvSchemaField, MCPServerView } from "@/api";
 import { KeyValueEditor } from "@/components/admin/KeyValueEditor";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,6 +19,7 @@ import {
   CUSTOM_TEMPLATE_ID,
 } from "@/lib/mcpForm";
 import type { MCPTemplate } from "@/lib/mcpTemplates";
+import { exampleFolderPath } from "@/lib/platform";
 
 interface MCPServerFormProps {
   form: MCPServerFormState;
@@ -130,6 +131,24 @@ export function MCPServerForm({
       </div>
 
       <div className="space-y-2">
+        <Label htmlFor="mcp-access">{t("frame.admin.mcpForm.access")}</Label>
+        <Select value={form.access} onValueChange={(access: MCPAccess) => update({ access })}>
+          <SelectTrigger id="mcp-access">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="listed">{t("frame.admin.mcpForm.accessListed")}</SelectItem>
+            <SelectItem value="all">{t("frame.admin.mcpForm.accessAll")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {form.access === "all"
+            ? t("frame.admin.mcpForm.accessAllHint")
+            : t("frame.admin.mcpForm.accessListedHint")}
+        </p>
+      </div>
+
+      <div className="space-y-2">
         <Label>Transport</Label>
         <Select
           value={form.transport}
@@ -162,7 +181,7 @@ export function MCPServerForm({
               id="mcp-args"
               value={form.argsText}
               onChange={(e) => update({ argsText: e.target.value })}
-              placeholder="-y&#10;@modelcontextprotocol/server-filesystem&#10;/tmp"
+              placeholder={`-y\n@modelcontextprotocol/server-filesystem\n${exampleFolderPath()}`}
               className="min-h-[100px] font-mono text-xs"
             />
           </div>

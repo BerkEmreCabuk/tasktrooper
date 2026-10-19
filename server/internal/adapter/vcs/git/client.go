@@ -1,6 +1,7 @@
 package git
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -10,12 +11,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/proctree"
 	"github.com/rs/zerolog/log"
 )
 
@@ -23,6 +26,10 @@ type TokenSource func(ctx context.Context) (string, error)
 
 type Client struct {
 	tokens TokenSource
+
+	// observe is a test seam: production leaves it nil, tests assert on the
+	// argv and env of child commands through it.
+	observe func(cmd *exec.Cmd)
 
 	identityMu    sync.Mutex
 	identityToken string
@@ -51,9 +58,21 @@ func (c *Client) token(ctx context.Context) string {
 	return strings.TrimSpace(tok)
 }
 
-func authFlags(token string) []string {
+// authEnv hands git the GitHub credential through the child's environment:
+// GIT_CONFIG_* is `-c` spelled as env, so the token never lands on argv, where
+// ps, a crash report or a shell history can read it. No token means no header
+// at all — an empty Authorization would break an anonymous clone.
+func (c *Client) authEnv(ctx context.Context) []string {
+	token := c.token(ctx)
+	if token == "" {
+		return nil
+	}
 	basic := base64.StdEncoding.EncodeToString([]byte("x-access-token:" + token))
-	return []string{"-c", "http.https://github.com/.extraheader=Authorization: Basic " + basic}
+	return []string{
+		"GIT_CONFIG_COUNT=1",
+		"GIT_CONFIG_KEY_0=http.https://github.com/.extraheader",
+		"GIT_CONFIG_VALUE_0=AUTHORIZATION: basic " + basic,
+	}
 }
 
 func (c *Client) HasGit(rootPath string) bool {
@@ -134,8 +153,7 @@ func (c *Client) EnsureRepoWithRemote(ctx context.Context, rootPath, name, owner
 		if _, err := c.run(ctx, rootPath, "git", "remote", "add", "origin", repo.CloneURL); err != nil {
 			return created(fmt.Errorf("git remote add: %w", err))
 		}
-		args := append(authFlags(tok), "push", "-u", "origin", "HEAD")
-		if out, err := c.run(ctx, rootPath, "git", args...); err != nil {
+		if out, err := c.runEnv(ctx, rootPath, c.authEnv(ctx), "git", "push", "-u", "origin", "HEAD"); err != nil {
 			return created(fmt.Errorf("git push: %w (%s)", err, strings.TrimSpace(out)))
 		}
 		return nil
@@ -151,11 +169,8 @@ func (c *Client) CloneRepo(ctx context.Context, cloneURL, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return fmt.Errorf("clone parent: %w", err)
 	}
-	args := []string{"clone", cloneURL, dest}
-	if tok := c.token(ctx); tok != "" {
-		args = append(authFlags(tok), args...)
-	}
-	if out, err := c.run(ctx, filepath.Dir(dest), "git", args...); err != nil {
+	args := cloneArgs(runtime.GOOS, cloneURL, dest)
+	if out, err := c.runEnv(ctx, filepath.Dir(dest), c.authEnv(ctx), "git", args...); err != nil {
 		return fmt.Errorf("git clone: %w (%s)", err, strings.TrimSpace(out))
 	}
 	return nil
@@ -176,11 +191,7 @@ func (c *Client) FetchLatest(ctx context.Context, rootPath string) error {
 	if !c.HasGit(rootPath) {
 		return fmt.Errorf("not a git repository: %s", rootPath)
 	}
-	args := []string{"fetch", "--prune", "origin"}
-	if tok := c.token(ctx); tok != "" {
-		args = append(authFlags(tok), args...)
-	}
-	if out, err := c.run(ctx, rootPath, "git", args...); err != nil {
+	if out, err := c.runEnv(ctx, rootPath, c.authEnv(ctx), "git", "fetch", "--prune", "origin"); err != nil {
 		return fmt.Errorf("git fetch: %w (%s)", err, strings.TrimSpace(out))
 	}
 	return nil
@@ -315,10 +326,7 @@ func (c *Client) LatestTag(ctx context.Context, rootPath, glob string) (string, 
 		glob = "*"
 	}
 	args := []string{"fetch", "--prune", "--tags", "origin"}
-	if tok := c.token(ctx); tok != "" {
-		args = append(authFlags(tok), args...)
-	}
-	if out, err := c.run(ctx, rootPath, "git", args...); err != nil {
+	if out, err := c.runEnv(ctx, rootPath, c.authEnv(ctx), "git", args...); err != nil {
 		return "", fmt.Errorf("git fetch --tags: %w (%s)", err, strings.TrimSpace(out))
 	}
 	out, err := c.run(ctx, rootPath, "git", "tag", "--list", glob, "--sort=-v:refname")
@@ -346,7 +354,7 @@ func (c *Client) EnsureTaskWorkspace(ctx context.Context, projectRoot, workspace
 		baseIsFresh = false
 		log.Warn().Err(err).Str("root", projectRoot).Msg("task workspace: could not refresh project root, branching from local state")
 	}
-	if out, err := c.run(ctx, filepath.Dir(workspacePath), "git", "clone", projectRoot, workspacePath); err != nil {
+	if out, err := c.run(ctx, filepath.Dir(workspacePath), "git", cloneArgs(runtime.GOOS, projectRoot, workspacePath)...); err != nil {
 		return fmt.Errorf("git clone: %w (%s)", err, strings.TrimSpace(out))
 	}
 	origin := c.OriginURL(ctx, projectRoot)
@@ -632,11 +640,11 @@ func (c *Client) TaskDiff(ctx context.Context, workspacePath string) (string, er
 	if base == "" {
 		return "", nil
 	}
-	stat, err := c.run(ctx, workspacePath, "git", "diff", "--stat", base)
+	stat, err := c.run(ctx, workspacePath, "git", "-c", "core.quotepath=off", "diff", "--stat", base)
 	if err != nil {
 		return "", fmt.Errorf("git diff --stat: %w", err)
 	}
-	patch, err := c.run(ctx, workspacePath, "git", "diff", base)
+	patch, err := c.run(ctx, workspacePath, "git", "-c", "core.quotepath=off", "diff", base)
 	if err != nil {
 		return "", fmt.Errorf("git diff: %w", err)
 	}
@@ -701,34 +709,35 @@ func (c *Client) TaskChangedFiles(ctx context.Context, workspacePath string) ([]
 	if base == "" {
 		return nil, nil
 	}
-	out, err := c.run(ctx, workspacePath, "git", "diff", "--name-only", base)
+	out, err := c.run(ctx, workspacePath, "git", "diff", "--name-only", "-z", base)
 	if err != nil {
 		return nil, fmt.Errorf("git diff --name-only: %w", err)
 	}
-	var files []string
-	for _, line := range strings.Split(out, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			files = append(files, line)
-		}
-	}
-	return files, nil
+	return nulSeparated(out), nil
 }
 
 func (c *Client) ChangedFilesSince(ctx context.Context, workspacePath, sha string) ([]string, error) {
 	if sha == "" || !c.HasGit(workspacePath) {
 		return nil, nil
 	}
-	out, err := c.run(ctx, workspacePath, "git", "diff", "--name-only", sha)
+	out, err := c.run(ctx, workspacePath, "git", "diff", "--name-only", "-z", sha)
 	if err != nil {
 		return nil, fmt.Errorf("git diff --name-only: %w", err)
 	}
-	var files []string
-	for _, line := range strings.Split(out, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			files = append(files, line)
+	return nulSeparated(out), nil
+}
+
+// nulSeparated reads a -z listing. Without -z, git quotes a path holding a
+// non-ASCII byte ("\303\244.go") under the default core.quotepath, and the
+// quoted form names no file on disk.
+func nulSeparated(out string) []string {
+	var paths []string
+	for _, p := range strings.Split(out, "\x00") {
+		if p != "" {
+			paths = append(paths, p)
 		}
 	}
-	return files, nil
+	return paths
 }
 
 func (c *Client) CommitAndPush(ctx context.Context, workspacePath, message string) error {
@@ -742,22 +751,27 @@ func (c *Client) CommitAndPush(ctx context.Context, workspacePath, message strin
 		}
 	}
 	pushArgs := []string{"push", "-u", "origin", "HEAD"}
-	if tok := c.token(ctx); tok != "" {
-		pushArgs = append(authFlags(tok), pushArgs...)
-	}
-	if out, err := c.run(ctx, workspacePath, "git", pushArgs...); err != nil {
-		return fmt.Errorf("git push: %w (%s)", err, strings.TrimSpace(out))
+	if out, err := c.runEnv(ctx, workspacePath, c.authEnv(ctx), "git", pushArgs...); err != nil {
+		return pushError(err, out)
 	}
 	return nil
 }
 
+// pushError keeps GitHub's workflow-scope refusal recognisable: the caller
+// must stop and ask a human for a better token rather than retry or drop the
+// workflow file.
+func pushError(err error, out string) error {
+	out = strings.TrimSpace(out)
+	if domain.GitHubWorkflowScopeRefusal(out) {
+		return fmt.Errorf("git push: %w (%s)", domain.ErrGitHubWorkflowScope, out)
+	}
+	return fmt.Errorf("git push: %w (%s)", err, out)
+}
+
 func (c *Client) PushBranch(ctx context.Context, workspacePath string) error {
 	pushArgs := []string{"push", "-u", "origin", "HEAD"}
-	if tok := c.token(ctx); tok != "" {
-		pushArgs = append(authFlags(tok), pushArgs...)
-	}
-	if out, err := c.run(ctx, workspacePath, "git", pushArgs...); err != nil {
-		return fmt.Errorf("git push: %w (%s)", err, strings.TrimSpace(out))
+	if out, err := c.runEnv(ctx, workspacePath, c.authEnv(ctx), "git", pushArgs...); err != nil {
+		return pushError(err, out)
 	}
 	return nil
 }
@@ -868,10 +882,7 @@ func (c *Client) RevertOnDefaultBranch(ctx context.Context, rootPath string, sha
 	}
 
 	pushArgs := []string{"push", "origin", "HEAD:refs/heads/" + branch}
-	if tok := c.token(ctx); tok != "" {
-		pushArgs = append(authFlags(tok), pushArgs...)
-	}
-	if out, err := c.run(ctx, worktree, "git", pushArgs...); err != nil {
+	if out, err := c.runEnv(ctx, worktree, c.authEnv(ctx), "git", pushArgs...); err != nil {
 		return "", fmt.Errorf("git push of the revert to origin/%s failed — the revert was NOT pushed and production is unchanged: %w (%s)",
 			branch, err, strings.TrimSpace(out))
 	}
@@ -917,17 +928,11 @@ func (c *Client) isAncestor(ctx context.Context, rootPath, ancestor, descendant 
 // conflictingPaths reads the paths a failed `git revert` left unmerged, so
 // the caller's error can name them instead of dumping raw git output.
 func (c *Client) conflictingPaths(ctx context.Context, dir string) []string {
-	out, err := c.run(ctx, dir, "git", "diff", "--name-only", "--diff-filter=U")
+	out, err := c.run(ctx, dir, "git", "diff", "--name-only", "-z", "--diff-filter=U")
 	if err != nil {
 		return nil
 	}
-	var paths []string
-	for _, line := range strings.Split(out, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			paths = append(paths, line)
-		}
-	}
-	return paths
+	return nulSeparated(out)
 }
 
 func shasLabel(shas []string) []string {
@@ -1036,6 +1041,43 @@ func (c *Client) ensurePullRequestAPI(ctx context.Context, workspacePath, token 
 	return url, nil
 }
 
+func (c *Client) HeadSHA(ctx context.Context, workspacePath string) (string, error) {
+	out, err := c.run(ctx, workspacePath, "git", "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("git rev-parse HEAD: %w (%s)", err, strings.TrimSpace(out))
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// AddDetachedWorktree checks rev out, detached, into a new temporary
+// directory sharing repoPath's objects. remove deletes the checkout and its
+// bookkeeping in repoPath; it outlives ctx and only logs what it cannot undo.
+func (c *Client) AddDetachedWorktree(ctx context.Context, repoPath, rev string) (string, func(), error) {
+	parent, err := os.MkdirTemp("", "tasktrooper-worktree-")
+	if err != nil {
+		return "", nil, fmt.Errorf("creating the worktree directory: %w", err)
+	}
+	dir := filepath.Join(parent, "wt")
+	if out, err := c.run(ctx, repoPath, "git", "worktree", "add", "--detach", dir, rev); err != nil {
+		_ = os.RemoveAll(parent)
+		return "", nil, fmt.Errorf("git worktree add: %w (%s)", err, strings.TrimSpace(out))
+	}
+	remove := func() {
+		rmCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cancel()
+		if out, err := c.run(rmCtx, repoPath, "git", "worktree", "remove", "--force", dir); err != nil {
+			log.Warn().Err(err).Str("output", strings.TrimSpace(out)).Str("worktree", dir).Msg("removing a detached worktree failed")
+		}
+		if out, err := c.run(rmCtx, repoPath, "git", "worktree", "prune"); err != nil {
+			log.Warn().Err(err).Str("output", strings.TrimSpace(out)).Msg("pruning worktrees failed")
+		}
+		if err := os.RemoveAll(parent); err != nil {
+			log.Warn().Err(err).Str("dir", parent).Msg("removing a detached worktree's directory failed")
+		}
+	}
+	return dir, remove, nil
+}
+
 func (c *Client) TaskGitInfo(ctx context.Context, workspacePath string) (domain.TaskGitInfo, error) {
 	var info domain.TaskGitInfo
 	origin, err := c.run(ctx, workspacePath, "git", "remote", "get-url", "origin")
@@ -1065,14 +1107,133 @@ func (c *Client) run(ctx context.Context, dir, name string, args ...string) (str
 	return c.runEnv(ctx, dir, nil, name, args...)
 }
 
+// runEnv returns stdout alone when the command succeeds: git writes warnings
+// to stderr even then (core.autocrlf's "LF will be replaced by CRLF" on
+// Windows), and callers parse the result as paths, refs and SHAs. A failure
+// returns both streams, because stderr is where git says why.
 func (c *Client) runEnv(ctx context.Context, dir string, extra []string, name string, args ...string) (string, error) {
+	if name == "git" {
+		args = HostArgs(args)
+	}
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "PATH="+os.Getenv("PATH")+":/opt/homebrew/bin:/usr/local/bin")
+	cmd.Env = toolPathEnv(runtime.GOOS, os.Environ())
 	cmd.Env = append(cmd.Env, commitIdentityEnv()...)
+	cmd.Env = append(cmd.Env, noPromptEnv()...)
 	cmd.Env = append(cmd.Env, extra...)
-	out, err := cmd.CombinedOutput()
-	return string(out), err
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if c.observe != nil {
+		c.observe(cmd)
+	}
+	tree, err := proctree.Start(cmd)
+	if err == nil {
+		err = cmd.Wait()
+		tree.Close()
+	}
+	if err == nil {
+		return stdout.String(), nil
+	}
+	return joinOutput(stdout.String(), stderr.String()), err
+}
+
+func joinOutput(stdout, stderr string) string {
+	switch {
+	case strings.TrimSpace(stdout) == "":
+		return stderr
+	case strings.TrimSpace(stderr) == "":
+		return stdout
+	}
+	return strings.TrimRight(stdout, "\n") + "\n" + stderr
+}
+
+// HostArgs prefixes a git argv with the per-invocation config this host
+// needs. Git for Windows refuses paths past MAX_PATH unless core.longpaths is
+// on, and a workspace under %APPDATA% holding a deep node_modules crosses it
+// at clone, checkout and worktree add — and again at reset, rebase, stash pop
+// and worktree remove, which is why every invocation gets it.
+func HostArgs(args []string) []string {
+	return hostArgs(runtime.GOOS, args)
+}
+
+// cloneArgs writes core.longpaths into the new clone's own config on Windows,
+// so the git commands an agent runs in that workspace get it too; hostArgs
+// only covers the calls this client makes itself.
+func cloneArgs(goos string, rest ...string) []string {
+	args := []string{"clone"}
+	if goos == "windows" {
+		args = append(args, "--config", "core.longpaths=true")
+	}
+	return append(args, rest...)
+}
+
+func hostArgs(goos string, args []string) []string {
+	if goos != "windows" {
+		return args
+	}
+	return append([]string{"-c", "core.longpaths=true"}, args...)
+}
+
+// toolDirs are where Homebrew and hand installs put git and gh: an app
+// launched from Finder inherits launchd's PATH, which has neither.
+func toolDirs(goos string) []string {
+	switch goos {
+	case "darwin":
+		return []string{"/opt/homebrew/bin", "/usr/local/bin"}
+	case "linux":
+		return []string{"/usr/local/bin"}
+	}
+	return nil
+}
+
+// toolPathEnv extends the existing PATH entry in place. Windows spells the
+// key "Path"; appending a second, upper-case PATH would leave the child with
+// whichever of the two exec happens to keep.
+func toolPathEnv(goos string, environ []string) []string {
+	dirs := toolDirs(goos)
+	if len(dirs) == 0 {
+		return environ
+	}
+	sep := ":"
+	if goos == "windows" {
+		sep = ";"
+	}
+	out := append([]string(nil), environ...)
+	for i, kv := range out {
+		key, value, ok := strings.Cut(kv, "=")
+		if !ok || !isPathKey(goos, key) {
+			continue
+		}
+		out[i] = key + "=" + appendPathList(value, dirs, sep)
+		return out
+	}
+	return append(out, "PATH="+strings.Join(dirs, sep))
+}
+
+func isPathKey(goos, key string) bool {
+	if goos == "windows" {
+		return strings.EqualFold(key, "PATH")
+	}
+	return key == "PATH"
+}
+
+func appendPathList(list string, dirs []string, sep string) string {
+	have := make(map[string]bool)
+	for _, p := range strings.Split(list, sep) {
+		have[p] = true
+	}
+	for _, d := range dirs {
+		if have[d] {
+			continue
+		}
+		if list != "" {
+			list += sep
+		}
+		list += d
+		have[d] = true
+	}
+	return list
 }
 
 func (c *Client) commitAuthorEnv(ctx context.Context) []string {
@@ -1122,6 +1283,13 @@ func commitIdentityEnv() []string {
 		"GIT_COMMITTER_NAME=" + name,
 		"GIT_COMMITTER_EMAIL=" + email,
 	}
+}
+
+// noPromptEnv keeps an auth failure a clean error instead of a hung prompt the
+// headless server can never answer; GCM_INTERACTIVE=never does the same for Git
+// Credential Manager, which would otherwise open a sign-in window on Windows.
+func noPromptEnv() []string {
+	return []string{"GIT_TERMINAL_PROMPT=0", "GCM_INTERACTIVE=never"}
 }
 
 func envOrDefault(key, fallback string) string {

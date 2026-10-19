@@ -7,26 +7,38 @@
  * the hole those two settings close. So: named channels, typed payloads,
  * validated in the main process before anything acts on them.
  *
- * Two namespaces:
+ * Three namespaces:
  *
  *   SHELL_* — the native chrome: a title bar with a status pill, a reload
  *             button, the update affordance and the screen that says so when
  *             the backend did not come up. It asks for almost nothing.
- *   CLOUD_* — the WebContentsView running the bundled SPA. Our own code, served
- *             from `app://tasktrooper`, but it is still the widest half of the
- *             surface — Connect, the workspace picker, the preflight and
- *             diagnostics all live there — so every handler on it verifies the
- *             sender on every call, not once at load. See main/ipc.ts.
+ *   KEYS_*  — the API-key window, this app's own page in a window of its own
+ *             (`main/keys/`). The only channels that take a secret in, and
+ *             the only page that may call them; none sends one back.
+ *   CLOUD_* — the WebContentsView running the web app: our own bundle from
+ *             `app://tasktrooper` in local mode, the account's web app from
+ *             its origin in account mode. It is the widest half of the surface
+ *             — Connect, the workspace picker, the preflight, pairing — so
+ *             every handler on it verifies the sender on every call, not once
+ *             at load, against the one origin the current mode trusts. See
+ *             main/ipc.ts.
  */
 
 import type {
+  AccountState,
   AppInfo,
   ChildId,
   CloudStatus,
   Diagnostics,
   LogLine,
   PreflightReport,
+  McpServersState,
+  ProviderKeysState,
+  ProviderKeyType,
+  RunnerPairingBundle,
+  RunnerPairingSummary,
   SupervisorSnapshot,
+  ToolchainId,
   UpdateStatus,
 } from "./types.js";
 import type {
@@ -48,15 +60,48 @@ export const SHELL_CHANNELS = {
   cloudStatus: "shell:cloud:status",
 
   /**
-   * Auto-update. These three are deliberately on the SHELL half: the
-   * affordance lives in the title bar and the tray, and updating replaces the
-   * whole app, which is not a capability to put on the page's bridge at any
-   * width. The last two are also the only shell channels that DO something, so
-   * both are guarded on the sender being this window — see `main/ipc.ts`.
+   * Auto-update, for the shell's own popup and the tray. The page has the same
+   * three on its bridge for Settings (see `CLOUD_CHANNELS.updateGet`). The
+   * last two are the only shell channels that DO something, so both are
+   * guarded on the sender being this window — see `main/ipc.ts`.
    */
   updateGet: "shell:update:get",
   updateCheck: "shell:update:check",
   updateRestart: "shell:update:restart",
+
+  /**
+   * Account mode, for the chrome's own failure screen: when the account's web
+   * app cannot be reached, this runs TaskTrooper locally FOR NOW — the
+   * account stays signed in and paired, and the next launch tries it again.
+   * Guarded on the sender like the update pair.
+   */
+  accountState: "shell:account:state",
+  accountUseLocalForNow: "shell:account:use-local-for-now",
+} as const;
+
+/**
+ * The API-key window's three calls (`preload/keys.ts`). Guarded on the sender
+ * being that window's own top frame on its own page — never the web app's
+ * view, whichever origin it holds, and never the chrome.
+ *
+ * Keys go in on `set` and are never read back: every answer is the list with
+ * `hasKey`, never a value.
+ */
+export const KEYS_CHANNELS = {
+  list: "shell:keys:list",
+  set: "shell:keys:set",
+  remove: "shell:keys:remove",
+  /** What the page that opened the window asked it to focus on; null when nothing. */
+  prefill: "shell:keys:prefill",
+  /** The member's own MCP servers, the window's second section. Same guard. */
+  mcpList: "shell:keys:mcp-list",
+  mcpSet: "shell:keys:mcp-set",
+  mcpRemove: "shell:keys:mcp-remove",
+} as const;
+
+/** Main → the API-key window, one-way: the prefill changed while it was open. */
+export const KEYS_EVENTS = {
+  prefill: "shell:keys:event:prefill",
 } as const;
 
 /** Main → the native chrome. One-way; it never replies. */
@@ -64,6 +109,14 @@ export const SHELL_EVENTS = {
   supervisorState: "shell:event:supervisor-state",
   cloudStatus: "shell:event:cloud-status",
   updateStatus: "shell:event:update-status",
+  /**
+   * The window entered or left full screen. The chrome drops its drag strip
+   * while it is: the web app's view then covers that strip, but macOS still
+   * hit-tests the drag region of the window's own contents underneath, so
+   * every click on the page's header became a window drag instead.
+   */
+  fullScreen: "shell:event:full-screen",
+  accountState: "shell:event:account-state",
 } as const;
 
 /**
@@ -95,12 +148,68 @@ export const CLOUD_CHANNELS = {
    */
   apiToken: "cloud:api-token",
 
+  /**
+   * `"local"` or `"account"`, synchronous like the two above: a page needs to
+   * know which world it is in before its first render — the account's web app
+   * authenticates with its own cookie and must not look for `apiToken`.
+   */
+  accountMode: "cloud:account:mode",
+  accountState: "cloud:account:state",
+  /**
+   * Leave local mode for the account at an origin (absent: the configured
+   * one). Stops the local backend and loads the account's sign-in page in
+   * this window. A no-op when already signed in there.
+   */
+  accountSignIn: "cloud:account:sign-in",
+  /** Stop the runner, forget the pairing, clear the account session, run locally again. */
+  accountSignOut: "cloud:account:sign-out",
+  /**
+   * Open the API-key window, optionally focused on one provider (`KeysPrefill`:
+   * identity and address, never a key) or on one of this computer's MCP
+   * servers (`McpKeysPrefill`: names only). Nothing comes back: the page — the
+   * account's, from a remote origin — may bring the window up, and that is
+   * all. The keys are typed into the window, which is this app's own.
+   */
+  accountOpenKeys: "cloud:account:open-keys",
+  /**
+   * This computer's own MCP servers, for the account's MCP Servers page:
+   * `mcp-list` answers what the key window's list does (names, commands,
+   * addresses without their query, which variables or headers hold a value —
+   * never a value). `mcp-set` takes a server in with the key window's rules;
+   * one that would make this computer run something it does not run already
+   * (a new server, another command, arguments, address, or a variable or
+   * header value) waits for the person's yes in a native dialog first. A
+   * secret is never sent here: the page opens the key window for it
+   * (`open-keys` with `{mcp}`). Account mode only.
+   */
+  accountMcpList: "cloud:account:mcp-list",
+  accountMcpSet: "cloud:account:mcp-set",
+  accountMcpRemove: "cloud:account:mcp-remove",
+
   runnerSnapshot: "cloud:runner:snapshot",
   runnerConnect: "cloud:runner:connect",
   runnerDisconnect: "cloud:runner:disconnect",
   runnerRestartChild: "cloud:runner:restart-child",
   runnerLogs: "cloud:runner:logs",
+  /**
+   * Whether the page wants `CLOUD_EVENTS.runnerLogs` pushed. Sent by the
+   * preload's `subscribeLogs` on the first subscriber and when the last one
+   * leaves, so lines cross IPC only while a log view is open; the page catches
+   * up on what it missed with `runnerLogs` and `afterSeq`.
+   */
+  runnerLogsStream: "cloud:runner:logs-stream",
   runnerClearLogs: "cloud:runner:clear-logs",
+
+  /**
+   * Account mode only. Pairing this computer is the same act as starting its
+   * runner: `runnerPair` checks the bundle's origin against the account's,
+   * stores it encrypted, and starts the runner. `runnerRestart` is
+   * `restartChild` without a `ChildId` — account mode supervises one child.
+   */
+  runnerPair: "cloud:runner:pair",
+  runnerUnpair: "cloud:runner:unpair",
+  runnerPairingInfo: "cloud:runner:pairing-info",
+  runnerRestart: "cloud:runner:restart",
 
   settingsGet: "cloud:settings:get",
   settingsSetPreferences: "cloud:settings:set-preferences",
@@ -138,15 +247,55 @@ export const CLOUD_CHANNELS = {
 
   diagnostics: "cloud:diagnostics:get",
   overridesSet: "cloud:diagnostics:set-overrides",
+
+  /**
+   * Auto-update, for Settings → General. The page is this app's own bundle on
+   * `app://tasktrooper`, the same code the chrome is. Restart only applies an
+   * update Squirrel has already downloaded and signature-checked, and does
+   * nothing when none is staged; the page cannot name a version, a feed or a
+   * file.
+   */
+  updateGet: "cloud:update:get",
+  updateCheck: "cloud:update:check",
+  updateRestart: "cloud:update:restart",
+
+  /**
+   * The usage count: its switch for Settings → General, and the page's screen
+   * views and product events (`track`) plus the signed-in member's hashed id
+   * (`identify`). Answered in both modes — the local bundle's page, or the
+   * account's own page. Main sends nothing while the switch is off.
+   */
+  analyticsGet: "cloud:analytics:get",
+  analyticsSet: "cloud:analytics:set",
+  analyticsTrack: "cloud:analytics:track",
+  analyticsIdentify: "cloud:analytics:identify",
+
+  /**
+   * Toolchain setup: detecting and installing the developer tools agents use
+   * on this computer. Answered in both modes — onboarding, the header chip and
+   * Settings run in each. The page names tools by id and nothing else; an
+   * install from the account's remote page is confirmed by the person in a
+   * native dialog first (see `main/ipc.ts`).
+   */
+  toolchainReport: "cloud:toolchain:report",
+  toolchainPlan: "cloud:toolchain:plan",
+  toolchainState: "cloud:toolchain:state",
+  toolchainInstall: "cloud:toolchain:install",
+  toolchainCancel: "cloud:toolchain:cancel",
+  toolchainDismiss: "cloud:toolchain:dismiss",
+  toolchainOpenPage: "cloud:toolchain:open-page",
 } as const;
 
 /** Main → the web app. Push, so the page never polls the supervisor. */
 export const CLOUD_EVENTS = {
   runnerState: "cloud:event:runner-state",
   runnerLogs: "cloud:event:runner-logs",
+  updateStatus: "cloud:event:update-status",
+  toolchainState: "cloud:toolchain:state-changed",
 } as const;
 
 export type ShellChannel = (typeof SHELL_CHANNELS)[keyof typeof SHELL_CHANNELS];
+export type KeysChannel = (typeof KEYS_CHANNELS)[keyof typeof KEYS_CHANNELS];
 export type ShellEvent = (typeof SHELL_EVENTS)[keyof typeof SHELL_EVENTS];
 export type CloudChannel = (typeof CLOUD_CHANNELS)[keyof typeof CLOUD_CHANNELS];
 export type CloudEvent = (typeof CLOUD_EVENTS)[keyof typeof CLOUD_EVENTS];
@@ -164,6 +313,21 @@ export interface RevealRequest {
 
 export interface OpenExternalRequest {
   url: string;
+}
+
+/** One screen view or product event. Ids, enums and counts only; see `validateAnalyticsTrack`. */
+export interface AnalyticsTrackRequest {
+  name: string;
+  params?: Record<string, string | number>;
+}
+
+/** The member's id, already one-way hashed by the page (64 hex), or null on sign-out. */
+export interface AnalyticsIdentifyRequest {
+  userId: string | null;
+}
+
+export interface LogsStreamRequest {
+  on: boolean;
 }
 
 /** `null`/`null` means no chat screen is open. */
@@ -195,6 +359,110 @@ export interface PreflightRequest {
   force?: boolean;
 }
 
+/** Toolchain ids, deduplicated by the validator; never a command, a package or a URL. */
+export interface ToolchainIdsRequest {
+  ids: ToolchainId[];
+}
+
+export interface ToolchainIdRequest {
+  id: ToolchainId;
+}
+
+/** Same rule as `PreflightRequest`: `force` re-probes, and only a real boolean says so. */
+export interface ToolchainReportRequest {
+  force?: boolean;
+}
+
+/** What `POST /api/runner/pair` returned. */
+export interface PairRequest {
+  bundle: RunnerPairingBundle;
+}
+
+export interface AccountSignInRequest {
+  /** An origin, `https://host[:port]`; absent means the configured one. */
+  origin?: string;
+}
+
+/**
+ * Add a provider or change one. A built-in type's id is the type and may be
+ * left out; a custom endpoint's id is a UUID — left out, a new one is made.
+ * An absent or empty `api_key` keeps the stored one.
+ */
+export interface KeySetRequest {
+  id?: string;
+  type: ProviderKeyType;
+  base_url?: string;
+  models?: string[];
+  api_key?: string;
+}
+
+/**
+ * What the account's page may hand the key window: which provider to ask a key
+ * for. Identity and address only — there is no key field, here or anywhere on
+ * the way in. `id` is a built-in type name or a custom endpoint's UUID.
+ */
+export interface KeysPrefill {
+  id: string;
+  type: ProviderKeyType;
+  base_url?: string;
+  models?: string[];
+  name?: string;
+}
+
+/**
+ * What the account's page may hand the key window to focus its MCP section
+ * on: a stored server, and the variables (stdio) or headers (http) it still
+ * needs a value for. Names only.
+ */
+export interface McpKeysPrefill {
+  mcp: string;
+  secretNames?: string[];
+}
+
+/** Either focus the key window takes: one provider, or one MCP server. */
+export type KeysWindowPrefill = KeysPrefill | McpKeysPrefill;
+
+export function isMcpKeysPrefill(prefill: KeysWindowPrefill): prefill is McpKeysPrefill {
+  return "mcp" in prefill;
+}
+
+export interface KeyRemoveRequest {
+  id: string;
+}
+
+/**
+ * Add an MCP server or change one: a stdio `command` (with `args` and `env`)
+ * or an http `url` (with `headers`). In `env` and `headers`, an empty value
+ * keeps the stored one under that name and a name left out is removed, so a
+ * server can be changed without typing its tokens again.
+ */
+export interface McpServerSetRequest {
+  name: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  /** True switches the server off, false back on; absent keeps what is stored. */
+  disabled?: boolean;
+}
+
+export interface McpServerRemoveRequest {
+  name: string;
+}
+
+/** What the API-key window finds on `window.tasktrooperKeys`. */
+export interface KeysBridge {
+  list(): Promise<ProviderKeysState>;
+  set(request: KeySetRequest): Promise<ProviderKeysState>;
+  remove(id: string): Promise<ProviderKeysState>;
+  prefill(): Promise<KeysWindowPrefill | null>;
+  mcpList(): Promise<McpServersState>;
+  mcpSet(request: McpServerSetRequest): Promise<McpServersState>;
+  mcpRemove(name: string): Promise<McpServersState>;
+  onPrefill(cb: (prefill: KeysWindowPrefill | null) => void): () => void;
+}
+
 /**
  * What the native chrome can ask for.
  *
@@ -219,6 +487,14 @@ export interface ShellBridge {
   onSupervisorState(cb: (snapshot: SupervisorSnapshot) => void): () => void;
   onCloudStatus(cb: (status: CloudStatus) => void): () => void;
   onUpdateStatus(cb: (status: UpdateStatus) => void): () => void;
+  onFullScreen(cb: (fullScreen: boolean) => void): () => void;
+  accountState(): Promise<AccountState>;
+  /**
+   * Run locally for now, still signed in. The failure screen's way on when
+   * the account's page cannot be reached; only an explicit sign-out unpairs.
+   */
+  useLocalForNow(): Promise<AccountState>;
+  onAccountState(cb: (state: AccountState) => void): () => void;
 }
 
 /** Re-exported so the preload and the main process name one shape. */
@@ -230,9 +506,19 @@ export type {
   HostSettings,
   HostWorkspaceChoice,
 };
-export type { Diagnostics, LogLine, PreflightReport, UpdateStatus };
+export type {
+  AccountState,
+  Diagnostics,
+  LogLine,
+  PreflightReport,
+  RunnerPairingBundle,
+  RunnerPairingSummary,
+  UpdateStatus,
+};
 
 export const SHELL_BRIDGE_KEY = "tasktrooper";
+
+export const KEYS_BRIDGE_KEY = "tasktrooperKeys";
 
 /**
  * The global the web app looks for. Two leading underscores, matching

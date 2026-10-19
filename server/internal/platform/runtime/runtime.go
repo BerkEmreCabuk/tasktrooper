@@ -36,9 +36,12 @@ import (
 	vercelapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/cloud/vercel"
 	httpadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/http"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/llm"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/local/appiumhub"
 	desktopadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/local/desktop"
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/local/ghrunner"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/local/localdevice"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/local/localtoolchain"
+	simrunhost "github.com/makifbaysal/tasktrooper/server/internal/adapter/local/simrun"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/localexec"
 	mcpadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/mcp"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/mcpserver"
@@ -48,6 +51,7 @@ import (
 	browsertools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/browser"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/clarification"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/code"
+	designsystemtools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/designsystem"
 	memorytools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/memory"
 	mobiletools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/mobile"
 	opstools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/ops"
@@ -61,6 +65,7 @@ import (
 	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agentcli"
+	alertingapp "github.com/makifbaysal/tasktrooper/server/internal/application/alerting"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/apikey"
 	attachmentapp "github.com/makifbaysal/tasktrooper/server/internal/application/attachment"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/billing"
@@ -71,14 +76,19 @@ import (
 	cloudapp "github.com/makifbaysal/tasktrooper/server/internal/application/cloud"
 	appconfig "github.com/makifbaysal/tasktrooper/server/internal/application/config"
 	appcontext "github.com/makifbaysal/tasktrooper/server/internal/application/context"
+	datasourceapp "github.com/makifbaysal/tasktrooper/server/internal/application/datasource"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deploy"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deployops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deploywatch"
+	designsystemapp "github.com/makifbaysal/tasktrooper/server/internal/application/designsystem"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/discovery"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/embedmap"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/envreq"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/evolution"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/githubauth"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/indexer"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/initiative"
+	issuesyncapp "github.com/makifbaysal/tasktrooper/server/internal/application/issuesync"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/job"
 	kpiapp "github.com/makifbaysal/tasktrooper/server/internal/application/kpi"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/llmprovider"
@@ -88,6 +98,8 @@ import (
 	memoryapp "github.com/makifbaysal/tasktrooper/server/internal/application/memory"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/mobiledevice"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/newrepo"
+	notifyapp "github.com/makifbaysal/tasktrooper/server/internal/application/notify"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/opsquery"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/orchestrator"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prodops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/projectmodel"
@@ -98,6 +110,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/repository"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/session"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/settings"
+	simrunapp "github.com/makifbaysal/tasktrooper/server/internal/application/simrun"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/smokegen"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops/pipeline"
@@ -106,6 +119,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/secrets"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/proctree"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -129,6 +143,17 @@ func (a releaseAttributor) AttributeRelease(ctx context.Context, repositoryID uu
 		return att, true
 	}
 	return a.fallback.AttributeRelease(ctx, repositoryID, env, onset)
+}
+
+func (a releaseAttributor) AttributeIncident(ctx context.Context, incident domain.Incident, onset time.Time) (domain.ReleaseAttribution, bool) {
+	if ia, ok := a.primary.(prodops.IncidentAttributor); ok {
+		if att, ok := ia.AttributeIncident(ctx, incident, onset); ok {
+			return att, true
+		}
+	} else if att, ok := a.primary.AttributeRelease(ctx, incident.RepositoryID, incident.Env, onset); ok {
+		return att, true
+	}
+	return a.fallback.AttributeRelease(ctx, incident.RepositoryID, incident.Env, onset)
 }
 
 func (a releaseAttributor) HealthWindow() time.Duration { return a.primary.HealthWindow() }
@@ -226,6 +251,10 @@ type Options struct {
 	// EmbeddingsBaseURL, set, bootstraps an embedding provider at boot so RAG
 	// works without anyone opening the settings page.
 	EmbeddingsBaseURL string
+	// EmbeddingsSource names the engine behind EmbeddingsBaseURL (a
+	// domain.EmbeddingSource* value); empty means the desktop's own int8 ONNX
+	// embedder. Skill vectors shipped with the catalog are used only for it.
+	EmbeddingsSource string
 	// PublicBaseURL is the origin a Claude Code session calls the server's own
 	// tools back on. Empty until the listener binds (PORT=0), so Run fills it
 	// in and reloads re-apply the value instead of the config's empty one.
@@ -233,6 +262,10 @@ type Options struct {
 	// AllowedRoots are extra roots a repository or session may be pointed at.
 	// Desktop/local defaults to "*" so any local directory can be opened.
 	AllowedRoots []string
+	// EmbeddedPostgres is set when this process started the database itself
+	// (DATABASE_URL empty), so no other host can be serving it: the only mode
+	// in which what is on this host's disk can decide what to delete there.
+	EmbeddedPostgres bool
 }
 
 type Server struct {
@@ -254,6 +287,8 @@ type engine struct {
 	mcpManager      *mcpadapter.Manager
 	browserSession  *browsertools.Session
 	mobilePool      *mobiletools.Pool
+	appiumHub       *appiumhub.Manager
+	githubRunner    *ghrunner.Manager
 	mobileDeviceSvc *mobiledevice.Service
 	llmClient       port.LLMClient
 	multiLLM        *llm.MultiProviderClient
@@ -273,13 +308,20 @@ type engine struct {
 	projectModelSvc *projectmodel.Service
 	newRepoSvc      *newrepo.Service
 	cloudSvc        *cloudapp.Service
+	opsQuerySvc     *opsquery.Service
 	prodOpsSvc      *prodops.Service
 	healthMonitor   *prodops.Monitor
+	// notifier is the one notify service incidents and alert rules share.
+	notifier        *notifyapp.Service
+	alertEvaluator  *alertingapp.Service
 	storeOpsSvc     *storeops.Service
 	storeMonitor    *storeops.Monitor
+	simRunSvc       *simrunapp.Service
+	designSystemSvc *designsystemapp.Service
 	deployOpsSvc    *deployops.Service
 	deployWatchSvc  *deploywatch.Service
 	releaseSvc      *releaseapp.Service
+	envReqSvc       *envreq.Service
 	smokeGenSvc     *smokegen.Service
 	deployMonitor   *deployops.Monitor
 	evolutionSvc    *evolution.Service
@@ -288,6 +330,9 @@ type engine struct {
 	// runs detached from any request and must be killed (and its worktree
 	// removed) on shutdown rather than left to outlive the process.
 	localRunner *localexec.Runner
+	// localPreview is stopped on shutdown: a preview is a dev server that
+	// would otherwise outlive the app.
+	localPreview *localpreviewapp.Service
 	// pgPool is kept beside pgDB for the two jobs that are not row data: pool
 	// close and the pgvector bootstrap. Everything else reaches Postgres through
 	// pgDB.
@@ -398,6 +443,8 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 		return nil, err
 	}
 
+	e.reapWorkspaceLeftovers()
+
 	// Prompts are embedded in the binary and must never depend on the async
 	// catalog DB sync below; a broken one is a build defect, so it fails
 	// boot here rather than surfacing as a broken prompt in a live run.
@@ -504,7 +551,7 @@ func Run(ctx context.Context, opts Options) (*Server, error) {
 				errType = "request_error"
 			}
 			if code >= fiber.StatusInternalServerError {
-				log.Error().Err(err).Str("path", c.Path()).Int("status", code).Msg("unhandled error")
+				log.Error().Err(err).Str("path", httpadapter.RedactPath(c.Path())).Int("status", code).Msg("unhandled error")
 			}
 			return c.Status(code).JSON(fiber.Map{
 				"error": fiber.Map{"message": err.Error(), "type": errType},
@@ -603,12 +650,19 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	if s.engine.deployMonitor != nil {
 		s.engine.deployMonitor.Stop()
 	}
+	if s.engine.alertEvaluator != nil {
+		s.engine.alertEvaluator.Stop()
+	}
 	if s.engine.evolutionSvc != nil {
 		s.engine.evolutionSvc.Stop()
 	}
 	// 3. Only now cancel anything still holding the run context.
 	s.cancel()
 	// 4. External processes, then the pool everything above was using.
+	proctree.Default.KillAll(3 * time.Second)
+	if s.engine.localPreview != nil {
+		s.engine.localPreview.Close()
+	}
 	if s.engine.localRunner != nil {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		if err := s.engine.localRunner.Close(closeCtx); err != nil {
@@ -627,6 +681,13 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	// Appium's own newCommandTimeout.
 	if s.engine.mobilePool != nil {
 		s.engine.mobilePool.Close()
+	}
+	// After the leases: releasing one is a DELETE to this hub.
+	if s.engine.appiumHub != nil {
+		s.engine.appiumHub.Close()
+	}
+	if s.engine.githubRunner != nil {
+		s.engine.githubRunner.Close()
 	}
 	return err
 }
@@ -652,6 +713,37 @@ func (e *engine) load(opts Options) error {
 		Msg("config loaded")
 
 	return e.registerBuiltinTools(cfg)
+}
+
+// reapWorkspaceLeftovers ends processes a previous server that died hard left
+// running in task workspaces. It runs before anything can dispatch, so every
+// process found there is a leftover.
+func (e *engine) reapWorkspaceLeftovers() {
+	e.mu.RLock()
+	root := e.cfg.Storage.Sessions.WorkspaceRoot
+	e.mu.RUnlock()
+	if root == "" {
+		return
+	}
+	type result struct {
+		killed int
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		n, err := proctree.KillProcessesUnder(root, 3*time.Second)
+		done <- result{n, err}
+	}()
+	select {
+	case r := <-done:
+		if r.err != nil {
+			log.Warn().Err(r.err).Str("root", root).Msg("could not look for processes left in the task workspaces")
+		} else if r.killed > 0 {
+			log.Info().Int("count", r.killed).Str("root", root).Msg("stopped processes left running in task workspaces by a previous server")
+		}
+	case <-time.After(10 * time.Second):
+		log.Warn().Str("root", root).Msg("reaping processes left in the task workspaces is taking too long; continuing boot")
+	}
 }
 
 func applyLocalOverrides(cfg *domain.Config, opts Options) {
@@ -757,6 +849,42 @@ func (e *engine) bootstrapLLMFromYAML(baseURL, model, apiKey string, timeout tim
 // wireRepositoryStore builds the repository store with the boot-time cipher,
 // not a lazy one: its encrypted columns' first real use is always a later HTTP
 // request, after scrubProcessSecrets wiped MCP_SECRETS_KEY from the env.
+// branchIndexPruning is what the workspace reaper may prune branch indexes
+// through, or nil. Pruning decides by this host's disk that an index is
+// orphaned, so it runs only on a database this process started: on one
+// another host also serves, that host's workspaces are not on this disk and
+// their indexes would be deleted under it.
+func branchIndexPruning(indexes port.IndexStore, opts Options) boardapp.BranchIndexStore {
+	if !opts.EmbeddedPostgres {
+		return nil
+	}
+	pruner, _ := indexes.(boardapp.BranchIndexStore)
+	return pruner
+}
+
+// interruptedRunFailing is what settles the session runs a server that died
+// mid-turn left 'running', or nil. It runs before anything can start a run,
+// and only on a database this process started: on one another host also
+// serves, that host's live turns would read as interrupted.
+func interruptedRunFailing(store port.ActivityStore, opts Options) port.InterruptedRunFailer {
+	if !opts.EmbeddedPostgres {
+		return nil
+	}
+	failer, _ := store.(port.InterruptedRunFailer)
+	return failer
+}
+
+func failInterruptedRuns(ctx context.Context, failer port.InterruptedRunFailer) {
+	n, err := failer.FailInterruptedRuns(ctx)
+	if err != nil {
+		log.Warn().Err(err).Msg("could not settle session runs a previous server left running")
+		return
+	}
+	if n > 0 {
+		log.Info().Int("count", n).Msg("marked session runs a previous server left running as failed")
+	}
+}
+
 func wireRepositoryStore(pgDB *pgstore.DB, cfg *domain.Config, cipher *secrets.Cipher, cipherErr error) *pgstore.RepositoryStore {
 	store := pgstore.NewRepositoryStore(pgDB).
 		SetHostRoots(cfg.Storage.Sessions.WorkspaceRoot, cfg.Indexer.AllowedRoots)
@@ -812,6 +940,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var mcpStore port.MCPStore
 	var settingsStore port.SettingsStore
 	var githubTokens port.GitHubTokenStore
+	var githubAuth *githubauth.Service
+	var issueSyncSettingsStore *pgstore.SettingsStore
 	var llmProviderStore port.LLMProviderStore
 	var llmEndpointStore port.LLMEndpointStore
 
@@ -884,11 +1014,18 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// no longer carries MCP_SECRETS_KEY.
 			pgSettings.SetCipher(e.secretsCipher, e.secretsCipherErr)
 			settingsStore = pgSettings
-			githubTokens = pgSettings
+			issueSyncSettingsStore = pgSettings
+			// Every GitHub caller reads its token through this, so a GitHub
+			// App connection renews itself without any of them knowing.
+			githubAuth = githubauth.New(pgSettings, pgSettings, githubapi.DeviceClient{}, githubauth.App)
+			githubTokens = githubAuth
 			llmProviderStore = pgstore.NewLLMProviderStore(pgDB)
 			llmEndpointStore = pgstore.NewLLMEndpointStore(pgDB)
 			agentCLIStore = pgstore.NewAgentCLIStore(pgDB)
 			log.Info().Msg("postgres connected")
+			if failer := interruptedRunFailing(activityStore, opts); failer != nil {
+				failInterruptedRuns(ctx, failer)
+			}
 		}
 	} else {
 		log.Warn().Msg("storage.postgres.dsn empty, sessions/jobs/audit/rag disabled")
@@ -905,8 +1042,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		// manager. Wired unconditionally — the refusal to rebuild lives in
 		// reloadMCP itself; an early guard here was walked past by engine.reload.
 		mcpService = mcpsvc.NewService(mcpStore, e.secretsCipher, e.reloadMCP)
+		e.enableMCPOAuth(mcpService, mcpStore)
 		// Default MCP server catalog, seeded as a boot step after the board seed.
-		e.bootSeed.AddStep("mcp_servers", mcpService.SeedDefaultsIfEmpty)
+		e.bootSeed.AddStep("mcp_servers", mcpService.SeedNewTemplates)
 		resolved, err := mcpService.ResolvedConfigs(ctx)
 		if err != nil {
 			log.Warn().Err(err).Msg("mcp server config resolve failed")
@@ -989,19 +1127,20 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if e.agentLoop != nil {
 			e.agentLoop.SetScreenshotArchiver(attachmentSvc)
 		}
+		// attach_to_task: a screenshot the agent asked to keep lands on its task.
+		if e.browserSession != nil {
+			e.browserSession.SetTaskAttacher(attachmentSvc)
+		}
 	}
 
+	// Zero window/reserve/threshold fields are left zero on purpose: the loop
+	// fills each from the model a run is on (appcontext.LimitsFor), and a value
+	// set in context.* overrides that model default for every model.
 	budget := appcontext.Budget{
 		MaxTokens:          cfg.Context.MaxTokens,
 		ReserveOutput:      cfg.Context.ReserveOutput,
 		SummarizeThreshold: cfg.Context.SummarizeThreshold,
 		KeepRecentMessages: cfg.Context.KeepRecentMessages,
-	}
-	if budget.MaxTokens <= 0 {
-		budget.MaxTokens = 32000
-	}
-	if budget.ReserveOutput <= 0 {
-		budget.ReserveOutput = 4096
 	}
 	// Defaulted before the loop gets the budget: it is a value, so a later fill
 	// never reaches the loop's copy, and its trim reads KeepRecentMessages
@@ -1014,6 +1153,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	// The loop trims with the same budget its callers do, or tool results grow
 	// the request back past it many times over.
 	e.agentLoop.SetHistoryBudget(budget)
+	e.agentLoop.SetModelLimits(appcontext.LimitsFor)
 	// Condenses dropped history into one fixed-position block so the request
 	// prefix stays byte-identical between trims (provider cache survives).
 	e.agentLoop.SetSummarizer(summarizer)
@@ -1025,6 +1165,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var indexSvc *indexer.Service
 	var indexInjector *indexer.Injector
 	var repositorySvc *repository.Service
+	var issueSyncSvc *issuesyncapp.Service
 	var modelSvc *projectmodel.Service
 	var initiativeSvc *initiative.Service
 	var workspaceSvc *workspace.Service
@@ -1052,7 +1193,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var orchSvc *orchestrator.Service
 	if catalogStore != nil {
 		catalogSvc = catalog.NewService(catalogStore, llmClient, embeddingModel)
-		catalogSvc.SetSkillBudget(cfg.Evolution.MaxSkillsPerAgent)
 		if llmProviderStore != nil {
 			catalogSvc.SetLLMProviders(llmProviderStore)
 		}
@@ -1109,16 +1249,21 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			}()
 			return nil
 		})
-		orchSvc = orchestrator.NewService(llmClient, catalogStore, nil, e.agentRouter, cfg.Orchestration, contextBuilder)
-		// Intake and the planner run without tools; the workspace is what keeps
-		// them from asking the stakeholder about repositories the system knows.
-		if initiativeStore != nil && repositoryStore != nil {
-			orchSvc.SetWorkspace(workspaceLister{projects: initiativeStore, repos: repositoryStore})
-		}
-		// A dependent subtask must read the ledger fresh to see what its
-		// dependency just put on the board.
-		if sessionActionStore != nil {
-			orchSvc.SetSessionActions(sessionActionStore)
+		// Chat is the only caller left (board runs go straight to the agent
+		// loop), and a disabled orchestration means no service at all rather
+		// than one every caller has to remember to ask first.
+		if cfg.Orchestration.Enabled {
+			orchSvc = orchestrator.NewService(llmClient, catalogStore, nil, e.agentRouter, cfg.Orchestration, contextBuilder)
+			// Intake and the planner run without tools; the workspace is what keeps
+			// them from asking the stakeholder about repositories the system knows.
+			if initiativeStore != nil && repositoryStore != nil {
+				orchSvc.SetWorkspace(workspaceLister{projects: initiativeStore, repos: repositoryStore})
+			}
+			// A dependent subtask must read the ledger fresh to see what its
+			// dependency just put on the board.
+			if sessionActionStore != nil {
+				orchSvc.SetSessionActions(sessionActionStore)
+			}
 		}
 	}
 
@@ -1225,7 +1370,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		}
 		boardRunner = boardapp.NewRunner(boardapp.RunnerDeps{
 			AgentLoop:     e.agentRouter,
-			OrchSvc:       orchSvc,
 			Catalog:       catalogStore,
 			ActivityStore: activityStore,
 			Runs:          taskAgentRunStore,
@@ -1536,12 +1680,25 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// The span ledger is also the review-chain gate's evidence: which stages a
 			// task actually passed through.
 			repositorySvc.SetSpanStore(taskSpanStore)
+			var reviewQuorum *boardapp.ReviewQuorum
+			if e.pgDB != nil {
+				var quorumWorkflows port.WorkflowReader
+				if workflowSvc != nil {
+					quorumWorkflows = workflowSvc
+				}
+				reviewQuorum = boardapp.NewReviewQuorum(pgstore.NewTaskReviewStore(e.pgDB), quorumWorkflows)
+				repositorySvc.SetReviewQuorum(reviewQuorum)
+				if boardRunner != nil {
+					boardRunner.SetReviewQuorum(reviewQuorum)
+				}
+			}
 			if scoreTracker != nil {
 				reviewGate := boardapp.NewReviewGate(taskSpanStore, scoreTracker)
 				if workflowSvc != nil {
 					reviewGate.SetWorkflows(workflowSvc)
 					reviewGate.SetRoleResolver(workflowSvc)
 				}
+				reviewGate.SetQuorum(reviewQuorum)
 				repositorySvc.SetReviewGate(reviewGate)
 			}
 		}
@@ -1550,6 +1707,41 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			boardRunner.SetTaskUpdater(repositorySvc)
 		}
 		repositorySvc.SetRequireCriteriaComplete(cfg.Board.RequireCriteriaComplete)
+
+		// Issue sync: GitHub/Jira issues imported as board tasks, turned into our
+		// own tasks by the product manager (StartConversions, once the session
+		// service exists below), and written back to as those tasks move. The
+		// poller is what imports on a local install, where GitHub's webhooks
+		// rarely reach this server.
+		if e.pgDB != nil && issueSyncSettingsStore != nil {
+			issueSyncDeps := issuesyncapp.Deps{
+				Tasks:        repositorySvc,
+				Repositories: repositoryStore,
+				Columns:      boardConfigStore,
+				Links:        pgstore.NewIssueLinkStore(e.pgDB),
+				Imports:      pgstore.NewIssueImportStore(e.pgDB),
+				GitHubIssues: githubapi.NewIssuesAPI(),
+				JiraSettings: issueSyncSettingsStore,
+				SyncSettings: issueSyncSettingsStore,
+				JiraFactory:  newJiraClientFactory(),
+			}
+			// Guarded: a typed-nil value in these interfaces would pass the
+			// service's nil checks.
+			if githubTokens != nil {
+				issueSyncDeps.GitHubTokens = githubTokens
+			}
+			if workflowSvc != nil {
+				issueSyncDeps.TaskTypes = workflowSvc
+			}
+			issueSyncSvc = issuesyncapp.NewService(issueSyncDeps)
+			repositorySvc.SetTaskCreatedObserver(issueSyncSvc)
+			if boardDispatcher != nil {
+				boardDispatcher.SetNotifier(issueSyncSvc)
+			}
+			activateBoard = append(activateBoard, func() {
+				issueSyncSvc.Start(ctx, issuesyncapp.PollInterval)
+			})
+		}
 
 		// Work order — the `blocks` relation, enforced where a run starts (the
 		// dispatcher) and a park's only exit (the sweeper). Registered on the
@@ -1563,6 +1755,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			workOrderSweeper := boardapp.NewWorkOrderSweeper(boardTaskStore, relationStore, boardDispatcher)
 			workOrderSweeper.SetDependents(relationStore)
 			workOrderSweeper.SetCommenter(repositorySvc)
+			workOrder.SetParkedHook(workOrderSweeper.SweepSoon)
 			repositorySvc.SetWorkOrderSweeper(workOrderSweeper)
 			activateBoard = append(activateBoard, func() {
 				workOrderSweeper.Start(ctx, boardapp.WorkOrderSweeperInterval)
@@ -1608,6 +1801,11 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				Legacy:    pgstore.NewLegacyModelSource(e.pgDB),
 			})
 			modelSvc.SetBackgroundContext(ctx)
+			modelSvc.SetFindingStore(pgstore.NewFindingStore(e.pgDB))
+			modelSvc.SetTaskCreator(repositorySvc)
+			if workflowSvc != nil {
+				modelSvc.SetRoleResolver(workflowSvc)
+			}
 			modelSvc.Boot(ctx)
 			for _, tool := range projectmodeltools.NewExecutors(&projectmodeltools.ToolKit{Model: modelSvc}) {
 				e.reg.Register(tool)
@@ -1628,6 +1826,27 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				newRepoSvc.SetRoleResolver(workflowSvc)
 			}
 			e.newRepoSvc = newRepoSvc
+		}
+
+		// Design systems: each project's base and each repository's layer,
+		// derived and revised by design tasks and approved with them.
+		if e.pgDB != nil && initiativeStore != nil {
+			designSystemSvc := designsystemapp.NewService(pgstore.NewDesignSystemStore(e.pgDB), initiativeStore, repositorySvc)
+			designSystemSvc.SetTaskCreator(repositorySvc)
+			if workflowSvc != nil {
+				designSystemSvc.SetRoleResolver(workflowSvc)
+			}
+			repositorySvc.SetDesignSystemApprover(designSystemSvc)
+			if boardRunner != nil {
+				boardRunner.SetDesignSystems(designSystemSvc)
+			}
+			if e.newRepoSvc != nil {
+				e.newRepoSvc.SetDesignSystems(designSystemSvc)
+			}
+			for _, tool := range designsystemtools.NewExecutors(&designsystemtools.ToolKit{Service: designSystemSvc, Tasks: repositorySvc}) {
+				e.reg.Register(tool)
+			}
+			e.designSystemSvc = designSystemSvc
 		}
 
 		if attachmentStore != nil {
@@ -1685,14 +1904,22 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		// The task chat and its branch checkout; built here beside the tools the
 		// chat's agent calls.
 		if sessionStore != nil {
-			boardTaskChat = boardapp.NewTaskChatOpener(boardapp.TaskChatOpenerDeps{
+			chatDeps := boardapp.TaskChatOpenerDeps{
 				Tasks:    boardTaskStore,
 				Sessions: sessionStore,
 				Agents:   catalogStore,
 				Columns:  boardConfigStore,
 				Repos:    repositorySvc,
 				Criteria: criterionStore,
-			})
+			}
+			// Guarded: a typed-nil *workflowapp.Service would pass the opener's nil check.
+			if workflowSvc != nil {
+				chatDeps.Roles = workflowSvc
+			}
+			if repositoryStore != nil {
+				chatDeps.RepoArea = boardapp.RepoAreaFromStore(repositoryStore)
+			}
+			boardTaskChat = boardapp.NewTaskChatOpener(chatDeps)
 		}
 		taskChatWorkspaces = taskChatWorkspace{
 			tasks:         boardTaskStore,
@@ -1710,6 +1937,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			WorkspaceRoot: cfg.Storage.Sessions.WorkspaceRoot,
 		})
 		boardKit.LocalPreviews = localPreviewSvc
+		e.localPreview = localPreviewSvc
 
 		if settingsStore != nil && cfg.Tools.BoilerplateCatalog.Enabled {
 			e.reg.Register(boilerplatetools.New(settingsStore))
@@ -1817,9 +2045,6 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					}
 				}()
 			}
-			if catalogStore != nil {
-				repositorySvc.SetAgentLister(catalogStore.ListAgents)
-			}
 			pipelineRunner.Start(ctx)
 			e.pipelineRunner = pipelineRunner
 
@@ -1896,6 +2121,11 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			cloudSvc.Start(ctx)
 			cloudSvc.Boot(ctx)
 			e.cloudSvc = cloudSvc
+			e.opsQuerySvc = opsquery.NewService(opsquery.Deps{
+				Environments: environmentStore,
+				Components:   cloudComponents,
+				Runtime:      cloudSvc,
+			})
 			if modelSvc != nil {
 				// A finished scan turns its deploy signals into environment rows
 				// through the same service the runtime routes read, and the model
@@ -1952,6 +2182,27 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// would spend a turn on saying.
 			if e.mobilePool == nil {
 				e.mobilePool = mobiletools.NewPool()
+			}
+			if attachmentSvc != nil {
+				e.mobilePool.SetTaskAttacher(attachmentSvc)
+			}
+			// The desktop sets APPIUM_BIN when Appium is installed and no longer
+			// runs a hub itself: one is started by the first mobile tool call that
+			// needs it and stopped once idle. Unset (make dev), the hub at
+			// MOBILE_APPIUM_HUB_URL is the user's to run.
+			if e.appiumHub == nil {
+				hubDir := ""
+				if opts.DataDir != "" {
+					hubDir = filepath.Join(opts.DataDir, "appium-hub")
+				}
+				e.appiumHub = appiumhub.New(appiumhub.Config{
+					Bin:     cfg.Tools.Mobile.AppiumBin,
+					HubURL:  cfg.Tools.Mobile.HubURL,
+					WorkDir: hubDir,
+				})
+				e.appiumHub.SetInUse(e.mobilePool.InUse)
+				e.mobilePool.UseHub(e.appiumHub)
+				e.appiumHub.Start()
 			}
 			mobileDeviceSvc.SetProbe(e.mobilePool)
 			mobileTools := mobiletools.NewExecutorsFor(e.mobilePool, deployAppResolver{targets: deployTargetStore})
@@ -2018,18 +2269,29 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					cfg.Storage.Sessions.WorkspaceRoot,
 					boardapp.WorkspaceReapGrace,
 				)
+				if branchIndexes := branchIndexPruning(indexStore, opts); branchIndexes != nil {
+					reaper.SetBranchIndexes(branchIndexes)
+				}
 				activateBoard = append(activateBoard, func() {
 					reaper.Start(ctx, boardapp.WorkspaceReaperInterval)
 				})
 			}
 
 			incidentStore := pgstore.NewIncidentStore(e.pgDB)
+			// No in_app channel yet: the UI has no feed for notifications
+			// that are not about a board task.
+			incidentNotifier := notifyapp.NewService()
+			incidentNotifier.Register(desktopadapter.NewChannel(desktopadapter.NewNotifier("local-llm")))
+			e.notifier = incidentNotifier
 			prodOpsDeps := prodops.Deps{
-				Incidents: incidentStore,
-				Targets:   deployTargetStore,
-				Repos:     repositoryStore,
-				Tasks:     repositorySvc,
-				Deploys:   pipelineStore,
+				Incidents:   incidentStore,
+				Targets:     deployTargetStore,
+				Repos:       repositoryStore,
+				Tasks:       repositorySvc,
+				Deploys:     pipelineStore,
+				Notifier:    incidentNotifier,
+				AlertTokens: pgstore.NewAlertIngestTokenStore(e.pgDB),
+				AlertLimits: cfg.ProdOps.AlertIngest,
 			}
 			prodOpsSvc := prodops.NewService(prodOpsDeps)
 			if workflowSvc != nil {
@@ -2037,6 +2299,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				prodOpsSvc.SetRoleResolver(workflowSvc)
 			}
 			e.prodOpsSvc = prodOpsSvc
+			prodOpsSvc.Start(ctx)
 			pipelineRunner.SetIncidentReporter(prodOpsSvc)
 
 			for _, tool := range opstools.NewExecutors(&opstools.ToolKit{
@@ -2150,7 +2413,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			if boardTaskStore != nil {
 				storeOpsSvc.SetReleaseParker(boardTaskStore)
 			}
-			storeOpsSvc.SetReleaseStarter(func(ctx context.Context, repo domain.Repository, app domain.MobileStoreApp, engine string, artifacts []pipeline.Artifact) error {
+			storeOpsSvc.SetReleaseStarter(func(ctx context.Context, repo domain.Repository, app domain.MobileStoreApp, engine string, artifacts []pipeline.Artifact, buildNumber string) error {
 				if gitClient == nil || githubTokens == nil {
 					return fmt.Errorf("storeops: github client or token not configured")
 				}
@@ -2196,7 +2459,11 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				if workflow == "" {
 					return fmt.Errorf("storeops: the generated release pipeline for %s carries no workflow", app.Identifier)
 				}
-				return githubapi.DispatchWorkflow(ctx, token, info.Owner, info.Repo, workflow, info.Branch)
+				if buildNumber == "" {
+					return githubapi.DispatchWorkflow(ctx, token, info.Owner, info.Repo, workflow, info.Branch)
+				}
+				return githubapi.DispatchWorkflowInputs(ctx, token, info.Owner, info.Repo, workflow, info.Branch,
+					map[string]string{"channel": "stage", "build_number": buildNumber})
 			})
 			// Onboard returns the (possibly test_ready) app row; the hook only needs
 			// to know whether onboarding succeeded, so the row is dropped here.
@@ -2212,6 +2479,67 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// A successful store prod deploy IS the submit for review — hand it
 			// to storeops so the monitor polls the verdict.
 			pipelineRunner.SetStoreSubmitter(storeOpsSvc)
+
+			// Per-task test builds (TestFlight, Play internal app sharing) and
+			// "run it on my simulator". Both build from a detached worktree of
+			// the task's checkout, never from the checkout an agent works in.
+			storeDataDir := opts.DataDir
+			if storeDataDir == "" {
+				storeDataDir = filepath.Dir(cfg.AgentCatalog.CacheDir)
+			}
+			testSource := &storeTestSource{git: gitClient, workspaceRoot: cfg.Storage.Sessions.WorkspaceRoot}
+			if githubTokens != nil {
+				testSource.remoteHead = func(ctx context.Context, repo domain.Repository, branch string) (string, error) {
+					token, err := githubTokens.GitHubToken(ctx)
+					if err != nil {
+						return "", err
+					}
+					info, err := gitClient.TaskGitInfo(ctx, repo.RootPath)
+					if err != nil {
+						return "", err
+					}
+					return githubapi.NewPRAPI().BranchHeadSHA(ctx, token, info.Owner, info.Repo, branch)
+				}
+			}
+			testBuildDeps := storeops.TestBuildDeps{
+				Builds: pgstore.NewStoreTestBuildStore(e.pgDB),
+				NewTestFlight: func(cred domain.StoreCredential) (port.TestFlightClient, error) {
+					return appstore.New(cred)
+				},
+				NewPlayTesting: func(cred domain.StoreCredential) (port.PlayTestingClient, error) {
+					return googleplay.New(cred)
+				},
+				Local:       newLocalMobileBuilder(storeDataDir),
+				Source:      testSource,
+				Tasks:       repositorySvc,
+				ArtifactDir: filepath.Join(storeDataDir, "store-builds"),
+			}
+			if githubTokens != nil {
+				testBuildDeps.Actions = githubapi.NewMobileTestBuilder(func(ctx context.Context, repo domain.Repository) (string, string, string, string, error) {
+					token, err := githubTokens.GitHubToken(ctx)
+					if err != nil {
+						return "", "", "", "", fmt.Errorf("resolving github token: %w", err)
+					}
+					info, err := gitClient.TaskGitInfo(ctx, repo.RootPath)
+					if err != nil {
+						return "", "", "", "", fmt.Errorf("resolving repository git info: %w", err)
+					}
+					// "" makes the builder ask GitHub: the root checkout's current
+					// branch is not necessarily the default one.
+					return token, info.Owner, info.Repo, "", nil
+				})
+			}
+			storeOpsSvc.SetTestBuilds(testBuildDeps)
+			repositorySvc.SetStoreTestBuilder(storeOpsSvc)
+			storeOpsSvc.ResumeTestBuilds(ctx)
+
+			e.simRunSvc = simrunapp.New(simrunapp.Deps{
+				Repos:    repositoryStore,
+				Tasks:    repositorySvc,
+				Source:   simRunCheckout{testSource},
+				Host:     simrunhost.New(localdevice.New(localdevice.Config{})),
+				CacheDir: filepath.Join(storeDataDir, "simulator-builds"),
+			})
 
 			// Gated like the prodops monitor: without a cipher the vault cannot
 			// build an ASC/Play client, so the sweep would only log warnings.
@@ -2309,9 +2637,13 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 					HealthWindow:        cfg.DeployOps.HealthWindow,
 					BeforeDeploy:        repository.BeforeDeployConfirmer{Service: repositorySvc},
 					Locator:             repositorySvc,
+					Notifier:            incidentNotifier,
 				}
 				if relations, ok := relationStore.(*pgstore.TaskRelationStore); ok {
 					releaseDeps.DeployOrder = relations
+				}
+				if holds, ok := boardTaskStore.(*pgstore.BoardTaskStore); ok {
+					releaseDeps.MergeHolds = holds
 				}
 				releaseDeps.Git = gitClient
 				e.localRunner = localexec.NewRunner()
@@ -2332,8 +2664,22 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				if boardDispatcher != nil {
 					releaseDeps.Waker = boardapp.NewReleaseWaker(boardDispatcher)
 				}
+				if e.cloudSvc != nil && modelSvc != nil {
+					e.envReqSvc = envreq.New(envreq.Deps{
+						Store:        pgstore.NewEnvRequirementStore(e.pgDB),
+						Environments: e.cloudSvc,
+						Cloud:        e.cloudSvc,
+						Components:   modelSvc,
+						Examples:     repositorySvc,
+					})
+					releaseDeps.Envs = e.envReqSvc
+					boardKit.EnvRequirements = e.envReqSvc
+				}
 				releaseSvc := releaseapp.New(releaseDeps)
 				e.releaseSvc = releaseSvc
+				if e.envReqSvc != nil {
+					e.envReqSvc.SetResumer(releaseSvc.ResumeEnvHolds)
+				}
 				// Drafting smoke checks is an agent run over the repository's own
 				// checkout, test-run through the release service's own probe.
 				if modelSvc != nil && catalogStore != nil && e.agentRouter != nil && repositoryStore != nil {
@@ -2353,6 +2699,14 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				boardKit.Releases = releaseSvc
 				if taskPRSvc != nil {
 					taskPRSvc.SetReleaseOpener(releaseSvc)
+					releaseSvc.SetMergedFiles(taskPRSvc)
+				}
+				if repositorySvc != nil {
+					repositorySvc.SetComponentAssignedHook(func(ctx context.Context, repositoryID, componentID uuid.UUID) {
+						if _, err := releaseSvc.OpenPending(ctx, repositoryID, componentID); err != nil {
+							log.Warn().Err(err).Str("component_id", componentID.String()).Msg("release: opening releases for merged tasks after a component was assigned failed")
+						}
+					})
 				}
 				if modelSvc != nil {
 					modelSvc.SetDeliveryConfirmedHook(func(ctx context.Context, repositoryID, componentID uuid.UUID) {
@@ -2366,6 +2720,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				}
 				activateBoard = append(activateBoard, func() {
 					releaseSvc.Start(ctx, releaseapp.DefaultSweepInterval)
+					go retryUnresolvedMerges(ctx, repositoryStore, releaseSvc)
 				})
 
 				// The park's release mechanism: without it a task parked on a running
@@ -2433,6 +2788,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	// need embedding, and running it any earlier fails every skill with
 	// "unsupported protocol scheme" on the not-yet-configured embedder.
 	var catalogRepo port.CatalogRepoReader
+	var catalogSkillVectors port.SkillVectorSource
 	var catalogSyncStoreForHandler port.CatalogSyncStore
 	var catalogSyncOnce func(context.Context)
 	if strings.TrimSpace(cfg.AgentCatalog.Source) != "" && e.pgDB != nil && catalogSvc != nil {
@@ -2440,6 +2796,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		reader := &catalogrepo.Reader{Source: cfg.AgentCatalog.Source, CacheDir: cfg.AgentCatalog.CacheDir}
 		catalogSyncStoreForHandler = catalogSyncStore
 		catalogRepo = reader
+		catalogSkillVectors = reader
 		catalogSyncOnce = func(runCtx context.Context) {
 			syncCtx, cancel := context.WithTimeout(runCtx, 10*time.Minute)
 			defer cancel()
@@ -2533,8 +2890,16 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			e.bootSeed.AddStep("embeddings_endpoint", func(stepCtx context.Context) error {
 				return llmProviderSvc.BootstrapEmbeddings(stepCtx, embeddingsBaseURL)
 			})
-			log.Info().Str("embeddings_base_url", embeddingsBaseURL).
+			embeddingsSource := opts.EmbeddingsSource
+			if embeddingsSource == "" {
+				embeddingsSource = domain.EmbeddingSourceONNXInt8
+			}
+			llmProviderSvc.SetBundledEmbedder(embeddingsBaseURL, embeddingsSource)
+			log.Info().Str("embeddings_base_url", embeddingsBaseURL).Str("embeddings_source", embeddingsSource).
 				Msg("embeddings resolve to the bundled local embedder")
+		}
+		if catalogSvc != nil && catalogSkillVectors != nil {
+			catalogSvc.SetShippedSkillVectors(catalogSkillVectors, llmProviderSvc)
 		}
 
 		// What an index pass stamps itself with, and what a search compares
@@ -2629,6 +2994,19 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// chat cannot park on its quota in the first place.
 			session.NewSessionQuotaSweeper(sessionStore, sessionSvc).Start(ctx, session.QuotaSweeperInterval)
 		}
+		// The conversion is an ordinary chat turn with the product manager, so
+		// an agent CLI provider runs it through the chat executor wired above.
+		if issueSyncSvc != nil && workflowSvc != nil {
+			conversion := issuesyncapp.ConversionDeps{
+				Sessions: sessionSvc,
+				Roles:    workflowSvc,
+				Policy:   cfg.Tools.DefaultPolicy,
+			}
+			if catalogStore != nil {
+				conversion.Agents = catalogStore
+			}
+			issueSyncSvc.StartConversions(ctx, conversion)
+		}
 	}
 
 	var apiKeySvc *apikey.Service
@@ -2666,6 +3044,37 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	if e.smokeGenSvc != nil {
 		smokeGenHTTP = e.smokeGenSvc
 	}
+	if e.githubRunner == nil && issueSyncSettingsStore != nil && opts.DataDir != "" {
+		e.githubRunner = newGitHubRunner(opts.DataDir, githubTokens, issueSyncSettingsStore, repositoryStore)
+		go e.githubRunner.Start(context.Background())
+	}
+	var dataSourceSvc *datasourceapp.Service
+	if e.pgDB != nil {
+		dataSourceSvc = newDataSourceService(e.pgDB, e.secretsCipher, e.secretsCipherErr)
+	}
+	if dataSourceSvc != nil && e.storeOpsSvc != nil {
+		dataSourceSvc.SetStoreCredentials(e.storeOpsSvc)
+	}
+	signalsSvc := newSignalsService(e.pgDB, dataSourceSvc)
+	// The Logs explorer is built with the cloud routes, before the signal
+	// bindings exist: a component's logs binding is handed to it here.
+	if e.opsQuerySvc != nil && signalsSvc != nil {
+		e.opsQuerySvc.SetBoundLogs(signalsSvc)
+		e.opsQuerySvc.SetBoundErrors(signalsSvc)
+	}
+	wireDeployImpact(e.releaseSvc, e.pgDB, signalsSvc, cfg.DeployOps.Impact)
+	alertingSvc := e.newAlertingService(ctx, cfg.Alerting, signalsSvc, dataSourceSvc)
+	errorDefsSvc, opsAISvc := e.wireObservabilityAI(ctx, cfg, observabilityAIDeps{
+		repositories: repositoryStore,
+		tasks:        repositorySvc,
+		workflows:    workflowSvc,
+		agents:       catalogStore,
+		sessions:     sessionSvc,
+		signals:      signalsSvc,
+		sources:      dataSourceSvc,
+		alerting:     alertingSvc,
+	})
+
 	handler := httpadapter.NewHandler(httpadapter.Config{
 		AgentLoop:         e.agentLoop,
 		LLMClient:         llmClient,
@@ -2677,6 +3086,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		SessionSvc:        sessionSvc,
 		SettingsSvc:       settingsSvc,
 		GitHubTokens:      githubTokens,
+		GitHubApp:         githubAppOrNil(githubAuth),
+		GitHubRunner:      githubRunnerOrNil(e.githubRunner),
 		LLMProviderSvc:    llmProviderSvc,
 		AgentCLISvc:       agentCLISvc,
 		JobSvc:            e.jobSvc,
@@ -2698,14 +3109,24 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		DeploySvc:         e.deploySvc,
 		RepoDocsSvc:       e.repoDocsSvc,
 		ProdOpsSvc:        e.prodOpsSvc,
+		IssueSyncSvc:      issueSyncSvc,
 		StoreOpsSvc:       e.storeOpsSvc,
 		DeployOpsSvc:      e.deployOpsSvc,
 		ProjectModelSvc:   e.projectModelSvc,
 		CloudSvc:          e.cloudSvc,
+		OpsQuerySvc:       e.opsQuerySvc,
+		DataSourceSvc:     dataSourceSvc,
+		SignalsSvc:        signalsSvc,
+		AlertingSvc:       alertingSvc,
+		ErrorDefsSvc:      errorDefsSvc,
+		OpsAISvc:          opsAISvc,
+		EnvRequirements:   envRequirementsOrNil(e.envReqSvc),
 		ReleaseSvc:        releaseHTTP,
 		SmokeGenSvc:       smokeGenHTTP,
 		ReleaseWaker:      releaseWaker,
 		LocalPreviewSvc:   localPreviewSvc,
+		SimRunSvc:         e.simRunSvc,
+		DesignSystemSvc:   e.designSystemSvc,
 		InitiativeSvc:     initiativeSvc,
 		WorkspaceSvc:      workspaceSvc,
 		WorkflowSvc:       workflowSvc,
@@ -2748,7 +3169,12 @@ func (e *engine) reloadMCP(configs []domain.MCPServerConfig) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	e.mcpManager = &mcpadapter.Manager{}
+	// The same manager, not a new one: the HTTP handler holds this pointer for
+	// the server list's health, and the manager remembers which tools it
+	// registered so a removed server's tools leave the registry.
+	if e.mcpManager == nil {
+		e.mcpManager = &mcpadapter.Manager{}
+	}
 	e.mcpManager.LoadAndRegister(ctx, configs, e.reg)
 	return nil
 }
@@ -2887,4 +3313,22 @@ func (m *muxExecutor) ExecuteChat(ctx context.Context, req domain.ChatExecution,
 		return domain.ChatResult{}, domain.ErrHostExecutedProvider(req.Provider)
 	}
 	return chatEx.ExecuteChat(ctx, req, out)
+}
+
+// envRequirementsOrNil keeps a nil *envreq.Service from becoming a non-nil
+// interface, which would register routes that dereference it.
+func envRequirementsOrNil(s *envreq.Service) httpadapter.EnvRequirementService {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
+// githubAppOrNil keeps a nil *githubauth.Service from becoming a non-nil
+// interface the handler would call into.
+func githubAppOrNil(s *githubauth.Service) httpadapter.GitHubAppService {
+	if s == nil {
+		return nil
+	}
+	return s
 }

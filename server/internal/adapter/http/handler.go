@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	goccyjson "github.com/goccy/go-json"
@@ -24,17 +25,21 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/mcpserver"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/agent"
 	agentcliapp "github.com/makifbaysal/tasktrooper/server/internal/application/agentcli"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/alerting"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/apikey"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/attachment"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/billing"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/catalog"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/cloud"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/datasource"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deploy"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deployops"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/designsystem"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/embedmap"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/evolution"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/indexer"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/initiative"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/issuesync"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/job"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/kpi"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/llmprovider"
@@ -43,6 +48,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/memory"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/mobiledevice"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/newrepo"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/opsquery"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prodops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/projectmodel"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/rag"
@@ -51,6 +57,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/repository"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/session"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/settings"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/signals"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/simrun"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
@@ -90,6 +98,8 @@ type Handler struct {
 	settingsSvc     *settings.Service
 	mobileDeviceSvc *mobiledevice.Service
 	githubTokens    port.GitHubTokenStore
+	githubApp       GitHubAppService
+	githubRunner    GitHubRunnerService
 	llmProviderSvc  *llmprovider.Service
 	agentCLISvc     *agentcliapp.Service
 	jobSvc          *job.Service
@@ -129,6 +139,7 @@ type Handler struct {
 	deploySvc         *deploy.Service
 	repoDocsSvc       *repodocs.Service
 	prodOpsSvc        *prodops.Service
+	issueSyncSvc      *issuesync.Service
 	storeOpsSvc       *storeops.Service
 	deployOpsSvc      *deployops.Service
 	projectModelSvc   *projectmodel.Service
@@ -142,10 +153,21 @@ type Handler struct {
 	releaseWaker    ReleaseWaker
 	smokeGenSvc     SmokeGenService
 	cloudSvc        *cloud.Service
+	dataSourceSvc   *datasource.Service
+	opsQuerySvc     *opsquery.Service
+	signalsSvc      *signals.Service
+	alertingSvc     *alerting.Service
+	errorDefsSvc    ErrorDefinitionService
+	opsAISvc        OpsAIService
+	envRequirements EnvRequirementService
 	localPreviewSvc *localpreview.Service
+	simRunSvc       *simrun.Service
+	designSystemSvc *designsystem.Service
 	// mcpToolServer serves TaskTrooper's tools to a local Claude Code session.
 	// Nil on every host without the CLI, in which case no route is mounted.
 	mcpToolServer *mcpserver.Server
+
+	boardList boardListCache
 }
 
 type Config struct {
@@ -160,6 +182,8 @@ type Config struct {
 	SettingsSvc       *settings.Service
 	MobileDeviceSvc   *mobiledevice.Service
 	GitHubTokens      port.GitHubTokenStore
+	GitHubApp         GitHubAppService
+	GitHubRunner      GitHubRunnerService
 	LLMProviderSvc    *llmprovider.Service
 	AgentCLISvc       *agentcliapp.Service
 	JobSvc            *job.Service
@@ -196,6 +220,7 @@ type Config struct {
 	DeploySvc         *deploy.Service
 	RepoDocsSvc       *repodocs.Service
 	ProdOpsSvc        *prodops.Service
+	IssueSyncSvc      *issuesync.Service
 	StoreOpsSvc       *storeops.Service
 	DeployOpsSvc      *deployops.Service
 	ProjectModelSvc   *projectmodel.Service
@@ -203,7 +228,16 @@ type Config struct {
 	ReleaseWaker      ReleaseWaker
 	SmokeGenSvc       SmokeGenService
 	CloudSvc          *cloud.Service
+	DataSourceSvc     *datasource.Service
+	OpsQuerySvc       *opsquery.Service
+	SignalsSvc        *signals.Service
+	AlertingSvc       *alerting.Service
+	ErrorDefsSvc      ErrorDefinitionService
+	OpsAISvc          OpsAIService
+	EnvRequirements   EnvRequirementService
 	LocalPreviewSvc   *localpreview.Service
+	SimRunSvc         *simrun.Service
+	DesignSystemSvc   *designsystem.Service
 	MCPToolServer     *mcpserver.Server
 	BootSeed          BootSeed
 }
@@ -221,6 +255,8 @@ func NewHandler(cfg Config) *Handler {
 		settingsSvc:       cfg.SettingsSvc,
 		mobileDeviceSvc:   cfg.MobileDeviceSvc,
 		githubTokens:      cfg.GitHubTokens,
+		githubApp:         cfg.GitHubApp,
+		githubRunner:      cfg.GitHubRunner,
 		llmProviderSvc:    cfg.LLMProviderSvc,
 		agentCLISvc:       cfg.AgentCLISvc,
 		jobSvc:            cfg.JobSvc,
@@ -258,6 +294,7 @@ func NewHandler(cfg Config) *Handler {
 		deploySvc:         cfg.DeploySvc,
 		repoDocsSvc:       cfg.RepoDocsSvc,
 		prodOpsSvc:        cfg.ProdOpsSvc,
+		issueSyncSvc:      cfg.IssueSyncSvc,
 		storeOpsSvc:       cfg.StoreOpsSvc,
 		deployOpsSvc:      cfg.DeployOpsSvc,
 		projectModelSvc:   cfg.ProjectModelSvc,
@@ -265,7 +302,16 @@ func NewHandler(cfg Config) *Handler {
 		releaseWaker:      cfg.ReleaseWaker,
 		smokeGenSvc:       cfg.SmokeGenSvc,
 		cloudSvc:          cfg.CloudSvc,
+		dataSourceSvc:     cfg.DataSourceSvc,
+		opsQuerySvc:       cfg.OpsQuerySvc,
+		signalsSvc:        cfg.SignalsSvc,
+		alertingSvc:       cfg.AlertingSvc,
+		errorDefsSvc:      cfg.ErrorDefsSvc,
+		opsAISvc:          cfg.OpsAISvc,
+		envRequirements:   cfg.EnvRequirements,
 		localPreviewSvc:   cfg.LocalPreviewSvc,
+		simRunSvc:         cfg.SimRunSvc,
+		designSystemSvc:   cfg.DesignSystemSvc,
 		mcpToolServer:     cfg.MCPToolServer,
 		bootSeed:          cfg.BootSeed,
 	}
@@ -310,12 +356,22 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	h.registerReleaseRoutes(app)
 	h.registerSmokeGenRoutes(app)
 	h.registerCloudRoutes(app)
+	h.registerOpsQueryRoutes(app)
+	h.registerDataSourceRoutes(app)
+	h.registerSignalRoutes(app)
+	h.registerTraceRoutes(app)
+	h.registerAlertRuleRoutes(app)
+	h.registerErrorDefinitionRoutes(app)
+	h.registerEnvRequirementRoutes(app)
 	h.registerInitiativeRoutes(app)
 	h.registerDeployRoutes(app)
 	h.registerRepoDocsRoutes(app)
 	h.registerProdOpsRoutes(app)
+	h.registerIssueSyncRoutes(app)
 	h.registerRepositoryOpsRoutes(app)
 	h.registerStoreOpsRoutes(app)
+	h.registerSimulatorRunRoutes(app)
+	h.registerDesignSystemRoutes(app)
 	h.registerWorkspaceRoutes(app)
 	h.registerWorkflowRoutes(app)
 	h.registerEvolutionRoutes(app)
@@ -421,12 +477,27 @@ func unauthorized(c *fiber.Ctx) error {
 	})
 }
 
+// metricsMiddleware labels by the matched route pattern, read after c.Next()
+// once routing is done: the raw path would mint a series per id. Labels are
+// cloned because fiber hands out strings that alias fasthttp's reused request
+// buffers, and Prometheus keeps label values for the life of the series. A
+// returned error has not been written yet (the app's error handler runs after
+// this returns), so its status comes from the error.
 func (h *Handler) metricsMiddleware(c *fiber.Ctx) error {
 	start := time.Now()
 	err := c.Next()
-	status := strconv.Itoa(c.Response().StatusCode())
-	h.metrics.RequestsTotal.WithLabelValues(c.Method(), c.Path(), status).Inc()
-	h.metrics.RequestDuration.WithLabelValues(c.Method(), c.Path()).Observe(time.Since(start).Seconds())
+	code := c.Response().StatusCode()
+	var fe *fiber.Error
+	if errors.As(err, &fe) {
+		code = fe.Code
+	} else if err != nil {
+		code = fiber.StatusInternalServerError
+	}
+	status := strconv.Itoa(code)
+	method := strings.Clone(c.Method())
+	path := strings.Clone(c.Route().Path)
+	h.metrics.RequestsTotal.WithLabelValues(method, path, status).Inc()
+	h.metrics.RequestDuration.WithLabelValues(method, path).Observe(time.Since(start).Seconds())
 	return err
 }
 
@@ -635,6 +706,12 @@ func (h *Handler) chatCompletionsStream(c *fiber.Ctx, messages []domain.Message,
 // which exposes per-provider model listing and health checks the port.LLMClient
 // interface does not. Without this, those capabilities are invisible whenever
 // the client is wrapped (always in cloud mode, where usage recording is on).
+func (h *Handler) invalidateProviderHealth() {
+	if multi, ok := resolveMultiClient(h.llmClient); ok {
+		multi.InvalidateHealth()
+	}
+}
+
 func resolveMultiClient(c port.LLMClient) (*llmadapter.MultiProviderClient, bool) {
 	for i := 0; i < 8 && c != nil; i++ {
 		if m, ok := c.(*llmadapter.MultiProviderClient); ok {
@@ -719,7 +796,7 @@ func (h *Handler) Tools(c *fiber.Ctx) error {
 	// existing grant is never silently stripped because the picker didn't know
 	// the tool existed).
 	if c.Query("all") == "true" {
-		defs := h.registry.DefinitionsForPolicy(domain.ToolPolicy{})
+		defs := h.registry.Definitions()
 		return c.JSON(toolsResponse{Tools: defs, Count: len(defs)})
 	}
 	policy := h.resolvePolicy(c, domain.ToolPolicy{})
@@ -746,6 +823,9 @@ func (h *Handler) Health(c *fiber.Ctx) error {
 		list, err := h.llmProviderSvc.List(ctx)
 		if err == nil {
 			if multi, ok := resolveMultiClient(h.llmClient); ok {
+				if c.Query("fresh") == "1" {
+					multi.InvalidateHealth()
+				}
 				checks := append(multi.HealthCheck(ctx, list.Providers),
 					multi.HealthCheckEndpoints(ctx, list.Endpoints)...)
 				providers = make([]llmProviderHealthItem, 0, len(checks))

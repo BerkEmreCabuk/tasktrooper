@@ -1,7 +1,18 @@
+import { CircleDashed, Clock } from "lucide-react";
 import { describe, expect, it } from "vitest";
 import type { TaskTypeDef } from "@/api";
 import {
+  BOARD_ACTIVITY_POLL_ACTIVE_MS,
+  BOARD_ACTIVITY_POLL_IDLE_MS,
+  BOARD_TASK_POLL_ACTIVE_MS,
+  BOARD_TASK_POLL_IDLE_MS,
+  beforeDeploySteps,
+  boardPollIntervals,
+  deployOrderBlockerLabel,
   filterTasksByScope,
+  formatColumnAge,
+  isBeforeDeployPending,
+  isMergeHold,
   pipelineStatusVariant,
   projectScopeCounts,
   runStatusVariant,
@@ -13,6 +24,66 @@ import {
   taskTypeOptions,
   workOrderBlockerLabel,
 } from "@/lib/project-board";
+
+const ORDER_NOTE =
+  "<!-- tt:order -->\n**Release order (generated from this task's relations — do not edit by hand):**\n" +
+  "- Ships after: T-100 (CMS API/auth foundation (serverless, GitHub Contents API)).\n<!-- /tt:order -->";
+
+describe("beforeDeploySteps", () => {
+  it("drops the generated order note", () => {
+    expect(beforeDeploySteps(ORDER_NOTE)).toBe("");
+  });
+
+  it("keeps what a human wrote around the order note", () => {
+    expect(beforeDeploySteps(`${ORDER_NOTE}\n\nRun the backfill`)).toBe("Run the backfill");
+  });
+
+  it("treats an unterminated note as running to the end, like the server", () => {
+    expect(beforeDeploySteps("Rotate the key\n<!-- tt:order -->\n- Ships after: T-1")).toBe("Rotate the key");
+  });
+
+  it("reads a missing field as no steps", () => {
+    expect(beforeDeploySteps(undefined)).toBe("");
+  });
+});
+
+describe("isBeforeDeployPending", () => {
+  it("never asks to confirm an order note alone", () => {
+    expect(isBeforeDeployPending({ before_deploy: ORDER_NOTE, before_deploy_confirmed_at: null })).toBe(false);
+  });
+
+  it("asks to confirm human steps until they are confirmed", () => {
+    const before_deploy = `${ORDER_NOTE}\n\nRun the backfill`;
+    expect(isBeforeDeployPending({ before_deploy, before_deploy_confirmed_at: null })).toBe(true);
+    expect(isBeforeDeployPending({ before_deploy, before_deploy_confirmed_at: "2026-10-05T15:40:00Z" })).toBe(false);
+  });
+});
+
+describe("isMergeHold", () => {
+  it("knows the three merge holds and nothing else", () => {
+    expect(isMergeHold("deploy_order")).toBe(true);
+    expect(isMergeHold("before_deploy")).toBe(true);
+    expect(isMergeHold("delivery_profile")).toBe(true);
+    expect(isMergeHold("work_order")).toBe(false);
+    expect(isMergeHold(undefined)).toBe(false);
+  });
+});
+
+describe("deployOrderBlockerLabel", () => {
+  it("names the task the merge waits for, even with parentheses in its title", () => {
+    expect(
+      deployOrderBlockerLabel("T-100 (CMS API/auth foundation (serverless, GitHub Contents API)) [done]"),
+    ).toBe("Merge waits for T-100");
+  });
+
+  it("counts the rest", () => {
+    expect(deployOrderBlockerLabel("T-100 (CMS) [done], T-99 (Auth) [in_qa]")).toBe("Merge waits for T-100 +1");
+  });
+
+  it("falls back to the resource label when the detail is empty", () => {
+    expect(deployOrderBlockerLabel("")).toBe("Merge waits for the deploy order");
+  });
+});
 
 describe("workOrderBlockerLabel", () => {
   it("shows the single blocker's task key", () => {
@@ -93,13 +164,14 @@ describe("runStatusVariant", () => {
 });
 
 describe("taskTypeOptions / taskTypeLabel", () => {
-  it("falls back to the four built-ins when no task_types list has loaded", () => {
-    expect(taskTypeOptions(undefined).map((o) => o.value)).toEqual(["task", "analiz", "bug", "technical"]);
-    expect(taskTypeOptions([]).map((o) => o.value)).toEqual(["task", "analiz", "bug", "technical"]);
+  it("falls back to the built-ins when no task_types list has loaded", () => {
+    expect(taskTypeOptions(undefined).map((o) => o.value)).toEqual(["task", "analiz", "bug", "technical", "design"]);
+    expect(taskTypeOptions([]).map((o) => o.value)).toEqual(["task", "analiz", "bug", "technical", "design"]);
   });
 
   it("labels a built-in type from the locale when no list is loaded", () => {
     expect(taskTypeLabel("technical")).toBe("Technical");
+    expect(taskTypeLabel("design")).toBe("Design");
   });
 
   it("orders options by the server list's position and prefers its labels", () => {
@@ -184,8 +256,16 @@ describe("taskTypeOptions / taskTypeLabel", () => {
 
 describe("taskPipelineCardIcon", () => {
   it("colors the running/pending board-card icon with the info hue, not warning", () => {
-    expect(taskPipelineCardIcon("running")?.className).toBe("text-info animate-spin");
-    expect(taskPipelineCardIcon("pending")?.className).toBe("text-info animate-spin");
+    expect(taskPipelineCardIcon("running")?.className).toBe("text-info");
+    expect(taskPipelineCardIcon("pending")?.className).toBe("text-info");
+  });
+
+  it("never animates a card icon, and tells waiting from running", () => {
+    for (const status of ["pending", "running", "success", "failed", "skipped"]) {
+      expect(taskPipelineCardIcon(status)?.className).not.toMatch(/animate-/);
+    }
+    expect(taskPipelineCardIcon("pending")?.Icon).toBe(Clock);
+    expect(taskPipelineCardIcon("running")?.Icon).toBe(CircleDashed);
   });
 });
 
@@ -276,5 +356,59 @@ describe("taskCreateDefaults", () => {
     expect(defaults.initiativeProjectId).toBe("proj-empty");
     expect(defaults.repositoryId).toBe("repo-a");
     expect(defaults.repositories).toBe(repositories);
+  });
+});
+
+describe("boardPollIntervals", () => {
+  const card = (column: string, agent_running?: boolean) => ({ column, agent_running });
+  const none = new Set<string>();
+
+  it("polls slowly when nothing on the board is moving", () => {
+    expect(boardPollIntervals([card("todo"), card("done", false)], none)).toEqual({
+      tasksMs: BOARD_TASK_POLL_IDLE_MS,
+      activityMs: BOARD_ACTIVITY_POLL_IDLE_MS,
+    });
+    expect(BOARD_TASK_POLL_IDLE_MS).toBe(15000);
+    expect(BOARD_ACTIVITY_POLL_IDLE_MS).toBe(15000);
+  });
+
+  it("keeps the cards fast while one is in progress, without speeding up the activity feed", () => {
+    expect(boardPollIntervals([card("todo"), card("in_progress")], none)).toEqual({
+      tasksMs: BOARD_TASK_POLL_ACTIVE_MS,
+      activityMs: BOARD_ACTIVITY_POLL_IDLE_MS,
+    });
+    expect(BOARD_TASK_POLL_ACTIVE_MS).toBe(5000);
+  });
+
+  it("goes fast on both while the activity feed shows a running agent", () => {
+    expect(boardPollIntervals([card("todo")], new Set(["t-1"]))).toEqual({
+      tasksMs: BOARD_TASK_POLL_ACTIVE_MS,
+      activityMs: BOARD_ACTIVITY_POLL_ACTIVE_MS,
+    });
+    expect(BOARD_ACTIVITY_POLL_ACTIVE_MS).toBe(2000);
+  });
+
+  it("goes fast on both while the task list says an agent is running", () => {
+    expect(boardPollIntervals([card("review", true)], none)).toEqual({
+      tasksMs: BOARD_TASK_POLL_ACTIVE_MS,
+      activityMs: BOARD_ACTIVITY_POLL_ACTIVE_MS,
+    });
+  });
+});
+
+describe("formatColumnAge", () => {
+  const entered = "2026-10-01T10:00:00Z";
+  const at = (minutes: number) => Date.parse(entered) + minutes * 60000;
+
+  it("reads minutes, then hours, then days", () => {
+    expect(formatColumnAge(entered, at(0))).toBe("0m");
+    expect(formatColumnAge(entered, at(59))).toBe("59m");
+    expect(formatColumnAge(entered, at(60))).toBe("1h");
+    expect(formatColumnAge(entered, at(47 * 60))).toBe("47h");
+    expect(formatColumnAge(entered, at(48 * 60))).toBe("2d");
+  });
+
+  it("keeps the same text across a minute tick once past the first hour", () => {
+    expect(formatColumnAge(entered, at(180))).toBe(formatColumnAge(entered, at(181)));
   });
 });

@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Loader2, MinusCircle, XCircle, type LucideIcon } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleDashed, Clock, MinusCircle, XCircle, type LucideIcon } from "lucide-react";
 import type {
   BoardTask,
   PipelineGateReason,
@@ -180,8 +180,8 @@ export const DEFAULT_BOARD_COLUMNS: {
   { slug: "released", label: "Released", position: 12, is_backlog: false },
 ];
 
-// The four types that shipped before task types became data (task_types
-// table, see hooks/useTaskTypes). Their locale strings stay the translation
+// The types the server ships built in: the four that predate task types as data (task_types
+// table, see hooks/useTaskTypes) plus `design` (migration 178). Their locale strings stay the translation
 // for these keys as long as nobody has renamed them server-side — see
 // taskTypeLabel below.
 export const BUILT_IN_TASK_TYPES: { key: string; defaultLabel: string; labelKey: string }[] = [
@@ -189,6 +189,7 @@ export const BUILT_IN_TASK_TYPES: { key: string; defaultLabel: string; labelKey:
   { key: "analiz", defaultLabel: "Analysis", labelKey: "lib.projectBoard.taskType.analiz" },
   { key: "bug", defaultLabel: "Bug", labelKey: "lib.projectBoard.taskType.bug" },
   { key: "technical", defaultLabel: "Technical", labelKey: "lib.projectBoard.taskType.technical" },
+  { key: "design", defaultLabel: "Design", labelKey: "lib.projectBoard.taskType.design" },
 ];
 
 export const TASK_PRIORITY_OPTIONS: { value: TaskPriority; labelKey: string }[] = [
@@ -202,7 +203,7 @@ export const TASK_PRIORITY_OPTIONS: { value: TaskPriority; labelKey: string }[] 
  * A task type's display label. `types` is the loaded task_types list
  * (hooks/useTaskTypes); omitted or not-yet-loaded, this falls back to the
  * built-in locale strings so a board painted before the list arrives still
- * reads correctly for task/analiz/bug/technical.
+ * reads correctly for task/analiz/bug/technical/design.
  *
  * For a built-in key whose server label is still the untouched English
  * default ("Task", "Analysis", ...), the locale string is preferred so the
@@ -229,7 +230,7 @@ export function taskTypeLabel(type: TaskType, types?: TaskTypeDef[]): string {
 
 /**
  * Select options for a task-type picker. Prefers the loaded task_types list
- * (server order via `position`); falls back to the four built-ins when the
+ * (server order via `position`); falls back to the built-ins when the
  * list has not loaded yet or came back empty (a workspace mid-migration).
  */
 export function taskTypeOptions(types: TaskTypeDef[] | undefined): { value: string; label: string }[] {
@@ -283,8 +284,28 @@ export function workOrderBlockerLabel(blockedQuestion: string): string {
   const suffix = " to finish";
   const start = trimmed.startsWith(prefix) ? prefix.length : 0;
   const end = trimmed.endsWith(suffix) ? trimmed.length - suffix.length : trimmed.length;
-  const body = trimmed.slice(start, end);
+  const keys = blockerKeys(trimmed.slice(start, end));
+  return keys.length > 0 ? blockerKeysLabel(keys) : blockedResourceLabel("work_order");
+}
 
+/**
+ * Visible label for a deploy_order merge hold. Its detail is the same
+ * "KEY (TITLE) [COLUMN]" list a work_order park carries, without the sentence
+ * around it (release.Service.mergeGate, server deploy_order.go).
+ */
+export function deployOrderBlockerLabel(detail: string): string {
+  const keys = blockerKeys(detail.trim());
+  return keys.length > 0
+    ? tStatic("lib.projectBoard.deployOrderBlocker", { keys: blockerKeysLabel(keys) })
+    : blockedResourceLabel("deploy_order");
+}
+
+function blockerKeysLabel(keys: string[]): string {
+  const [first, ...rest] = keys;
+  return rest.length > 0 ? `${first} +${rest.length}` : first;
+}
+
+function blockerKeys(body: string): string[] {
   const segmentEnd = /\[[a-z0-9_]+\]/gi;
   const keys: string[] = [];
   let cursor = 0;
@@ -295,16 +316,85 @@ export function workOrderBlockerLabel(blockedQuestion: string): string {
     if (keyMatch) keys.push(keyMatch[1]);
     cursor = match.index + match[0].length;
   }
-
-  if (keys.length === 0) {
-    return blockedResourceLabel("work_order");
-  }
-  const [first, ...rest] = keys;
-  return rest.length > 0 ? `${first} +${rest.length}` : first;
+  return keys;
 }
 
 /**
- * Coarse countdown to blocked_resume_at, the mirror image of BoardPage's
+ * The merge holds (server domain.MergeHoldResources): why release's merge gate
+ * is refusing a done task's merge. Unlike every other park, two of them wait on
+ * the human reading the card, not on a sweeper.
+ */
+export const MERGE_HOLD_RESOURCES = ["deploy_order", "before_deploy", "delivery_profile", "deploy_env"] as const;
+
+export type MergeHoldResource = (typeof MERGE_HOLD_RESOURCES)[number];
+
+export function isMergeHold(resource: string | null | undefined): resource is MergeHoldResource {
+  return (MERGE_HOLD_RESOURCES as readonly string[]).includes(resource ?? "");
+}
+
+const ORDER_NOTE_OPEN = "<!-- tt:order -->";
+const ORDER_NOTE_CLOSE = "<!-- /tt:order -->";
+
+/**
+ * before_deploy without the generated order note — server
+ * domain.StripOrderNote, literally the same markers and the same reading of an
+ * unterminated block. The order note is not a step a human performs (the
+ * release gate enforces that order itself), so it never asks for a
+ * confirmation.
+ */
+export function beforeDeploySteps(text: string | null | undefined): string {
+  let rest = text ?? "";
+  for (;;) {
+    const start = rest.indexOf(ORDER_NOTE_OPEN);
+    if (start < 0) return rest.trim();
+    const after = rest.slice(start + ORDER_NOTE_OPEN.length);
+    const end = after.indexOf(ORDER_NOTE_CLOSE);
+    rest = end < 0 ? rest.slice(0, start) : rest.slice(0, start) + after.slice(end + ORDER_NOTE_CLOSE.length);
+  }
+}
+
+/** Server domain.BoardTask.BeforeDeployPending. */
+export function isBeforeDeployPending(task: Pick<BoardTask, "before_deploy" | "before_deploy_confirmed_at">): boolean {
+  return beforeDeploySteps(task.before_deploy) !== "" && !task.before_deploy_confirmed_at;
+}
+
+/**
+ * Coarse on purpose: the badge answers "is this stuck?", and a minute-accurate
+ * figure only adds noise. The board hands a card this text rather than its
+ * clock, so a memoized card re-renders only when what it shows changes.
+ */
+export function formatColumnAge(iso: string, now: number): string {
+  const minutes = Math.max(0, Math.round((now - new Date(iso).getTime()) / 60000));
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  return hours < 48 ? `${hours}h` : `${Math.round(hours / 24)}d`;
+}
+
+export const BOARD_TASK_POLL_ACTIVE_MS = 5000;
+export const BOARD_TASK_POLL_IDLE_MS = 15000;
+export const BOARD_ACTIVITY_POLL_ACTIVE_MS = 2000;
+export const BOARD_ACTIVITY_POLL_IDLE_MS = 15000;
+
+/**
+ * Fast only while something on the board is moving. A quiet board used to read
+ * /v1/activity every 2s for as long as it was open, and since a shared poll
+ * runs at its shortest subscriber's interval, it dragged the header's
+ * notifications to the same pace.
+ */
+export function boardPollIntervals(
+  tasks: readonly Pick<BoardTask, "column" | "agent_running">[],
+  activeAgentTaskIds: ReadonlySet<string>,
+): { tasksMs: number; activityMs: number } {
+  const agentRunning = activeAgentTaskIds.size > 0 || tasks.some((task) => task.agent_running);
+  const moving = agentRunning || tasks.some((task) => task.column === "in_progress");
+  return {
+    tasksMs: moving ? BOARD_TASK_POLL_ACTIVE_MS : BOARD_TASK_POLL_IDLE_MS,
+    activityMs: agentRunning ? BOARD_ACTIVITY_POLL_ACTIVE_MS : BOARD_ACTIVITY_POLL_IDLE_MS,
+  };
+}
+
+/**
+ * Coarse countdown to blocked_resume_at, the mirror image of
  * formatColumnAge and deliberately as coarse: the badge answers "roughly when
  * does this move again?", and a card that re-renders on every poll must not
  * tick seconds down. Already-due parks read "0m" — the sweeper runs on its own
@@ -487,9 +577,12 @@ export function taskPipelineCardIcon(
       return { Icon: CheckCircle2, className: "text-success" };
     case "failed":
       return { Icon: XCircle, className: "text-destructive" };
+    // Static on purpose: a card sits on the board for as long as CI runs, and a
+    // spinner on it kept the compositor drawing a frame on every vsync.
     case "pending":
+      return { Icon: Clock, className: "text-info" };
     case "running":
-      return { Icon: Loader2, className: "text-info animate-spin" };
+      return { Icon: CircleDashed, className: "text-info" };
     // Nothing ran — a muted dash, never the green check the card used to show.
     case "skipped":
       return { Icon: MinusCircle, className: "text-muted-foreground" };

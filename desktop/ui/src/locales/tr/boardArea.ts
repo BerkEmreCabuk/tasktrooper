@@ -67,11 +67,30 @@ export const boardArea: BoardAreaDict = {
     blockedHumanDecisionReason:
       "aynı commit için CI kırmızı kaldı ya da review döngüsü insan müdahalesi olmadan tekrarladı",
     blockedHumanDecisionTitle: "{reason}. Karar verince kartı Blocked'tan kendin taşı.",
+    mergeHoldTitle: {
+      deploy_order: "Bunlar yayına çıkınca kendiliğinden merge edilir: {detail}",
+      before_deploy: "Deploy öncesi adımları uygula ve görev üzerinden onayla; hemen ardından merge edilir.",
+      delivery_profile: "{detail} için deploy profilini reponun Deploy sekmesinden onayla; hemen ardından merge edilir.",
+      deploy_env: "Production'ın yalnızca senin girebileceğin env değişkenlerine ihtiyacı var: {detail}. Görev üzerinden gir; hemen ardından yayına çıkar.",
+    },
     loadFailed: "Görevler yüklenemedi",
     moveFailed: "Görev taşınamadı",
     taskDeleted: "Görev silindi",
     deleteFailed: "Görev silinemedi",
     agentRunning: "Ajan çalışıyor",
+    releaseBadgeVerifying: "{status} · ~{minutes} dk",
+    releaseTitle: {
+      pending:
+        "Merge edildi. Release engineer'ın deploy'u başlatması bekleniyor; release onaylanınca kart kendiliğinden Released kolonuna geçer.",
+      deploying:
+        "Merge edildi, deploy sürüyor. Deploy canlıya çıkıp doğrulama süresini geçince ve release engineer onaylayınca kart kendiliğinden Released kolonuna geçer.",
+      verifying:
+        "Deploy edildi. Sağlık ve hatalar {time} saatine kadar izleniyor; ardından release engineer onaylar ve kart kendiliğinden Released kolonuna geçer. Elle taşımak release'i kontrolsüz bırakır.",
+      awaiting_verdict:
+        "Doğrulama süresi bitti. Kartı Released kolonuna taşıyacak release engineer onayı bekleniyor.",
+      rolling_back: "Bu release geri alınıyor.",
+      failed: "Release başarısız oldu: {reason}. Release'i görmek ve karar vermek için görevi aç.",
+    },
     pipelineTitle: "Pipeline: {status}",
     title: "Board",
     description: "Aktif iş akışı. Backlog'daki görevler Backlog ekranında.",
@@ -163,8 +182,12 @@ export const boardArea: BoardAreaDict = {
       reason: {
         pipeline_passed: "Pipeline geçti. Göreve bakacak ajana devredildi.",
         pipeline_failed: "Pipeline başarısız. Revizyona gönderildi.",
+        handoff_unverified: "Devir reddedildi: run hiç komut çalıştırmadı. Revizyona gönderildi.",
+        handoff_unseen_ui: "Devir reddedildi: arayüz değişikliğine hiç bakılmadı. Revizyona gönderildi.",
         pipeline_gate_opened: "Build sonucu gelmedi. Reviewer yine de atandı.",
-        verification_failed: "Build/vet kontrolleri başarısız. In Progress'e geri alındı.",
+        verification_failed: "Build/vet kontrolleri başarısız. Revizyona gönderildi.",
+        plan_verification_failed: "Plan kontrolü başarısız. Revizyona gönderildi.",
+        handoff_refused: "Workflow devri reddetti. Revizyona gönderildi.",
         deploy_released: "Deploy başarılı. Görev yayınlandı.",
         merge_released_no_deploy_target: "Deploy target tanımlı değil. Merge görevi doğrudan yayınladı.",
         reconciled: "Takılan çalışma kurtarıldı. Yeniden başlatıldı.",
@@ -175,6 +198,7 @@ export const boardArea: BoardAreaDict = {
         device_free: "Paylaşılan kaynak boşaldı. Görev devam ediyor.",
         pipeline_loop_parked: "Park edildi: aynı commit için CI kırmızı kaldı, yeni commit gelmedi",
         review_loop_parked: "Park edildi: insan müdahalesi olmadan tekrar tekrar revizyona gönderildi",
+        push_workflow_scope: "Park edildi: GitHub push'u reddetti — token'da workflow yetkisi yok",
       },
     },
     taskRunSteps: {
@@ -197,6 +221,13 @@ export const boardArea: BoardAreaDict = {
       blockedResumeAt: "~{relative} içinde devam edecek, {absolute} civarı",
       blockedNoResume: "Kaynak boşalır boşalmaz devam edecek.",
       blockedHumanDecision: "Seni bekliyor: karar ver, sonra kartı Blocked'tan kendin taşı.",
+      mergeHold: {
+        deploy_order: "Bu görev yukarıdaki görevlerden sonra yayına çıkmalı. Onlar yayına çıkınca merge kendiliğinden devam eder.",
+        before_deploy: "Seni bekliyor: bu adımları uygula, sonra onayla. Merge hemen ardından devam eder.",
+        delivery_profile: "Seni bekliyor: {detail} için deploy profilini Deploy sekmesinden onayla. Merge hemen ardından devam eder.",
+        deploy_env: "Seni bekliyor: production'ın bu env değişkenlerine ihtiyacı var. Değerler doğrudan sağlayıcıya gider; hepsi girilince merge devam eder.",
+      },
+      mergeHoldOpenDeploy: "Deploy sekmesini aç",
       humanUatHeading: "Kararınız bekleniyor",
       humanUatApprove: "Onayla",
       humanUatDecline: "Reddet",
@@ -229,6 +260,7 @@ export const boardArea: BoardAreaDict = {
       type: "Tür",
       priority: "Öncelik",
       project: "Proje",
+      component: "Bileşen",
       none: "Yok",
       description: "Açıklama",
       edit: "Düzenle",
@@ -323,7 +355,6 @@ export const boardArea: BoardAreaDict = {
       tokenCacheRead: "önbellekten",
       tokenCacheWrite: "önbelleğe yazılan",
       tokenTotal: "toplam",
-      orchestrationPlan: "Orkestrasyon planı",
       pipeline: "Pipeline",
       discuss: "Ajanla konuş",
       discussOpening: "Sohbet açılıyor…",
@@ -334,6 +365,24 @@ export const boardArea: BoardAreaDict = {
       pullRequestOpen: "Pull request'i aç",
       pullRequestMerged: "{sha} olarak merge edildi",
       pullRequestLinkFailed: "Bu link açılamadı",
+      codeReview: {
+        title: "Code review",
+        round: "{round}. tur",
+        waitingForFirst: "Reviewer'ların başlaması bekleniyor.",
+        noVerdicts: "Henüz karar veren reviewer yok.",
+        earlierRounds: "Önceki turlar ({count})",
+        outcome: {
+          open: "İncelemede",
+          approved: "Onaylandı",
+          rejected: "Değişiklik istendi",
+          closed: "Kapandı",
+        },
+        verdict: {
+          approve: "Onayladı",
+          reject: "Değişiklik istedi",
+          pending: "Bekliyor",
+        },
+      },
     },
   },
 };

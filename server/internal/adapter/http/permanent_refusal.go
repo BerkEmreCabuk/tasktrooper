@@ -65,6 +65,10 @@ const codeTaskBlockedByDependency = "task_blocked_by_dependency"
 // task's type has no workflow_stages row for. See stageNotOnWorkflowBadRequest.
 const codeStageNotOnWorkflow = "stage_not_on_workflow"
 
+// codeAssigneeNotAssignable: the assignee holds the product_manager role,
+// which never takes a board task. See domain.ErrAssigneeNotAssignable.
+const codeAssigneeNotAssignable = "assignee_not_assignable"
+
 // permanentRefusals maps each sentinel to the code clients switch on.
 var permanentRefusals = []struct {
 	sentinel error
@@ -85,6 +89,7 @@ var typedBadRequests = []struct {
 	code     string
 }{
 	{catalog.ErrInvalidInput, codeInvalidCatalogInput},
+	{domain.ErrAssigneeNotAssignable, codeAssigneeNotAssignable},
 }
 
 // codedBadRequest is badRequest for a refusal this handler recognises itself,
@@ -215,7 +220,7 @@ func permanentRefusal(c *fiber.Ctx, err error) (bool, error) {
 		if !errors.Is(err, r.sentinel) {
 			continue
 		}
-		log.Info().Str("path", c.Path()).Str("method", c.Method()).Str("code", r.code).
+		log.Info().Str("path", RedactPath(c.Path())).Str("method", c.Method()).Str("code", r.code).
 			Msg("permanent refusal")
 		return true, c.Status(fiber.StatusConflict).JSON(codedErrorResponse{
 			Error: errorDetail{Message: err.Error(), Type: r.code},

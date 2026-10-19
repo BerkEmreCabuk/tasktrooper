@@ -4,7 +4,9 @@ llm:
   api_key: ""
   max_iterations: 30
   task_max_iterations: 80
-  timeout: "300s"
+  # Covers one whole non-streamed response: a turn that hit its output cap is
+  # retried with up to twice the cap (32K tokens), which outruns 300s.
+  timeout: "600s"
 
 server:
   port: 8085
@@ -44,7 +46,18 @@ orchestration:
 
 prod_ops:
   monitor_enabled: true
-  probe_interval: "1m"
+  # Two failed probes in a row open an incident, so an outage is caught within
+  # two intervals (six minutes), inside deploy_ops.health_window. Shorter costs
+  # an HTTP probe per target, and a query, on an otherwise idle machine.
+  probe_interval: "3m"
+  # Per alert ingest token (POST /v1/alerts/ingest/:token), so a leaked token
+  # cannot open incidents, tasks and agent runs without bound. Over either
+  # limit the request gets 429; an alert that folds into an incident already
+  # open, and a recovery, are never refused by the hourly cap. 0 = default.
+  alert_ingest:
+    requests_per_minute: 60
+    burst: 10
+    new_incidents_per_hour: 20
 
 # The deploy monitor mirrors GitHub Actions deploy runs into deployment_runs,
 # attributes console-triggered dispatches, and opens an incident for a failed
@@ -69,6 +82,32 @@ deploy_ops:
   # rolled back. Short on purpose: it authorises undoing a specific card's
   # release, so a coincidence must not reach it.
   health_window: "15m"
+  # Deploy impact: how far a golden signal must move across a deploy (the
+  # hour before against the hour after, and the same hour a day earlier) to
+  # read as improved or worse — percent of its value before (throughput,
+  # which swings more, by throughput_change_pct), or percentage points for a
+  # ratio signal such as an error rate. A count must also move by an absolute
+  # floor (count_floor for a gauge such as a backlog, rate_floor per second
+  # for an error rate), at least floor_pct percent of the larger value; a
+  # latency in ms by latency_floor_ms, which also floors a soak's
+  # max_p95_delta_pct.
+  impact:
+    change_pct: 10
+    ratio_points: 0.5
+    throughput_change_pct: 25
+    count_floor: 1
+    rate_floor: 0.05
+    floor_pct: 5
+    latency_floor_ms: 50
+
+# The alert rule evaluator: each enabled rule is read and judged once per
+# interval (one query against its data source), at most max_rules_per_sweep a
+# sweep, four at a time. A sweep runs every quarter interval, so a rule is
+# judged at most a quarter interval late.
+alerting:
+  enabled: true
+  interval: "1m"
+  max_rules_per_sweep: 200
 
 storeops:
   poll_interval: "5m"
@@ -87,10 +126,15 @@ board:
   pipeline_gate_timeout: "45m"
   pipeline_gate_interval: "2m"
 
+# Each run's context window, output cap and summarize threshold come from the
+# model it runs on (application/context/limits.go): e.g. 1M window / 16K turn
+# cap for current Claude Opus/Sonnet, 128K / 16K for gpt-4o, 32K / 4K for a
+# local endpoint or an unrecognised model. A threshold left at 0 is 45% of the
+# window. Set any of the three to a positive number to override every model.
 context:
-  max_tokens: 32000
-  reserve_output: 4096
-  summarize_threshold: 16000
+  max_tokens: 0
+  reserve_output: 0
+  summarize_threshold: 0
   keep_recent_messages: 10
 
 mapping:
@@ -112,6 +156,9 @@ indexer:
   # Set it only on a self-hosted install that keeps checkouts elsewhere.
   allowed_roots: []
   query_rewrite: true
+  # true also indexes generated code and mocks (mockery, protoc, *_gen.go, ...).
+  # .tasktrooperignore at the repository root is honoured either way.
+  index_generated: false
   concurrency: 1
 
 embedding:
@@ -158,6 +205,7 @@ tools:
 
   mobile:
     hub_url: "${MOBILE_APPIUM_HUB_URL}"
+    appium_bin: "${APPIUM_BIN}"
     device_udid: "${MOBILE_DEVICE_UDID}"
     platform_version: "${MOBILE_PLATFORM_VERSION}"
     device_pin: "${MOBILE_DEVICE_PIN}"
@@ -171,14 +219,13 @@ tools:
 # this binary instead of by the HTTP agent loop; an installation where it is not
 # on PATH registers no executor and those agents' runs fail with one clear
 # sentence saying so. max_turns / run_timeout / max_concurrent_sessions are left
-# unset: the executor owns those defaults (100 turns, 1h per session, 3
-# concurrent sessions).
+# unset: the executor owns those defaults (100 turns, 1h per session, no
+# session cap of its own).
 claude_code:
   binary: "${CLAUDE_CODE_BIN}"
-  # How many CLI sessions run at once. Unset means 3: the Claude subscription's
-  # usage limit is shared by every session on this account, so parallel
-  # sessions that all hit it mid-work all park together and a burst on resume
-  # re-hits it. Set -1 for unlimited.
+  # A host-wide cap on CLI sessions running at once, on top of the Settings
+  # concurrency limits. Unset (or 0) means none: the limits set in Settings
+  # are the only ones, and 0 there is unlimited.
   # max_concurrent_sessions: 3
   # Which of the CLI's settings files a session loads. Unset means
   # "project,local": the operator's own ~/.claude hooks and plugins stay out of
@@ -194,7 +241,7 @@ evolution:
   revision_debounce: "30m"
   impact_window: "168h"
   golden_gate: true        # degisiklik oncesi/sonrasi golden kosulur, kotulesirse geri alinir
-  max_skills_per_agent: 25 # ajan basina toplam skill butcesi (dolunca create reddedilir)
+  max_skills_per_agent: 100 # ajan basina toplam skill butcesi (dolunca create reddedilir)
   max_rules_per_agent: 15
   # model: ""          # reflection + golden eval icin model override
   # provider_type: ""

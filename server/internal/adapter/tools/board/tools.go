@@ -101,6 +101,7 @@ type ReleaseService interface {
 	RunSmoke(ctx context.Context, releaseID uuid.UUID) ([]domain.SmokeResult, error)
 	Finish(ctx context.Context, releaseID uuid.UUID, actor domain.ReleaseActor, note string) (domain.Release, error)
 	Rollback(ctx context.Context, releaseID uuid.UUID, actor domain.ReleaseActor, reason domain.RollbackReason, note string) (domain.Release, error)
+	Impact(ctx context.Context, releaseID uuid.UUID) (domain.DeployImpact, error)
 }
 
 type ToolKit struct {
@@ -117,10 +118,10 @@ type ToolKit struct {
 	// PullRequests is nil — it needs GitHub.
 	DeployWatch DeployWatch
 	// Releases is the release-engineer's service: the release covering a
-	// task, and the actions that move it — deploy, watch, verify, finish,
-	// roll back. Nil on a build where it has not been wired yet (it is built
-	// later in the boot sequence than this registration runs, the same
-	// reason DeployWatch is read at call time), which is why the six release
+	// task, its deploy impact, and the actions that move it — deploy, watch,
+	// verify, finish, roll back. Nil on a build where it has not been wired yet
+	// (it is built later in the boot sequence than this registration runs, the
+	// same reason DeployWatch is read at call time), which is why the release
 	// tools answer "the release service is not configured on this
 	// deployment" instead of failing to register.
 	Releases ReleaseService
@@ -143,6 +144,9 @@ type ToolKit struct {
 	// (it needs the workspace root and git wiring), so it is read at call
 	// time like Previews.
 	LocalPreviews LocalPreviewRunner
+	// EnvRequirements backs declare_env_vars. Built after this registration
+	// (it needs the cloud service), so it is read at call time.
+	EnvRequirements EnvDeclarer
 }
 
 // SubscriptionLister is the read-only slice of port.BoardConfigStore
@@ -183,6 +187,7 @@ func NewExecutors(kit *ToolKit) []port.ToolExecutor {
 		newGetPipelineStatusTool(kit),
 		newGetTaskPreviewTool(kit),
 		newStartTaskPreviewTool(kit),
+		newDeclareEnvVarsTool(kit),
 	}
 	if kit.Workspace != nil {
 		execs = append(execs,
@@ -234,6 +239,7 @@ func NewExecutors(kit *ToolKit) []port.ToolExecutor {
 			newRunSmokeChecksTool(kit),
 			newFinishReleaseTool(kit),
 			newRollbackReleaseTool(kit),
+			newGetDeployImpactTool(kit),
 		)
 	}
 	return execs
@@ -328,16 +334,11 @@ func (kit *ToolKit) findTask(ctx context.Context, taskID uuid.UUID) (domain.Boar
 	if err != nil {
 		return domain.BoardTask{}, false
 	}
-	tasks, err := kit.Tasks.ListTasks(ctx, repositoryID)
+	task, err := kit.Tasks.GetTask(ctx, repositoryID, taskID)
 	if err != nil {
 		return domain.BoardTask{}, false
 	}
-	for _, t := range tasks {
-		if t.ID == taskID {
-			return t, true
-		}
-	}
-	return domain.BoardTask{}, false
+	return task, true
 }
 
 func (kit *ToolKit) listBoardTasks(ctx context.Context) ([]domain.BoardTask, error) {

@@ -12,6 +12,14 @@ type refInput struct{ Ref string }
 
 var claimAlreadyAssignedKey = prompt.Define("guard.board_claim_already_assigned", refInput{Ref: "T-1"})
 var claimTaskNotFoundKey = prompt.Define("guard.board_claim_task_not_found", refInput{Ref: "T-1"})
+var assigneeNotAssignableKey = prompt.Define("guard.board_assignee_not_assignable", struct{}{})
+
+type assigneeDisabledInput struct {
+	Agents []string
+	Role   string
+}
+
+var assigneeDisabledKey = prompt.Define("guard.board_assignee_disabled", assigneeDisabledInput{Agents: []string{"data-scientist"}, Role: ""})
 var unknownTaskRefKey = prompt.Define("guard.board_unknown_task_ref", refInput{Ref: "T-1"})
 var unknownProjectRefEmptyKey = prompt.Define("guard.board_unknown_project_ref_empty", refInput{Ref: "x"})
 
@@ -45,6 +53,7 @@ var deployReleaseRefusedKey = prompt.Define("guard.board_deploy_release_refused"
 var finishReleaseRefusedKey = prompt.Define("guard.board_finish_release_refused", struct{}{})
 var rollbackReleaseRefusedKey = prompt.Define("guard.board_rollback_release_refused", struct{}{})
 var mergeTaskRefusedKey = prompt.Define("guard.board_merge_task_refused", struct{}{})
+var pushWorkflowScopeToolKey = prompt.Define("guard.board_push_workflow_scope", struct{}{})
 
 type ungroundedAnalysisGroundingInput struct{ Tools []string }
 
@@ -52,6 +61,11 @@ var ungroundedAnalysisGroundingKey = prompt.Define("guard.board_ungrounded_analy
 
 var documentRewrittenInPlaceKey = prompt.Define("tool_results.board_document_rewritten_in_place", struct{}{})
 var duplicateTaskHintKey = prompt.Define("tool_results.board_duplicate_task_hint", struct{}{})
+
+type moveVerdictInput struct{ Column, Requested string }
+
+var moveVerdictHeldKey = prompt.Define("tool_results.board_move_verdict_held", moveVerdictInput{Column: "code_review", Requested: "ready_for_qa"})
+var moveVerdictRedirectedKey = prompt.Define("tool_results.board_move_verdict_redirected", moveVerdictInput{Column: "need_revision", Requested: "ready_for_qa"})
 
 type countInput struct{ Count int }
 
@@ -105,6 +119,14 @@ var releaseNextUnknownKey = prompt.Define("tool_results.board_release_next_unkno
 var deployReleaseNextKey = prompt.Define("tool_results.board_deploy_release_next", struct{}{})
 var finishReleaseDoneKey = prompt.Define("tool_results.board_finish_release_done", struct{}{})
 var rollbackReleaseNextKey = prompt.Define("tool_results.board_rollback_release_next", struct{}{})
+
+type deployImpactNextInput struct {
+	Verdict      string
+	Pending      bool
+	AutoRollback bool
+}
+
+var deployImpactNextKey = prompt.Define("tool_results.board_deploy_impact_next", deployImpactNextInput{Verdict: "worse", AutoRollback: true})
 
 var criterionRuleCardMoveKey = prompt.Define("guard.board_criterion_rule_card_move", struct{}{})
 var criterionRuleCardWaitingKey = prompt.Define("guard.board_criterion_rule_card_waiting", struct{}{})

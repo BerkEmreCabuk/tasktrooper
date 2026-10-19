@@ -1,8 +1,14 @@
 import { Menu, Moon, Sun } from "lucide-react";
+import { useLocation } from "react-router-dom";
+import type { Agent, CatalogSyncProgress } from "@/api";
 import { Button } from "@/components/ui/button";
+import { CatalogSyncIndicator } from "@/components/layout/CatalogSyncIndicator";
+import { FeedbackButton } from "@/components/layout/FeedbackButton";
 import { HealthStatus } from "@/components/layout/HealthStatus";
+import { LeadQuickAsk } from "@/components/layout/LeadQuickAsk";
 import { NotificationCenter } from "@/components/layout/NotificationCenter";
 import { SidebarBrand } from "@/components/layout/SidebarBrand";
+import { ToolchainIndicator } from "@/components/layout/ToolchainIndicator";
 import { useI18n } from "@/hooks/useI18n";
 import { useTheme } from "@/hooks/useTheme";
 
@@ -12,14 +18,30 @@ interface HeaderProps {
   sidebarCollapsed?: boolean;
   /** Advances an agent's sidebar "last viewed" from a notification-center click. Optional so a Header shown outside WorkspaceShell (none today) still renders without a bell. */
   onAgentSeen?: (agentId: string, iso: string) => void;
+  leadAgent?: Agent | null;
+  /** The catalog sync in flight, if any; shown while it adds agents or indexes skills. */
+  catalogSync?: CatalogSyncProgress | null;
 }
 
-export function Header({ title, onMenuClick, sidebarCollapsed = false, onAgentSeen }: HeaderProps) {
+function LeadAskSlot({ agent }: { agent: Agent }) {
+  const { pathname } = useLocation();
+  if (pathname === "/home" || pathname.startsWith(`/agents/${agent.id}/chat`)) return null;
+  return <LeadQuickAsk agent={agent} />;
+}
+
+export function Header({
+  title,
+  onMenuClick,
+  sidebarCollapsed = false,
+  onAgentSeen,
+  leadAgent = null,
+  catalogSync = null,
+}: HeaderProps) {
   const { t } = useI18n();
   const { theme, toggleTheme } = useTheme();
 
   return (
-    <header className="relative z-50 flex h-14 shrink-0 items-center justify-between border-b border-sidebar-border bg-surface-raised/90 px-4 shadow-[var(--shadow-raised)] backdrop-blur-sm">
+    <header className="relative z-50 flex h-14 shrink-0 items-center justify-between border-b border-sidebar-border bg-surface-raised/90 px-4 shadow-[var(--shadow-raised)]">
       <div className="flex min-w-0 items-center gap-3">
         <Button variant="ghost" size="icon" className="lg:hidden" onClick={onMenuClick}>
           <Menu className="h-5 w-5" />
@@ -40,11 +62,16 @@ export function Header({ title, onMenuClick, sidebarCollapsed = false, onAgentSe
         {title && <h1 className="truncate text-title font-semibold">{title}</h1>}
       </div>
 
-      <div className="min-w-0 flex-1 self-stretch" aria-hidden />
+      <div className="flex min-w-0 flex-1 items-center justify-center self-stretch px-4">
+        {leadAgent && <LeadAskSlot agent={leadAgent} />}
+      </div>
 
       <div className="flex items-center gap-2">
+        <CatalogSyncIndicator progress={catalogSync} />
+        <ToolchainIndicator />
         {onAgentSeen && <NotificationCenter onAgentSeen={onAgentSeen} />}
         <HealthStatus />
+        <FeedbackButton />
 
         <Button
           variant="ghost"

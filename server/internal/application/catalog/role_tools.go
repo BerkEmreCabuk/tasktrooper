@@ -150,6 +150,7 @@ var (
 		domain.RunSmokeChecksToolName,
 		domain.FinishReleaseToolName,
 		domain.ReleaseRollbackToolName,
+		domain.GetDeployImpactToolName,
 	}
 )
 
@@ -176,6 +177,8 @@ func developerToolPolicy() domain.ToolPolicy {
 	tools = append(tools, "search_boilerplate_catalog")
 	// need_revision: the failed QA-gate jobs and their output say why the task came back.
 	tools = append(tools, "get_pipeline_status")
+	// The implementer is the one who knows a new variable exists; the merge waits until it is set.
+	tools = append(tools, "declare_env_vars")
 	return domain.ToolPolicy{AllowTools: tools}
 }
 
@@ -198,6 +201,8 @@ func productManagerToolPolicy() domain.ToolPolicy {
 	tools = append(tools, roleBoardCreateTools...)
 	tools = append(tools, roleBoardDeleteTools...)
 	tools = append(tools, roleWorkspaceManageTools...)
+	// A project with UI and no design system gets the server-briefed design task, never a hand-written one.
+	tools = append(tools, "request_design_system")
 	// pm_uat: the PM records its own verdict per criterion.
 	tools = append(tools, "review_criterion")
 	// The PM answers "what shipped?" from the PR rather than the implementer's summary.
@@ -238,6 +243,8 @@ func architectToolPolicy() domain.ToolPolicy {
 	// tail (query_runtime_logs) or the deploy history (list_deployments) —
 	// those are for the implementer and QA, not the reviewer.
 	tools = append(tools, "get_environment", "list_runtime_errors")
+	// Decomposition opens the design system UI tasks wait for through the server's brief, not a hand-written task.
+	tools = append(tools, "request_design_system")
 	return domain.ToolPolicy{AllowTools: tools}
 }
 
@@ -284,9 +291,24 @@ func releaseEngineerToolPolicy() domain.ToolPolicy {
 	// get_deploy_logs stays for a CI job's own output; the release tools above cover the release's own checks.
 	tools = append(tools, domain.DeployLogsToolName)
 	tools = append(tools, "list_incidents", "get_incident")
+	tools = append(tools, roleObservabilityTools...)
+	// Enabling observability ends in a developer task, never in an edit: the
+	// release engineer opens it and parks its own card on it with blocked_by.
+	tools = append(tools, "codebase_search", "create_board_task", "update_board_task")
 	tools = append(tools, roleMemoryTools...)
 	tools = append(tools, roleSkillTools...)
 	return domain.ToolPolicy{AllowTools: tools}
+}
+
+// The release engineer's observability work: read error groups and data
+// source inventories, propose definitions, bindings and (disabled) rules a
+// person accepts.
+var roleObservabilityTools = []string{
+	"list_error_groups",
+	"propose_error_definitions",
+	"list_data_source_metrics",
+	"propose_signal_binding",
+	"propose_alert_rule",
 }
 
 func toolPolicyEqual(a, b domain.ToolPolicy) bool {

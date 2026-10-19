@@ -71,10 +71,30 @@ export const boardArea = {
     blockedHumanDecisionReason:
       "CI stayed red for the same commit, or the review loop repeated without human input",
     blockedHumanDecisionTitle: "{reason}. Move the card out of Blocked yourself once you have decided.",
+    // Card tooltip for a merge hold; {detail} is board_tasks.blocked_question.
+    mergeHoldTitle: {
+      deploy_order: "Merges by itself once these ship: {detail}",
+      before_deploy: "Perform the before-deploy steps and confirm them on the task; it merges right after.",
+      delivery_profile: "Confirm {detail}'s delivery profile on the repository's Deploy tab; it merges right after.",
+      deploy_env: "Production needs environment variables only you can enter: {detail}. Enter them on the task; it ships right after.",
+    },
     moveFailed: "Failed to move task",
     taskDeleted: "Task deleted",
     deleteFailed: "Failed to delete task",
     agentRunning: "Agent running",
+    releaseBadgeVerifying: "{status} · ~{minutes}m",
+    releaseTitle: {
+      pending:
+        "Merged. Waiting for the release engineer to start the deploy; the card moves to Released by itself once the release is signed off.",
+      deploying:
+        "Merged and deploying. The card moves to Released by itself once the deploy is live, has passed its verify window and the release engineer has signed it off.",
+      verifying:
+        "Deployed. Health and errors are watched until {time}; then the release engineer signs it off and the card moves to Released by itself. Moving it by hand leaves the release unchecked.",
+      awaiting_verdict:
+        "The verify window is over. Waiting for the release engineer's sign-off, which moves the card to Released.",
+      rolling_back: "This release is being rolled back.",
+      failed: "The release failed: {reason}. Open the task to see the release and decide.",
+    },
     pipelineTitle: "Pipeline: {status}",
     title: "Board",
     description: "Active workflow. Backlog tasks are on the Backlog screen.",
@@ -170,8 +190,12 @@ export const boardArea = {
       reason: {
         pipeline_passed: "Pipeline passed. Handed to the reviewer.",
         pipeline_failed: "Pipeline failed. Sent back for revision.",
+        handoff_unverified: "Hand-off refused: the run never ran a command. Sent back for revision.",
+        handoff_unseen_ui: "Hand-off refused: the UI change was never looked at. Sent back for revision.",
         pipeline_gate_opened: "No build result arrived. The reviewer was dispatched anyway.",
-        verification_failed: "Build/vet checks failed. Sent back to In Progress.",
+        verification_failed: "Build/vet checks failed. Sent back for revision.",
+        plan_verification_failed: "Plan check failed. Sent back for revision.",
+        handoff_refused: "The workflow refused the hand-off. Sent back for revision.",
         deploy_released: "Deploy succeeded. Task released.",
         merge_released_no_deploy_target: "No deploy target configured. Merge released the task directly.",
         reconciled: "Stalled run recovered. Re-dispatched.",
@@ -185,6 +209,7 @@ export const boardArea = {
         // human_decision parks: no sweeper writes a resume half for these.
         pipeline_loop_parked: "Parked: CI stayed red for the same commit, no new commit arrived",
         review_loop_parked: "Parked: sent back to revision repeatedly without human input",
+        push_workflow_scope: "Parked: GitHub refused the push — the token lacks the workflow scope",
       },
     },
     taskRunSteps: {
@@ -207,6 +232,13 @@ export const boardArea = {
       blockedResumeAt: "Resumes in ~{relative}, around {absolute}",
       blockedNoResume: "Resumes as soon as the resource frees up.",
       blockedHumanDecision: "Waiting for you: decide, then move the card out of Blocked yourself.",
+      mergeHold: {
+        deploy_order: "This task must ship after the tasks above. The merge goes ahead by itself once they are released.",
+        before_deploy: "Waiting for you: perform these steps, then confirm them. The merge goes ahead right after.",
+        delivery_profile: "Waiting for you: confirm {detail}'s delivery profile on the Deploy tab. The merge goes ahead right after.",
+        deploy_env: "Waiting for you: production needs these environment variables. The values go straight to the provider; the merge goes ahead once they are set.",
+      },
+      mergeHoldOpenDeploy: "Open the Deploy tab",
       humanUatHeading: "Your decision is needed",
       humanUatApprove: "Approve",
       humanUatDecline: "Decline",
@@ -239,6 +271,7 @@ export const boardArea = {
       type: "Type",
       priority: "Priority",
       project: "Project",
+      component: "Component",
       none: "None",
       description: "Description",
       edit: "Edit",
@@ -333,7 +366,6 @@ export const boardArea = {
       tokenCacheRead: "cached",
       tokenCacheWrite: "cache write",
       tokenTotal: "total",
-      orchestrationPlan: "Orchestration plan",
       pipeline: "Pipeline",
       discuss: "Discuss with the agent",
       discussOpening: "Opening chat…",
@@ -344,6 +376,24 @@ export const boardArea = {
       pullRequestOpen: "Open the pull request",
       pullRequestMerged: "Merged as {sha}",
       pullRequestLinkFailed: "That link could not be opened",
+      codeReview: {
+        title: "Code review",
+        round: "Round {round}",
+        waitingForFirst: "Waiting for the reviewers to start.",
+        noVerdicts: "No reviewer has decided yet.",
+        earlierRounds: "Earlier rounds ({count})",
+        outcome: {
+          open: "In review",
+          approved: "Approved",
+          rejected: "Changes requested",
+          closed: "Closed",
+        },
+        verdict: {
+          approve: "Approved",
+          reject: "Changes requested",
+          pending: "Pending",
+        },
+      },
     },
   },
 };

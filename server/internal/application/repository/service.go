@@ -70,6 +70,7 @@ type Service struct {
 	scorer           *board.ScoreTracker
 	completion       *board.CompletionStamper
 	reviewGate       *board.ReviewGate
+	reviewQuorum     *board.ReviewQuorum
 	workOrderSweeper *board.WorkOrderSweeper
 	evolution        RevisionNotifier
 	pipelines        *board.PipelineRunner
@@ -83,6 +84,8 @@ type Service struct {
 	git              port.GitClient
 	deployTargets    port.DeployTargetStore
 	mobileStoreApps  port.MobileStoreAppStore
+	storeTestBuilds  StoreTestBuilder
+	designSystems    DesignSystemApprover
 	workspaceRoot    string
 	gitWarnMu        sync.Mutex
 	gitWarnings      map[uuid.UUID]string
@@ -97,10 +100,10 @@ type Service struct {
 	syncMu        sync.Mutex
 	syncWarnings  map[uuid.UUID]string
 	syncCheckedAt map[uuid.UUID]time.Time
+	syncFailures  map[uuid.UUID]int
 
 	pipelineJobs   port.RepositoryPipelineJobStore
 	githubToken    func(ctx context.Context) (string, error)
-	agentLister    func(ctx context.Context) ([]domain.Agent, error)
 	modelRefresher ModelRefresher
 	components     ComponentResolver
 
@@ -116,6 +119,22 @@ type Service struct {
 
 	workflows port.WorkflowReader
 	roles     port.RoleResolver
+
+	ciSetupMu sync.Mutex
+
+	createdObserver TaskCreatedObserver
+
+	componentAssigned func(ctx context.Context, repositoryID, componentID uuid.UUID)
+}
+
+// TaskCreatedObserver hears about every task CreateTask opens, with the
+// caller's context: an agent's tool call carries its chat session on it.
+type TaskCreatedObserver interface {
+	TaskCreated(ctx context.Context, task domain.BoardTask)
+}
+
+func (s *Service) SetTaskCreatedObserver(o TaskCreatedObserver) {
+	s.createdObserver = o
 }
 
 func NewService(
@@ -146,6 +165,7 @@ func NewService(
 
 		syncWarnings:  make(map[uuid.UUID]string),
 		syncCheckedAt: make(map[uuid.UUID]time.Time),
+		syncFailures:  make(map[uuid.UUID]int),
 	}
 }
 
@@ -159,6 +179,20 @@ func (s *Service) SetCompletionStamper(cs *board.CompletionStamper) {
 
 func (s *Service) SetReviewGate(g *board.ReviewGate) {
 	s.reviewGate = g
+}
+
+func (s *Service) SetReviewQuorum(q *board.ReviewQuorum) {
+	s.reviewQuorum = q
+}
+
+// TaskReviews is the per-reviewer verdict history of the task's code_review
+// rounds; empty when no quorum ledger is wired.
+func (s *Service) TaskReviews(ctx context.Context, repositoryID, taskID uuid.UUID) (domain.TaskReviews, error) {
+	task, err := s.tasks.Get(ctx, repositoryID, taskID)
+	if err != nil {
+		return domain.TaskReviews{}, err
+	}
+	return s.reviewQuorum.TaskReviews(ctx, task)
 }
 
 func (s *Service) SetAnnotationStore(store port.TaskDocumentAnnotationStore) {
@@ -468,6 +502,27 @@ func (s *Service) SetMobileStoreApps(store port.MobileStoreAppStore) {
 	s.mobileStoreApps = store
 }
 
+// StoreTestBuilder builds a task for its repository's store apps when the task
+// enters a stage carrying store_test_build_on_enter.
+type StoreTestBuilder interface {
+	OnTaskEnteredTestStage(ctx context.Context, repositoryID, taskID uuid.UUID)
+}
+
+func (s *Service) SetStoreTestBuilder(b StoreTestBuilder) {
+	s.storeTestBuilds = b
+}
+
+// DesignSystemApprover approves the design system versions a design task
+// proposed when the task enters a stage carrying
+// approve_design_system_on_enter.
+type DesignSystemApprover interface {
+	ApproveForTask(ctx context.Context, taskID uuid.UUID) []domain.DesignSystem
+}
+
+func (s *Service) SetDesignSystemApprover(a DesignSystemApprover) {
+	s.designSystems = a
+}
+
 func (s *Service) SetGit(git port.GitClient, workspaceRoot string) {
 	s.git = git
 	s.workspaceRoot = workspaceRoot
@@ -481,10 +536,6 @@ func (s *Service) SetGitHubTokenSource(src func(ctx context.Context) (string, er
 	s.githubToken = src
 }
 
-func (s *Service) SetAgentLister(fn func(ctx context.Context) ([]domain.Agent, error)) {
-	s.agentLister = fn
-}
-
 func (s *Service) SetWorkflows(w port.WorkflowReader)  { s.workflows = w }
 func (s *Service) SetRoleResolver(r port.RoleResolver) { s.roles = r }
 
@@ -495,10 +546,20 @@ func (s *Service) workflow(ctx context.Context, taskType domain.TaskType) (domai
 	return s.workflows.Workflow(ctx, taskType)
 }
 
-func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid.UUID) (domain.BoardTask, error) {
+// CreateWorkflowSetupTask opens the board task that authors the repo's CI
+// workflows — at most one at a time. While the last one is still on the board
+// and not done/released it is returned as is (created == false), so repeated
+// clicks on the "no CI workflows" notice cannot pile up duplicates.
+func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid.UUID) (task domain.BoardTask, created bool, err error) {
+	s.ciSetupMu.Lock()
+	defer s.ciSetupMu.Unlock()
+
 	repo, err := s.repos.Get(ctx, repositoryID)
 	if err != nil {
-		return domain.BoardTask{}, err
+		return domain.BoardTask{}, false, err
+	}
+	if open, ok, err := s.openWorkflowSetupTask(ctx, repo); err != nil || ok {
+		return open, false, err
 	}
 	var assignee *uuid.UUID
 	if s.roles != nil {
@@ -509,7 +570,7 @@ func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid
 	}
 	desc := workflowSetupTaskBrief(repo.Kind)
 
-	return s.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
+	task, err = s.CreateTask(ctx, repositoryID, domain.CreateBoardTaskRequest{
 		Title:           "Set up GitHub Actions CI/CD workflows",
 		Description:     desc,
 		Priority:        domain.TaskPriorityHigh,
@@ -517,6 +578,44 @@ func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid
 		CreatedBy:       "system",
 		AssigneeAgentID: assignee,
 	})
+	if err != nil {
+		return domain.BoardTask{}, false, err
+	}
+	if err := s.repos.SetCISetupTaskID(ctx, repositoryID, task.ID.String()); err != nil {
+		return domain.BoardTask{}, false, err
+	}
+	return task, true, nil
+}
+
+// WorkflowSetupTask reports the CI setup task this repository is still waiting
+// on, if any.
+func (s *Service) WorkflowSetupTask(ctx context.Context, repositoryID uuid.UUID) (domain.BoardTask, bool, error) {
+	repo, err := s.repos.Get(ctx, repositoryID)
+	if err != nil {
+		return domain.BoardTask{}, false, err
+	}
+	return s.openWorkflowSetupTask(ctx, repo)
+}
+
+// openWorkflowSetupTask: a deleted task, or one that reached done/released
+// while the repo still has no CI, no longer holds the slot — the next click
+// opens a fresh one.
+func (s *Service) openWorkflowSetupTask(ctx context.Context, repo domain.Repository) (domain.BoardTask, bool, error) {
+	id, err := uuid.Parse(strings.TrimSpace(repo.CISetupTaskID))
+	if err != nil {
+		return domain.BoardTask{}, false, nil
+	}
+	task, err := s.tasks.Get(ctx, repo.ID, id)
+	if errors.Is(err, domain.ErrBoardTaskNotFound) || errors.Is(err, port.ErrNotFound) {
+		return domain.BoardTask{}, false, nil
+	}
+	if err != nil {
+		return domain.BoardTask{}, false, err
+	}
+	if task.Column == domain.TaskColumnDone || task.Column == domain.TaskColumnReleased {
+		return domain.BoardTask{}, false, nil
+	}
+	return task, true, nil
 }
 
 func workflowSetupTaskBrief(kind string) string {
@@ -903,7 +1002,24 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.repos.Delete(ctx, id)
 }
 
-const freshnessCheckInterval = 10 * time.Minute
+const (
+	freshnessCheckInterval = 10 * time.Minute
+	// freshnessMaxBackoff caps how far failed pulls push a repository's next
+	// check out. A pull that fails is most often a machine with no network, and
+	// retrying it every interval only wakes git and the network for nothing.
+	freshnessMaxBackoff = time.Hour
+)
+
+func freshnessWait(failures int) time.Duration {
+	wait := freshnessCheckInterval
+	for range failures {
+		if wait >= freshnessMaxBackoff {
+			break
+		}
+		wait *= 2
+	}
+	return min(wait, freshnessMaxBackoff)
+}
 
 func (s *Service) IndexStatus(ctx context.Context, repositoryID uuid.UUID) (domain.WorkspaceIndex, error) {
 	if s.indexer == nil {
@@ -916,7 +1032,7 @@ func (s *Service) IndexStatus(ctx context.Context, repositoryID uuid.UUID) (doma
 	repo, getErr := s.repos.Get(ctx, repositoryID)
 	if idx.Status == domain.IndexStatusRunning && !s.indexer.IsProjectIndexActive(repositoryID) {
 		if getErr == nil {
-			s.restartIndex(ctx, repo.ID, repo.RootPath)
+			s.refreshIndex(ctx, repo.ID, repo.RootPath)
 		}
 	}
 	if getErr == nil {
@@ -943,7 +1059,7 @@ func (s *Service) Reindex(ctx context.Context, repositoryID uuid.UUID) error {
 	if err != nil {
 		return err
 	}
-	s.pullAndRestartIndex(ctx, repo.ID, repo.RootPath)
+	s.pullAndReindex(ctx, repo.ID, repo.RootPath, nil, true)
 	return nil
 }
 
@@ -963,11 +1079,10 @@ func (s *Service) StopIndex(ctx context.Context, repositoryID uuid.UUID) (bool, 
 	return stopped, nil
 }
 
-func (s *Service) pullAndRestartIndex(ctx context.Context, repositoryID uuid.UUID, rootPath string) {
-	s.pullAndRestartIndexNotify(ctx, repositoryID, rootPath, nil)
-}
-
-func (s *Service) pullAndRestartIndexNotify(ctx context.Context, repositoryID uuid.UUID, rootPath string, onDone func()) {
+// pullAndReindex pulls the project root and replaces any running pass. Only
+// an explicit user Reindex forces every file to be re-embedded; a push or a
+// poll runs the incremental pass.
+func (s *Service) pullAndReindex(ctx context.Context, repositoryID uuid.UUID, rootPath string, onDone func(), force bool) {
 	if s.indexer == nil {
 		if onDone != nil {
 			onDone()
@@ -990,7 +1105,11 @@ func (s *Service) pullAndRestartIndexNotify(ctx context.Context, repositoryID uu
 	passCtx := context.WithoutCancel(ctx)
 	go func() {
 		s.pullProjectRoot(passCtx, repositoryID, rootPath)
-		s.indexer.RestartIndexProject(passCtx, repositoryID, rootPath, finish)
+		if force {
+			s.indexer.RestartIndexProject(passCtx, repositoryID, rootPath, finish)
+			return
+		}
+		s.indexer.RefreshIndexProject(passCtx, repositoryID, rootPath, finish)
 	}()
 }
 
@@ -1017,11 +1136,16 @@ func (s *Service) recordSyncResult(repositoryID uuid.UUID, err error) {
 	if s.syncWarnings == nil {
 		s.syncWarnings = make(map[uuid.UUID]string)
 	}
+	if s.syncFailures == nil {
+		s.syncFailures = make(map[uuid.UUID]int)
+	}
 	if err == nil {
 		delete(s.syncWarnings, repositoryID)
+		delete(s.syncFailures, repositoryID)
 		return
 	}
 	s.syncWarnings[repositoryID] = err.Error()
+	s.syncFailures[repositoryID]++
 }
 
 func (s *Service) syncWarning(repositoryID uuid.UUID) string {
@@ -1033,14 +1157,25 @@ func (s *Service) syncWarning(repositoryID uuid.UUID) string {
 func (s *Service) claimFreshnessCheck(repositoryID uuid.UUID) bool {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
+	if !s.freshnessDueLocked(repositoryID) {
+		return false
+	}
 	if s.syncCheckedAt == nil {
 		s.syncCheckedAt = make(map[uuid.UUID]time.Time)
 	}
-	if last, ok := s.syncCheckedAt[repositoryID]; ok && time.Since(last) < freshnessCheckInterval {
-		return false
-	}
 	s.syncCheckedAt[repositoryID] = time.Now()
 	return true
+}
+
+func (s *Service) freshnessCheckDue(repositoryID uuid.UUID) bool {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+	return s.freshnessDueLocked(repositoryID)
+}
+
+func (s *Service) freshnessDueLocked(repositoryID uuid.UUID) bool {
+	last, ok := s.syncCheckedAt[repositoryID]
+	return !ok || time.Since(last) >= freshnessWait(s.syncFailures[repositoryID])
 }
 
 func (s *Service) ensureIndexFresh(ctx context.Context, repo domain.Repository, idx domain.WorkspaceIndex) {
@@ -1074,7 +1209,7 @@ func (s *Service) ensureIndexFresh(ctx context.Context, repo domain.Repository, 
 			Str("head", head).
 			Msg("index is behind origin; rebuilding")
 
-		s.restartIndex(freshCtx, repo.ID, repo.RootPath)
+		s.refreshIndex(freshCtx, repo.ID, repo.RootPath)
 
 		if s.modelRefresher != nil {
 			s.modelRefresher.RefreshAfterPush(freshCtx, repo.ID, "poll")
@@ -1093,6 +1228,9 @@ func (s *Service) SweepIndexFreshness(ctx context.Context) {
 			return
 		}
 		for _, repo := range repos {
+			if !s.freshnessCheckDue(repo.ID) {
+				continue
+			}
 			idx, err := s.indexer.GetProjectStatus(ctx, repo.ID)
 			if err != nil {
 				continue
@@ -1106,20 +1244,20 @@ func (s *Service) startIndex(ctx context.Context, repositoryID uuid.UUID, rootPa
 	s.startIndexWith(ctx, repositoryID, rootPath, false)
 }
 
-func (s *Service) restartIndex(ctx context.Context, repositoryID uuid.UUID, rootPath string) {
+func (s *Service) refreshIndex(ctx context.Context, repositoryID uuid.UUID, rootPath string) {
 	s.startIndexWith(ctx, repositoryID, rootPath, true)
 }
 
-func (s *Service) startIndexWith(ctx context.Context, repositoryID uuid.UUID, rootPath string, force bool) {
+func (s *Service) startIndexWith(ctx context.Context, repositoryID uuid.UUID, rootPath string, replace bool) {
 	if s.indexer == nil {
 		return
 	}
-	if force {
+	if replace {
 		s.indexMu.Lock()
 		delete(s.indexing, repositoryID)
 		s.indexing[repositoryID] = struct{}{}
 		s.indexMu.Unlock()
-		s.indexer.RestartIndexProject(ctx, repositoryID, rootPath, s.indexDone(repositoryID))
+		s.indexer.RefreshIndexProject(ctx, repositoryID, rootPath, s.indexDone(repositoryID))
 		return
 	}
 	s.indexMu.Lock()
@@ -1171,6 +1309,39 @@ func (s *Service) ListBoardTasks(ctx context.Context) ([]domain.BoardTask, error
 		tasks = []domain.BoardTask{}
 	}
 	return s.withLatestPipelineStatus(ctx, tasks)
+}
+
+// BoardVersion is the task store's change counter (port.BoardVersioner);
+// false when the store keeps none. Read it before ListBoardTasks, never after,
+// so a list is only ever tagged with a version at least as old as its rows.
+func (s *Service) BoardVersion() (uint64, bool) {
+	v, ok := s.tasks.(port.BoardVersioner)
+	if !ok {
+		return 0, false
+	}
+	return v.BoardVersion(), true
+}
+
+// BoardListExpiry is when a ListBoardTasks answer goes stale with no write at
+// all: the first released task on it ages out of domain.ReleasedBoardWindow.
+// It mirrors the store's COALESCE(entered_at, updated_at). ok is false when
+// nothing on the list is time-limited.
+func BoardListExpiry(tasks []domain.BoardTask) (time.Time, bool) {
+	var earliest time.Time
+	found := false
+	for _, t := range tasks {
+		if t.Column != domain.TaskColumnReleased {
+			continue
+		}
+		since := t.UpdatedAt
+		if t.ColumnEnteredAt != nil {
+			since = *t.ColumnEnteredAt
+		}
+		if until := since.Add(domain.ReleasedBoardWindow); !found || until.Before(earliest) {
+			earliest, found = until, true
+		}
+	}
+	return earliest, found
 }
 
 func (s *Service) ListReleasedArchive(ctx context.Context, query string, limit int) ([]domain.BoardTask, error) {
@@ -1227,16 +1398,14 @@ func parseTaskKey(key string) (string, int, error) {
 }
 
 func (s *Service) FindTaskRepositoryID(ctx context.Context, taskID uuid.UUID) (uuid.UUID, error) {
-	tasks, err := s.ListAllTasks(ctx)
+	task, err := s.tasks.GetByID(ctx, taskID)
+	if errors.Is(err, domain.ErrBoardTaskNotFound) {
+		return uuid.Nil, fmt.Errorf("task not found")
+	}
 	if err != nil {
 		return uuid.Nil, err
 	}
-	for _, task := range tasks {
-		if task.ID == taskID {
-			return task.RepositoryID, nil
-		}
-	}
-	return uuid.Nil, fmt.Errorf("task not found")
+	return task.RepositoryID, nil
 }
 
 func (s *Service) DefaultRepositoryID(ctx context.Context) (uuid.UUID, error) {
@@ -1336,6 +1505,15 @@ func (s *Service) resolveNewTaskAssignee(ctx context.Context, taskType domain.Ta
 	if err != nil {
 		return nil, fmt.Errorf("resolve assignee for new task: %w", err)
 	}
+	if resolved != nil && (requested == nil || *resolved != *requested) {
+		pm, err := s.isProductManager(ctx, *resolved)
+		if err != nil {
+			return nil, err
+		}
+		if pm {
+			return requested, nil
+		}
+	}
 	return resolved, nil
 }
 
@@ -1386,7 +1564,11 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 	if err != nil {
 		return domain.BoardTask{}, err
 	}
-	assignee, err := s.resolveNewTaskAssignee(ctx, taskType, repo, req.AssigneeAgentID)
+	requested, err := s.requestedAssignee(ctx, req)
+	if err != nil {
+		return domain.BoardTask{}, err
+	}
+	assignee, err := s.resolveNewTaskAssignee(ctx, taskType, repo, requested)
 	if err != nil {
 		return domain.BoardTask{}, err
 	}
@@ -1490,6 +1672,9 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 		createdPayload["assignee_agent_id"] = task.AssigneeAgentID.String()
 	}
 	_ = s.emit(ctx, repo, task, domain.BoardEventTaskCreated, createdPayload)
+	if s.createdObserver != nil {
+		s.createdObserver.TaskCreated(ctx, task)
+	}
 	return task, nil
 }
 
@@ -1531,6 +1716,7 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 	}
 	prevColumn := task.Column
 	prevAssignee := task.AssigneeAgentID
+	prevComponent := task.ComponentID
 	if req.Title != nil {
 		task.Title = *req.Title
 	}
@@ -1610,6 +1796,9 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 			return domain.BoardTask{}, err
 		}
 
+		if err := s.reviewStageSkipGate(ctx, task, prevColumn, *req.Column, req.Actor); err != nil {
+			return domain.BoardTask{}, err
+		}
 		if err := s.reviewChainGate(ctx, repo, task, prevColumn, *req.Column); err != nil {
 			return domain.BoardTask{}, err
 		}
@@ -1619,6 +1808,11 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 		task.Position = *req.Position
 	}
 	if req.AssigneeAgentID.Present {
+		if next := req.AssigneeAgentID.Value; next != nil && (prevAssignee == nil || *next != *prevAssignee) {
+			if err := s.requireAssignable(ctx, next); err != nil {
+				return domain.BoardTask{}, err
+			}
+		}
 		task.AssigneeAgentID = req.AssigneeAgentID.Value
 	}
 	if req.ComponentID.Present {
@@ -1630,8 +1824,30 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 		task.ComponentID = req.ComponentID.Value
 	}
 
+	if req.Column != nil && *req.Column != prevColumn && s.reviewQuorum != nil {
+		decision, err := s.reviewQuorum.Decide(ctx, task, prevColumn, *req.Column, req.Actor, req.ActorAgentID)
+		if err != nil {
+			return domain.BoardTask{}, err
+		}
+		if decision.Hold {
+			task.Column = prevColumn
+			return task, nil
+		}
+		if decision.Target != *req.Column {
+			if s.columns != nil {
+				if err := s.columns.ValidateTransition(ctx, string(prevColumn), string(decision.Target)); err != nil {
+					return domain.BoardTask{}, err
+				}
+			}
+			target := decision.Target
+			req.Column = &target
+			task.Column = target
+		}
+	}
+
 	if req.Column != nil && *req.Column != prevColumn && s.reviewGate != nil {
 		if !s.reviewGate.InterceptAgentMove(ctx, task, prevColumn, *req.Column, req.Actor, repo) {
+			task.Column = prevColumn
 			return task, nil
 		}
 	}
@@ -1689,10 +1905,9 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 		}
 		// Approval: analiz_review -> done. The human's answers to any
 		// non-blocking question that rode along into analiz_review are told
-		// to the agent now, same as a submit, but with no extra comment —
-		// the approval comment already says the review passed.
+		// to the agent now and left on the task, same as a submit.
 		if prevColumn == domain.TaskColumnAnalizReview && *req.Column == domain.TaskColumnDone {
-			s.markQuestionsSubmitted(ctx, updated.ID)
+			s.markQuestionsSubmitted(ctx, updated.RepositoryID, updated.ID)
 		}
 
 		wf, wfErr := s.workflow(ctx, updated.TaskType)
@@ -1713,6 +1928,15 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 
 		if wfErr == nil && wf.Has(*req.Column, domain.BehaviourDetectMigrationOnEnter) {
 			s.DetectTaskMigration(ctx, updated)
+		}
+
+		if s.designSystems != nil && wfErr == nil && wf.Has(*req.Column, domain.BehaviourApproveDesignSystem) {
+			s.designSystems.ApproveForTask(context.WithoutCancel(ctx), updated.ID)
+		}
+
+		// Off the request path: allocating a build number reads the store.
+		if s.storeTestBuilds != nil && wfErr == nil && wf.Has(*req.Column, domain.BehaviourStoreTestBuildOnEnter) {
+			go s.storeTestBuilds.OnTaskEnteredTestStage(context.WithoutCancel(ctx), repositoryID, updated.ID)
 		}
 
 		if s.pipelines != nil {
@@ -1773,7 +1997,19 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 	if req.DeployDependsOn != nil || len(req.BlockedBy) > 0 {
 		updated = s.syncOrderNote(ctx, updated)
 	}
+	if s.componentAssigned != nil && req.ComponentID.Present && req.ComponentID.Value != nil &&
+		!assigneeEqual(prevComponent, req.ComponentID.Value) &&
+		updated.Column == domain.TaskColumnDone && strings.TrimSpace(updated.MergeCommitSHA) != "" {
+		s.componentAssigned(ctx, repositoryID, *req.ComponentID.Value)
+	}
 	return s.enrichTask(ctx, updated)
+}
+
+// SetComponentAssignedHook wires the release catch-up for a merged task left
+// in done with no component: naming its component later is the only signal
+// that it can ship now, and nothing else would retry the release for it.
+func (s *Service) SetComponentAssignedHook(fn func(ctx context.Context, repositoryID, componentID uuid.UUID)) {
+	s.componentAssigned = fn
 }
 
 // ConfirmBeforeDeploy records a human's confirmation that BeforeDeploy's
@@ -1864,9 +2100,9 @@ func validateAgentSelfMove(task domain.BoardTask, req domain.UpdateBoardTaskRequ
 	}
 	switch *req.Column {
 	case domain.TaskColumnNeedRevision:
-		return fmt.Errorf("%s", prompt.Text(selfMoveNeedRevisionKey))
+		return domain.RefuseMove(fmt.Errorf("%s", prompt.Text(selfMoveNeedRevisionKey)))
 	case domain.TaskColumnTodo:
-		return fmt.Errorf("%s", prompt.Text(selfMoveTodoKey))
+		return domain.RefuseMove(fmt.Errorf("%s", prompt.Text(selfMoveTodoKey)))
 	}
 	return nil
 }
@@ -1905,6 +2141,9 @@ func (s *Service) ClaimTask(ctx context.Context, repositoryID, taskID, agentID u
 	if _, err := s.repos.Get(ctx, repositoryID); err != nil {
 		return domain.BoardTask{}, err
 	}
+	if err := s.requireAssignable(ctx, &agentID); err != nil {
+		return domain.BoardTask{}, err
+	}
 	task, err := s.tasks.ClaimAssignee(ctx, repositoryID, taskID, agentID)
 	if err != nil {
 		return domain.BoardTask{}, err
@@ -1916,6 +2155,9 @@ func (s *Service) DeleteTask(ctx context.Context, repositoryID, taskID uuid.UUID
 	if err := s.tasks.Delete(ctx, repositoryID, taskID); err != nil {
 		return err
 	}
+	// A deleted blocker takes its blocks relations with it, which frees its
+	// dependents without the done/released move WakeDependentsOf listens for.
+	s.workOrderSweeper.SweepSoon()
 
 	if s.workspaceRoot != "" {
 		if err := workspace.RemoveDirWithin(s.workspaceRoot, s.taskWorkspacePath(taskID)); err != nil {
@@ -1956,40 +2198,7 @@ func (s *Service) ListComments(ctx context.Context, repositoryID, taskID uuid.UU
 	if err != nil {
 		return nil, err
 	}
-	return s.nameCommentAuthors(ctx, comments), nil
-}
-
-func (s *Service) nameCommentAuthors(ctx context.Context, comments []domain.TaskComment) []domain.TaskComment {
-	if s.agentLister == nil {
-		return comments
-	}
-	needed := false
-	for i := range comments {
-		if comments[i].AuthorType == "agent" && comments[i].AuthorID != "" {
-			needed = true
-			break
-		}
-	}
-	if !needed {
-		return comments
-	}
-	agents, err := s.agentLister(ctx)
-	if err != nil {
-		return comments
-	}
-	names := make(map[string]string, len(agents))
-	for i := range agents {
-		names[agents[i].ID.String()] = agents[i].Name
-	}
-	for i := range comments {
-		if comments[i].AuthorType != "agent" {
-			continue
-		}
-		if name := names[comments[i].AuthorID]; name != "" {
-			comments[i].AuthorName = name
-		}
-	}
-	return comments
+	return comments, nil
 }
 
 func (s *Service) AddComment(ctx context.Context, repositoryID, taskID uuid.UUID, req domain.CreateTaskCommentRequest) (domain.TaskComment, error) {
@@ -2022,14 +2231,17 @@ func (s *Service) AddComment(ctx context.Context, repositoryID, taskID uuid.UUID
 	if err != nil {
 		return domain.TaskComment{}, err
 	}
-	comment = s.nameCommentAuthors(ctx, []domain.TaskComment{comment})[0]
-	_ = s.emit(ctx, repo, task, domain.BoardEventTaskCommented, map[string]interface{}{
+	payload := map[string]interface{}{
 		"comment_id":  comment.ID.String(),
 		"content":     comment.Content,
 		"author_type": comment.AuthorType,
 		"author_id":   comment.AuthorID,
 		"author_name": comment.AuthorName,
-	})
+	}
+	if req.Informational {
+		payload[domain.EventPayloadInformational] = true
+	}
+	_ = s.emit(ctx, repo, task, domain.BoardEventTaskCommented, payload)
 	return comment, nil
 }
 

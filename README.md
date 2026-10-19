@@ -13,7 +13,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/assets/demo.gif" alt="A card dragged from Todo to In Progress; the backend-developer agent starts a headless agent CLI session, reads the repo, writes the rate limiter and runs the tests." width="100%">
+  <img src="docs/assets/demo.gif" alt="A CSV-export request typed to the product-manager agent becomes card T-9 with its assumptions and acceptance criteria; after 'Looks good, go ahead' the backend-developer agent picks it up, then the card sits in Code Review with every criterion ticked by Dev and the security agent and system architect reviewing." width="100%">
 </p>
 # TaskTrooper
 
@@ -25,7 +25,7 @@ runtime that hands each task to an agent CLI on your own machine — Claude Code
 Cursor, Antigravity or OpenCode — or to a model API you bring a key for: clone,
 plan, implement, test, open the PR, while you watch the run.
 
-Everything runs on your Mac: the desktop app starts an embedded Postgres and the
+Everything runs on your machine: the desktop app starts an embedded Postgres and the
 Go backend, serves the UI, and runs the agent sessions locally. No account, no
 cloud, no login.
 
@@ -64,7 +64,7 @@ carries on from where it stopped instead of starting over.
 
 ### Role agents
 
-Seven role agents ship with a catalog-driven library of skills, rules and tool
+Eleven role agents ship with a catalog-driven library of skills, rules and tool
 policies — the repo's `catalog/` directory is the source of truth and the
 backend syncs it into the database at boot and on an interval. They run on the
 connected agent CLI (Claude Code, Cursor, Antigravity or OpenCode) or on a
@@ -75,10 +75,14 @@ agent is given its own.
 |---|---|
 | `product-manager` | backlog, requirements, PM UAT |
 | `system-architect` | analysis tasks, task breakdown, code review |
-| `backend-developer` | APIs, databases and tests (Go, Java/Quarkus) |
+| `security-agent` | a second, security-only code review of every pull request; its rejection sends the task back |
+| `backend-developer` | APIs, databases and tests (Go, Java/Quarkus, C#/.NET, TypeScript on Node.js, Rust) |
 | `frontend-developer` | React, Vite and Tailwind UIs |
 | `mobile-developer` | Flutter, SwiftUI, Compose, store releases |
+| `data-scientist` | data pipelines, SQL/dbt analytics, model training and evaluation, notebooks turned into tested modules |
+| `game-developer` | Unity, Godot, Unreal Engine, web (Phaser, PixiJS, three.js, Babylon.js) and Bevy games |
 | `qa-agent` | manual test rounds with real requests and headless-browser screenshots; it cannot pass a task without running something |
+| `ui-designer` | the project's design system and screen designs, approved before they are built |
 | `release-engineer` | merges signed-off work, ships it, verifies production and rolls back what breaks — the only agent that touches Done and Released |
 
 Every agent is editable: provider and model, tool policy, effort, skills, rules,
@@ -159,12 +163,12 @@ Agents rewrite their own playbooks from how their work actually went.
   is only recorded, becomes a diagnosis task, or is fixed through the board.
 - **Mobile releases:** connect App Store Connect and Google Play and promote
   builds through internal, external and production channels. QA can drive iOS
-  simulators and Android emulators on this Mac through Appium.
+  simulators (macOS only) and Android emulators on this machine through Appium.
 - **Usage:** token usage per model and per day.
 
 ### First run
 
-A guided setup checks this Mac (git, the agent CLIs you have, and optionally
+A guided setup checks this machine (git, the agent CLIs you have, and optionally
 Chrome, Xcode, Appium and the Android SDK), lets you connect any agent CLI you
 have (Claude Code, Cursor, Antigravity, OpenCode) or an API provider with your
 own key, then connects GitHub and imports your first project.
@@ -203,6 +207,15 @@ it. On **Linux**, use `TaskTrooper-<version>-x86_64.AppImage` (`chmod +x`, then
 run it) or install the `.deb`. Neither is code-signed yet, so Windows SmartScreen
 asks you to confirm the first time. The install script and Homebrew are
 macOS-only.
+
+### Privacy
+
+TaskTrooper runs on your machine and has no account requirement. Official
+desktop builds send usage statistics (a random ID, app version, OS, which
+screens you open and which features you use; never tasks, chats, code, paths or
+email), on by default. Turn it off in Settings → General → "Usage statistics",
+or set `TASKTROOPER_TELEMETRY=0` / `DO_NOT_TRACK=1`. Builds from source and
+forks send nothing. Details: [Data and security](docs/data-and-security.md#usage-statistics).
 
 ## Run from source
 

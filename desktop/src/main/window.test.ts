@@ -30,9 +30,13 @@ class FakeWebContents extends EventEmitter {
   reloads = 0;
   destroyed = false;
   mainFrame = { processId: 1, routingId: 1, url: "" };
+  focusCalls = 0;
 
   getURL(): string {
     return this.url;
+  }
+  focus(): void {
+    this.focusCalls += 1;
   }
   async loadURL(url: string): Promise<void> {
     this.loaded.push(url);
@@ -94,6 +98,7 @@ class FakeWebContents extends EventEmitter {
 class FakeView {
   webContents = new FakeWebContents();
   visible = true;
+  constructor(public options: unknown = {}) {}
   bounds: unknown = null;
   background = "";
   setVisible(visible: boolean): void {
@@ -130,15 +135,26 @@ class FakeBrowserWindow extends EventEmitter {
   async loadURL(): Promise<void> {
     return Promise.resolve();
   }
-  show(): void {}
+  shown = false;
+  // Electron raises both events from the calls themselves, and the
+  // visibility tests below lean on that.
+  show(): void {
+    this.shown = true;
+    this.emit("show");
+  }
   hide(): void {
     this.hidden = true;
+    this.emit("hide");
   }
   hidden = false;
   focus(): void {}
   restore(): void {}
   isMinimized(): boolean {
     return false;
+  }
+  fullScreen = false;
+  isFullScreen(): boolean {
+    return this.fullScreen;
   }
 }
 
@@ -154,8 +170,8 @@ vi.mock("electron", () => ({
   },
   BrowserWindow: class extends FakeBrowserWindow {},
   WebContentsView: class {
-    constructor() {
-      const view = new FakeView();
+    constructor(options: unknown) {
+      const view = new FakeView(options);
       views.push(view);
       return view as unknown as this;
     }
@@ -173,10 +189,20 @@ interface Harness {
   last: () => CloudStatus;
 }
 
-function start(origin = ORIGIN, quitStarted: () => boolean = () => false): Harness {
+function start(
+  origin = ORIGIN,
+  quitStarted: () => boolean = () => false,
+  extra: { hidden?: boolean; onSessionEnd?: () => void; onFullScreen?: (fullScreen: boolean) => void } = {},
+): Harness {
   const statuses: CloudStatus[] = [];
-  const shell = new Shell({ origin: () => origin, onCloudStatus: (s) => statuses.push(s), quitStarted });
-  shell.create();
+  const shell = new Shell({
+    origin: () => origin,
+    onCloudStatus: (s) => statuses.push(s),
+    quitStarted,
+    ...(extra.onSessionEnd ? { onSessionEnd: extra.onSessionEnd } : {}),
+    ...(extra.onFullScreen ? { onFullScreen: extra.onFullScreen } : {}),
+  });
+  shell.create({ hidden: extra.hidden ?? false });
   // The web app's view is attached only once the backend answers, which is what
   // the main process signals with serve(). Every case below is about a window
   // that has one.
@@ -201,11 +227,90 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+const realPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+function onPlatform(platform: NodeJS.Platform): void {
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+}
+function restorePlatform(): void {
+  if (realPlatform) Object.defineProperty(process, "platform", realPlatform);
+}
+
+describe("where the web app sits in the window", () => {
+  afterEach(restorePlatform);
+
+  it("sits under the title bar on macOS, and flush to the top in full screen where the traffic lights are hidden", () => {
+    onPlatform("darwin");
+    const { window, view } = start();
+    expect(view.bounds).toEqual({ x: 0, y: 44, width: 1180, height: 756 });
+
+    window.fullScreen = true;
+    window.emit("enter-full-screen");
+    expect(view.bounds).toEqual({ x: 0, y: 0, width: 1180, height: 800 });
+
+    window.fullScreen = false;
+    window.emit("leave-full-screen");
+    expect(view.bounds).toEqual({ x: 0, y: 44, width: 1180, height: 756 });
+  });
+
+  /**
+   * In full screen the view covers the chrome's drag strip, but macOS still
+   * hit-tests it as a drag region: every button in the page's header turned
+   * into a window drag. The chrome drops the strip when it is told.
+   */
+  it("tells the chrome when full screen starts and ends, so it can drop the drag strip under the page's header", () => {
+    onPlatform("darwin");
+    const changes: boolean[] = [];
+    const { window } = start(ORIGIN, () => false, { onFullScreen: (on) => changes.push(on) });
+
+    window.fullScreen = true;
+    window.emit("enter-full-screen");
+    window.fullScreen = false;
+    window.emit("leave-full-screen");
+
+    expect(changes).toEqual([true, false]);
+  });
+
+  /**
+   * Windows and Linux draw a native title bar above the content; the 44px
+   * strip kept for macOS's traffic lights would be an empty band under it.
+   */
+  it("fills the whole content area on Windows and Linux, which have no traffic lights to make room for", () => {
+    for (const platform of ["win32", "linux"] as const) {
+      onPlatform(platform);
+      const { window, view } = start();
+      expect(view.bounds).toEqual({ x: 0, y: 0, width: 1180, height: 800 });
+      expect(window.options).toMatchObject({ autoHideMenuBar: true });
+    }
+  });
+});
+
+describe("how the window is shown", () => {
+  afterEach(restorePlatform);
+
+  it("shows itself once ready, unless the login item started the app hidden", () => {
+    const visible = start();
+    visible.window.emit("ready-to-show");
+    expect(visible.window.shown).toBe(true);
+
+    const hidden = start(ORIGIN, () => false, { hidden: true });
+    hidden.window.emit("ready-to-show");
+    expect(hidden.window.shown).toBe(false);
+  });
+
+  it("starts the drain when Windows ends the session", () => {
+    onPlatform("win32");
+    const onSessionEnd = vi.fn();
+    const { window } = start(ORIGIN, () => false, { onSessionEnd });
+    window.emit("session-end", { reasons: ["shutdown"] });
+    expect(onSessionEnd).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("where the window opens", () => {
   it("opens the product's home route, not the marketing landing page", () => {
     const { contents } = start();
-    expect(HOME_ROUTE).toBe("/board");
-    expect(contents.loaded).toEqual([`${ORIGIN}/board`]);
+    expect(HOME_ROUTE).toBe("/home");
+    expect(contents.loaded).toEqual([`${ORIGIN}/home`]);
   });
 
   /**
@@ -221,7 +326,7 @@ describe("where the window opens", () => {
 
     shell.serve();
     expect(views).toHaveLength(1);
-    expect(views[0]!.webContents.loaded).toEqual([`${ORIGIN}/board`]);
+    expect(views[0]!.webContents.loaded).toEqual([`${ORIGIN}/home`]);
 
     // Called again on every backend restart; it must not stack up views.
     shell.serve();
@@ -309,6 +414,19 @@ describe("keeping the hosted app on screen", () => {
     contents.emit("did-finish-load");
     expect(view.visible).toBe(true);
   });
+
+  it("hands keyboard focus back to the web app when the window regains it", () => {
+    const { window, contents } = start();
+    contents.emitDocumentLoad(`${ORIGIN}/home`);
+    expect(contents.focusCalls).toBe(0);
+
+    // Alt-tab away and back, or show from the tray: focus can land on the
+    // shell's own page, which would leave the field the user was typing in
+    // unreadable until clicked. The shell must re-enter the product's view.
+    window.emit("focus");
+
+    expect(contents.focusCalls).toBe(1);
+  });
 });
 
 describe("failures still reach the offline screen", () => {
@@ -345,7 +463,7 @@ describe("failures still reach the offline screen", () => {
     shell.reloadCloud();
 
     expect(contents.reloads).toBe(1);
-    expect(contents.loaded).toEqual([`${ORIGIN}/board`]);
+    expect(contents.loaded).toEqual([`${ORIGIN}/home`]);
   });
 });
 
@@ -362,7 +480,7 @@ describe("the navigation boundary is unchanged", () => {
     const { contents } = start();
     contents.loaded.length = 0;
     contents.emit("did-navigate", {}, "https://evil.example.com/", 200, "");
-    expect(contents.loaded).toEqual([`${ORIGIN}/board`]);
+    expect(contents.loaded).toEqual([`${ORIGIN}/home`]);
   });
 
   it("lets a same-origin navigation through", () => {
@@ -371,6 +489,74 @@ describe("the navigation boundary is unchanged", () => {
     contents.emit("will-navigate", { preventDefault: () => (prevented = true) }, `${ORIGIN}/settings/llm`);
     expect(prevented).toBe(false);
     expect(openedExternally).toEqual([]);
+  });
+});
+
+/**
+ * Account mode: the same view, created in the account origin's own partition,
+ * holding that origin and nothing else, and replaced — not navigated — when
+ * the mode changes.
+ */
+describe("the account's view", () => {
+  const ACCOUNT = "https://app.tasktrooper.ai";
+
+  function account(): { shell: InstanceType<typeof Shell>; mode: { origin: string; partition?: string } } {
+    const mode: { origin: string; partition?: string } = { origin: ORIGIN };
+    const shell = new Shell({
+      origin: () => mode.origin,
+      partition: () => mode.partition,
+      onCloudStatus: () => undefined,
+      quitStarted: () => false,
+    });
+    shell.create();
+    return { shell, mode };
+  }
+
+  it("opens the route it was served with, in the partition it was given", () => {
+    const { shell, mode } = account();
+    mode.origin = ACCOUNT;
+    mode.partition = `persist:account:${ACCOUNT}`;
+    shell.serve("/login");
+    const view = views.at(-1)!;
+    expect(view.options).toMatchObject({ webPreferences: { partition: `persist:account:${ACCOUNT}` } });
+    expect(view.webContents.loaded).toEqual([`${ACCOUNT}/login`]);
+  });
+
+  it("leaves the local view in the default session", () => {
+    const { view } = start();
+    expect((view.options as { webPreferences: Record<string, unknown> }).webPreferences).not.toHaveProperty("partition");
+  });
+
+  it("closes the old page on retire and builds a new one on the next serve", () => {
+    const { shell, mode } = account();
+    shell.serve();
+    const local = views.at(-1)!;
+    shell.retire();
+    expect(local.webContents.isDestroyed()).toBe(true);
+    expect(shell.cloudContents).toBeNull();
+
+    mode.origin = ACCOUNT;
+    mode.partition = `persist:account:${ACCOUNT}`;
+    shell.serve("/login");
+    const remote = views.at(-1)!;
+    expect(remote).not.toBe(local);
+    expect(shell.cloudContents).toBe(remote.webContents);
+  });
+
+  it("keeps the account's page on its origin and sends everything else to the browser", () => {
+    const { shell, mode } = account();
+    mode.origin = ACCOUNT;
+    shell.serve("/login");
+    const contents = views.at(-1)!.webContents;
+
+    let prevented = false;
+    contents.emit("will-navigate", { preventDefault: () => (prevented = true) }, `${ACCOUNT}/board`);
+    expect(prevented).toBe(false);
+
+    contents.emit("will-navigate", { preventDefault: () => (prevented = true) }, `${ORIGIN}/home`);
+    expect(prevented).toBe(true);
+    contents.emit("will-navigate", { preventDefault: () => undefined }, "https://accounts.example.com/o/oauth2");
+    expect(openedExternally).toEqual(["https://accounts.example.com/o/oauth2"]);
   });
 });
 
@@ -389,6 +575,87 @@ describe("closing the window", () => {
     window.emit("close", { preventDefault: () => (prevented = true) });
     expect(prevented).toBe(false);
     expect(window.hidden).toBe(false);
+  });
+});
+
+/**
+ * Closing hides the window rather than destroying it, so the page behind it
+ * keeps running. It must at least see `visibilityState` "hidden", which is
+ * what pauses its polls and animations.
+ */
+describe("a window nobody can see lets the page sleep", () => {
+  it("hides the view when the red button hides the window, and shows it again with the window", () => {
+    const { shell, window, view, contents } = start();
+    contents.emitDocumentLoad(`${ORIGIN}/board`);
+    expect(view.visible).toBe(true);
+    expect(shell.pageOnScreen).toBe(true);
+
+    window.emit("close", { preventDefault: () => {} });
+    expect(view.visible).toBe(false);
+    expect(shell.pageOnScreen).toBe(false);
+
+    shell.show();
+    expect(view.visible).toBe(true);
+    expect(shell.pageOnScreen).toBe(true);
+  });
+
+  it("follows minimize and restore", () => {
+    const { window, view, contents } = start();
+    contents.emitDocumentLoad(`${ORIGIN}/board`);
+
+    window.emit("minimize");
+    expect(view.visible).toBe(false);
+    window.emit("restore");
+    expect(view.visible).toBe(true);
+  });
+
+  /** macOS's minimize animation, as Electron 41 reported it. */
+  it("ends hidden after macOS's minimize sequence, which flaps through show", () => {
+    const { window, view, contents } = start();
+    contents.emitDocumentLoad(`${ORIGIN}/board`);
+    for (const event of ["minimize", "hide", "show", "hide"]) window.emit(event);
+    expect(view.visible).toBe(false);
+  });
+
+  it("does not show a view the window hid when its page finishes loading", () => {
+    const { window, view, contents } = start();
+    window.hide();
+    contents.emitDocumentLoad(`${ORIGIN}/board`);
+    expect(view.visible).toBe(false);
+
+    window.show();
+    expect(view.visible).toBe(true);
+  });
+
+  it("keeps a failed page's view hidden when the window comes back", () => {
+    const { window, view, contents } = start();
+    contents.emitDocumentLoad(`${ORIGIN}/board`, 502);
+    window.hide();
+    window.show();
+    expect(view.visible).toBe(false);
+  });
+
+  it("counts focus as on screen, whatever event was missed", () => {
+    const { window, view, contents } = start();
+    contents.emitDocumentLoad(`${ORIGIN}/board`);
+    window.emit("hide");
+    window.emit("focus");
+    expect(view.visible).toBe(true);
+  });
+
+  it("starts off screen when the login item launched it hidden", () => {
+    const { shell, view, contents } = start(ORIGIN, () => false, { hidden: true });
+    contents.emitDocumentLoad(`${ORIGIN}/board`);
+    expect(view.visible).toBe(false);
+
+    shell.show();
+    expect(view.visible).toBe(true);
+  });
+
+  it("pins background throttling on for both renderers", () => {
+    const { window, view } = start();
+    expect(window.options).toMatchObject({ webPreferences: { backgroundThrottling: true } });
+    expect(view.options).toMatchObject({ webPreferences: { backgroundThrottling: true } });
   });
 });
 

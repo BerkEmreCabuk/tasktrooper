@@ -1,8 +1,20 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
-import { CLOUD_BRIDGE_KEY, CLOUD_CHANNELS, CLOUD_EVENTS, type ChooseDirectoryRequest } from "../ipc/channels.js";
+import {
+  CLOUD_BRIDGE_KEY,
+  CLOUD_CHANNELS,
+  CLOUD_EVENTS,
+  type AnalyticsTrackRequest,
+  type ChooseDirectoryRequest,
+  type KeysWindowPrefill,
+  type McpServerSetRequest,
+} from "../ipc/channels.js";
 import type {
+  DesktopAccountHost,
+  DesktopAnalyticsHost,
   DesktopHost,
   DesktopRunnerHost,
+  DesktopToolchainHost,
+  DesktopUpdatesHost,
   HostLogsRequest,
   HostOverrides,
   HostPreferences,
@@ -10,7 +22,21 @@ import type {
   HostSettings,
   HostWorkspaceChoice,
 } from "../ipc/host.js";
-import type { ChildId, Diagnostics, LogLine, PreflightReport } from "../ipc/types.js";
+import type {
+  AccountState,
+  AnalyticsState,
+  ChildId,
+  Diagnostics,
+  LogLine,
+  McpServersState,
+  PreflightReport,
+  RunnerPairingBundle,
+  RunnerPairingSummary,
+  ToolchainId,
+  ToolchainJobState,
+  ToolchainReport,
+  UpdateStatus,
+} from "../ipc/types.js";
 
 /**
  * The preload for the view that renders the web app — which is the entire
@@ -26,9 +52,13 @@ import type { ChildId, Diagnostics, LogLine, PreflightReport } from "../ipc/type
  *    the workspace folder — which it can ask to open a native picker for, and
  *    cannot name.
  *
- * There is no session, no sign-in and no OAuth on this bridge. The one value
+ * The same preload serves both modes' pages. In local mode the one secret
  * that travels shell → page is `apiToken`, the bearer for a loopback server
- * this same process started.
+ * this same process started. In account mode the page is the account's web
+ * app, which signs in on its own origin with its own cookie: the main process
+ * answers `apiBase` and `apiToken` with nothing, and the pairing bundle the
+ * page hands over goes in only — `runner.pairing()` returns it without the
+ * token.
  */
 
 /**
@@ -67,6 +97,28 @@ function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
   };
 }
 
+/**
+ * `subscribeLogs`, plus telling the main process when anybody is listening:
+ * it pushes log batches only then (see `CLOUD_CHANNELS.runnerLogsStream`).
+ * The page's side of the bridge is unchanged — it subscribes and unsubscribes
+ * exactly as before.
+ */
+let logSubscribers = 0;
+
+function subscribeLogs(cb: (lines: LogLine[]) => void): () => void {
+  const off = subscribe<LogLine[]>(CLOUD_EVENTS.runnerLogs, cb);
+  logSubscribers += 1;
+  if (logSubscribers === 1) void call<void>(CLOUD_CHANNELS.runnerLogsStream, { on: true }).catch(() => undefined);
+  let subscribed = true;
+  return () => {
+    if (!subscribed) return;
+    subscribed = false;
+    off();
+    logSubscribers -= 1;
+    if (logSubscribers === 0) void call<void>(CLOUD_CHANNELS.runnerLogsStream, { on: false }).catch(() => undefined);
+  };
+}
+
 const runner: DesktopRunnerHost = {
   snapshot: () => call<HostRunnerSnapshot>(CLOUD_CHANNELS.runnerSnapshot),
   subscribe: (cb) => subscribe<HostRunnerSnapshot>(CLOUD_EVENTS.runnerState, cb),
@@ -76,8 +128,13 @@ const runner: DesktopRunnerHost = {
   restartChild: (child: ChildId) =>
     call<HostRunnerSnapshot>(CLOUD_CHANNELS.runnerRestartChild, { child }),
 
+  pair: (bundle: RunnerPairingBundle) => call<HostRunnerSnapshot>(CLOUD_CHANNELS.runnerPair, { bundle }),
+  unpair: () => call<HostRunnerSnapshot>(CLOUD_CHANNELS.runnerUnpair),
+  pairing: () => call<RunnerPairingSummary | null>(CLOUD_CHANNELS.runnerPairingInfo),
+  restart: () => call<HostRunnerSnapshot>(CLOUD_CHANNELS.runnerRestart),
+
   logs: (req?: HostLogsRequest) => call<LogLine[]>(CLOUD_CHANNELS.runnerLogs, req ?? {}),
-  subscribeLogs: (cb) => subscribe<LogLine[]>(CLOUD_EVENTS.runnerLogs, cb),
+  subscribeLogs,
   clearLogs: () => call<void>(CLOUD_CHANNELS.runnerClearLogs),
 
   settings: () => call<HostSettings>(CLOUD_CHANNELS.settingsGet),
@@ -100,8 +157,51 @@ const runner: DesktopRunnerHost = {
   setOverrides: (patch: HostOverrides) => call<Diagnostics>(CLOUD_CHANNELS.overridesSet, patch),
 };
 
+const account: DesktopAccountHost = {
+  signIn: async (origin?: string) => {
+    await call<AccountState>(CLOUD_CHANNELS.accountSignIn, origin === undefined ? {} : { origin });
+  },
+  signOut: async () => {
+    await call<AccountState>(CLOUD_CHANNELS.accountSignOut);
+  },
+  state: () => call<AccountState>(CLOUD_CHANNELS.accountState),
+  openKeys: async (prefill?: KeysWindowPrefill) => {
+    await call<void>(CLOUD_CHANNELS.accountOpenKeys, prefill);
+  },
+  mcp: {
+    list: () => call<McpServersState>(CLOUD_CHANNELS.accountMcpList),
+    set: (request: McpServerSetRequest) => call<McpServersState>(CLOUD_CHANNELS.accountMcpSet, request),
+    remove: (name: string) => call<McpServersState>(CLOUD_CHANNELS.accountMcpRemove, { name }),
+  },
+};
+
+const updates: DesktopUpdatesHost = {
+  status: () => call<UpdateStatus>(CLOUD_CHANNELS.updateGet),
+  subscribe: (cb) => subscribe<UpdateStatus>(CLOUD_EVENTS.updateStatus, cb),
+  check: () => call<UpdateStatus>(CLOUD_CHANNELS.updateCheck),
+  restart: () => call<void>(CLOUD_CHANNELS.updateRestart),
+};
+
+const analytics: DesktopAnalyticsHost = {
+  get: () => call<AnalyticsState>(CLOUD_CHANNELS.analyticsGet),
+  set: (on: boolean) => call<AnalyticsState>(CLOUD_CHANNELS.analyticsSet, { on }),
+  track: (event: AnalyticsTrackRequest) => call<void>(CLOUD_CHANNELS.analyticsTrack, event),
+  identify: (userId: string | null) => call<void>(CLOUD_CHANNELS.analyticsIdentify, { userId }),
+};
+
+const toolchain: DesktopToolchainHost = {
+  report: (force?: boolean) => call<ToolchainReport>(CLOUD_CHANNELS.toolchainReport, { force }),
+  plan: (ids: ToolchainId[]) => call<ToolchainId[]>(CLOUD_CHANNELS.toolchainPlan, { ids }),
+  state: () => call<ToolchainJobState>(CLOUD_CHANNELS.toolchainState),
+  subscribe: (cb) => subscribe<ToolchainJobState>(CLOUD_EVENTS.toolchainState, cb),
+  install: (ids: ToolchainId[]) => call<ToolchainJobState>(CLOUD_CHANNELS.toolchainInstall, { ids }),
+  cancel: () => call<ToolchainJobState>(CLOUD_CHANNELS.toolchainCancel),
+  dismiss: () => call<ToolchainJobState>(CLOUD_CHANNELS.toolchainDismiss),
+  openPage: (id: ToolchainId) => call<void>(CLOUD_CHANNELS.toolchainOpenPage, { id }),
+};
+
 /**
- * The two synchronous reads, made once while the preload runs.
+ * The synchronous reads, made once while the preload runs.
  *
  * They have to be values before the page's first line executes: `api.ts` reads
  * the base and the token on every request, so a promise here would mean an
@@ -120,15 +220,29 @@ function syncString(channel: string): string | undefined {
 
 const apiBase = syncString(CLOUD_CHANNELS.apiBase);
 const apiToken = syncString(CLOUD_CHANNELS.apiToken);
+const mode = syncString(CLOUD_CHANNELS.accountMode) === "account" ? "account" : "local";
 
 const host: DesktopHost = {
   ...(apiBase !== undefined ? { apiBase } : {}),
   ...(apiToken !== undefined ? { apiToken } : {}),
+  bridgeVersion: 7,
+  mode,
   info: () => call<{ app: string; version: string; platform: string }>(CLOUD_CHANNELS.hostInfo),
+  account,
   runner,
+  updates,
+  analytics,
+  toolchain,
 };
 
 contextBridge.exposeInMainWorld(
   CLOUD_BRIDGE_KEY,
-  Object.freeze({ ...host, runner: Object.freeze(runner) }),
+  Object.freeze({
+    ...host,
+    account: Object.freeze(account),
+    runner: Object.freeze(runner),
+    updates: Object.freeze(updates),
+    analytics: Object.freeze(analytics),
+    toolchain: Object.freeze(toolchain),
+  }),
 );

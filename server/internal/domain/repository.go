@@ -79,8 +79,11 @@ type Repository struct {
 	Docs RepositoryDocs `json:"docs"`
 	// DocsTaskID is the board task of the last reference-doc bundle asked for;
 	// overwritten by the next and cleared when its PR merges.
-	DocsTaskID string      `json:"docs_task_id,omitempty"`
-	ProjectIDs []uuid.UUID `json:"project_ids,omitempty"`
+	DocsTaskID string `json:"docs_task_id,omitempty"`
+	// CISetupTaskID is the board task the "no CI workflows" notice opened; it
+	// blocks a second one until it is deleted or reaches done/released.
+	CISetupTaskID string      `json:"ci_setup_task_id,omitempty"`
+	ProjectIDs    []uuid.UUID `json:"project_ids,omitempty"`
 	// GitWarning is the finished sentence the repository card shows above its
 	// root path. Rendered verbatim by the web app — server-composed English,
 	// not a translation key, so localising it would mean threading a language
@@ -101,13 +104,15 @@ const (
 	RepoKindFrontend = "frontend"
 	RepoKindMobile   = "mobile"
 	RepoKindWorker   = "worker"
+	RepoKindData     = "data"
+	RepoKindGame     = "game"
 	RepoKindMonorepo = "monorepo"
 )
 
 // ValidRepoKind reports whether k is a known repo kind.
 func ValidRepoKind(k string) bool {
 	switch k {
-	case RepoKindBackend, RepoKindFrontend, RepoKindMobile, RepoKindWorker, RepoKindMonorepo:
+	case RepoKindBackend, RepoKindFrontend, RepoKindMobile, RepoKindWorker, RepoKindData, RepoKindGame, RepoKindMonorepo:
 		return true
 	}
 	return false
@@ -165,7 +170,7 @@ func ValidMobilePlatform(p string) bool {
 // (single-kind only; monorepo cannot nest).
 func ValidSubRepoKind(k string) bool {
 	switch k {
-	case RepoKindBackend, RepoKindFrontend, RepoKindMobile, RepoKindWorker:
+	case RepoKindBackend, RepoKindFrontend, RepoKindMobile, RepoKindWorker, RepoKindData, RepoKindGame:
 		return true
 	}
 	return false
@@ -174,7 +179,7 @@ func ValidSubRepoKind(k string) bool {
 // AllSubRepoKinds returns every valid monorepo sub-repo kind, for computing
 // auto-detect suggestions.
 func AllSubRepoKinds() []string {
-	return []string{RepoKindBackend, RepoKindFrontend, RepoKindMobile, RepoKindWorker}
+	return []string{RepoKindBackend, RepoKindFrontend, RepoKindMobile, RepoKindWorker, RepoKindData, RepoKindGame}
 }
 
 // RepoSubProject is one project inside a monorepo working copy, detected at
@@ -506,6 +511,9 @@ const maxRepoNameLen = 100
 
 // SanitizeRepoName is the name a new repository gets both on GitHub and as its
 // local folder, so the two never drift apart. "" means nothing usable was left.
+// The trim already rules out the trailing dot or space Windows cannot create;
+// a Windows device name is renamed on every OS, because a repository cloned
+// on macOS still has to check out on a Windows machine later.
 func SanitizeRepoName(name string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
@@ -516,7 +524,33 @@ func SanitizeRepoName(name string) string {
 			b.WriteRune('-')
 		}
 	}
-	return strings.Trim(b.String(), "-._")
+	return avoidWindowsDeviceName(strings.Trim(b.String(), "-._"))
+}
+
+// reservedDeviceSuffix is appended to the part before the first dot, since
+// Windows reserves "nul.tar.gz" exactly as it reserves "nul".
+const reservedDeviceSuffix = "-repo"
+
+func avoidWindowsDeviceName(name string) string {
+	stem, ext, _ := strings.Cut(name, ".")
+	if !isWindowsDeviceName(stem) {
+		return name
+	}
+	if ext == "" {
+		return stem + reservedDeviceSuffix
+	}
+	return stem + reservedDeviceSuffix + "." + ext
+}
+
+func isWindowsDeviceName(stem string) bool {
+	switch stem {
+	case "con", "prn", "aux", "nul":
+		return true
+	}
+	if len(stem) == 4 && (strings.HasPrefix(stem, "com") || strings.HasPrefix(stem, "lpt")) {
+		return stem[3] >= '0' && stem[3] <= '9'
+	}
+	return false
 }
 
 // NewRepoDirName validates a requested repository name and returns the single

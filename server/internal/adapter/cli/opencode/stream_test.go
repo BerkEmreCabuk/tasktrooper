@@ -1,6 +1,7 @@
 package opencode
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -52,7 +53,8 @@ func TestParseStreamReadsAFinishedSession(t *testing.T) {
 	assert.Equal(t, "Hello", out.Text)
 	assert.Equal(t, "stop", out.Status)
 	assert.Equal(t, 0.02, out.CostUSD)
-	assert.Equal(t, domain.Usage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120, CacheReadTokens: 10}, out.Usage)
+	assert.Equal(t, domain.Usage{PromptTokens: 111, CompletionTokens: 25, TotalTokens: 136, CacheReadTokens: 10, CacheWriteTokens: 1}, out.Usage,
+		"opencode's input excludes both cache buckets and its output excludes reasoning; the domain counts them inside")
 
 	assert.Equal(t, []string{"ses_1"}, sink.sessions)
 	assert.Equal(t, 1, sink.turns)
@@ -111,8 +113,8 @@ func TestParseStreamHandlesToolCompletionAndError(t *testing.T) {
 	assert.Equal(t, []bool{false, true}, sink.toolFails)
 }
 
-// An "error" event is a terminal event — SawResult true, IsError true — and
-// its message is the CLI's own words, not a paraphrase.
+// An "error" event nothing finishes after is terminal — SawResult true,
+// IsError true — and its message is the CLI's own words, not a paraphrase.
 func TestParseStreamReadsAnErrorEvent(t *testing.T) {
 	body := `{"type":"step_start","sessionID":"ses_5"}
 {"type":"error","sessionID":"ses_5","error":{"name":"rate_limit_exceeded","data":{"message":"Rate limit exceeded. Please try again later."}}}
@@ -124,6 +126,43 @@ func TestParseStreamReadsAnErrorEvent(t *testing.T) {
 	assert.True(t, out.IsError)
 	assert.Equal(t, "rate_limit_exceeded", out.Status)
 	assert.Equal(t, "Rate limit exceeded. Please try again later.", out.Text)
+}
+
+// opencode also reports errors it recovers from: on a context overflow it
+// compacts and keeps going. A step that finishes after the error means the
+// session carried on, so its answer is the outcome, not the error (#102).
+func TestParseStreamKeepsTheAnswerOfASessionThatRecoveredFromAnError(t *testing.T) {
+	f, err := os.Open("testdata/error_recovered.jsonl")
+	require.NoError(t, err)
+	defer f.Close()
+
+	out, err := parseStream(f, &recordingSink{})
+	require.NoError(t, err)
+
+	assert.True(t, out.SawResult)
+	assert.False(t, out.IsError)
+	assert.Equal(t, "stop", out.Status)
+	assert.Equal(t, "The pipeline is green: build 33 is on TestFlight.", out.Text)
+	assert.Equal(t, "prompt is too long: 214803 tokens > 200000 maximum", out.RecoveredError)
+	assert.InDelta(t, 0.03, out.CostUSD, 1e-9)
+}
+
+// An error with nothing finished after it still ends the run, and one that
+// carries no message is reported by its name — never as the session's
+// answer text, which used to render a good answer as an error.
+func TestParseStreamReportsAnErrorWithoutAMessageByItsName(t *testing.T) {
+	body := `{"type":"step_start","sessionID":"ses_7"}
+{"type":"text","sessionID":"ses_7","part":{"id":"prt_1","text":"Here is the answer."}}
+{"type":"step_finish","sessionID":"ses_7","part":{"reason":"tool-calls","cost":0,"tokens":{}}}
+{"type":"error","sessionID":"ses_7","error":{"name":"UnknownError","data":{}}}
+`
+	out, err := parseStream(strings.NewReader(body), &recordingSink{})
+	require.NoError(t, err)
+
+	assert.True(t, out.IsError)
+	assert.Equal(t, "UnknownError", out.Status)
+	assert.Equal(t, "UnknownError", out.Text)
+	assert.Empty(t, out.RecoveredError)
 }
 
 // Malformed or non-event lines (a stray log line that slipped onto stdout, an
@@ -161,4 +200,44 @@ func TestParseStreamReadsTheCallIDOfBothGenerations(t *testing.T) {
 
 	assert.Equal(t, []string{"call_v1", "call_v2"}, sink.callIDs)
 	assert.Equal(t, []string{"read", "tasktrooper_list_board_tasks"}, sink.toolUses)
+}
+
+func TestParseStreamSumsStepsAndCapturesSubagentSessions(t *testing.T) {
+	f, err := os.Open("testdata/subagent.jsonl")
+	require.NoError(t, err)
+	defer f.Close()
+
+	sink := &recordingSink{}
+	out, err := parseStream(f, sink)
+	require.NoError(t, err)
+
+	assert.True(t, out.SawResult)
+	assert.Equal(t, "stop", out.Status)
+	assert.InDelta(t, 0.06, out.CostUSD, 1e-9)
+	assert.Equal(t, domain.Usage{
+		PromptTokens: 24350, CompletionTokens: 600, TotalTokens: 24950,
+		CacheReadTokens: 18000, CacheWriteTokens: 350,
+	}, out.Usage)
+	assert.LessOrEqual(t, out.Usage.CacheReadTokens+out.Usage.CacheWriteTokens, out.Usage.PromptTokens,
+		"cache buckets are a subset of the prompt, so a cache hit rate can never pass 100%")
+	assert.Equal(t, []string{"ses_child1"}, out.ChildSessions)
+	assert.Equal(t, "subagent", ledgerToolName("task"))
+	assert.Equal(t, []string{"task"}, sink.toolDone)
+}
+
+func TestChildSessionIDFallsBackToTheOutputHeader(t *testing.T) {
+	var withMeta, headerOnly, neither toolPart
+	withMeta.State.Metadata.SessionID = "ses_meta"
+	withMeta.State.Output = `<task id="ses_header" state="completed">`
+	headerOnly.State.Output = `<task id="ses_header" state="completed">`
+	for name, tc := range map[string]struct {
+		part toolPart
+		want string
+	}{
+		"metadata wins": {withMeta, "ses_meta"},
+		"header":        {headerOnly, "ses_header"},
+		"none":          {neither, ""},
+	} {
+		assert.Equal(t, tc.want, childSessionID(tc.part), name)
+	}
 }

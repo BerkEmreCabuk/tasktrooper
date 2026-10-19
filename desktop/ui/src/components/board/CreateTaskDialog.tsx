@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Loader2, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Loader2, Plus, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -17,6 +17,7 @@ import { MultiSelectPicker } from "@/components/admin/MultiSelectPicker";
 import { TaskAssigneeFields } from "@/components/board/TaskAssigneeFields";
 import { AttachmentDropzone } from "@/components/attachments/AttachmentDropzone";
 import { AttachmentList } from "@/components/attachments/AttachmentList";
+import { ImportIssueDialog } from "@/components/issues/ImportIssueDialog";
 import { MarkdownField } from "@/components/markdown/MarkdownField";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +39,7 @@ import {
 import { useI18n } from "@/hooks/useI18n";
 import { useTaskTypes } from "@/hooks/useTaskTypes";
 import { TASK_PRIORITY_OPTIONS, taskTypeOptions } from "@/lib/project-board";
+import { logEvent } from "@/lib/analytics";
 
 interface CriterionDraft {
   id: string;
@@ -113,6 +115,7 @@ export function CreateTaskDialog({
   const [deployDependsOn, setDeployDependsOn] = useState<string[]>([]);
   const [repoTasks, setRepoTasks] = useState<BoardTask[]>([]);
   const [repoTasksLoading, setRepoTasksLoading] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const memberAgents = agents.filter((a) => memberAgentIds.includes(a.id));
   const columnOptions = columns.filter((c) => !c.is_backlog || c.slug === defaultColumn);
@@ -215,6 +218,7 @@ export function CreateTaskDialog({
         }
       }
       toast.success(t("boardArea.components.createTask.created"));
+      logEvent("task_create", { source: "manual", task_type: taskType });
       onOpenChange(false);
       onCreated();
     } catch (e) {
@@ -526,6 +530,10 @@ export function CreateTaskDialog({
           </div>
         </div>
         <DialogFooter>
+          <Button variant="ghost" className="mr-auto" onClick={() => setImportOpen(true)}>
+            <Download className="mr-2 h-4 w-4" />
+            {t("issues.import.fromIssue")}
+          </Button>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t("common.cancel")}
           </Button>
@@ -535,6 +543,16 @@ export function CreateTaskDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+      <ImportIssueDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        repositories={repositories}
+        defaultRepositoryId={repositoryId}
+        onImported={() => {
+          onCreated();
+          onOpenChange(false);
+        }}
+      />
     </Dialog>
   );
 }

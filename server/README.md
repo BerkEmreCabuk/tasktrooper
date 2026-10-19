@@ -19,6 +19,8 @@ See [.ai/architecture.md](.ai/architecture.md).
 |---|---|
 | `cmd/agent-server/` | the server binary (env → `runtime.Run`) |
 | `cmd/migrate/` | applies `migrations/` out of band |
+| `cmd/executor/` | the headless executor a runner drives ([.ai/executor.md](.ai/executor.md)) |
+| `cmd/skillvectors/` | embeds the catalog's skills into `catalog/skills.vectors.json` |
 | `internal/` | domain / port / application / adapter / platform |
 | `migrations/` | SQL migrations (embedded) |
 | `resources/` | `config.yml`, `openapi.yaml` (embedded into the binary) |
@@ -65,11 +67,14 @@ Optional:
 | `SHUTDOWN_ON_STDIN_CLOSE` | no | `1` makes stdin EOF start the same drain as SIGTERM. The desktop app sets it so the server stops cleanly on Windows and never outlives the app. |
 | `EMBEDDED_POSTGRES_CACHE_DIR` | `$DATA_DIR/postgres-bin` | Where the Postgres binaries are downloaded and extracted (~30 MB, first start only) |
 | `EMBEDDINGS_BASE_URL` | — | OpenAI-compatible host exposing `POST /v1/embeddings`. Set, an embedding provider pointing at it (`nomic-embed-text-v1.5`, 768 dims) is created at boot. Idempotent. |
+| `EMBEDDINGS_SOURCE` | `onnx-int8` | The engine behind `EMBEDDINGS_BASE_URL`: `onnx-int8` (the desktop's embedder) or `tei`. The catalog's shipped skill vectors stand in for live embeddings only while embeddings go to that URL and this names the engine they were made with. |
 | `CORS_ORIGINS` | `app://tasktrooper,http://localhost:3200,http://127.0.0.1:3200` | Origins allowed to call this server |
 | `PUBLIC_BASE_URL` | `http://127.0.0.1:<port>` | The origin a Claude Code session calls TaskTrooper's tools back on |
 | `CLAUDE_CODE_BIN` | `claude` | The Claude Code CLI |
 | `CHROME_BIN` | — | Chromium for the `browser_*` tools |
-| `AGENT_CATALOG_REPO` | — | Where the six role agents sync from, at boot and on the `agent_catalog.interval`. A local directory is read in place; a git URL is fetched into `agent_catalog.cache_dir`. Set, catalogsync creates/merges the role agents by name; unset, no role agents are created. Dev defaults to `<repo>/catalog`; the desktop ships its own copy. See "Role agent catalog". |
+| `MOBILE_APPIUM_HUB_URL` | — | The Appium hub the `mobile_*` tools drive. The desktop sets `http://127.0.0.1:4723` whenever Appium is installed. |
+| `APPIUM_BIN` | — | The `appium` executable (on Windows its npm `.cmd` shim, run without `cmd.exe`). Set, and with `MOBILE_APPIUM_HUB_URL` plain `http` on loopback, the hub is this server's to run: the first mobile tool call that needs it starts `appium --address <host> --port <port> [--base-path <path>] --log-no-colors` in `$DATA_DIR/appium-hub` and waits up to 45 s for `GET /status`; it is stopped after 10 minutes with no tool call and no device lease open, and on shutdown. A hub already answering on the address is used as it is and never stopped. Unset (`make dev`), the hub is whoever's runs it. |
+| `AGENT_CATALOG_REPO` | — | Where the role agents sync from, at boot and on the `agent_catalog.interval`. A local directory is read in place; a git URL is fetched into `agent_catalog.cache_dir`. Set, catalogsync creates/merges the role agents by name; unset, no role agents are created. Dev defaults to `<repo>/catalog`; the desktop ships its own copy. See "Role agent catalog". |
 | `CONFIG_PATH` | `resources/config.yml` | Config file; falls back to the copy compiled into the binary when the file is absent |
 | `SHUTDOWN_GRACE` | `9m` | How long to keep working after SIGTERM before in-flight runs are cancelled |
 
@@ -86,7 +91,7 @@ binaries (`ANTIGRAVITY_BIN`, `CURSOR_AGENT_BIN`, `OPENCODE_BIN`, and
 
 ## Role agent catalog
 
-The six role agents (product-manager, system-architect, backend-developer,
+The role agents (product-manager, system-architect, backend-developer,
 frontend-developer, mobile-developer, qa-agent) no longer ship inside the
 binary or as boot-time seed data. They live as plain files — agent, skills,
 rules, tool policy — in `catalog/` at the repository root, and the server
@@ -104,6 +109,22 @@ created — the board starts empty and the sync stays idle.
 The desktop bundles this directory under `Contents/Resources/catalog` and
 passes it as `AGENT_CATALOG_REPO`; `make dev` defaults it to the checkout's
 `catalog/`.
+
+`catalog/skills.vectors.json` holds every skill's vector, embedded once with
+the desktop's embedder (`nomic-embed-text-v1.5`, int8 ONNX, 768 dims) and
+keyed by the sha256 of the exact text a skill is embedded from
+(`name\ndescription\ncontent`). Creating, updating and backfilling a skill
+take the shipped vector instead of calling the embedder when the file's model
+and engine are the ones this install embeds with (`EMBEDDINGS_SOURCE`); an
+edited skill, or any other engine, is embedded live. After changing a skill,
+regenerate the file against a running desktop embedder:
+
+```sh
+go run ./cmd/skillvectors -catalog ../catalog -embeddings-url http://127.0.0.1:<port>/v1
+go run ./cmd/skillvectors -catalog ../catalog -check   # skills without a vector
+```
+
+Unchanged skills keep their vectors; only changed texts are embedded.
 
 ## Startup contract
 

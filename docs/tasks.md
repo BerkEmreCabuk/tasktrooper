@@ -6,7 +6,7 @@ description: Task types, fields, acceptance criteria, documents, comments, attac
 ## Task types
 
 Every task belongs to a repository and, optionally, a project (an initiative
-that groups the repositories shipping together). It is also one of three
+that groups the repositories shipping together). It is also one of five
 types:
 
 | Type | Key prefix | What it is |
@@ -14,6 +14,8 @@ types:
 | `task` | `T-` | Ordinary product work |
 | `bug` | `B-` | A defect |
 | `analiz` | `A-` | An analysis |
+| `design` | `D-` | A design: a design system or a screen, designed before it is built |
+| `technical` | `TC-` | A code-health finding — the default type for a task opened from a repository scan |
 
 `task` and `bug` follow the same review chain (Code Review → QA → PM UAT).
 An **`analiz`** task is different in kind, not just in name: its deliverable
@@ -28,6 +30,16 @@ an approved analysis names that analysis with a `derived_from` relation — see
 developer picking it up reaches the specification: `list_task_documents`
 re-reads it at any point, and it's injected into every run on that task
 automatically.
+
+A **`design`** task works the same way, owned by the `ui-designer` agent: its
+deliverable is an HTML design document (mockups of every state, or a design
+system preview) and, when it changes the design system, a design system
+proposal. You review it in **Analiz Review**; approving it approves the
+design system versions it proposed, and the frontend and mobile tasks that
+are `derived_from` it, or blocked by it, get the approved design in every run
+and under the task. Work blocked by a `design` task starts only once that task
+is **released**, after its designer has written the hand-off. See
+[Design systems](design-systems.md).
 
 ## Fields
 

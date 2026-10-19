@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/secrets"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -81,7 +82,7 @@ func (s *RepositoryStore) localizeRootPath(r *domain.Repository) {
 
 // repositoryCols is the canonical repositories column list shared by every
 // SELECT/RETURNING below so the read order can never drift from scanRepository.
-const repositoryCols = `id, name, description, root_path, remote_url, verify_command, build_command, test_command, kind, mobile_platform, detected_bundle_id, detected_package_name, detected_xcode_scheme, detected_gradle_module, release_engine, sub_repo_kinds, sub_projects, docs, docs_task_id, require_human_review, incident_policy, test_strategy, coverage_threshold, require_overall_coverage, mutation_enabled, mutation_threshold, webhook_hook_id, created_at, updated_at`
+const repositoryCols = `id, name, description, root_path, remote_url, verify_command, build_command, test_command, kind, mobile_platform, detected_bundle_id, detected_package_name, detected_xcode_scheme, detected_gradle_module, release_engine, sub_repo_kinds, sub_projects, docs, docs_task_id, ci_setup_task_id, require_human_review, incident_policy, test_strategy, coverage_threshold, require_overall_coverage, mutation_enabled, mutation_threshold, webhook_hook_id, created_at, updated_at`
 
 // scanRepository reads a single repositories row in repositoryCols order and
 // re-anchors its root_path onto this host. Every SELECT/RETURNING in this file
@@ -107,7 +108,7 @@ func scanRepositoryRow(row interface{ Scan(dest ...any) error }) (domain.Reposit
 		&r.ID, &r.Name, &r.Description, &r.RootPath, &r.RemoteURL, &r.VerifyCommand, &r.BuildCommand, &r.TestCommand,
 		&r.Kind, &r.MobilePlatform, &r.DetectedAppIdentity.BundleID, &r.DetectedAppIdentity.PackageName,
 		&r.DetectedBuildTargets.XcodeScheme, &r.DetectedBuildTargets.GradleModule, &r.ReleaseEngine,
-		&r.SubRepoKinds, &subProjectsJSON, &docsJSON, &r.DocsTaskID,
+		&r.SubRepoKinds, &subProjectsJSON, &docsJSON, &r.DocsTaskID, &r.CISetupTaskID,
 		&r.RequireHumanReview, &incidentPolicy,
 		&r.TestStrategy, &r.CoverageThreshold, &r.RequireOverallCoverage, &r.MutationEnabled, &r.MutationThreshold,
 		&webhookHookID, &r.CreatedAt, &r.UpdatedAt,
@@ -270,8 +271,15 @@ func (s *RepositoryStore) Get(ctx context.Context, id uuid.UUID) (domain.Reposit
 // conflating those would be worse than the duplicate. Name collision across
 // hosts is the accepted residue — two hosts serving one database are expected
 // to hold the same repositories.
+//
+// On Windows the exact match also accepts a case variant: NTFS opens c:\Repo
+// and C:\repo as one directory, and an exact-only lookup registered it twice.
 func (s *RepositoryStore) GetByRootPath(ctx context.Context, rootPath string) (domain.Repository, error) {
-	r, err := s.scanRepository(s.pool.QueryRow(ctx, `SELECT `+repositoryCols+` FROM repositories WHERE root_path = $1`, rootPath))
+	rootPath = workspace.CanonicalPath(rootPath)
+	r, err := s.scanRepository(s.pool.QueryRow(ctx, `SELECT `+repositoryCols+` FROM repositories
+		WHERE root_path = $1 OR ($2::boolean AND lower(root_path) = lower($1))
+		ORDER BY root_path = $1 DESC, updated_at DESC
+		LIMIT 1`, rootPath, runtime.GOOS == "windows"))
 	if err == nil {
 		return r, nil
 	}
@@ -284,9 +292,10 @@ func (s *RepositoryStore) GetByRootPath(ctx context.Context, rootPath string) (d
 	}
 	// regexp_replace drops everything through the last separator, so this is an
 	// equality test on the directory name — a bound parameter, no LIKE, and no
-	// pattern metacharacters reachable from a caller-supplied path.
+	// pattern metacharacters reachable from a caller-supplied path. Both
+	// separators count: a Windows host stores C:\...\acme-web.
 	rows, queryErr := s.pool.Query(ctx, `SELECT `+repositoryCols+` FROM repositories
-		WHERE regexp_replace(root_path, '^.*/', '') = $1 AND root_path <> $2
+		WHERE regexp_replace(root_path, '^.*[/\\]', '') = $1 AND root_path <> $2
 		ORDER BY updated_at DESC`, name, rootPath)
 	if queryErr != nil {
 		return domain.Repository{}, fmt.Errorf("get repository by root: %w", queryErr)
@@ -321,15 +330,7 @@ func (s *RepositoryStore) GetByRootPath(ctx context.Context, rootPath string) (d
 // repoDirName is the final segment of a root path — the repository's directory
 // name, the only part of a foreign path that means anything on another host.
 func repoDirName(rootPath string) string {
-	trimmed := strings.TrimSpace(rootPath)
-	if trimmed == "" {
-		return ""
-	}
-	name := filepath.Base(filepath.Clean(trimmed))
-	if name == "." || name == ".." || name == string(filepath.Separator) {
-		return ""
-	}
-	return name
+	return workspace.BaseName(rootPath)
 }
 
 func (s *RepositoryStore) List(ctx context.Context) ([]domain.Repository, error) {
@@ -547,6 +548,21 @@ func (s *RepositoryStore) SetDocsTaskID(ctx context.Context, id uuid.UUID, taskI
 	return nil
 }
 
+// SetCISetupTaskID records (or, with "", clears) the CI workflow setup task
+// this repository is waiting on.
+func (s *RepositoryStore) SetCISetupTaskID(ctx context.Context, id uuid.UUID, taskID string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE repositories SET ci_setup_task_id = $2, updated_at = now() WHERE id = $1
+	`, id, taskID)
+	if err != nil {
+		return fmt.Errorf("set repository ci setup task: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("set repository ci setup task: %w", port.ErrNotFound)
+	}
+	return nil
+}
+
 // UpdateMeta applies kind / sub-repo kinds only when the matching pointer is
 // non-nil, leaving unspecified fields untouched.
 func (s *RepositoryStore) UpdateMeta(ctx context.Context, id uuid.UUID, kind *string, subRepoKinds *[]string) (domain.Repository, error) {
@@ -695,7 +711,8 @@ const boardTaskColumns = `id, repository_id, task_number, title, task_type,
 		before_deploy, after_deploy, rollback_plan, before_deploy_confirmed_at,
 		pr_url, pr_number, merge_commit_sha, component_id,
 		NULL::timestamptz, NULL::timestamptz,
-		(SELECT key_prefix FROM task_types WHERE key = task_type)`
+		(SELECT key_prefix FROM task_types WHERE key = task_type),
+		EXISTS (SELECT 1 FROM task_agent_runs ar WHERE ar.task_id = board_tasks.id AND ar.status = 'running')`
 
 // The quota lateral is what puts "resumes at 14:30" on a parked card: the reset
 // time lives on the RUN (task_agent_runs.quota_resume_at, migration 101), which
@@ -717,7 +734,8 @@ const boardTaskSelect = `
 		bt.before_deploy, bt.after_deploy, bt.rollback_plan, bt.before_deploy_confirmed_at,
 		bt.pr_url, bt.pr_number, bt.merge_commit_sha, bt.component_id,
 		sp.entered_at, qr.quota_resume_at,
-		tt.key_prefix
+		tt.key_prefix,
+		EXISTS (SELECT 1 FROM task_agent_runs ar WHERE ar.task_id = bt.id AND ar.status = 'running')
 	FROM board_tasks bt
 	LEFT JOIN LATERAL (
 		SELECT entered_at FROM task_column_spans
@@ -757,6 +775,7 @@ func scanBoardTask(scanner interface {
 		&prURL, &prNumber, &mergeCommitSHA, &task.ComponentID,
 		&task.ColumnEnteredAt, &task.BlockedResumeAt,
 		&keyPrefix,
+		&task.AgentRunning,
 	)
 	if err != nil {
 		return domain.BoardTask{}, err
@@ -837,6 +856,73 @@ func (s *BoardTaskStore) Get(ctx context.Context, repositoryID, taskID uuid.UUID
 		return domain.BoardTask{}, fmt.Errorf("get board task: %w", err)
 	}
 	return task, nil
+}
+
+func (s *BoardTaskStore) GetByID(ctx context.Context, taskID uuid.UUID) (domain.BoardTask, error) {
+	task, err := scanBoardTask(s.pool.QueryRow(ctx, boardTaskSelect+` WHERE bt.id = $1`, taskID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.BoardTask{}, fmt.Errorf("%w: %s", domain.ErrBoardTaskNotFound, taskID)
+	}
+	if err != nil {
+		return domain.BoardTask{}, fmt.Errorf("get board task by id: %w", err)
+	}
+	return task, nil
+}
+
+// ListDispatchCandidates is two reads however large the board: the filter runs
+// in SQL rather than over every task, and the run histories come back in one
+// LATERAL query instead of one query per task.
+func (s *BoardTaskStore) ListDispatchCandidates(ctx context.Context, runsPerTask int) ([]port.TaskRecentRuns, error) {
+	if runsPerTask <= 0 {
+		runsPerTask = 1
+	}
+	rows, err := s.pool.Query(ctx, boardTaskSelect+`
+		WHERE bt.assignee_agent_id IS NOT NULL
+		  AND bt.board_column NOT IN ($1, $2, $3, $4)
+		  AND COALESCE(bt.blocked_resource, '') <> $5
+		ORDER BY bt.board_column, bt.position ASC, bt.created_at ASC
+	`, string(domain.TaskColumnDone), string(domain.TaskColumnReleased), string(domain.TaskColumnBlocked),
+		string(domain.TaskColumnBacklog), domain.ResourceWorkOrder)
+	if err != nil {
+		return nil, fmt.Errorf("list dispatch candidates: %w", err)
+	}
+	tasks, err := scanBoardTasks(rows)
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if len(tasks) == 0 {
+		return nil, nil
+	}
+	ids := make([]uuid.UUID, len(tasks))
+	for i, t := range tasks {
+		ids[i] = t.ID
+	}
+	runRows, err := s.pool.Query(ctx, `
+		SELECT r.* FROM unnest($1::uuid[]) AS t(id)
+		CROSS JOIN LATERAL (
+			SELECT `+taskAgentRunColumns+` FROM task_agent_runs
+			WHERE task_id = t.id ORDER BY created_at DESC LIMIT $2
+		) r
+		ORDER BY r.task_id, r.created_at DESC
+	`, ids, runsPerTask)
+	if err != nil {
+		return nil, fmt.Errorf("list dispatch candidate runs: %w", err)
+	}
+	defer runRows.Close()
+	runs, err := scanTaskAgentRuns(runRows)
+	if err != nil {
+		return nil, err
+	}
+	byTask := make(map[uuid.UUID][]domain.TaskAgentRun, len(tasks))
+	for _, r := range runs {
+		byTask[r.TaskID] = append(byTask[r.TaskID], r)
+	}
+	out := make([]port.TaskRecentRuns, len(tasks))
+	for i, t := range tasks {
+		out[i] = port.TaskRecentRuns{Task: t, Runs: byTask[t.ID]}
+	}
+	return out, nil
 }
 
 func (s *BoardTaskStore) GetByNumber(ctx context.Context, number int) (domain.BoardTask, error) {
@@ -975,6 +1061,10 @@ func scanBoardTasks(rows pgx.Rows) ([]domain.BoardTask, error) {
 // cancellation block has no session and no answer to wait for — a human moving
 // the task back to a column IS the release, and without clearing the stamp here
 // the board would keep showing a blocked badge on a task that is running again.
+//
+// A merge hold (domain.MergeHoldResources) is cleared only by a move: editing a
+// done task's description or regenerating its order note does not resolve what
+// its merge waits for.
 func (s *BoardTaskStore) Update(ctx context.Context, task domain.BoardTask) (domain.BoardTask, error) {
 	row := s.pool.QueryRow(ctx, `
 		UPDATE board_tasks SET
@@ -988,10 +1078,13 @@ func (s *BoardTaskStore) Update(ctx context.Context, task domain.BoardTask) (dom
 			priority = $10,
 			assignee_agent_id = $11,
 			blocked_question = CASE WHEN blocked_session_id IS NULL AND $8 <> $12::text
+				AND NOT (board_column = $8 AND COALESCE(blocked_resource = ANY($19::text[]), false))
 				THEN NULL ELSE blocked_question END,
 			blocked_at = CASE WHEN blocked_session_id IS NULL AND $8 <> $12::text
+				AND NOT (board_column = $8 AND COALESCE(blocked_resource = ANY($19::text[]), false))
 				THEN NULL ELSE blocked_at END,
 			blocked_origin_column = CASE WHEN blocked_session_id IS NULL AND $8 <> $12::text
+				AND NOT (board_column = $8 AND COALESCE(blocked_resource = ANY($19::text[]), false))
 				THEN NULL ELSE blocked_origin_column END,
 			-- A resource block has no session either, so it releases the same
 			-- way a cancellation does: a human dragging the card out of blocked
@@ -999,6 +1092,7 @@ func (s *BoardTaskStore) Update(ctx context.Context, task domain.BoardTask) (dom
 			-- set, the card would keep claiming to be queued for hardware while
 			-- an agent works on it.
 			blocked_resource = CASE WHEN blocked_session_id IS NULL AND $8 <> $12::text
+				AND NOT (board_column = $8 AND COALESCE(blocked_resource = ANY($19::text[]), false))
 				THEN NULL ELSE blocked_resource END,
 			-- The release gate's stamp travels with the move that earns (or
 			-- withdraws) it, so a task can never be left in done carrying the
@@ -1026,7 +1120,7 @@ func (s *BoardTaskStore) Update(ctx context.Context, task domain.BoardTask) (dom
 		task.Position, string(task.Priority), task.AssigneeAgentID,
 		string(domain.TaskColumnBlocked), task.VerifiedSHA,
 		task.BeforeDeploy, task.AfterDeploy, task.RollbackPlan, task.ComponentID,
-		task.BeforeDeployConfirmedAt)
+		task.BeforeDeployConfirmedAt, domain.MergeHoldResources)
 	updated, err := scanBoardTask(row)
 	if err != nil {
 		return domain.BoardTask{}, fmt.Errorf("update board task: %w", err)
@@ -1145,6 +1239,45 @@ func (s *BoardTaskStore) MarkWorkOrderWaiting(ctx context.Context, repositoryID,
 	`, taskID, repositoryID, detail, domain.ResourceWorkOrder)
 	if err != nil {
 		return fmt.Errorf("mark board task waiting on work order: %w", err)
+	}
+	return nil
+}
+
+// HoldMerge records why a done task's merge waits, WITHOUT moving
+// board_column, the same way MarkWorkOrderWaiting does. It never overwrites a
+// park that is not itself a merge hold, nor a pending question. blocked_at is
+// kept while the reason stays the same, so the card's wait does not restart on
+// every refused retry.
+func (s *BoardTaskStore) HoldMerge(ctx context.Context, repositoryID, taskID uuid.UUID, resource, detail string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE board_tasks
+		SET blocked_question = NULLIF($3, ''),
+		    blocked_resource = $4,
+		    blocked_at       = CASE WHEN blocked_resource = $4 THEN COALESCE(blocked_at, now()) ELSE now() END,
+		    updated_at       = now()
+		WHERE id = $1 AND repository_id = $2
+		  AND blocked_session_id IS NULL
+		  AND (blocked_resource IS NULL OR blocked_resource = ANY($5::text[]))
+	`, taskID, repositoryID, detail, resource, domain.MergeHoldResources)
+	if err != nil {
+		return fmt.Errorf("hold board task merge: %w", err)
+	}
+	return nil
+}
+
+// ReleaseMergeHold clears a hold set by HoldMerge when it is one of resources;
+// anything else the task is parked on is left alone.
+func (s *BoardTaskStore) ReleaseMergeHold(ctx context.Context, taskID uuid.UUID, resources ...string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE board_tasks
+		SET blocked_question = NULL,
+		    blocked_resource = NULL,
+		    blocked_at       = NULL,
+		    updated_at       = now()
+		WHERE id = $1 AND blocked_resource = ANY($2::text[]) AND blocked_resource = ANY($3::text[])
+	`, taskID, resources, domain.MergeHoldResources)
+	if err != nil {
+		return fmt.Errorf("release board task merge hold: %w", err)
 	}
 	return nil
 }
@@ -1463,15 +1596,19 @@ func (s *BoardTaskStore) ResetMergeState(ctx context.Context, taskID uuid.UUID) 
 // ConfirmBeforeDeploy stamps a human's confirmation that BeforeDeploy's steps
 // were performed. COALESCE keeps the first confirmation's time on a repeated
 // call, so pressing the button twice cannot restart the "confirmed <time>"
-// clock the UI shows.
+// clock the UI shows. The before_deploy merge hold is what this confirmation
+// answers, so it clears with it.
 func (s *BoardTaskStore) ConfirmBeforeDeploy(ctx context.Context, repositoryID, taskID uuid.UUID) (domain.BoardTask, error) {
 	row := s.pool.QueryRow(ctx, `
 		UPDATE board_tasks
 		SET before_deploy_confirmed_at = COALESCE(before_deploy_confirmed_at, now()),
+			blocked_question = CASE WHEN blocked_resource = $3 THEN NULL ELSE blocked_question END,
+			blocked_at = CASE WHEN blocked_resource = $3 THEN NULL ELSE blocked_at END,
+			blocked_resource = CASE WHEN blocked_resource = $3 THEN NULL ELSE blocked_resource END,
 			updated_at = now()
 		WHERE id = $1 AND repository_id = $2
 		RETURNING `+boardTaskColumns+`
-	`, taskID, repositoryID)
+	`, taskID, repositoryID, domain.ResourceBeforeDeploy)
 	task, err := scanBoardTask(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.BoardTask{}, fmt.Errorf("%w: %s", domain.ErrBoardTaskNotFound, taskID)
@@ -2169,11 +2306,17 @@ func (s *TaskRelationStore) AddBlockers(ctx context.Context, targetTaskID uuid.U
 	return out, nil
 }
 
+// unfinishedBlockerSQL is when a `blocks` source (bt) still holds its target
+// back. A design task holds until released, not done: its designer writes the
+// hand-off spec and opens the implementation tasks in its done run, and the
+// work it blocks must not start before that hand-off exists.
+const unfinishedBlockerSQL = `(bt.board_column NOT IN ('done', 'released') OR (bt.task_type = 'design' AND bt.board_column = 'done'))`
+
 func (s *TaskRelationStore) ListBlockingSources(ctx context.Context, targetTaskID uuid.UUID) ([]domain.BoardTask, error) {
 	rows, err := s.pool.Query(ctx, boardTaskSelect+`
 		JOIN task_relations tr ON tr.source_task_id = bt.id
 		WHERE tr.target_task_id = $1 AND tr.relation_type = 'blocks'
-		AND bt.board_column NOT IN ('done', 'released')
+		AND `+unfinishedBlockerSQL+`
 	`, targetTaskID)
 	if err != nil {
 		return nil, err
@@ -2193,7 +2336,7 @@ func (s *TaskRelationStore) ListUnfinishedBlockers(ctx context.Context) ([]domai
 			`+taskKeySQL+`, bt.title
 		FROM task_relations tr
 		JOIN board_tasks bt ON bt.id = tr.source_task_id
-		WHERE tr.relation_type = 'blocks' AND bt.board_column NOT IN ('done', 'released')
+		WHERE tr.relation_type = 'blocks' AND `+unfinishedBlockerSQL+`
 		ORDER BY tr.created_at
 	`)
 	if err != nil {

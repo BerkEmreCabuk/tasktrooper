@@ -86,6 +86,7 @@ func (s *ResumeSuite) SetupTest() {
 		task: domain.BoardTask{
 			ID:                  s.taskID,
 			RepositoryID:        s.repoID,
+			AssigneeAgentID:     &agentA,
 			Title:               "Add billing service",
 			Column:              domain.TaskColumnTodo,
 			BlockedOriginColumn: domain.TaskColumnTodo,
@@ -123,6 +124,21 @@ func (s *ResumeSuite) TestAnswerIsRecordedOnTheTask() {
 	replay := prompt.AnsweredClarificationsMessage([]domain.TaskComment{{Content: comment.Content}})
 	s.Contains(replay, s.question)
 	s.Contains(replay, "Postgres")
+}
+
+func (s *ResumeSuite) TestTaskChatAnswerIsAnInformationalClarificationComment() {
+	repositoryID, taskID := uuid.New(), uuid.New()
+
+	s.resumer.RecordTaskAnswer(context.Background(), repositoryID, taskID, s.question, "Postgres")
+
+	s.Require().Len(s.commenter.comments, 1)
+	comment := s.commenter.comments[0]
+	s.Equal("system", comment.AuthorType)
+	s.True(comment.Informational, "the chat carries the conversation on; the comment must not wake a board run")
+	s.True(prompt.IsClarificationComment(comment.Content))
+	s.Contains(comment.Content, s.question)
+	s.Contains(comment.Content, "Postgres")
+	s.Empty(s.runner.jobs)
 }
 
 func (s *ResumeSuite) TestCommentFailureStillResumes() {
