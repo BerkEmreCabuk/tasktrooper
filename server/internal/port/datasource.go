@@ -14,6 +14,11 @@ import (
 // that does not parse), as opposed to the source failing.
 var ErrDataSourceQuery = errors.New("the data source rejected the query")
 
+// ErrSignalNotEnabled marks a read the source answers with "not measured": the
+// project has not switched the feature on at the provider (Vercel Web
+// Analytics, Speed Insights). It is a state to show, not a failure.
+var ErrSignalNotEnabled = errors.New("not enabled for this project")
+
 // ErrStaleDataSource is RecordVerification finding the source written since
 // the snapshot the verify ran against.
 var ErrStaleDataSource = errors.New("the data source changed since it was read")
@@ -75,6 +80,22 @@ type DataSourceStore interface {
 type CloudAccountReader interface {
 	GetCloudAccount(ctx context.Context, id uuid.UUID) (domain.CloudAccount, error)
 	CloudCredential(ctx context.Context, id uuid.UUID) (domain.CloudCredential, error)
+}
+
+// CloudAccountLister lists the connected cloud accounts, for the data sources
+// made for each one on its own.
+type CloudAccountLister interface {
+	ListCloudAccounts(ctx context.Context) ([]domain.CloudAccount, error)
+}
+
+// CloudSourceLinkStore remembers which data sources were made for a cloud
+// account on its own, and which of them a person has since deleted.
+type CloudSourceLinkStore interface {
+	ListCloudSourceLinks(ctx context.Context) ([]domain.CloudSourceLink, error)
+	// LinkCloudSource records the source made for an account and kind; false
+	// when the pair already has a row (a source or a deletion), which is left
+	// as it was.
+	LinkCloudSource(ctx context.Context, accountID uuid.UUID, kind domain.DataSourceKind, dataSourceID uuid.UUID) (bool, error)
 }
 
 // ObservabilityRecipeStore holds the recipes a person added beside the

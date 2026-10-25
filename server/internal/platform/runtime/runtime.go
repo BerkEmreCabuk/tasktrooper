@@ -1891,6 +1891,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				Gates:         repositorySvc,
 				WorkspaceRoot: cfg.Storage.Sessions.WorkspaceRoot,
 			})
+			taskPRSvc.SetRootSyncer(repositorySvc)
 			boardKit.PullRequests = taskPRSvc
 			// The same reader the tools use, so a revision run is handed the
 			// reviewer's comments without a tool call for them.
@@ -2761,6 +2762,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			Runs:      taskAgentRunStore,
 			Comments:  commentStore,
 			Golden:    goldenStore,
+			Tasks:     boardTaskStore,
+			Activity:  activityStore,
 			LLM:       llmClient,
 			AgentLoop: e.agentRouter,
 			Config:    cfg.Evolution,
@@ -3045,7 +3048,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		smokeGenHTTP = e.smokeGenSvc
 	}
 	if e.githubRunner == nil && issueSyncSettingsStore != nil && opts.DataDir != "" {
-		e.githubRunner = newGitHubRunner(opts.DataDir, githubTokens, issueSyncSettingsStore, repositoryStore)
+		e.githubRunner = newGitHubRunner(opts.DataDir, githubTokens, issueSyncSettingsStore)
 		go e.githubRunner.Start(context.Background())
 	}
 	var dataSourceSvc *datasourceapp.Service
@@ -3054,6 +3057,12 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	}
 	if dataSourceSvc != nil && e.storeOpsSvc != nil {
 		dataSourceSvc.SetStoreCredentials(e.storeOpsSvc)
+	}
+	if dataSourceSvc != nil && e.cloudSvc != nil {
+		// Connecting a cloud account makes its data source; the sync gives the
+		// accounts connected before this build theirs.
+		e.cloudSvc.SetAccountObserver(dataSourceSvc)
+		go dataSourceSvc.SyncCloudAccounts(context.WithoutCancel(ctx))
 	}
 	signalsSvc := newSignalsService(e.pgDB, dataSourceSvc)
 	// The Logs explorer is built with the cloud routes, before the signal

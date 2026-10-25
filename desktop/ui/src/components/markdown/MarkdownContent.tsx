@@ -4,7 +4,29 @@ import remarkGfm from "remark-gfm";
 import { useI18n } from "@/hooks/useI18n";
 import { cn } from "@/lib/utils";
 
-const REMARK_PLUGINS = [remarkGfm];
+interface MdNode {
+  type: string;
+  value?: string;
+  children?: MdNode[];
+}
+
+// react-markdown prints raw HTML as text, so the server's `<!-- tt:order -->`
+// fences around a generated note would show up as literal characters. Dropping
+// the parsed comment nodes (rather than pattern-matching the source) leaves
+// nothing half-stripped.
+function dropHtmlComments(node: MdNode): void {
+  if (!node.children) return;
+  node.children = node.children.filter(
+    (child) => !(child.type === "html" && /^<!--[\s\S]*-->$/.test((child.value ?? "").trim())),
+  );
+  node.children.forEach(dropHtmlComments);
+}
+
+function remarkDropHtmlComments() {
+  return (tree: MdNode) => dropHtmlComments(tree);
+}
+
+const REMARK_PLUGINS = [remarkGfm, remarkDropHtmlComments];
 
 interface MarkdownContentProps {
   content: string;

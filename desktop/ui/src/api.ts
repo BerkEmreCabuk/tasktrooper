@@ -2143,7 +2143,18 @@ export interface PerformanceSnapshot {
   captured_at: string;
 }
 
-export type ReflectionOutcome = "applied" | "rejected" | "skipped" | "failed" | "rolled_back" | "not_applied";
+export type ReflectionOutcome =
+  | "applied"
+  | "rejected"
+  | "skipped"
+  | "failed"
+  | "rolled_back"
+  | "not_applied"
+  | "not_adopted";
+
+export type ReflectionDimension = "procedure" | "domain";
+
+export type ProbeVerdict = "helped" | "hurt" | "no_effect" | "confounded";
 
 interface ReflectionCatalogCounts {
   skills: number;
@@ -2159,9 +2170,52 @@ export interface ReflectionChange {
   name: string;
   target_id?: string;
   reason?: string;
+  dimension?: ReflectionDimension;
   outcome: ReflectionOutcome;
+  /** How the change did when it was rehearsed; absent when nothing probed it. */
+  verdict?: ProbeVerdict;
   detail?: string;
   event_id?: string;
+}
+
+export interface ReflectionProbeCase {
+  kind: "golden" | "task" | "chat";
+  title: string;
+  measured: boolean;
+}
+
+export interface ReflectionProbeVariant {
+  label: "procedure" | "domain" | "all";
+  changes: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  golden_losses: number;
+  accepted: boolean;
+}
+
+/** What decided the skill/rule changes. Older reflections (applied first,
+ *  rolled back on a worse golden run) carry only the rates, keep and
+ *  rolled_back; a probed one never wrote what it did not adopt. */
+export interface ReflectionGate {
+  before_rate?: number;
+  after_rate?: number;
+  keep: boolean;
+  reason?: string;
+  rolled_back: number;
+  probed?: boolean;
+  unmeasured?: boolean;
+  adopted?: ReflectionProbeVariant["label"];
+  not_adopted?: number;
+  cases?: ReflectionProbeCase[];
+  variants?: ReflectionProbeVariant[];
+}
+
+export interface ReflectionLesson {
+  cue: string;
+  lesson: string;
+  evidence: string;
+  confidence: string;
 }
 
 export interface ReflectionDecision {
@@ -2176,9 +2230,35 @@ export interface ReflectionDecision {
   /** `null` on the wire, not `[]`: a decision that changed nothing is stored
    *  with a nil slice, and Go marshals that as null. */
   changes: ReflectionChange[] | null;
-  gate?: { before_rate: number; after_rate: number; keep: boolean; reason?: string; rolled_back: number };
+  gate?: ReflectionGate;
+  lesson?: ReflectionLesson;
   /** An older analysis parsed after the fact; its proposals were never applied. */
   legacy?: boolean;
+}
+
+/** A fixed prompt every skill/rule change is rehearsed on before it is
+ *  written; it passes when the answer contains every expected string. */
+export interface GoldenTask {
+  id: string;
+  agent_id: string;
+  name: string;
+  prompt: string;
+  /** `null` on the wire when the task was saved without any. */
+  expected: string[] | null;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GoldenTaskInput {
+  name: string;
+  prompt: string;
+  expected: string[];
+  enabled: boolean;
+}
+
+export function isEvolutionDisabledError(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 409 && e.type === "evolution_disabled";
 }
 
 export interface AgentReflection {
@@ -4050,7 +4130,17 @@ export type ReadinessCode =
   | "no_log_source"
   | "no_rum"
   | "no_crash_sdk"
-  | "queues_unbound";
+  | "queues_unbound"
+  | "analytics_not_enabled";
+
+/** Whether a hosting provider that must be told to measure a project (Vercel's
+ * Web Analytics and Speed Insights) is doing so. */
+export type AnalyticsState = "enabled" | "not_enabled" | "unknown";
+
+export interface CloudAnalytics {
+  web_analytics: AnalyticsState;
+  speed_insights: AnalyticsState;
+}
 
 export interface ObservabilityReadiness {
   component_id: string;
@@ -4058,6 +4148,9 @@ export interface ObservabilityReadiness {
   role: ComponentRole;
   /** The cloud of the environment's confirmed, bound binding; "" without one. */
   provider: CloudProviderKind | "";
+  /** Set for a Vercel environment, whose Web Analytics and Speed Insights are
+   * switched on per project; null for a provider that does not say. */
+  analytics?: CloudAnalytics | null;
   signals: Array<{ signal: string; status: ComponentSignalStatus; golden: boolean }> | null;
   instrumentation: Partial<Record<ObservabilityInstrumentation, boolean>>;
   suggestions: Array<{ goal: ObservabilityGoal; code: ReadinessCode | string }> | null;
@@ -5848,6 +5941,21 @@ export const api = {
 
   reflectNow: (agentId: string) =>
     request<AgentReflection>(`/v1/agents/${agentId}/reflect`, { method: "POST" }),
+
+  listGoldenTasks: (agentId: string) =>
+    request<{ golden_tasks: GoldenTask[] }>(`/admin/agents/${agentId}/golden-tasks`),
+
+  createGoldenTask: (agentId: string, task: GoldenTaskInput) =>
+    request<GoldenTask>(`/admin/agents/${agentId}/golden-tasks`, { method: "POST", body: JSON.stringify(task) }),
+
+  updateGoldenTask: (agentId: string, goldenId: string, task: GoldenTaskInput) =>
+    request<GoldenTask>(`/admin/agents/${agentId}/golden-tasks/${goldenId}`, {
+      method: "PUT",
+      body: JSON.stringify(task),
+    }),
+
+  deleteGoldenTask: (agentId: string, goldenId: string) =>
+    request<void>(`/admin/agents/${agentId}/golden-tasks/${goldenId}`, { method: "DELETE" }),
 
   listAgentMemories: (
     agentId: string,

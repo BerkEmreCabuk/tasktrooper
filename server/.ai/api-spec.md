@@ -964,6 +964,8 @@ validate.
 | `posthog-web-vitals` | posthog | — (detect `$web_vitals`) | — (lcp, inp, cls, fcp at p75) |
 | `ga4-web` | ga4 | — (detect `page_view`) | — (page_views, sessions, visitors; the four web tables) |
 | `plausible-web` | plausible | — (detect `pageview`) | — (page_views, sessions, visitors; the four web tables) |
+| `vercel-web` | vercel | — (detect `pageview`; resource `vercel_project`, `project`=id) | `project` (page_views, visitors; the four web tables) |
+| `vercel-web-vitals` | vercel | — (detect `speed_insights`; resource `vercel_project`, `project`=id) | `project` (lcp, inp, cls, fcp at p75) |
 | `datadog-apm` | datadog | — (detect `trace.http.request.hits`) | `service`, `env`; `metric_prefix` defaults to `trace.http.request` (http.requests, error_ratio, latency; `endpoints` table) |
 | `datadog-system` | datadog | — (detect `system.cpu.user`) | `host` (infra.cpu, infra.memory) |
 | `datadog-container` | datadog | — (detect `container.cpu.usage`) | `container` (infra.cpu, infra.memory) |
@@ -1189,7 +1191,7 @@ same-host redirects, base-path containment, size caps, masked errors) and name a
 credential needs, 404 not found, 429 "rate limited (HTTP 429); try again in a minute" (an upstream
 error, never `bad_query`). Each implements `MetricsQuerier`, `TableQuerier` and `Discoverer`.
 
-**Web analytics** — `posthog`, `ga4`, `plausible` (capabilities `metrics`, `rum`). **Query**
+**Web analytics** — `posthog`, `ga4`, `plausible` (and `vercel`, below) (capabilities `metrics`, `rum`). **Query**
 (`domain.WebQuery`, unknown keys refused): a series `{"metric"?, "event"?, "quantile"?, "host"?,
 "property"? (GA4), "site"? (Plausible)}`, a table `{"table": pages|referrers|countries|devices,
 "days"?: 1–90 (7), "limit"?: 1–500 (100), "host"?, …}`. `metric` (default `page_views`):
@@ -1240,6 +1242,40 @@ a count and a gap for a vital. Tables answer their key columns (`path`; `referre
   `visit:device`/`visit:browser`/`visit:os`, metrics `pageviews`, `visitors`, `order_by visitors
   desc`. Verify reads 7 days' visitors; Discover answers `pageview` once the site recorded one in
   28 days.
+
+- `vercel` (`adapter/datasource/vercel`). Reads a connected Vercel account (cloud_account field, its
+  `token` and `team_id`), per project: query `{"metric"?, "project" (prj_…), "quantile"?}`, a table
+  `{"table", "project", …}`; `host` is refused and there is no `sessions`. page_views/visitors:
+  `GET /v1/query/web-analytics/visits/aggregate` (`projectId`, `teamId`, `since`/`until` RFC3339,
+  `by=hour` below a one-day step else `day`; rows `{timestamp, pageviews, visitors}`; page_views per
+  second). Vitals `lcp`/`inp`/`cls`/`fcp`: `POST /v2/observability/query` (`?teamId`; body `metric`
+  `vercel.speed_insights.<lcp_ms|inp_ms|cls|fcp_ms>`, `aggregation` the nearest of p50/p75/p90/p95/p99
+  to `quantile`, `scope {type: project, ownerId: team id or, for a personal account, `GET /v2/user`'s
+  id, projectIds}`, `granularity {hours|days: 1}`; rows `{timestamp, <metric with _>_<aggregation>}`).
+  Tables: `GET …/visits/aggregate?by=requestPath|referrerHostname|country|deviceType`, the `Others`
+  group dropped. Web Analytics and Speed Insights are per-project switches (one project each on the
+  free plan): before a read the adapter fetches `GET /v9/projects/<id>` and, when `webAnalytics` (for
+  page views, visitors, tables) or `speedInsights` (for the vitals) has no `enabledAt` later than its
+  `disabledAt`/`canceledAt`, answers `port.ErrSignalNotEnabled` (series error code `not_enabled`,
+  with a hint to turn it on); a project Vercel will not describe is read anyway, and a 400 saying
+  "not enabled" is the same state. Nothing is ever switched on. Verify reads `GET /v2/user`; Discover answers `pageview` and `speed_insights` once
+  Verify passes (what a project has switched on is learnt when its signals are read). Capabilities
+  `metrics`, `rum`.
+
+**Analytics state** (`port.CloudAnalyticsReader`, Vercel's provider; `cloud.Service.Analytics`): the
+readiness read (`GET …/observability`) carries `analytics {web_analytics, speed_insights}`
+(`enabled|not_enabled|unknown`) for a Vercel environment, from the same project JSON, and the suggestion
+`analytics_not_enabled` (goal `rum`) when either is off; the entity page words it on the gaps card and
+on the tiles of the web signals that have no source.
+
+**Sources made for cloud accounts** (migration 193, `cloud_account_data_sources`; `application/datasource/cloud_sources.go`): a
+connected Vercel, Google Cloud or AWS account gets one `vercel`, `gcp_monitoring` or `aws_cloudwatch`
+source with `cloud_account_id` as its only config, verified when made. `cloud.Service` announces
+`CloudAccountConnected` (after create and after the legacy backfill) and `CloudAccountRemoved` (before
+the account row goes) to an `AccountObserver`; `Service.SyncCloudAccounts` makes up for accounts
+that predate it, at boot. A link row per account and kind makes it once: a source already there for
+the pair is adopted, and a link whose `data_source_id` went NULL (the source was deleted by hand) is
+never made again. Removal deletes only the sources the links name.
 
 **APM** — `datadog` (capability `metrics`) and `newrelic` (`metrics`, `rum`, `crashes`); neither
 searches traces (no `port.TracesQuerier`), so neither declares `traces`. A kind declares only
@@ -1992,7 +2028,7 @@ The revision run (`board.Runner.reviewAnnotationsMessage`) gets a system message
 document, the quoted passage (one line, ≤ 600 bytes) and the full comment — capped at
 20000 bytes; when capped it says how many were left out and to call
 `list_document_annotations`. `derived_from` context (`Runner.analysisContext`) injects an
-html document as its text rendition (`htmldoc.Text`) with a 24000-byte budget instead of the
+html document as its text rendition (`htmldoc.Text`) with a 1 MiB budget (`domain.MaxHTMLDocumentBytes`) instead of the
 markdown 12000.
 
 ## Deploy metadata, ordering relations, packages
@@ -2214,7 +2250,7 @@ repository's own `local_run` doc (`scripts/dev.sh`).
 `{enabled, repos}` — no credential.
 
 - `GET /v1/settings/github/runner` → `domain.GitHubRunnerStatus` `{supported, enabled, labels,
-  version, repos[], candidates[]}`. Without the manager it answers `supported: false`.
+  version, repos[], candidates[]}`; `candidates` are the private repositories the connection administers (`GET /user/repos?visibility=private`, owned, collaborated and organization ones, admin only, cached for a minute) plus any already saved. Without the manager it answers `supported: false`.
 - `PUT /v1/settings/github/runner {"enabled", "repos": ["owner/name"]}` → the new status. At most
   `domain.GitHubRunnerMaxRepos` (5). A repository not already saved is checked through GitHub
   first (`GET /repos/{o}/{r}`): it must exist, be private, and the connection must have admin on
