@@ -2,7 +2,7 @@ import type { LibDict } from "@/locales/en/lib";
 
 export const lib: LibDict = {
   projectBoard: {
-    taskType: { task: "Görev", analiz: "Analiz", bug: "Hata", technical: "Teknik" },
+    taskType: { task: "Görev", analiz: "Analiz", bug: "Hata", technical: "Teknik", design: "Tasarım" },
     taskPriority: { low: "Düşük", medium: "Orta", high: "Yüksek", critical: "Kritik" },
     pipelineStatus: {
       pending: "Bekliyor",
@@ -25,8 +25,14 @@ export const lib: LibDict = {
       deploy_watch: "Deploy bekleniyor",
       work_order: "Bloke eden görevler bekleniyor",
       human_decision: "İnsan kararı gerekiyor",
+      analysis_questions: "Açık sorular cevabını bekliyor",
+      deploy_order: "Merge yayın sırasını bekliyor",
+      before_deploy: "Merge deploy öncesi adımları bekliyor",
+      delivery_profile: "Merge deploy profilini bekliyor",
+      deploy_env: "Merge env değişkenlerini bekliyor",
     },
     blockedResourceFallback: "Paylaşılan kaynak bekleniyor",
+    deployOrderBlocker: "Merge {keys} bekliyor",
   },
   plan: {
     step: {
@@ -67,6 +73,7 @@ export const lib: LibDict = {
       run_terminal: "Terminal (shell)",
       web_search: "Web arama",
       fetch_url: "URL getir",
+      http_request: "HTTP isteği (localhost)",
       codebase_search: "Kod tabanı arama",
       grep_code: "Kodda grep",
       get_repo_tree: "Depo ağacı",

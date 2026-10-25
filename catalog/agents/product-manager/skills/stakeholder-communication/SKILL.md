@@ -2,6 +2,7 @@
 name: stakeholder-communication
 category: pm
 description: Use when updating the stakeholder - report in outcome language (what changed for users, what's next, what decision is needed), translate technical detail, and surface risks early
+source: anthropics/knowledge-work-plugins stakeholder-update (Apache-2.0), adapted
 ---
 # Stakeholder Communication
 
@@ -23,6 +24,18 @@ The stakeholder cares about outcomes, not mechanics. The failure modes are forwa
 Done since last update: <user-facing outcomes>
 In progress:            <what's being built now>
 Blocked / needs you:    <the decision required, if any>
+```
+
+## Decision-request format
+
+When the update needs a decision, don't just flag it — frame it so one reply resolves it:
+
+```
+Decision needed: <the one-sentence question>
+Options:         (a) <option> — <one-line tradeoff>
+                 (b) <option> — <one-line tradeoff>
+Recommendation:  <a> because <reason>
+If no answer by <when>: <what happens — e.g. "work stays queued behind it">
 ```
 
 ## Worked Example

@@ -5,6 +5,7 @@ import {
   FRAME_SANDBOX,
   frameCsp,
   markdownFrameHtml,
+  OPEN_QUESTIONS_ID,
   parseFrameMessage,
 } from "@/components/board/analysis/srcdoc";
 
@@ -99,6 +100,17 @@ describe("buildAnalysisSrcdoc", () => {
     expect(fragment.head.firstElementChild?.getAttribute("content")).toBe(frameCsp("n"));
     expect(fragment.querySelector("h1")?.textContent).toBe("Only a heading");
   });
+
+  it("marks the document as a canvas only when asked", () => {
+    expect(doc.documentElement.hasAttribute("data-tt-canvas")).toBe(false);
+    expect(srcdoc).not.toContain("tt-panning");
+
+    const canvas = buildAnalysisSrcdoc("<main>Frames</main>", { nonce: "n", script: "", canvas: true });
+    const canvasDoc = parse(canvas);
+    expect(canvasDoc.documentElement.hasAttribute("data-tt-canvas")).toBe(true);
+    expect(canvasDoc.head.querySelector("style")?.textContent).toContain("html[data-tt-canvas].tt-panning");
+    expect(canvasDoc.querySelector("main")?.textContent).toBe("Frames");
+  });
 });
 
 describe("markdownFrameHtml", () => {
@@ -134,5 +146,51 @@ describe("parseFrameMessage", () => {
     expect(parseFrameMessage({ type: "tt:selection", quote: "q", prefix: "x".repeat(201), suffix: "" })).toBeNull();
     expect(parseFrameMessage({ type: "tt:focus", id: "" })).toBeNull();
     expect(parseFrameMessage({ type: "tt:anchored", results: "all" })).toBeNull();
+  });
+
+  it("accepts a well-formed tt:answer, including an empty answer that reopens the question", () => {
+    expect(parseFrameMessage({ type: "tt:answer", id: "q1", text: "Ship it" })).toEqual({
+      type: "tt:answer",
+      id: "q1",
+      text: "Ship it",
+    });
+    expect(parseFrameMessage({ type: "tt:answer", id: "q1", text: "" })).toEqual({
+      type: "tt:answer",
+      id: "q1",
+      text: "",
+    });
+  });
+
+  it("rejects a tt:answer with a bad id or an over-long answer", () => {
+    expect(parseFrameMessage({ type: "tt:answer", id: "", text: "x" })).toBeNull();
+    expect(parseFrameMessage({ type: "tt:answer", id: 42, text: "x" })).toBeNull();
+    expect(parseFrameMessage({ type: "tt:answer", id: "q1", text: 42 })).toBeNull();
+    expect(parseFrameMessage({ type: "tt:answer", id: "q1", text: "x".repeat(4001) })).toBeNull();
+    expect(parseFrameMessage({ type: "tt:answer", id: "q1", text: "x".repeat(4000) })).toEqual({
+      type: "tt:answer",
+      id: "q1",
+      text: "x".repeat(4000),
+    });
+  });
+
+  it("accepts a canvas zoom report only as a plausible number", () => {
+    expect(parseFrameMessage({ type: "tt:zoom", zoom: 0.5, extra: true })).toEqual({ type: "tt:zoom", zoom: 0.5 });
+    expect(parseFrameMessage({ type: "tt:zoom", zoom: "1" })).toBeNull();
+    expect(parseFrameMessage({ type: "tt:zoom", zoom: Number.NaN })).toBeNull();
+    expect(parseFrameMessage({ type: "tt:zoom", zoom: 0 })).toBeNull();
+    expect(parseFrameMessage({ type: "tt:zoom", zoom: 1000 })).toBeNull();
+  });
+});
+
+describe("Open questions container", () => {
+  it("always adds an empty, hidden, skip-marked section as the first element of <body>", () => {
+    const srcdoc = buildAnalysisSrcdoc("<p>Report body</p>", { nonce: "n", script: "" });
+    const doc = parse(srcdoc);
+    const section = doc.body.firstElementChild!;
+    expect(section.id).toBe(OPEN_QUESTIONS_ID);
+    expect(section.hasAttribute("data-tt-skip")).toBe(true);
+    expect(section.hasAttribute("hidden")).toBe(true);
+    expect(section.textContent).toBe("");
+    expect(doc.querySelector("p")?.textContent).toBe("Report body");
   });
 });

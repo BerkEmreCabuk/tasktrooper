@@ -10,9 +10,11 @@ vi.mock("electron", () => ({
 // backend is always handed the bundled catalog path.
 vi.mock("node:fs", () => ({
   existsSync: (p: string) => p === "/catalog",
+  // fnm's per-shell directory: a different name for the same binary each launch.
+  realpathSync: (p: string) => p.replace(/^\/multishell\/\d+\//, "/fnm/default/"),
 }));
 
-const { agentServerEnv, appiumArgs, childEnv } = await import("./env.js");
+const { agentServerEnv, childEnv, spawnFingerprint } = await import("./env.js");
 const { APPIUM_BASE_URL } = await import("../services/detect.js");
 
 const report = (extra: PreflightReport["items"] = []): PreflightReport => ({
@@ -109,11 +111,13 @@ describe("agentServerEnv", () => {
   it("says nothing about a capability this Mac does not have", () => {
     vi.stubEnv("CHROME_BIN", "/usr/bin/google-chrome");
     vi.stubEnv("MOBILE_APPIUM_HUB_URL", "http://10.0.0.9:4723");
+    vi.stubEnv("APPIUM_BIN", "/somewhere/else/appium");
     vi.stubEnv("EMBEDDINGS_BASE_URL", "http://10.0.0.9:1234");
     try {
       const e = env();
       expect(e.CHROME_BIN).toBeUndefined();
       expect(e.MOBILE_APPIUM_HUB_URL).toBeUndefined();
+      expect(e.APPIUM_BIN).toBeUndefined();
       expect(e.EMBEDDINGS_BASE_URL).toBeUndefined();
     } finally {
       vi.unstubAllEnvs();
@@ -155,13 +159,27 @@ describe("agentServerEnv", () => {
     }
   });
 
-  it("names the hub and the browser when they were found", () => {
+  /**
+   * The backend starts the hub itself, on demand, so it needs the binary as
+   * well as the address — and the address stays Appium's own loopback default,
+   * because a hub on 0.0.0.0 is a remote-control interface for every device
+   * attached to somebody's laptop.
+   */
+  it("names the hub, the appium that serves it, and the browser when they were found", () => {
     const e = env([
       { id: "appium", label: "Appium", required: false, status: "ok", path: "/opt/homebrew/bin/appium" },
       { id: "chrome", label: "Chrome / Chromium", required: false, status: "ok", path: "/Applications/C.app/x" },
     ]);
     expect(e.MOBILE_APPIUM_HUB_URL).toBe(APPIUM_BASE_URL);
+    expect(APPIUM_BASE_URL).toBe("http://127.0.0.1:4723");
+    expect(e.APPIUM_BIN).toBe("/opt/homebrew/bin/appium");
     expect(e.CHROME_BIN).toBe("/Applications/C.app/x");
+  });
+
+  it("hands the backend no hub at all when Appium is not installed", () => {
+    const e = env([{ id: "appium", label: "Appium", required: false, status: "missing" }]);
+    expect(e.MOBILE_APPIUM_HUB_URL).toBeUndefined();
+    expect(e.APPIUM_BIN).toBeUndefined();
   });
 
   it("passes the embedder's resolved address through as the OpenAI-compatible host", () => {
@@ -196,15 +214,113 @@ describe("childEnv", () => {
       delete process.env.ELECTRON_RUN_AS_NODE;
     }
   });
+
+  /**
+   * A CLI installed under nvm needs the node beside it reachable, but the
+   * user's own PATH order must win: every agent command inherits this PATH.
+   */
+  it("appends each found CLI's directory after the user's own PATH", () => {
+    vi.stubEnv("PATH", "/usr/local/bin:/usr/bin:/bin");
+    try {
+      const e = childEnv(
+        report([
+          { id: "opencode", label: "OpenCode CLI", required: false, status: "ok", path: "/home/me/.nvm/versions/node/v22/bin/opencode" },
+          { id: "agy", label: "Antigravity CLI", required: false, status: "missing", path: "/nope/agy" },
+        ]),
+      );
+      const parts = (e.PATH ?? "").split(":");
+      expect(parts.slice(0, 3)).toEqual(["/usr/local/bin", "/usr/bin", "/bin"]);
+      expect(parts).toContain("/home/me/.nvm/versions/node/v22/bin");
+      expect(parts.indexOf("/home/me/.nvm/versions/node/v22/bin")).toBeGreaterThan(parts.indexOf("/bin"));
+      expect(parts).not.toContain("/nope");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  /**
+   * AppRun's LD_LIBRARY_PATH and PATH point at the AppImage's own libraries;
+   * git, claude and Postgres must not load them. The embedder is this app's own
+   * binary and needs them.
+   */
+  it("strips an AppImage's environment from every child but this app's own binary", () => {
+    vi.stubEnv("APPIMAGE", "/home/me/TaskTrooper.AppImage");
+    vi.stubEnv("APPDIR", "/tmp/.mount_TT");
+    vi.stubEnv("PATH", "/tmp/.mount_TT:/tmp/.mount_TT/usr/sbin:/usr/bin");
+    vi.stubEnv("LD_LIBRARY_PATH", "/tmp/.mount_TT/usr/lib");
+    try {
+      const external = childEnv(report());
+      expect(external.PATH).not.toContain("/tmp/.mount_TT");
+      expect(external.LD_LIBRARY_PATH).toBeUndefined();
+      expect(external.APPIMAGE).toBeUndefined();
+
+      const own = childEnv(report(), { ownBinary: true });
+      expect(own.LD_LIBRARY_PATH).toBe("/tmp/.mount_TT/usr/lib");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
 });
 
-describe("appiumArgs", () => {
-  /**
-   * A hub on 0.0.0.0 is a remote-control interface for every device attached to
-   * somebody's laptop.
-   */
-  it("binds the hub to loopback and to Appium's own port", () => {
-    expect(appiumArgs()).toEqual(["--address", "127.0.0.1", "--port", "4723"]);
-    expect(APPIUM_BASE_URL).toBe("http://127.0.0.1:4723");
+/**
+ * The backend starts on the gating half of a sweep and the supervisor restarts
+ * it only when the complete half changes what its environment is built from.
+ * Both directions matter: a missed difference is a backend with the wrong
+ * CLAUDE_CODE_BIN, and a false one is a restart on every launch.
+ */
+describe("spawnFingerprint", () => {
+  const claude = (patch: Partial<PreflightReport["items"][number]>): PreflightReport["items"][number] => ({
+    id: "claude",
+    label: "Claude Code CLI",
+    required: false,
+    status: "ok",
+    path: "/opt/homebrew/bin/claude",
+    ...patch,
+  });
+  const with_ = (items: PreflightReport["items"]): PreflightReport => ({ generatedAt: 1, ready: true, items });
+
+  it("changes when a provisionally usable claude turns out unusable", () => {
+    expect(spawnFingerprint(with_([claude({})]))).not.toBe(spawnFingerprint(with_([claude({ status: "unusable" })])));
+  });
+
+  it("changes when a CLI appears that the backend was not told about", () => {
+    const opencode = { id: "opencode" as const, label: "OpenCode", required: false, status: "ok" as const, path: "/o/opencode" };
+    expect(spawnFingerprint(with_([claude({})]))).not.toBe(spawnFingerprint(with_([claude({}), opencode])));
+  });
+
+  it("does not change for what the backend never reads: versions, details, the account", () => {
+    const account = { id: "claude-account" as const, label: "Claude account", required: false, status: "missing" as const };
+    expect(spawnFingerprint(with_([claude({})]))).toBe(
+      spawnFingerprint(with_([claude({ version: "2.1.0", detail: "x" }), account])),
+    );
+  });
+
+  it("does not change when the same binary is reached through a different symlink", () => {
+    expect(spawnFingerprint(with_([claude({ path: "/multishell/111/bin/claude" })]))).toBe(
+      spawnFingerprint(with_([claude({ path: "/multishell/222/bin/claude" })])),
+    );
+  });
+});
+
+describe("the backend's environment with what the toolchain installed", () => {
+  it("reaches a keg-only JDK and a per-user tool directory, after the PATH it already had", () => {
+    const keg = "/opt/homebrew/opt/openjdk@17";
+    const e = agentServerEnv({
+      preflight: report(),
+      dataDir: "/userData/data",
+      postgresCacheDir: "/userData/postgres-bin",
+      apiToken: "token-1",
+      mcpSecretsKey: "key-1",
+      toolchainRuntime: { pathDirs: ["/Users/me/.local/bin", `${keg}/bin`], javaHome: `${keg}/libexec/openjdk.jdk/Contents/Home` },
+    });
+    const before = (childEnv(report()).PATH ?? "").split(":");
+    const parts = (e.PATH ?? "").split(":");
+    expect(parts.slice(0, before.length)).toEqual(before);
+    expect(parts.slice(before.length)).toEqual(["/Users/me/.local/bin", `${keg}/bin`].filter((d) => !before.includes(d)));
+    expect(e.JAVA_HOME).toBe(process.env.JAVA_HOME ? process.env.JAVA_HOME : `${keg}/libexec/openjdk.jdk/Contents/Home`);
+  });
+
+  it("is unchanged without one", () => {
+    expect(childEnv(report()).PATH).toBe(childEnv(report(), {}).PATH);
   });
 });

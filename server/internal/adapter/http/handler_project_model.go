@@ -40,6 +40,9 @@ func (h *Handler) registerProjectModelRoutes(app fiber.Router) {
 	app.Patch("/v1/links/:linkId", h.UpdateComponentLink)
 	app.Delete("/v1/links/:linkId", h.DeleteComponentLink)
 
+	app.Patch("/v1/findings/:findingId", h.UpdateFinding)
+	app.Post("/v1/repositories/:id/findings/task", h.CreateFindingTask)
+
 	app.Get("/v1/resources", h.ListWorkspaceResources)
 	app.Patch("/v1/resources/:resourceId", h.RenameResource)
 	app.Post("/v1/resources/:resourceId/merge", h.MergeResource)
@@ -206,11 +209,18 @@ func (h *Handler) UpdateProjectComponent(c *fiber.Ctx) error {
 	if err := c.BodyParser(&patch); err != nil {
 		return pmErrMsg(c, fiber.StatusBadRequest, "invalid request body")
 	}
-	comp, err := h.projectModelSvc.UpdateComponent(h.enrichContext(c), id, patch)
+	comp, gateTasks, err := h.projectModelSvc.UpdateComponentWithGateTasks(h.enrichContext(c), id, patch)
 	if err != nil {
 		return projectModelErr(c, err)
 	}
-	return c.JSON(comp)
+	return c.JSON(componentPatchResponse{Component: comp, GateCITasks: gateTasks})
+}
+
+// componentPatchResponse is the component plus the CI tasks switching a gate
+// on opened, so the page can say so; every other field reads as before.
+type componentPatchResponse struct {
+	domain.Component
+	GateCITasks []domain.GateCITask `json:"gate_ci_tasks,omitempty"`
 }
 
 // AddComponentCheck — POST /v1/components/:componentId/checks
@@ -367,4 +377,39 @@ func (h *Handler) SplitResource(c *fiber.Ctx) error {
 		return projectModelErr(c, err)
 	}
 	return c.Status(fiber.StatusCreated).JSON(resource)
+}
+
+// UpdateFinding — PATCH /v1/findings/:findingId {status?, reason?}
+func (h *Handler) UpdateFinding(c *fiber.Ctx) error {
+	id, err := parseUUIDParam(c, "findingId")
+	if err != nil {
+		return pmErrMsg(c, fiber.StatusBadRequest, "invalid finding id")
+	}
+	var patch domain.FindingPatch
+	if err := c.BodyParser(&patch); err != nil {
+		return pmErrMsg(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	finding, err := h.projectModelSvc.UpdateFinding(h.enrichContext(c), id, patch)
+	if err != nil {
+		return projectModelErr(c, err)
+	}
+	return c.JSON(finding)
+}
+
+// CreateFindingTask — POST /v1/repositories/:id/findings/task
+// 201 {task, findings}: one board task covering every listed open finding.
+func (h *Handler) CreateFindingTask(c *fiber.Ctx) error {
+	id, err := parseUUIDParam(c, "id")
+	if err != nil {
+		return pmErrMsg(c, fiber.StatusBadRequest, "invalid repository id")
+	}
+	var req domain.FindingTaskRequest
+	if err := c.BodyParser(&req); err != nil {
+		return pmErrMsg(c, fiber.StatusBadRequest, "invalid request body")
+	}
+	result, err := h.projectModelSvc.CreateFindingTask(h.enrichContext(c), id, req)
+	if err != nil {
+		return projectModelErr(c, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(result)
 }

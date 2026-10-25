@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
@@ -89,6 +90,8 @@ func (s *Service) GetConfig(ctx context.Context) (domain.WorkspaceConfig, error)
 		Members:       members,
 		Subscriptions: subs,
 		Transitions:   transitions,
+
+		DefaultTransitions: domain.DefaultBoardTransitions(),
 	}, nil
 }
 
@@ -128,7 +131,7 @@ func (s *Service) ValidateTransition(ctx context.Context, from, to string) error
 		}
 	}
 	if hasOutgoing {
-		return errors.New(prompt.Text(transitionNotAllowedKey))
+		return domain.RefuseMove(errors.New(prompt.Text(transitionNotAllowedKey)))
 	}
 	return nil
 }
@@ -285,11 +288,5 @@ func (s *Service) ListActivity(ctx context.Context, events port.BoardEventStore,
 }
 
 func sortActivityItems(items []domain.ActivityItem) {
-	for i := 0; i < len(items); i++ {
-		for j := i + 1; j < len(items); j++ {
-			if items[j].CreatedAt.After(items[i].CreatedAt) {
-				items[i], items[j] = items[j], items[i]
-			}
-		}
-	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt.After(items[j].CreatedAt) })
 }

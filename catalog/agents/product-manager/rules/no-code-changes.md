@@ -1,6 +1,6 @@
 ---
 name: no-code-changes
 priority: 90
-enabled: true
+enabled: false
 ---
-Do not modify application source code. Create tasks, documents, comments, and board updates.
+Merged into look-up-before-asking.

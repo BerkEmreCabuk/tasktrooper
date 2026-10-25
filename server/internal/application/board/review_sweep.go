@@ -91,6 +91,7 @@ func (r *Runner) finalizeReviewVerdict(
 	job RunJob,
 	agentRec domain.Agent,
 	history []domain.Message,
+	headLen int,
 	model string,
 	policy domain.ToolPolicy,
 	exit domain.TaskColumn,
@@ -112,6 +113,7 @@ func (r *Runner) finalizeReviewVerdict(
 	}
 	resp, err := r.agentLoop.RunTask(ctx, turn, model, agentRec.ProviderType, policy,
 		agent.WithLightModel(agentRec.Model),
+		agent.WithStableHead(headLen),
 		agent.WithCLILabel(job.Task.Key+" review-verdict", job.Task.Title))
 	if err != nil {
 		if quotaErr, ok := domain.QuotaBlockOf(err); ok {
@@ -228,6 +230,9 @@ func (r *Runner) sweepReviewVerdict(
 	if fresh.Column != job.Task.Column {
 		return nil
 	}
+	if r.reviewQuorum.HasDecided(ctx, job.Task.ID, job.Task.Column, job.Run.AgentID) {
+		return nil
+	}
 
 	var missing []domain.AcceptanceCriterion
 	var role domain.CriterionReviewRole
@@ -241,13 +246,13 @@ func (r *Runner) sweepReviewVerdict(
 	if rec != nil {
 		rec.Step("review_verdict_sweep_start", map[string]any{"column": string(job.Task.Column)})
 	}
-	history = append(history,
-		domain.Message{Role: domain.RoleAssistant, Content: resp.Message.Content},
-		domain.Message{Role: domain.RoleUser, Content: prompt},
-	)
-	if _, err := r.agentLoop.RunTask(ctx, history, model, agentRec.ProviderType, policy,
+	headLen := len(history)
+	history = append(followUpHistory(history, resp), domain.Message{Role: domain.RoleUser, Content: prompt})
+	swept, err := r.agentLoop.RunTask(ctx, history, model, agentRec.ProviderType, policy,
 		agent.WithLightModel(agentRec.Model),
-		agent.WithCLILabel(job.Task.Key+" review-sweep", job.Task.Title)); err != nil {
+		agent.WithStableHead(headLen),
+		agent.WithCLILabel(job.Task.Key+" review-sweep", job.Task.Title))
+	if err != nil {
 		if quotaErr, ok := domain.QuotaBlockOf(err); ok {
 			return quotaErr
 		}
@@ -257,7 +262,10 @@ func (r *Runner) sweepReviewVerdict(
 	if after, err := reader.GetTask(ctx, job.RepositoryID, job.Task.ID); err == nil && after.Column == job.Task.Column {
 		log.Info().Str("task_id", job.Task.ID.String()).Str("column", string(job.Task.Column)).
 			Msg("review verdict sweep ran and the task is still in its review column")
-		moved, quotaErr := r.finalizeReviewVerdict(ctx, job, agentRec, history, model, policy, exit)
+		if len(swept.Transcript) > 0 {
+			history = swept.Transcript
+		}
+		moved, quotaErr := r.finalizeReviewVerdict(ctx, job, agentRec, history, headLen, model, policy, exit)
 		if quotaErr != nil {
 			return quotaErr
 		}

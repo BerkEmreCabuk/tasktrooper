@@ -13,8 +13,12 @@ func (h *Handler) registerSettingsRoutes(app *fiber.App) {
 	app.Get("/v1/settings/github", h.GitHubStatus)
 	app.Put("/v1/settings/github", h.SetGitHubToken)
 	app.Delete("/v1/settings/github", h.DeleteGitHubToken)
+	app.Post("/v1/settings/github/device", h.StartGitHubDeviceFlow)
+	app.Get("/v1/settings/github/device/:id", h.PollGitHubDeviceFlow)
 	app.Get("/v1/settings/github/owners", h.GitHubOwners)
 	app.Get("/v1/settings/github/repos", h.GitHubOwnerRepos)
+	app.Get("/v1/settings/github/runner", h.GitHubRunnerStatus)
+	app.Put("/v1/settings/github/runner", h.SetGitHubRunner)
 }
 
 func (h *Handler) GetSettings(c *fiber.Ctx) error {

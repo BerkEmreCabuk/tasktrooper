@@ -106,7 +106,7 @@ func TestCommitTaskChangesPushesAndRecordsThePR(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.True(t, result.Committed)
-	assert.Equal(t, []string{"add the store link to the footer\n\nTask: DE-1\n"}, git.commits)
+	assert.Equal(t, []string{"add the store link to the footer\n\nTask: DE-1\nCo-authored-by: Task Trooper <agents@tasktrooper.ai>\n"}, git.commits)
 	assert.Equal(t, "bbb2222", result.SHA)
 	assert.Equal(t, "feature/task-1234abcd-add-the-store-link", result.Branch)
 	assert.Equal(t, "https://github.com/acme/widget/pull/42", result.PRURL)

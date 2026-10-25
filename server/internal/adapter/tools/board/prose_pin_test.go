@@ -117,6 +117,16 @@ func TestBoardProsePinnedByteIdentical(t *testing.T) {
 			"Use this task instead of creating another: move_board_task / update_board_task / add_task_comment. Pass allow_duplicate=true only if it is genuinely different work.",
 		},
 		{
+			"move_verdict_held",
+			moveVerdictHeldKey.Render(moveVerdictInput{Column: "code_review", Requested: "ready_for_qa"}),
+			"Your verdict is recorded, but the card stays in `code_review`: it moves to `ready_for_qa` only when every required reviewer has decided, or when a person signs it off. Your review is complete — do not move the card again and do not re-review it; end the run.",
+		},
+		{
+			"move_verdict_redirected",
+			moveVerdictRedirectedKey.Render(moveVerdictInput{Column: "need_revision", Requested: "ready_for_qa"}),
+			"Your verdict is recorded, but another required reviewer asked for changes, so the card went to `need_revision` instead of `ready_for_qa` with every reviewer's comments on it. Your review is complete — do not move the card again; end the run.",
+		},
+		{
 			"criteria_dropped_hint",
 			criteriaDroppedHintKey.Render(countInput{Count: 2}),
 			"2 acceptance criterion/criteria were board actions (moving the card, opening the next tasks, attaching things, hand-offs) and were not saved. Acceptance criteria describe what the finished work IS — the content of the spec, the behaviour of the endpoint, the state of the screen — never the board steps around it. Re-send them as observable statements about the deliverable, or leave them out.",
@@ -190,12 +200,12 @@ func TestBoardProsePinnedByteIdentical(t *testing.T) {
 		{
 			"release_next_awaiting_verdict_batch",
 			releaseNextAwaitingVerdictBatchKey.Render(struct{}{}),
-			"Read get_release for the build/publish evidence (workflow run, local_run, or store_builds) and any smoke checks, then call finish_release or rollback_release. Read query_runtime_logs and list_runtime_errors too when the component has a bound runtime environment; when it does not, say so explicitly in the finish note instead of treating the gap as a pass.",
+			"Read get_release for the build/publish evidence (workflow run, local_run, or store_builds) and any smoke checks, then call finish_release or rollback_release. Read query_runtime_logs and list_runtime_errors too when the component has a bound runtime environment (pass its component); when it does not, say so explicitly in the finish note instead of treating the gap as a pass.",
 		},
 		{
 			"release_next_awaiting_verdict",
 			releaseNextAwaitingVerdictKey.Render(struct{}{}),
-			"Read query_runtime_logs and list_runtime_errors since deployed_at, then call finish_release or rollback_release.",
+			"Read query_runtime_logs and list_runtime_errors — pass the release's component, and read errors from well before deployed_at, judging a group by its own first_seen rather than by `new` alone — then call finish_release or rollback_release.",
 		},
 		{
 			"release_next_failed_batch",

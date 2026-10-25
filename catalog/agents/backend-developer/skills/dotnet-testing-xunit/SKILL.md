@@ -1,97 +1,80 @@
 ---
 name: dotnet-testing-xunit
 category: testing
-description: Use when writing or fixing tests for C#/.NET code - xUnit structure, test doubles, WebApplicationFactory integration tests, Testcontainers, and the coverlet setup the coverage gate needs
+description: Use when writing tests for C#/.NET code - xUnit structure, NSubstitute or the repository's mocking library at ports, WebApplicationFactory for HTTP, Testcontainers Postgres for EF Core, FakeTimeProvider, test-first
 tech_stack: .NET
 ---
-
 # .NET Testing (xUnit)
 
 ## Overview
 
-Test-first, same discipline as tdd-workflow: failing test, watch it fail for the right reason, minimal code, refactor. This skill is the .NET mechanics.
+Test-first in C#, same discipline as everywhere (see tdd-workflow): write the failing test, watch it fail, minimal code to pass. This skill is the .NET mechanics for that cycle.
 
-**Core principle:** Use the test framework and assertion library the repository already uses. Only a brand-new test project gets to choose, and then it follows the table below.
+**Core principle:** unit-test the domain and services as plain C# without starting the host. Start the host (`WebApplicationFactory`) only where wiring, serialization, validation or SQL is what you are proving.
 
-## Picking the stack (new test projects only)
+## Test levels
 
-| Concern | Default | Note |
-|---------|---------|------|
-| Framework | xUnit v3 (`xunit.v3`) | Keep NUnit/MSTest if the solution already uses them |
-| Assertions | Built-in `Assert` or Shouldly | FluentAssertions v8+ is commercially licensed — do not add it to a repo that doesn't already have it |
-| Test doubles | NSubstitute | Keep Moq/FakeItEasy if already present |
-| HTTP integration | `Microsoft.AspNetCore.Mvc.Testing` (`WebApplicationFactory<Program>`) | Needs `public partial class Program;` in the API if top-level statements are used |
-| Real database | Testcontainers (`Testcontainers.PostgreSql` etc.) | Never EF InMemory for behaviour that depends on SQL |
-| Coverage | `coverlet.collector` | Without it the board cannot measure coverage for the project |
+| Level | What it covers | Tools |
+|-------|-----------------|-------|
+| Unit | Domain entity / value object, no mocks | xUnit `[Fact]` / `[Theory]` |
+| Unit with fakes | Application service, its ports faked | xUnit + NSubstitute (or the repository's Moq / FakeItEasy) |
+| Persistence | Repository / `DbContext` queries against real Postgres | Testcontainers `PostgreSqlContainer` + the repository's migrations |
+| HTTP | Endpoint wiring, binding, validation, ProblemDetails, auth | `WebApplicationFactory<Program>` (`Microsoft.AspNetCore.Mvc.Testing`) + `HttpClient` |
 
-Create with the repo's existing template if it has one; otherwise `dotnet new xunit -o tests/<Project>.Tests` (ships with the SDK) and move it to `xunit.v3`. Then `dotnet sln add` it and `dotnet add reference` the project under test. `FakeTimeProvider` comes from `Microsoft.Extensions.TimeProvider.Testing`.
+Most tests are the first two. Match the repository's framework: xUnit (v3 for new projects; v2 where the repository is on it), NUnit or MSTest — never add a second one.
 
-## Layers
-
-| What | Test | Speed |
-|------|------|-------|
-| Domain types, pure services | Plain unit test, no doubles | ms |
-| Service with I/O ports | Unit test, substitute the port | ms |
-| Endpoint + serialization + DI wiring | `WebApplicationFactory` with the DB swapped for a container | s |
-| SQL / migrations | Testcontainers against the real engine | s |
-
-Most tests belong in the first two rows.
-
-## Unit test shape
+## Unit test with a faked port
 
 ```csharp
-public sealed class OrderServiceTests
+public sealed class TaskServiceTests
 {
-    private readonly IOrderRepository _orders = Substitute.For<IOrderRepository>();
-    private readonly FakeTimeProvider _clock = new(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    private readonly ITaskRepository _repo = Substitute.For<ITaskRepository>();
+    private readonly FakeTimeProvider _clock = new(DateTimeOffset.Parse("2026-01-01T00:00:00Z"));
+    private readonly TaskService _service;
+
+    public TaskServiceTests() => _service = new TaskService(_repo, _clock);
 
     [Fact]
-    public async Task Place_rejects_an_empty_basket()
+    public async Task Create_persists_and_returns_the_task()
     {
-        var sut = new OrderService(_orders, _clock);
+        var task = await _service.CreateAsync("Write the report", CancellationToken.None);
 
-        var result = await sut.PlaceAsync(new PlaceOrder([]), TestContext.Current.CancellationToken);
-
-        Assert.False(result.IsSuccess);
-        await _orders.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
+        Assert.Equal("Write the report", task.Title);
+        await _repo.Received(1).AddAsync(task, Arg.Any<CancellationToken>());
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    public void Quantity_must_be_positive(int quantity) =>
-        Assert.Throws<ArgumentOutOfRangeException>(() => new OrderLine("sku", quantity));
-}
-```
-
-Name tests as behaviour (`Place_rejects_an_empty_basket`), one behaviour per test, `[Theory]` for input tables.
-
-## Integration test shape
-
-```csharp
-public sealed class OrdersApiTests(ApiFactory factory) : IClassFixture<ApiFactory>
-{
-    [Fact]
-    public async Task Get_unknown_order_is_404()
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Create_rejects_a_blank_title(string title)
     {
-        var client = factory.CreateClient();
-        var response = await client.GetAsync($"/orders/{Guid.NewGuid()}", TestContext.Current.CancellationToken);
-        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        await Assert.ThrowsAsync<InvalidTaskTitleException>(() => _service.CreateAsync(title, CancellationToken.None));
+        await _repo.DidNotReceiveWithAnyArgs().AddAsync(default!, default);
     }
 }
 ```
 
-`ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime` starts the container in `InitializeAsync` and overrides the connection string in `ConfigureWebHost`.
+## Rules
 
-## Running
+- **Fake ports, never the class under test.** Assert on the returned value or the observable state first; `Received(...)` alone proves only that the fake was called.
+- One behaviour per test, named for it (`Create_rejects_a_blank_title`). `[Theory]` + `[InlineData]` / `[MemberData]` for boundary tables (200 characters accepted, 201 rejected).
+- **Time is injected:** `TimeProvider` in production code, `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`) in tests — never `DateTime.Now` in either.
+- **Real Postgres, not the InMemory provider or SQLite**, for anything that runs SQL: the InMemory provider ignores constraints, transactions and SQL translation. One container per test class or collection (`IAsyncLifetime` / a collection fixture), migrations applied once, data reset between tests (Respawn, or a transaction rolled back per test).
+- **HTTP tests** go through `WebApplicationFactory<Program>` with `ConfigureTestServices` replacing only the external dependencies (payment gateway, clock), not the services under test. Assert the status code AND the body shape (ProblemDetails `type`/`errors`). On .NET 9 or earlier a top-level-statement `Program` needs `public partial class Program;` for the factory to see it.
+- **Assertions:** the repository's library. Do not add FluentAssertions to a project that lacks it — version 8 is commercially licensed; plain `Assert`, Shouldly or AwesomeAssertions are the free options. Do not add Moq to a project that uses NSubstitute or the other way round.
+- `async` tests return `Task`, never `async void`; pass `TestContext.Current.CancellationToken` (xUnit v3) where the API takes one.
+- Focused run while iterating: `dotnet test --filter "FullyQualifiedName~TaskServiceTests"`; the whole `dotnet test` before you stop. Coverage through the repository's collector (coverlet `--collect:"XPlat Code Coverage"` or Microsoft.Testing.Platform `--coverage`); mutation testing, where the repository runs it, is Stryker.NET.
+- **A new test project references `coverlet.collector`** — without it the board's coverage gate cannot measure the project. Read the summary line (`Passed! - Failed: 0, Passed: N`); "Build succeeded" is not a test result.
 
-- One project: `dotnet test tests/Shop.Api.Tests`
-- One test: `dotnet test --filter "FullyQualifiedName~OrderServiceTests.Place_rejects"`
-- Read the summary line (`Passed! - Failed: 0, Passed: N`). "Build succeeded" is not a test result.
+## Common Mistakes
 
-## Red flags
+- Testing EF queries against the InMemory provider and shipping SQL that Postgres rejects.
+- A `WebApplicationFactory` test for every service rule — slow, and it hides design problems a plain unit test would show.
+- `Thread.Sleep` / `Task.Delay` to wait for time to pass instead of advancing `FakeTimeProvider`.
+- Shared static state between test classes run in parallel.
 
-- `Thread.Sleep` / `Task.Delay` to wait for something — use `FakeTimeProvider` or poll with a timeout.
-- A test that only passes when run alone (shared static state, shared DB rows).
-- Asserting on a substitute's received calls for something the return value already proves.
-- Deleting or `[Skip]`-ing a failing test to get green.
+## Red Flags
+
+- The test passes before the production code exists (it tests the fake).
+- A unit test that needs Docker.
+- `[Fact(Skip = ...)]` added to make the suite green.

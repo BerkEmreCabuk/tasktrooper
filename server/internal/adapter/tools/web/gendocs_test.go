@@ -24,7 +24,7 @@ func TestGenerateToolDocs(t *testing.T) {
 	}
 
 	dir := repoToolsDir(t)
-	execs := []port.ToolExecutor{New(1048576), NewDownloadTool()}
+	execs := []port.ToolExecutor{New(1048576), NewDownloadTool(), NewHTTPRequestTool()}
 
 	for _, ex := range execs {
 		writeToolDoc(t, dir, ex.Definition())

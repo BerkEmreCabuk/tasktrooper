@@ -286,14 +286,15 @@ func TestSweepVerifyingEarlyStopsOnTooManyNewErrorGroups(t *testing.T) {
 	repositoryID := uuid.New()
 	task := f.withTask(repositoryID)
 	envID := uuid.New()
-	r := verifyingRelease(repositoryID, f.clock.Now(), f.clock.Now().Add(10*time.Minute))
+	deployedAt := f.clock.Now()
+	r := verifyingRelease(repositoryID, deployedAt, f.clock.Now().Add(10*time.Minute))
 	r.Checks.EnvironmentID = &envID
 	r.Profile.Verify.MaxNewErrors = 1
 	created, err := f.store.Create(context.Background(), r, []uuid.UUID{task.ID})
 	require.NoError(t, err)
 	f.envs.errorGroups[envID] = []domain.RuntimeErrorGroup{
-		{Fingerprint: "a", New: true},
-		{Fingerprint: "b", New: true},
+		{Fingerprint: "a", FirstSeen: deployedAt.Add(time.Minute)},
+		{Fingerprint: "b", FirstSeen: deployedAt.Add(2 * time.Minute)},
 	}
 
 	f.svc.SweepOnce(context.Background())
@@ -303,6 +304,62 @@ func TestSweepVerifyingEarlyStopsOnTooManyNewErrorGroups(t *testing.T) {
 	assert.Equal(t, domain.ReleaseAwaitingVerdict, got.Status)
 	assert.Contains(t, got.Checks.EarlyStop, "2 new runtime error groups")
 	require.Len(t, f.waker.calls, 1)
+}
+
+// TestSweepVerifyingIgnoresErrorGroupsNewOnlyByTheProvidersMidWindowGuess
+// is the P0-2 fix: on Vercel/AWS (no native grouping), cloud.GroupErrors
+// can only set New from where a group's first occurrence falls inside the
+// *queried* window, which is wrong when since=deployedAt puts a
+// regression that starts right after the deploy in the window's front
+// half. The sweeper must classify by FirstSeen against DeployedAt itself,
+// not by the provider's New flag.
+func TestSweepVerifyingIgnoresErrorGroupsNewOnlyByTheProvidersMidWindowGuess(t *testing.T) {
+	f := newSweepFixture()
+	repositoryID := uuid.New()
+	task := f.withTask(repositoryID)
+	envID := uuid.New()
+	deployedAt := f.clock.Now()
+	r := verifyingRelease(repositoryID, deployedAt, f.clock.Now().Add(10*time.Minute))
+	r.Checks.EnvironmentID = &envID
+	r.Profile.Verify.MaxNewErrors = 0
+	created, err := f.store.Create(context.Background(), r, []uuid.UUID{task.ID})
+	require.NoError(t, err)
+	f.envs.errorGroups[envID] = []domain.RuntimeErrorGroup{
+		// New:false and FirstSeen before the deploy — a chronic error the
+		// provider's mid-window heuristic correctly called old.
+		{Fingerprint: "chronic", New: false, FirstSeen: deployedAt.Add(-time.Hour)},
+	}
+
+	f.svc.SweepOnce(context.Background())
+
+	got, err := f.store.Get(context.Background(), created.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.Checks.NewErrors)
+	assert.Empty(t, got.Checks.EarlyStop)
+}
+
+// TestSweepVerifyingReadsErrorsFromBeforeTheDeploy proves the read window
+// starts before DeployedAt (at least one soak period back) rather than at
+// it, so a fallback-grouped provider's first-seen-in-window signal still
+// lands on the correct side of the deploy.
+func TestSweepVerifyingReadsErrorsFromBeforeTheDeploy(t *testing.T) {
+	f := newSweepFixture()
+	repositoryID := uuid.New()
+	task := f.withTask(repositoryID)
+	envID := uuid.New()
+	deployedAt := f.clock.Now().Add(-5 * time.Minute)
+	r := verifyingRelease(repositoryID, deployedAt, f.clock.Now().Add(5*time.Minute))
+	r.Checks.EnvironmentID = &envID
+	r.Profile.Verify.SoakMinutes = 10
+	_, err := f.store.Create(context.Background(), r, []uuid.UUID{task.ID})
+	require.NoError(t, err)
+
+	f.svc.SweepOnce(context.Background())
+
+	require.NotEmpty(t, f.envs.errorsSinceCalls)
+	since := f.envs.errorsSinceCalls[len(f.envs.errorsSinceCalls)-1]
+	assert.True(t, since.Before(deployedAt), "since (%s) must be before deployedAt (%s)", since, deployedAt)
+	assert.True(t, !since.After(deployedAt.Add(-10*time.Minute)), "since (%s) must be at least one soak period before deployedAt (%s)", since, deployedAt)
 }
 
 func TestSweepVerifyingMovesToAwaitingVerdictWhenTheWindowEnds(t *testing.T) {
@@ -439,16 +496,16 @@ func TestSweepDoesNotRewakeAReleaseThatWasNeverHandedBack(t *testing.T) {
 	assert.Empty(t, f.waker.calls, "nothing was ever handed back for this release; the watchdog must not invent one")
 }
 
-// Once an agent has looked at the release (AgentSeenAt, stamped by
+// Once an agent has looked at a failed release (AgentSeenAt, stamped by
 // Service.ForAgent — every release tool call) since the last hand-back, the
-// watchdog leaves it alone: whatever is slow is the agent's own turn, not a
-// dropped dispatch.
-func TestSweepDoesNotRewakeWhenTheAgentHasSeenItSinceTheHandBack(t *testing.T) {
+// watchdog leaves it alone: reporting the failure is the agent's whole
+// answer, and only a human can ship a failed release anyway.
+func TestSweepDoesNotRewakeAFailedReleaseTheAgentHasSeenSinceTheHandBack(t *testing.T) {
 	f := newSweepFixture()
 	repositoryID := uuid.New()
 	task := f.withTask(repositoryID)
 	created, err := f.store.Create(context.Background(), domain.Release{
-		RepositoryID: repositoryID, Status: domain.ReleaseAwaitingVerdict,
+		RepositoryID: repositoryID, Status: domain.ReleaseFailed,
 	}, []uuid.UUID{task.ID})
 	require.NoError(t, err)
 	past := f.clock.Now().Add(-30 * time.Minute)
@@ -460,7 +517,36 @@ func TestSweepDoesNotRewakeWhenTheAgentHasSeenItSinceTheHandBack(t *testing.T) {
 	f.store.releases[created.ID] = created
 
 	f.svc.SweepOnce(context.Background())
-	assert.Empty(t, f.waker.calls, "an agent already looked at it after the hand-back; the watchdog must not re-wake it")
+	assert.Empty(t, f.waker.calls, "an agent already looked at the failed release after the hand-back; the watchdog must not re-wake it")
+}
+
+// An awaiting_verdict release the agent looked at but never finished or
+// rolled back is re-woken once it has been quiet for the cooldown: that is
+// how T-75's release sat in awaiting_verdict, its task in done, until a later
+// merge superseded it. A recent look still holds the re-wake off.
+func TestSweepRewakesAnAwaitingVerdictReleaseTheAgentLookedAtButLeftOpen(t *testing.T) {
+	f := newSweepFixture()
+	repositoryID := uuid.New()
+	task := f.withTask(repositoryID)
+	created, err := f.store.Create(context.Background(), domain.Release{
+		RepositoryID: repositoryID, Status: domain.ReleaseAwaitingVerdict,
+	}, []uuid.UUID{task.ID})
+	require.NoError(t, err)
+	past := f.clock.Now().Add(-30 * time.Minute)
+	seen := f.clock.Now().Add(-5 * time.Minute)
+	created.HandBackCount = 1
+	created.LastHandBackAt = &past
+	created.AgentSeenAt = &seen
+	created.UpdatedAt = f.clock.Now()
+	f.store.releases[created.ID] = created
+
+	f.svc.SweepOnce(context.Background())
+	assert.Empty(t, f.waker.calls, "the agent looked five minutes ago; it may still be working on the verdict")
+
+	f.clock.Advance(6 * time.Minute)
+	f.svc.SweepOnce(context.Background())
+	require.Len(t, f.waker.calls, 1, "ten quiet minutes after the agent's last look, a release still awaiting a verdict is re-woken")
+	assert.Equal(t, task.ID, f.waker.calls[0].task.ID)
 }
 
 // A release nothing has touched in more than a day is not something the

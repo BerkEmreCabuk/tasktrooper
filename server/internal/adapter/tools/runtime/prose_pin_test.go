@@ -27,7 +27,7 @@ func TestGuardProseUnchanged(t *testing.T) {
 	}
 
 	if _, err := parseSinceDuration("5x"); err == nil ||
-		err.Error() != `invalid since "5x": use a duration like "30m", "2h", "1d"` {
+		err.Error() != `invalid since "5x": use a duration like "30m", "2h", "1d", or an RFC3339 timestamp such as a release's deployed_at` {
 		t.Errorf("parseSinceDuration error = %v", err)
 	}
 }

@@ -145,8 +145,8 @@ func TestExecuteBuildsTheDocumentedInvocation(t *testing.T) {
 	assert.Contains(t, argv, "opus")
 	assert.NotContains(t, argv, "--mcp-config", "with no MCPConfig the session runs on the CLI's native tools")
 	assert.NotContains(t, argv, "--resume", "a fresh run must not resume anything")
-	assert.Equal(t, "Bash(pkill:*),Bash(killall:*),Bash(gh pr merge:*)", argv[indexOf(t, argv, "--disallowedTools")+1],
-		"a machine-wide kill by name reaches the backend and every other task, and gh pr merge must go through the gated merge_task_pull_request tool")
+	assert.Equal(t, "Bash(pkill:*),Bash(killall:*),Bash(taskkill /IM:*),Bash(taskkill //IM:*),Bash(taskkill /F /IM:*),Bash(taskkill //F //IM:*),Bash(gh pr merge:*),AskUserQuestion", argv[indexOf(t, argv, "--disallowedTools")+1],
+		"a machine-wide kill by name reaches the backend and every other task, gh pr merge must go through the gated merge_task_pull_request tool, and a question goes through the MCP ask_user the human can answer")
 
 	// System blocks are flattened into one system prompt file, in order; the
 	// user content arrives on stdin.
@@ -887,6 +887,24 @@ func TestConcurrencyCapOfTwoLetsSessionsOverlap(t *testing.T) {
 
 	assert.Less(t, elapsed, 1800*time.Millisecond,
 		"cap 2 must run both one-second sessions concurrently")
+}
+
+// No configured cap means none: the Settings limits are the only ones, so the
+// executor must not hold a session back on a default of its own.
+func TestNoConfiguredCapLetsSessionsOverlap(t *testing.T) {
+	script, err := filepath.Abs(filepath.Join("testdata", "fake-claude.sh"))
+	require.NoError(t, err)
+	ex, err := New(Config{Binary: script})
+	require.NoError(t, err)
+
+	elapsed := runTwoConcurrently(t, ex,
+		newWorkspaceWithSleep(t, "success.jsonl", 1),
+		newWorkspaceWithSleep(t, "success.jsonl", 1))
+
+	assert.Less(t, elapsed, 1800*time.Millisecond,
+		"an unset cap must run both one-second sessions concurrently")
+	_, cap := ex.SlotsInUse()
+	assert.Zero(t, cap, "an unset cap reports no cap")
 }
 
 // A follow-up step (a criteria sweep, a fix round) resuming a session sends

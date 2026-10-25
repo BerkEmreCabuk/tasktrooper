@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type MCPServerView } from "@/api";
 import { MultiSelectPicker } from "@/components/admin/MultiSelectPicker";
 import { useI18n } from "@/hooks/useI18n";
+import { isTaskTrooperMCP, TASKTROOPER_MCP_ID } from "@/lib/toolPolicy";
 
 interface MCPServerPickerProps {
   label?: string;
@@ -24,27 +25,41 @@ export function MCPServerPicker({ label, selected, onChange }: MCPServerPickerPr
       .finally(() => setLoading(false));
   }, []);
 
-  const options = useMemo(
-    () =>
-      servers.map((server) => ({
-        value: server.id,
-        label: server.id,
-        description:
+  const options = useMemo(() => {
+    const known = new Set(servers.map((server) => server.id));
+    const pinned = {
+      value: TASKTROOPER_MCP_ID,
+      label: "TaskTrooper",
+      description: t("frame.admin.mcpPicker.tasktrooperDescription"),
+      locked: true,
+    };
+    const listed = servers
+      .filter((server) => !isTaskTrooperMCP(server.id))
+      .map((server) => {
+        const status =
           server.status === "connected"
             ? t("frame.admin.mcpPicker.connected")
             : server.enabled === false
               ? t("frame.admin.mcpPicker.disabled")
-              : server.status,
-      })),
-    [servers, t],
-  );
+              : server.status;
+        const access =
+          (server.access ?? "all") === "all"
+            ? t("frame.admin.mcpPicker.accessAll")
+            : t("frame.admin.mcpPicker.accessListed");
+        return { value: server.id, label: server.id, description: `${status} · ${access}` };
+      });
+    const unknown = selected
+      .filter((id) => !known.has(id) && !isTaskTrooperMCP(id))
+      .map((id) => ({ value: id, label: id, description: t("frame.admin.mcpPicker.notConfigured") }));
+    return [pinned, ...listed, ...unknown];
+  }, [servers, selected, t]);
 
   return (
     <MultiSelectPicker
       label={resolvedLabel}
       options={options}
-      selected={selected}
-      onChange={onChange}
+      selected={selected.filter((id) => !isTaskTrooperMCP(id))}
+      onChange={(ids) => onChange(ids.filter((id) => !isTaskTrooperMCP(id)))}
       loading={loading}
       emptyText={t("frame.admin.mcpPicker.notFound")}
     />

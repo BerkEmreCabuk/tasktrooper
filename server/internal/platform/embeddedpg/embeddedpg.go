@@ -12,9 +12,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	embedded "github.com/fergusstrange/embedded-postgres"
@@ -34,12 +34,31 @@ const (
 // dataDir/postgres. cacheDir holds the downloaded archive and the binaries
 // extracted from it; empty means dataDir/postgres-bin.
 func Start(ctx context.Context, dataDir, cacheDir string) (string, func(), error) {
+	return StartCluster(ctx, Options{DataDir: dataDir, CacheDir: cacheDir})
+}
+
+// Options place one cluster. RuntimeDir is where the library writes its
+// scratch files (the initdb password file) and wipes on every start; empty
+// means CacheDir/runtime. A second cluster sharing CacheDir with a running one
+// names its own, so its start does not clear the other's scratch mid-initdb.
+type Options struct {
+	DataDir    string
+	CacheDir   string
+	RuntimeDir string
+}
+
+func StartCluster(ctx context.Context, opts Options) (string, func(), error) {
+	dataDir, cacheDir := opts.DataDir, opts.CacheDir
 	if strings.TrimSpace(dataDir) == "" {
 		return "", nil, errors.New("embedded postgres needs a data directory")
 	}
 	pgData := filepath.Join(dataDir, "postgres")
 	if strings.TrimSpace(cacheDir) == "" {
 		cacheDir = filepath.Join(dataDir, "postgres-bin")
+	}
+	runtimeDir := opts.RuntimeDir
+	if strings.TrimSpace(runtimeDir) == "" {
+		runtimeDir = filepath.Join(cacheDir, "runtime")
 	}
 	if err := os.MkdirAll(pgData, 0o700); err != nil {
 		return "", nil, fmt.Errorf("create postgres data dir: %w", err)
@@ -56,7 +75,7 @@ func Start(ctx context.Context, dataDir, cacheDir string) (string, func(), error
 				Msg("postgres is already running on this data directory, so no copy was taken before migration 133")
 		}
 		log.Info().Uint32("port", port).Msg("reusing the embedded postgres already running on this data directory")
-		return dsn(port), func() {}, nil
+		return dsn(port), func() { stopAdopted(cacheDir, pgData, runPgCtl) }, nil
 	}
 	// A dead postmaster.pid blocks pg_ctl, which is how a crash turns into a
 	// desktop that never starts again.
@@ -83,25 +102,11 @@ func Start(ctx context.Context, dataDir, cacheDir string) (string, func(), error
 	if !downloaded {
 		log.Info().Str("cache_dir", cacheDir).Str("version", string(version)).
 			Msg("downloading the postgres binaries (~30 MB, first start only)")
+	} else if err := markExtracted(cacheDir); err != nil {
+		log.Warn().Err(err).Str("cache_dir", cacheDir).Msg("could not mark the postgres binaries as extracted; they will be extracted again")
 	}
 
-	pg := embedded.NewDatabase(embedded.DefaultConfig().
-		Version(version).
-		Username(user).
-		Password(password).
-		Database(dbName).
-		Port(port).
-		DataPath(pgData).
-		// Separate from RuntimePath, which Start() wipes on every boot: the
-		// extracted binaries belong beside the archive so a second start skips
-		// both the download and the extraction.
-		BinariesPath(cacheDir).
-		CachePath(cacheDir).
-		RuntimePath(filepath.Join(cacheDir, "runtime")).
-		StartTimeout(90 * time.Second).
-		Logger(logWriter{}).
-		Locale("C").
-		Encoding("UTF8"))
+	pg := embedded.NewDatabase(clusterConfig(port, pgData, cacheDir, runtimeDir))
 
 	if err := pg.Start(); err != nil {
 		return "", nil, wrapStartError(err)
@@ -123,6 +128,46 @@ func Start(ctx context.Context, dataDir, cacheDir string) (string, func(), error
 	}, nil
 }
 
+func clusterConfig(port uint32, pgData, cacheDir, runtimeDir string) embedded.Config {
+	return embedded.DefaultConfig().
+		Version(version).
+		Username(user).
+		Password(password).
+		Database(dbName).
+		Port(port).
+		DataPath(pgData).
+		// Separate from RuntimePath, which Start() wipes on every boot: the
+		// extracted binaries belong beside the archive so a second start skips
+		// both the download and the extraction.
+		BinariesPath(cacheDir).
+		CachePath(cacheDir).
+		RuntimePath(runtimeDir).
+		StartTimeout(90 * time.Second).
+		Logger(logWriter{}).
+		Locale("C").
+		Encoding("UTF8").
+		StartParameters(startParameters())
+}
+
+// startParameters tune a cluster that sits idle on a laptop most of the day:
+// its background workers (autovacuum launcher, checkpointer, WAL writer,
+// background writer) otherwise wake every 200ms to every few minutes with
+// nothing to do. They are server start options, so a cluster initialised
+// on stock settings picks them up on its next start. Durability is untouched:
+// fsync and synchronous_commit keep their defaults, and max_connections stays
+// at the stock 100, well above the server's pool.
+func startParameters() map[string]string {
+	return map[string]string{
+		"autovacuum_naptime":    "10min",
+		"checkpoint_timeout":    "30min",
+		"wal_writer_delay":      "1s",
+		"bgwriter_delay":        "10s",
+		"bgwriter_lru_maxpages": "0",
+		"log_checkpoints":       "off",
+		"jit":                   "off",
+	}
+}
+
 // wrapStartError surfaces exe/initdb failures the OS itself caused (unsigned
 // binaries quarantined by antivirus, a missing VC++ runtime). It does not fix
 // them, only makes the cause distinguishable in the log.
@@ -133,6 +178,35 @@ func wrapStartError(err error) error {
 		return fmt.Errorf("start embedded postgres: %w (the OS could not launch the postgres binary; on Windows this usually means it was blocked by antivirus/Defender or a required system runtime library is missing)", err)
 	}
 	return fmt.Errorf("start embedded postgres: %w", err)
+}
+
+// pgCtlStopTimeout is pg_ctl's own -t wait; the context bound sits above it.
+const pgCtlStopTimeout = 30 * time.Second
+
+func pgCtlPath(cacheDir string) string {
+	name := "pg_ctl"
+	if runtime.GOOS == "windows" {
+		name = "pg_ctl.exe"
+	}
+	return filepath.Join(cacheDir, "bin", name)
+}
+
+func runPgCtl(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+// stopAdopted stops a cluster this process did not start. pg.Stop() is not an
+// option for it: the library only stops what it launched, and without this a
+// cluster adopted after a hard kill would outlive every later server.
+func stopAdopted(cacheDir, pgData string, run func(ctx context.Context, name string, args ...string) ([]byte, error)) {
+	ctx, cancel := context.WithTimeout(context.Background(), pgCtlStopTimeout+10*time.Second)
+	defer cancel()
+	out, err := run(ctx, pgCtlPath(cacheDir), "stop", "-D", pgData, "-m", "fast", "-w", "-t", strconv.Itoa(int(pgCtlStopTimeout/time.Second)))
+	if err != nil {
+		log.Error().Err(err).Str("output", strings.TrimSpace(string(out))).Msg("stopping the adopted embedded postgres failed")
+		return
+	}
+	log.Info().Msg("stopped the adopted embedded postgres")
 }
 
 func dsn(port uint32) string {
@@ -154,6 +228,20 @@ func binariesReady(cacheDir string) bool {
 	}
 	_, err := os.Stat(filepath.Join(cacheDir, "bin", "postgres"))
 	return err == nil
+}
+
+// markExtracted gives Windows the bin/pg_ctl the library stats to decide
+// whether BinariesPath still needs extracting. Only unix has a file by that
+// name, so on Windows it extracts again on every start, and replacing the
+// .exe files fails while any postgres.exe from this directory still runs. The
+// empty stand-in is never what runs: exec resolves the extension-less path
+// through PATHEXT to pg_ctl.exe.
+func markExtracted(cacheDir string) error {
+	marker := filepath.Join(cacheDir, "bin", "pg_ctl")
+	if fileExists(marker) || !fileExists(marker+".exe") {
+		return nil
+	}
+	return os.WriteFile(marker, nil, 0o644)
 }
 
 // liveCluster reports the port of a postmaster still serving this data
@@ -205,14 +293,6 @@ func readPostmasterPID(pgData string) (pid int, port uint32, ok bool) {
 		return 0, 0, false
 	}
 	return pid, uint32(p), true
-}
-
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
 }
 
 // logWriter routes the cluster's own output into the process log instead of

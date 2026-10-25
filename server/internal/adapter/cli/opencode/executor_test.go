@@ -78,13 +78,13 @@ func TestExecuteReturnsTheSessionsAnswer(t *testing.T) {
 	assert.Equal(t, domain.RoleAssistant, resp.Message.Role)
 	assert.Equal(t, "Reading the runner to see how the task is dispatched. Fixed the undefined symbol and the build is green.",
 		resp.Message.Content)
-	assert.Equal(t, 1500, resp.Usage.PromptTokens)
+	assert.Equal(t, 13700, resp.Usage.PromptTokens, "input 1500 + cache read 12000 + cache write 200")
 	assert.Equal(t, 800, resp.Usage.CompletionTokens)
 	assert.Equal(t, 12000, resp.Usage.CacheReadTokens)
 
 	totals := tokens.Totals()
 	assert.Equal(t, 1, totals.LLMCalls, "finish must stamp the run's own usage onto the context accumulator")
-	assert.Equal(t, int64(1500), totals.PromptTokens)
+	assert.Equal(t, int64(13700), totals.PromptTokens)
 }
 
 // opencode run takes the prompt as a positional argument, not on stdin the
@@ -218,6 +218,34 @@ func TestExecuteFailsOnANonRateLimitError(t *testing.T) {
 
 	var block *domain.QuotaBlock
 	assert.False(t, errors.As(err, &block), "a non-rate-limit error must not park")
+}
+
+// opencode run exits 1 once any session error was reported, even one the
+// session recovered from and then answered; that answer is the result (#102).
+func TestExecuteChatKeepsTheAnswerOfASessionThatRecoveredFromAnError(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "error_recovered.jsonl")
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "exit_code"), []byte("1"), 0o600))
+
+	req := domain.ChatExecution{
+		History:   []domain.Message{{Role: domain.RoleUser, Content: "Is the build on TestFlight?"}},
+		Provider:  domain.LLMProviderOpencode,
+		WorkDir:   workDir,
+		SessionID: "chat-102",
+	}
+	result, err := ex.ExecuteChat(context.Background(), req, port.ChatStream{})
+	require.NoError(t, err)
+	assert.Equal(t, "The pipeline is green: build 33 is on TestFlight.", result.Response.Message.Content)
+}
+
+// Only exit 1 is opencode flagging the recovered error; any other failure
+// exit still fails the run.
+func TestExecuteFailsWhenARecoveredSessionExitsAbnormally(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "error_recovered.jsonl")
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "exit_code"), []byte("2"), 0o600))
+
+	_, err := ex.Execute(context.Background(), taskExecution(workDir))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exited with an error after reporting success")
 }
 
 // The deadline has to actually kill a wedged session, and a hang must never be

@@ -12,6 +12,8 @@ export const projectModel = {
     library: "Library",
     infra: "Infra",
     cli: "CLI",
+    data: "Data",
+    game: "Game",
     other: "Other",
   },
   commandPurposes: {
@@ -80,6 +82,7 @@ export const projectModel = {
     checks: "Checks",
     links: "Links",
     deploy: "Deploy",
+    findings: "Code health",
     match: "Match",
   },
   confidence: {

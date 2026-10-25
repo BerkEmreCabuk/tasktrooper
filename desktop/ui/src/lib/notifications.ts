@@ -1,4 +1,5 @@
 import type { ActivityItem, BoardTask } from "@/api";
+import { analysisReviewPath } from "@/lib/analysis-review";
 
 export interface NotificationItem {
   id: string;
@@ -8,6 +9,8 @@ export interface NotificationItem {
   title: string;
   body: string;
   createdAt: string;
+  /** Overrides the default `/board?task=<id>` destination — an analysis_questions park routes to the report instead of a chat that does not exist. */
+  path?: string;
 }
 
 export interface ReadCursor {
@@ -93,7 +96,14 @@ export function toNotificationItems(activity: ActivityItem[], tasks: BoardTask[]
       } else if (toColumn === "human_uat") {
         result.push({ ...base, kind: "uat", title: `${label} — Awaiting your UAT` });
       } else if (toColumn === "blocked") {
-        if (task?.blocked_resource === "human_decision") {
+        if (task?.blocked_resource === "analysis_questions") {
+          result.push({
+            ...base,
+            kind: "question",
+            title: `${label} — Open questions need your answer`,
+            path: task.repository_id ? analysisReviewPath(task.repository_id, task.id) : undefined,
+          });
+        } else if (task?.blocked_resource === "human_decision") {
           result.push({ ...base, kind: "decision", title: `${label} — Needs your decision` });
         } else if (task?.blocked_question) {
           result.push({ ...base, kind: "question", title: `${label} — An agent has a question` });

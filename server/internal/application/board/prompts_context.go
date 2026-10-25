@@ -148,3 +148,22 @@ var pipelineFailureCommentKey = prompt.Define("board_context.pipeline_failure_co
 
 var pipelineFailureBlockedCICommentKey = prompt.Define("board_context.pipeline_failure_blocked_ci_comment",
 	pipelineFailureCommentData{Stage: "deploy", Report: "GitHub Actions billing limit reached"})
+
+type analysisQuestionBlock struct {
+	Key, Kind, Prompt, Answer, RecommendedAnswer string
+	Blocking, Answered                           bool
+}
+
+type analysisQuestionsData struct {
+	Label        string
+	TaskRef      string
+	Questions    []analysisQuestionBlock
+	OmittedCount int
+}
+
+var analysisQuestionsKey = prompt.Define("board_context.analysis_questions", analysisQuestionsData{
+	TaskRef: "A-7",
+	Questions: []analysisQuestionBlock{
+		{Key: "Q1", Kind: "technical", Prompt: "Which queue?", Blocking: true},
+	},
+})

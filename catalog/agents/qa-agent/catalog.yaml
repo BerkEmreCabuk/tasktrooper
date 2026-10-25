@@ -58,7 +58,6 @@ tool_policy:
         - set_test_case_result
         - get_pipeline_status
         - get_deploy_target
-        - update_deploy_target
         - get_task_preview
         - start_task_preview
         - get_task_pull_request

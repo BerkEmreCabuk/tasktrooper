@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { api, type Agent } from "@/api";
@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Spinner } from "@/components/ui/spinner";
 import { PageContent } from "@/components/layout/PageContent";
+import { PageSuspense } from "@/components/layout/PageSuspense";
 import { useI18n } from "@/hooks/useI18n";
+import { isCoreAgent } from "@/lib/teamTemplates";
 import { cn } from "@/lib/utils";
 
 export function WorkspaceAgentLayout() {
@@ -47,6 +49,7 @@ export function WorkspaceAgentLayout() {
     load();
   }, [load]);
 
+  const outletContext = useMemo(() => ({ agent, refreshAgent: load }), [agent, load]);
   const isNew = agentId === "new";
 
   const handleDelete = async () => {
@@ -95,7 +98,7 @@ export function WorkspaceAgentLayout() {
                 </NavLink>
               </Button>
             )}
-            {!isNew && (
+            {!isNew && agent && !isCoreAgent(agent) && (
               <Button
                 variant="outline"
                 size="sm"
@@ -130,7 +133,9 @@ export function WorkspaceAgentLayout() {
         )}
       </div>
 
-      <Outlet context={{ agent, refreshAgent: load }} />
+      <PageSuspense>
+        <Outlet context={outletContext} />
+      </PageSuspense>
 
       <ConfirmDialog
         open={deleteOpen}

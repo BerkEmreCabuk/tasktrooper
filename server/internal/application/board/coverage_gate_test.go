@@ -1,8 +1,11 @@
 package board
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -85,6 +88,43 @@ func TestParseLcovCoverageCountsExecutedLines(t *testing.T) {
 	assert.InDelta(t, 66.7, pct, 0.1)
 }
 
+func TestParseLcovCoverageReadsACRLFReport(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(dir, "coverage"), 0o755))
+	lcov := "SF:lib/a.dart\r\nDA:1,1\r\nDA:2,0\r\nDA:3,4\r\nend_of_record\r\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "coverage", "lcov.info"), []byte(lcov), 0o644))
+
+	pct, ok := parseLcovCoverage(dir, "")
+	require.True(t, ok)
+	assert.InDelta(t, 66.7, pct, 0.1)
+}
+
+type exitCodeError int
+
+func (e exitCodeError) Error() string { return "exit status" }
+func (e exitCodeError) ExitCode() int { return int(e) }
+
+func TestMissingToolExitIsTheWindowsCommandNotFoundCode(t *testing.T) {
+	tests := []struct {
+		name string
+		goos string
+		err  error
+		want bool
+	}{
+		{name: "store alias stub on windows", goos: "windows", err: exitCodeError(9009), want: true},
+		{name: "wrapped store alias stub on windows", goos: "windows", err: fmt.Errorf("stage: %w", exitCodeError(9009)), want: true},
+		{name: "ordinary failure on windows", goos: "windows", err: exitCodeError(1), want: false},
+		{name: "same code elsewhere is a real exit", goos: "linux", err: exitCodeError(9009), want: false},
+		{name: "not an exit", goos: "windows", err: errors.New("boom"), want: false},
+		{name: "no error", goos: "windows", err: nil, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, missingToolExit(tt.goos, tt.err))
+		})
+	}
+}
+
 func TestParseLcovCoverageReportsUnmeasuredWithoutAReport(t *testing.T) {
 	_, ok := parseLcovCoverage(t.TempDir(), "")
 	assert.False(t, ok)
@@ -100,39 +140,40 @@ func TestDetectCoverageForDotnetSolution(t *testing.T) {
 	assert.Equal(t, []string{dotnetCoverageDir}, stage.artifacts)
 }
 
-// Two test projects covering the same source line report it twice; the line
-// counts once, and a hit in either report makes it covered.
-func TestParseDotnetCoverageMergesPerProjectReports(t *testing.T) {
-	dir := t.TempDir()
-	write := func(run, body string) {
-		p := filepath.Join(dir, dotnetCoverageDir, run)
-		require.NoError(t, os.MkdirAll(p, 0o755))
-		require.NoError(t, os.WriteFile(filepath.Join(p, "coverage.info"), []byte(body), 0o644))
-	}
-	write("run-a", "SF:src/Api/Orders.cs\nDA:1,1\nDA:2,0\nend_of_record\n")
-	write("run-b", "SF:src/Api/Orders.cs\nDA:2,3\nDA:3,0\nend_of_record\n")
-
-	pct, ok := parseDotnetCoverage(dir, "")
-	require.True(t, ok)
-	assert.InDelta(t, 66.7, pct, 0.1)
-
-	hits, ok := dotnetCoverageLines(dir)
-	require.True(t, ok)
-	assert.Equal(t, 3, hits["src/Api/Orders.cs"][2])
+func writeCoberturaReport(t *testing.T, dir, run, body string) {
+	t.Helper()
+	p := filepath.Join(dir, dotnetCoverageDir, run)
+	require.NoError(t, os.MkdirAll(p, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(p, "coverage.cobertura.xml"), []byte(body), 0o644))
 }
 
+func coberturaClass(filename, lines string) string {
+	return `<class name="C" filename="` + filename + `"><lines>` + lines + `</lines></class>`
+}
+
+func coberturaDoc(classes ...string) string {
+	return `<?xml version="1.0"?><coverage><packages><package name="Api"><classes>` +
+		strings.Join(classes, "") + `</classes></package></packages></coverage>`
+}
+
+// Generated code (source generators under obj/, *.g.cs, EF *.Designer.cs) is
+// instrumented like hand-written code; left in, a template web API reports
+// hundreds of generated lines against a handful of real ones.
 func TestParseDotnetCoverageIgnoresGeneratedSource(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, dotnetCoverageDir, "run")
-	require.NoError(t, os.MkdirAll(p, 0o755))
-	report := "SF:src/Api/Pricing.cs\nDA:1,1\nDA:2,0\nend_of_record\n" +
-		"SF:src/Api/obj/Debug/net10.0/Gen/OpenApi.generated.cs\nDA:1,0\nDA:2,0\nDA:3,0\nend_of_record\n" +
-		"SF:src/Api/Migrations/20260101_Init.Designer.cs\nDA:1,0\nend_of_record\n"
-	require.NoError(t, os.WriteFile(filepath.Join(p, "coverage.info"), []byte(report), 0o644))
+	writeCoberturaReport(t, dir, "run", coberturaDoc(
+		coberturaClass("src/Api/Pricing.cs", `<line number="1" hits="1"/><line number="2" hits="0"/>`),
+		coberturaClass("src/Api/obj/Debug/net10.0/Gen/OpenApi.generated.cs", `<line number="1" hits="0"/><line number="2" hits="0"/><line number="3" hits="0"/>`),
+		coberturaClass("src/Api/Migrations/20260101_Init.Designer.cs", `<line number="1" hits="0"/>`),
+	))
 
 	pct, ok := parseDotnetCoverage(dir, "")
 	require.True(t, ok)
 	assert.InDelta(t, 50.0, pct, 0.1)
+
+	hits, ok := dotnetCoverageLines(dir)
+	require.True(t, ok)
+	assert.Equal(t, lineHits{"src/Api/Pricing.cs": {1: 1, 2: 0}}, hits)
 }
 
 func TestParseDotnetCoverageWithoutReportsIsUnmeasured(t *testing.T) {

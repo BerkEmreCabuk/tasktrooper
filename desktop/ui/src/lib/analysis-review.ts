@@ -1,4 +1,12 @@
-import type { TaskAnnotation, TaskAnnotationStatus, TaskColumn, TaskDocument, TaskDocumentFormat } from "@/api";
+import type {
+  BoardTask,
+  TaskAnnotation,
+  TaskAnnotationStatus,
+  TaskColumn,
+  TaskDocument,
+  TaskDocumentFormat,
+  TaskQuestion,
+} from "@/api";
 
 export function analysisReviewPath(repositoryId: string, taskId: string, documentId?: string): string {
   const base = `/repositories/${encodeURIComponent(repositoryId)}/tasks/${encodeURIComponent(taskId)}/analysis`;
@@ -46,4 +54,34 @@ export function annotationCounts(annotations: TaskAnnotation[]): AnnotationCount
     if (annotation.status in counts) counts[annotation.status] += 1;
   }
   return counts;
+}
+
+/** Withdrawn questions are kept by the server for later context but never shown. */
+export function visibleQuestions(questions: TaskQuestion[]): TaskQuestion[] {
+  return questions.filter((q) => q.status !== "withdrawn");
+}
+
+/**
+ * `blocking && status === "open"` — the server's own "pending-blocking" rule.
+ * Saving a non-empty answer flips a question to `answered` (server-side), so
+ * once every blocking question has an answer this list is empty.
+ */
+export function pendingBlockingQuestions(questions: TaskQuestion[]): TaskQuestion[] {
+  return questions.filter((q) => q.blocking && q.status === "open");
+}
+
+/** Enables "Send answers": every pending-blocking question must be answered first. */
+export function canSendAnswers(questions: TaskQuestion[]): boolean {
+  return pendingBlockingQuestions(questions).length === 0;
+}
+
+/** Answered but not yet delivered to the agent — counted into "Send comments (N)" and the approve confirm note. */
+export function answeredUnsubmittedQuestions(questions: TaskQuestion[]): TaskQuestion[] {
+  return questions.filter((q) => q.status === "answered" && !q.submitted_at);
+}
+
+export function isQuestionAnswerEditable(question: TaskQuestion, task: Pick<BoardTask, "column" | "blocked_resource">): boolean {
+  if (question.status === "withdrawn") return false;
+  if (task.column === "blocked" && task.blocked_resource === "analysis_questions") return true;
+  return task.column === "analiz_review";
 }

@@ -1,7 +1,8 @@
 ---
 name: stepwise-task-execution
 category: workflow
-description: Use when you pick up any implementation task - understand it fully, break it into small steps, and execute each with its own test and commit before handoff
+description: Master workflow for an implementation task. Use when you pick up any task or bug that changes product code, including a need_revision bounce.
+source: obra/superpowers (MIT), adapted
 ---
 # Stepwise Task Execution
 
@@ -39,7 +40,7 @@ digraph stepwise {
 }
 ```
 
-**Autonomy:** you do NOT wait for human approval on your plan. Understand, decompose, build, verify, and move the task to code_review yourself. The only human gate in the system is the system-architect's analiz review — implementation tasks are never gated on a human.
+**Autonomy:** you do NOT wait for human approval on your plan. Understand, decompose, build, verify, and move the task to code_review yourself. No human approves your plan: the human gates are analiz_review (before code exists) and human_uat (after QA and PM), never your step list.
 
 ## The Process
 
@@ -47,10 +48,11 @@ digraph stepwise {
 - Read the description and EVERY acceptance criterion. Restate the outcome in your own words.
 - Explore the code before changing it (codebase_search, grep_code, get_repo_tree): find the neighboring feature that already does something similar and follow its pattern. Never invent a parallel convention.
 - List the exact files you expect to touch and the interfaces between them.
-- Genuinely ambiguous requirement? add_task_comment with numbered questions. Never guess a product decision. A technical unknown you can answer by reading code is not a question — go read the code.
+- **Review Focus:** list the 3–5 inputs or conditions the AC doesn't name that would most likely break for a real user — empty, max length, unauthorised, concurrent, network or dependency failure. Each one earns a test in the step that owns the code; this is where QA's boundary-negative-testing finds what you missed.
+- Genuinely ambiguous requirement? add_task_comment with numbered questions. Never guess a product decision. A technical unknown you can answer by reading code is not a question — go read the code. A technical gap the task doesn't settle (naming, an error code, a default) is a decision, not a question: decide it and record it, see the closing-message template below.
 
 ### 2. Decompose into steps
-Write an ordered list of steps, each one action worth 2–5 minutes and ending in an independently verifiable state. A typical step is a TDD micro-cycle:
+Write an ordered list of steps. A step is one test-and-code cycle that leaves the build green — about ≤100 changed lines, not a fixed number of minutes. A typical step is a TDD micro-cycle:
 
 ```
 Step 1: failing test for empty-input validation
@@ -60,7 +62,7 @@ Step 4: run suite, green
 Step 5: commit
 ```
 
-Fold setup/scaffolding into the step whose deliverable needs it. Split only where each piece is worth its own commit.
+Fold setup/scaffolding into the step whose deliverable needs it. Split only where each piece is worth its own commit. **Scope discipline:** touch only what the task needs — something noticed but out of scope goes in the closing message as a follow-up, never into this diff.
 
 ### 3. Execute each step
 Per step: write the failing test, watch it fail for the right reason, write the minimal code, run the suite green, then commit on your task branch. One logical change per commit. If a step balloons, stop, commit what is green, and re-slice the rest.
@@ -69,20 +71,27 @@ Per step: write the failing test, watch it fail for the right reason, write the 
 When all steps are done, run the full build and the affected test suite IN THIS RUN and read the output. Then walk every acceptance criterion line by line and confirm each is actually satisfied — tests passing is not the same as requirements met.
 
 ### 5. Handoff
-The column move is NOT yours and is never a step in your plan: when your run ends with a green build and a real diff on the task branch, the system moves the task to code_review, opens the pull request (ready for review, never a draft) and starts the pipeline. A step whose only content is "move the task to code_review" is rejected before the plan runs.
+The column move and your closing message follow your prompt's final step — see it for the exact mechanics. In short: the move is the system's, never a step in your plan, and a run that ends green writes nothing on the card.
 
-Your closing action is your run's final message — what you changed and how you verified it. It is NOT a card comment: a run that finished its work behind a green build writes nothing on the task, because the diff, the PR, the pipeline result and the ticked criteria already say it. Comment only when something needs somebody: a question you cannot answer, work you did not do, a risk for the next person.
+## Closing-message template
+
+```
+Changed: <what, where>   (root cause: <x> — bugs/revisions)
+Verified: <command> → <result>; <command> → <result>
+Decisions: <what> — <why> — <cost if wrong>        (omit if none)
+Not done / follow-ups: <…>                          (omit if none)
+```
 
 ## Worked Example
 
 Task: "Reject task titles longer than 200 chars with a 422." AC: (1) >200 chars → 422 + message; (2) ≤200 chars unaffected.
 
-1. Explore: `grep_code "validate"` finds the existing title-required check in the create handler → follow that pattern.
+1. Explore: `grep_code "validate"` finds the existing title-required check in the create handler → follow that pattern. Review Focus: the 200/201-char boundary — both get tests.
 2. Decompose: [test 422 for 201 chars] → [test 200 chars still passes] → [add bound check] → [verify + commit].
 3. Step A: failing test posting a 201-char title expecting 422 → run, fails (currently 201 Created). Add the length guard next to the required check → run, green → commit `feat: reject task titles over 200 chars`.
 4. Step B: test a 200-char title still returns 201 → already green (regression guard) → commit.
 5. Verify: `go test ./internal/...` green; re-read AC1 and AC2 against the two tests — both covered.
-6. Move to code_review with a How-to-test note: `curl` commands for a 201-char and a 200-char title with expected status codes.
+6. Close: final message — "Reject titles >200 chars with 422 (create handler, next to the required check). Verified: go test ./internal/task/... ok; 201 chars → 422, 200 chars → 201." No comment, no move — the system hands off.
 
 ## Common Mistakes
 
@@ -92,6 +101,7 @@ Task: "Reject task titles longer than 200 chars with a 422." AC: (1) >200 chars 
 - Asking the human to approve your step plan — implementation tasks are autonomous.
 - Making board bookkeeping a step: claiming, moving columns and announcing progress take one tool call, produce nothing, and the hand-off move is the system's anyway.
 - Re-reading code you have already read to be sure. Analysis you repeat is analysis you already have; the second pass costs a step and returns nothing.
+- A decision silently made and never recorded — the reviewer and PM have no way to catch a wrong guess early.
 
 ## Red Flags — STOP
 

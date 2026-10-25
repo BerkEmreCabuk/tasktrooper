@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,11 +16,14 @@ import (
 
 	"github.com/rs/zerolog/log"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/core"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/activity"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
-	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/core"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/hostshell"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/proctree"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/winshim"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -27,8 +32,6 @@ const DefaultBinary = "claude"
 const DefaultMaxTurns = 100
 
 const DefaultRunTimeout = time.Hour
-
-const DefaultMaxConcurrentSessions = 3
 
 const DefaultSettingSources = "project,local"
 
@@ -52,12 +55,12 @@ func normalizeSettingSources(raw string) string {
 }
 
 type Config struct {
-	Binary string
-	MaxTurns int
-	RunTimeout time.Duration
-	SettingSources string
-	MCP MCPConfig
-	MCPProvider MCPProvider
+	Binary                string
+	MaxTurns              int
+	RunTimeout            time.Duration
+	SettingSources        string
+	MCP                   MCPConfig
+	MCPProvider           MCPProvider
 	MaxConcurrentSessions int
 	// Usage is where every session's token spend is metered, both into the
 	// run's context accumulator and (kind=cli) the usage dashboard. Nil is
@@ -66,17 +69,17 @@ type Config struct {
 }
 
 type Executor struct {
-	bin        string
-	maxTurns   int
-	runTimeout time.Duration
+	bin            string
+	maxTurns       int
+	runTimeout     time.Duration
 	settingSources string
 	mcp            MCPConfig
 	mcpProvider    MCPProvider
 	usage          *usageapp.Meter
-	now func() time.Time
-	sem     chan struct{}
-	slotCap int
-	active int64
+	now            func() time.Time
+	sem            chan struct{}
+	slotCap        int
+	active         int64
 	gateMu         sync.Mutex
 	quotaUntil     time.Time
 	quotaDetail    string
@@ -115,12 +118,9 @@ func New(cfg Config) (*Executor, error) {
 	if runTimeout <= 0 {
 		runTimeout = DefaultRunTimeout
 	}
-	slotCap := cfg.MaxConcurrentSessions
-	if slotCap == 0 {
-		slotCap = DefaultMaxConcurrentSessions
-	} else if slotCap < 0 {
-		slotCap = -1
-	}
+	// The board runner's own limits (Settings) decide how many runs start;
+	// a host cap here is only for an operator who wants one on top.
+	slotCap := max(cfg.MaxConcurrentSessions, 0)
 	var sem chan struct{}
 	if slotCap > 0 {
 		sem = make(chan struct{}, slotCap)
@@ -328,19 +328,19 @@ func (e *Executor) Execute(ctx context.Context, req domain.TaskExecution) (domai
 }
 
 type invocation struct {
-	workDir string
+	workDir         string
 	env             []string
 	systemPrompt    string
 	prompt          string
 	model           string
 	resumeSessionID string
-	maxTurns int
-	effort string
-	tools []string
-	label string
-	mcpPath string
-	trace *core.Trace
-	stream port.ChatStream
+	maxTurns        int
+	effort          string
+	tools           []string
+	label           string
+	mcpPath         string
+	trace           *core.Trace
+	stream          port.ChatStream
 }
 
 func (e *Executor) spawn(ctx context.Context, inv invocation) (session, error) {
@@ -354,9 +354,9 @@ func (e *Executor) spawn(ctx context.Context, inv invocation) (session, error) {
 	defer cleanupSystemPrompt()
 
 	args := e.buildArgs(inv, systemPromptPath)
-	cmd := exec.CommandContext(runCtx, e.bin, args...)
+	cmd := winshim.Command(runCtx, e.bin, args...)
 	cmd.Dir = inv.workDir
-	cmd.Env = append(core.ChildEnv(ctx, true, claudeEnvPassthrough), inv.env...)
+	cmd.Env = append(claudeChildEnv(ctx), inv.env...)
 	cmd.Stdin = strings.NewReader(inv.prompt)
 
 	stdout, err := cmd.StdoutPipe()
@@ -366,9 +366,14 @@ func (e *Executor) spawn(ctx context.Context, inv invocation) (session, error) {
 	stderr := core.NewTailWriter(core.StderrTailMax)
 	cmd.Stderr = stderr
 
-	if err := cmd.Start(); err != nil {
+	tree, err := proctree.Start(cmd)
+	if err != nil {
 		return session{}, fmt.Errorf("start agent cli: %w", err)
 	}
+	defer func() {
+		tree.Terminate(3 * time.Second)
+		tree.Close()
+	}()
 
 	trace := inv.trace
 	if trace == nil {
@@ -392,14 +397,14 @@ func (e *Executor) spawn(ctx context.Context, inv invocation) (session, error) {
 	timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 
 	return session{
-		out:             out,
-		trace:           trace,
-		stderrTail:      stderr.String(),
-		parseErr:        parseErr,
-		waitErr:         waitErr,
-		timedOut:        timedOut,
-		initFault:       guard.fault,
-		requestedModel:  inv.model,
+		out:            out,
+		trace:          trace,
+		stderrTail:     stderr.String(),
+		parseErr:       parseErr,
+		waitErr:        waitErr,
+		timedOut:       timedOut,
+		initFault:      guard.fault,
+		requestedModel: inv.model,
 	}, nil
 }
 
@@ -408,7 +413,7 @@ type initGuard struct {
 	label   string
 	require bool
 	cancel  context.CancelFunc
-	fault error
+	fault   error
 }
 
 func (g *initGuard) OnInit(init sessionInit) {
@@ -444,7 +449,7 @@ type session struct {
 	parseErr   error
 	waitErr    error
 	timedOut   bool
-	initFault error
+	initFault  error
 	// requestedModel is the invocation's own model flag, used when the CLI's
 	// init event never reports one (e.g. the session died before init).
 	requestedModel string
@@ -553,7 +558,7 @@ func (f sessionFinisher) finish(ctx context.Context, label string, s session) (d
 
 	if rec := activity.FromContext(ctx); rec != nil {
 		rec.Step("claude_code_result", map[string]any{
-			"subtype": out.Subtype,
+			"subtype":        out.Subtype,
 			"num_turns":      out.NumTurns,
 			"turns":          s.trace.Turns(),
 			"cost_usd":       out.CostUSD,
@@ -572,8 +577,8 @@ func (f sessionFinisher) finish(ctx context.Context, label string, s session) (d
 		Msg("agent cli session finished")
 
 	resp := domain.AgentResponse{
-		Message: domain.Message{Role: domain.RoleAssistant, Content: out.Text},
-		Usage:   out.Usage,
+		Message:      domain.Message{Role: domain.RoleAssistant, Content: out.Text},
+		Usage:        out.Usage,
 		CLISessionID: sessionID,
 	}
 
@@ -613,7 +618,7 @@ func (e *Executor) buildArgs(inv invocation, systemPromptPath string) []string {
 		"--verbose",
 		"--dangerously-skip-permissions",
 		"--max-turns", strconv.Itoa(maxTurns),
-		"--disallowedTools", disallowedBashCommands,
+		"--disallowedTools", disallowedBashCommands+","+nativeQuestionTool,
 		"--setting-sources", e.settingSources,
 	)
 	if systemPromptPath != "" {
@@ -637,7 +642,17 @@ func (e *Executor) buildArgs(inv invocation, systemPromptPath string) []string {
 	return args
 }
 
-const disallowedBashCommands = "Bash(pkill:*),Bash(killall:*),Bash(gh pr merge:*)"
+// taskkill /IM is Windows' pkill: it stops every process with that image name,
+// other tasks' servers and the user's own included. Git Bash spells the
+// switches //IM and //F.
+const disallowedBashCommands = "Bash(pkill:*),Bash(killall:*),Bash(taskkill /IM:*),Bash(taskkill //IM:*),Bash(taskkill /F /IM:*),Bash(taskkill //F //IM:*),Bash(gh pr merge:*)"
+
+// The CLI's own question card has nobody to answer it in -p mode, and nothing
+// here turns its call into a TaskTrooper question, so a session that reached
+// for it lost the question. Withheld everywhere (a chat passes no --tools, so
+// the built-in set alone does not keep it out), it leaves the MCP ask_user as
+// the one way to ask — the one the board and the chat carry back to the human.
+const nativeQuestionTool = "AskUserQuestion"
 
 func continuePrompt(req domain.TaskExecution) string {
 	task := strings.TrimSpace(req.TaskKey + " " + req.TaskTitle)
@@ -667,8 +682,23 @@ func flattenHistory(history []domain.Message) (systemPrompt, promptText string) 
 	return strings.Join(system, "\n\n"), strings.Join(user, "\n\n")
 }
 
+// claudeChildEnv is the environment Claude Code runs with. On Windows it
+// refuses to start without Git Bash and finds one only in the default install
+// locations unless CLAUDE_CODE_GIT_BASH_PATH names it, so when the user has
+// not set that, the Git Bash run_terminal found on this host is named for it.
+func claudeChildEnv(ctx context.Context) []string {
+	env := core.ChildEnv(ctx, true, claudeEnvPassthrough)
+	if runtime.GOOS == "windows" && os.Getenv("CLAUDE_CODE_GIT_BASH_PATH") == "" {
+		if sh := hostshell.Default(); sh.Name == hostshell.GitBashName {
+			env = append(env, "CLAUDE_CODE_GIT_BASH_PATH="+sh.Path)
+		}
+	}
+	return env
+}
+
 var claudeEnvPassthrough = []string{
 	"CLAUDE_CONFIG_DIR",
+	"CLAUDE_CODE_GIT_BASH_PATH",
 	"CLAUDE_CODE_OAUTH_TOKEN",
 	"CLAUDE_CODE_USE_BEDROCK",
 	"CLAUDE_CODE_USE_VERTEX",

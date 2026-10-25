@@ -41,6 +41,7 @@ type RepositoryStore interface {
 	// (projectmodel.LegacyProjector).
 	UpdateQualityGates(ctx context.Context, id uuid.UUID, coverage, mutation domain.QualityGate) (domain.Repository, error)
 	SetDocsTaskID(ctx context.Context, id uuid.UUID, taskID string) error
+	SetCISetupTaskID(ctx context.Context, id uuid.UUID, taskID string) error
 	// Separate from UpdateMeta: sub_repo_kinds is the pipeline's routing key
 	// set, and a writer of one must not be able to blank the other.
 	UpdateSubProjects(ctx context.Context, id uuid.UUID, subProjects []domain.RepoSubProject) (domain.Repository, error)
@@ -69,6 +70,10 @@ type RepositoryPipelineJobStore interface {
 type BoardTaskStore interface {
 	Create(ctx context.Context, task domain.BoardTask) (domain.BoardTask, error)
 	Get(ctx context.Context, repositoryID, taskID uuid.UUID) (domain.BoardTask, error)
+	// GetByID is Get without the repository scope, for callers that hold only
+	// a task id (a criterion, a deploy order, a work order) and are asking which
+	// repository it belongs to. Not a substitute for Get's ownership check.
+	GetByID(ctx context.Context, taskID uuid.UUID) (domain.BoardTask, error)
 	GetByNumber(ctx context.Context, number int) (domain.BoardTask, error)
 	LookupByKey(ctx context.Context, keyPrefix string, number int) (domain.BoardTask, error)
 	ListByRepository(ctx context.Context, repositoryID uuid.UUID) ([]domain.BoardTask, error)
@@ -122,10 +127,36 @@ type BoardTaskStore interface {
 	// time on its own row, so the due check and the claim are one statement.
 	TakeQuotaResumable(ctx context.Context, now time.Time) (domain.BoardTask, bool, error)
 	BlockOnCancel(ctx context.Context, repositoryID, taskID uuid.UUID, reason string) error
+	// ReleaseAnalysisQuestionsBlock clears the analysis_questions resource
+	// block (see BlockOnResource) on taskID specifically — not "whichever
+	// task waited longest" the way TakeBlockedByResource claims, because the
+	// release here is one human answering one task's questions, not a
+	// sweeper. Falls back to in_progress rather than TakeBlockedByResource's
+	// todo: this resource only ever blocks a task that was in in_progress or
+	// need_revision when its run ended.
+	ReleaseAnalysisQuestionsBlock(ctx context.Context, taskID uuid.UUID) (domain.BoardTask, bool, error)
 	// ConfirmBeforeDeploy stamps before_deploy_confirmed_at; idempotent, so the
 	// confirm endpoint need not read the task first to know whether it already
 	// happened.
 	ConfirmBeforeDeploy(ctx context.Context, repositoryID, taskID uuid.UUID) (domain.BoardTask, error)
+	// ListDispatchCandidates is the reconciler's idle-task scan: assigned tasks
+	// outside backlog/blocked/done/released that are not parked on a work
+	// order, each with its newest runs (newest first, at most runsPerTask).
+	ListDispatchCandidates(ctx context.Context, runsPerTask int) ([]TaskRecentRuns, error)
+}
+
+type TaskRecentRuns struct {
+	Task domain.BoardTask
+	Runs []domain.TaskAgentRun
+}
+
+// BoardVersioner is implemented by a BoardTaskStore that can tell, without
+// reading the board, that this process has not changed the board list: the
+// value only moves after a committed write of its own that could change it.
+// Writes by another host on the same database do not move it, so a caller
+// bounds how long it trusts an unchanged version.
+type BoardVersioner interface {
+	BoardVersion() uint64
 }
 
 type AcceptanceCriterionStore interface {
@@ -201,6 +232,27 @@ type TaskDocumentAnnotationStore interface {
 	// statement and returns the ids it actually moved; a row that stopped
 	// being open in the meantime is left alone.
 	MarkSubmitted(ctx context.Context, taskID uuid.UUID, ids []uuid.UUID, at time.Time) ([]uuid.UUID, error)
+}
+
+// TaskQuestionStore is task_questions (migration 169): the open questions an
+// analiz run records for the human, each with its own answer lifecycle.
+type TaskQuestionStore interface {
+	// Create assigns the next question_key ("Q1", "Q2", …) for the task in
+	// the same statement, so two concurrent record_open_questions calls on
+	// the same task cannot race onto the same key.
+	Create(ctx context.Context, q domain.TaskQuestion) (domain.TaskQuestion, error)
+	// Get wraps domain.ErrQuestionNotFound when the question is not on that
+	// task.
+	Get(ctx context.Context, taskID uuid.UUID, id uuid.UUID) (domain.TaskQuestion, error)
+	GetByKey(ctx context.Context, taskID uuid.UUID, key string) (domain.TaskQuestion, error)
+	// ListByTask orders by the key's numeric suffix (Q1, Q2, … Q10), not
+	// lexically.
+	ListByTask(ctx context.Context, taskID uuid.UUID) ([]domain.TaskQuestion, error)
+	Update(ctx context.Context, q domain.TaskQuestion) (domain.TaskQuestion, error)
+	// MarkSubmitted stamps submitted_at on every answered, unsubmitted
+	// question of the task — /questions/submit, /annotations/submit and a
+	// done approval all call this with their own moment in time.
+	MarkSubmitted(ctx context.Context, taskID uuid.UUID, at time.Time) ([]domain.TaskQuestion, error)
 }
 
 type InitiativeProjectStore interface {

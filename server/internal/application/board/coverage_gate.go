@@ -4,11 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +21,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/toolchain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/childenv"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/hostshell"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/proctree"
 )
 
 const DefaultCoverageThreshold = 90.0
@@ -37,6 +41,9 @@ type CoverageResult struct {
 	Detail   string
 	Output   string
 	Lines    lineHits
+	// ToolMissing: the recipe's tool is not on this machine, which only
+	// matters to a repository that switched the gate on.
+	ToolMissing bool
 }
 
 type coverageStage struct {
@@ -45,7 +52,19 @@ type coverageStage struct {
 	parse     func(dir, out string) (float64, bool)
 	lines     func(dir string) (lineHits, bool)
 	artifacts []string
+	// missingTool is what a runner prints when the plugin it dispatches to
+	// is not installed (cargo's "no such command"): the exit alone reads
+	// like a failed suite.
+	missingTool []string
+	// noNumber says why a run that passed left nothing to read, when the
+	// usual cause is one setup step (a .NET test project without coverlet).
+	noNumber string
 }
+
+const (
+	rustLcovReport    = "lcov.info"
+	dotnetCoverageDir = ".tasktrooper-coverage"
+)
 
 func detectCoverage(dir string) *coverageStage {
 	switch {
@@ -64,8 +83,6 @@ func detectCoverage(dir string) *coverageStage {
 			parse:   parseLcovCoverage,
 			lines:   lcovLines,
 		}
-	case dotnet.HasProject(dir):
-		return dotnetCoverageStage(dir)
 	case hasVitest(dir):
 		return &coverageStage{
 			name: "coverage",
@@ -76,6 +93,24 @@ func detectCoverage(dir string) *coverageStage {
 			parse: parseReportedCoverage,
 			lines: lcovLines,
 		}
+	case hasJest(dir):
+		return &coverageStage{
+			name:    "coverage",
+			command: []string{"npx", "jest", "--coverage", "--coverageReporters=text-summary", "--coverageReporters=lcov"},
+			parse:   parseReportedCoverage,
+			lines:   lcovLines,
+		}
+	case markerExists(dir, "Cargo.toml"):
+		return &coverageStage{
+			name:        "coverage",
+			command:     []string{"cargo", "llvm-cov", "--lcov", "--output-path", rustLcovReport},
+			parse:       func(dir, _ string) (float64, bool) { return lcovPercent(filepath.Join(dir, rustLcovReport)) },
+			lines:       func(dir string) (lineHits, bool) { return lcovFileLines(dir, rustLcovReport) },
+			artifacts:   []string{rustLcovReport},
+			missingTool: []string{"no such command: `llvm-cov`", "llvm-tools-preview"},
+		}
+	case dotnet.HasProject(dir):
+		return dotnetCoverageStage(dir)
 	}
 	return nil
 }
@@ -94,37 +129,54 @@ func detectMutation(dir string) *coverageStage {
 			command: []string{"npx", "stryker", "run"},
 			parse:   parseStrykerScore,
 		}
+	case markerExists(dir, filepath.Join(".cargo", "mutants.toml")) && markerExists(dir, "Cargo.toml"):
+		return &coverageStage{
+			name:        "mutation",
+			command:     []string{"cargo", "mutants"},
+			parse:       parseCargoMutantsScore,
+			artifacts:   []string{"mutants.out", "mutants.out.old"},
+			missingTool: []string{"no such command: `mutants`"},
+		}
+	case markerExists(dir, "stryker-config.json", "stryker-config.yaml", "stryker-config.yml") && dotnet.HasProject(dir):
+		return &coverageStage{
+			name:        "mutation",
+			command:     []string{"dotnet", "stryker"},
+			parse:       parseStrykerScore,
+			artifacts:   []string{"StrykerOutput"},
+			missingTool: []string{"could not execute because the specified command or file was not found"},
+		}
 	}
 	return nil
 }
 
-// dotnetCoverageDir is where the coverage stage points `dotnet test
-// --results-directory`. It is removed after every run, so nothing it writes
-// can end up in the agent's commit.
-const dotnetCoverageDir = ".tasktrooper-coverage"
+var jestConfigs = []string{"jest.config.js", "jest.config.ts", "jest.config.mjs", "jest.config.cjs", "jest.config.json"}
+
+func hasJest(dir string) bool {
+	if markerExists(dir, jestConfigs...) {
+		return true
+	}
+	pkg, err := os.ReadFile(filepath.Join(dir, "package.json"))
+	return err == nil && bytes.Contains(pkg, []byte(`"jest"`))
+}
 
 // dotnetCoverageStage runs the solution's tests through coverlet's data
-// collector (what `dotnet new xunit|nunit|mstest` references by default) and
-// asks it for lcov, so the percentage and the new-code line intersection read
-// the same format Flutter and Vitest already produce. A test project without
-// coverlet.collector writes no report: the run is then "could not read a
-// coverage number", which is advisory, never a block.
+// collector (what `dotnet new xunit|nunit|mstest` references by default),
+// which writes one Cobertura report per test project. The target is named
+// because `dotnet test` refuses a folder holding more than one solution or
+// project. A test project without coverlet.collector writes no report: the
+// run is then advisory, never a block.
 func dotnetCoverageStage(dir string) *coverageStage {
 	target, ok := dotnet.BuildTarget(dir)
 	if !ok {
 		return nil
 	}
 	return &coverageStage{
-		name: "coverage",
-		command: []string{
-			"dotnet", "test", target, "-nologo",
-			"--collect:XPlat Code Coverage",
-			"--results-directory", dotnetCoverageDir,
-			"--", "DataCollectionRunSettings.DataCollectors.DataCollector.Configuration.Format=lcov",
-		},
+		name:      "coverage",
+		command:   []string{"dotnet", "test", target, "--collect:XPlat Code Coverage", "--results-directory", dotnetCoverageDir},
 		parse:     parseDotnetCoverage,
 		lines:     dotnetCoverageLines,
 		artifacts: []string{dotnetCoverageDir},
+		noNumber:  "no Cobertura report was written; the test projects need the coverlet.collector package",
 	}
 }
 
@@ -134,8 +186,7 @@ func dotnetCoverageStage(dir string) *coverageStage {
 // hundreds of generated lines against a handful of real ones, which pins the
 // number near zero whatever the tests cover.
 func dotnetCoverageLines(dir string) (lineHits, bool) {
-	reports, _ := filepath.Glob(filepath.Join(dir, dotnetCoverageDir, "*", "coverage.info"))
-	hits, ok := lcovFileLines(dir, reports...)
+	hits, ok := coberturaLines(dir)
 	if !ok {
 		return nil, false
 	}
@@ -200,13 +251,14 @@ func runCoverage(ctx context.Context, dir string, stage *coverageStage, timeout 
 	overlay := toolchain.Default.Overlay(dir)
 	cmdCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(cmdCtx, stage.command[0], stage.command[1:]...)
+	argv := hostshell.ResolveArgv(stage.command)
+	cmd := exec.CommandContext(cmdCtx, argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = childenv.For(os.Environ(), append(append([]string{}, overlay.Env...), dotnetQuietEnv...))
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
-	err := cmd.Run()
+	err := runTree(cmd)
 	out := buf.String()
 
 	defer func() {
@@ -222,13 +274,18 @@ func runCoverage(ctx context.Context, dir string, stage *coverageStage, timeout 
 	}
 
 	if err != nil && isToolMissing(err) {
-		return CoverageResult{Detail: stage.command[0] + " is not installed in this environment"}
+		return CoverageResult{Detail: stage.command[0] + " is not installed in this environment", ToolMissing: true}
+	}
+	if err != nil && printsMissingTool(out, stage.missingTool) {
+		return CoverageResult{Detail: strings.Join(stage.command[:2], " ") + " is not installed in this environment", ToolMissing: true}
 	}
 	pct, ok := stage.parse(dir, out)
 	if !ok {
 		detail := "could not read a coverage number from the run"
 		if err != nil {
 			detail = "the test suite failed"
+		} else if stage.noNumber != "" {
+			detail = stage.noNumber
 		}
 		return CoverageResult{Detail: detail, Output: truncateTail(out, 6000), Lines: lines}
 	}
@@ -239,9 +296,31 @@ func runCoverage(ctx context.Context, dir string, stage *coverageStage, timeout 
 	return CoverageResult{Percent: pct, Measured: true, Output: truncateTail(out, 4000), Lines: lines}
 }
 
+func printsMissingTool(out string, markers []string) bool {
+	lower := strings.ToLower(out)
+	for _, m := range markers {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	return false
+}
+
 func isToolMissing(err error) bool {
 	return err != nil && (strings.Contains(err.Error(), "executable file not found") ||
-		strings.Contains(err.Error(), "no such file or directory"))
+		strings.Contains(err.Error(), "no such file or directory") ||
+		missingToolExit(runtime.GOOS, err))
+}
+
+// windowsCommandNotFoundExit is what the python/python3 App Execution Alias
+// stubs exit with on a Windows machine without Python (they only point at
+// the Microsoft Store), and what cmd.exe exits with for an unknown command.
+// It says the tool is absent, not that the build failed.
+const windowsCommandNotFoundExit = 9009
+
+func missingToolExit(goos string, err error) bool {
+	var exit interface{ ExitCode() int }
+	return goos == "windows" && errors.As(err, &exit) && exit.ExitCode() == windowsCommandNotFoundExit
 }
 
 func parseGoCoverage(dir, out string) (float64, bool) {
@@ -261,7 +340,11 @@ func parseGoCoverage(dir, out string) (float64, bool) {
 }
 
 func parseLcovCoverage(dir, _ string) (float64, bool) {
-	f, err := os.Open(filepath.Join(dir, "coverage", "lcov.info"))
+	return lcovPercent(filepath.Join(dir, "coverage", "lcov.info"))
+}
+
+func lcovPercent(path string) (float64, bool) {
+	f, err := os.Open(path)
 	if err != nil {
 		return 0, false
 	}
@@ -269,7 +352,7 @@ func parseLcovCoverage(dir, _ string) (float64, bool) {
 	var total, covered int
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		line := scanner.Text()
+		line := strings.TrimSpace(scanner.Text())
 		if !strings.HasPrefix(line, "DA:") {
 			continue
 		}
@@ -312,6 +395,38 @@ func parseGremlinsScore(_, out string) (float64, bool) {
 	return pct, true
 }
 
+// cargoMutantsCount reads cargo-mutants' closing line, "25 mutants tested in
+// 15s: 3 missed, 20 caught, 2 unviable", which leaves out a zero count.
+var cargoMutantsCount = regexp.MustCompile(`(\d+) (missed|caught|timeouts?|unviable)\b`)
+
+// parseCargoMutantsScore counts a timeout as killed, as Stryker does: the
+// tests noticed the mutant, they just never finished.
+func parseCargoMutantsScore(_, out string) (float64, bool) {
+	summary := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "mutants tested") {
+			summary = line
+		}
+	}
+	var killed, missed int
+	for _, m := range cargoMutantsCount.FindAllStringSubmatch(summary, -1) {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		switch m[2] {
+		case "missed":
+			missed += n
+		case "caught", "timeout", "timeouts":
+			killed += n
+		}
+	}
+	if killed+missed == 0 {
+		return 0, false
+	}
+	return float64(killed) * 100 / float64(killed+missed), true
+}
+
 var strykerScore = regexp.MustCompile(`(?i)mutation score[^0-9]*([0-9.]+)`)
 
 func parseStrykerScore(_, out string) (float64, bool) {
@@ -337,6 +452,9 @@ func coverageReport(ctx context.Context, dir string, repo domain.Repository, sub
 	}
 	res := runCoverage(ctx, dir, stage, coverageTimeout)
 	if !res.Measured {
+		if res.ToolMissing && !repo.EffectiveCoverageGate(subProjectPath).Enabled {
+			return ""
+		}
 		note := "[unverified] coverage: " + res.Detail
 		if res.Output != "" {
 			note += "\n" + res.Output
@@ -413,4 +531,15 @@ func mutationWarning(percent, threshold float64) string {
 		Percent:   fmt.Sprintf("%.1f", percent),
 		Threshold: fmt.Sprintf("%.0f", threshold),
 	})
+}
+
+// runTree runs cmd and kills whatever it left behind, so a test runner's
+// workers cannot outlive the step that started them.
+func runTree(cmd *exec.Cmd) error {
+	tree, err := proctree.Start(cmd)
+	if err != nil {
+		return err
+	}
+	defer tree.Close()
+	return cmd.Wait()
 }

@@ -18,6 +18,8 @@ const HIT_RADIUS_PX = 9;
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 24;
 const KEYBOARD_PAN_PX = 48;
+const MARKER_FIT_MIN_PX = 40;
+const MARKER_FIT_MAX_SCALE = 6;
 
 interface View {
   scale: number;
@@ -36,6 +38,30 @@ function plotMetrics(width: number, height: number): PlotMetrics {
     spanY: Math.max(1, height - PADDING_PX * 2),
   };
 }
+
+export interface EmbeddingCanvasMarker {
+  /** Normalized [0, 1] like `positions`. */
+  x: number;
+  y: number;
+  label: string;
+}
+
+const CLICK_SLOP_PX = 4;
+const MARKER_FONT = '700 10px "Inter Variable", Inter, system-ui, sans-serif';
+
+export interface EmbeddingCanvasLabel {
+  groupId: string;
+  text: string;
+  /** Normalized [0, 1] like `positions`. */
+  x: number;
+  y: number;
+  weight: number;
+}
+
+const LABEL_FONT = '600 12px "Inter Variable", Inter, system-ui, sans-serif';
+const LABEL_MAX_CHARS = 28;
+const LABEL_MAX_DRAWN = 16;
+const LABEL_OFFSET_PX = 12;
 
 export interface EmbeddingScatterCanvasProps {
   /** `2 * n` interleaved x/y pairs normalized into [0, 1]. */
@@ -56,6 +82,13 @@ export interface EmbeddingScatterCanvasProps {
   resetLabel: string;
   /** Tooltip body for the hovered point index. */
   renderTooltip: (index: number) => ReactNode;
+  /** Direct labels drawn over the plot, heaviest first. */
+  labels?: EmbeddingCanvasLabel[];
+  labelColor?: string;
+  /** Numbered rings drawn over the points, e.g. code-search hits. */
+  markers?: EmbeddingCanvasMarker[];
+  /** Fires on a click that did not drag, with the point under the cursor. */
+  onPointClick?: (index: number) => void;
   className?: string;
 }
 
@@ -72,6 +105,10 @@ export function EmbeddingScatterCanvas({
   zoomOutLabel,
   resetLabel,
   renderTooltip,
+  labels,
+  labelColor = "#1c1c21",
+  markers,
+  onPointClick,
   className,
 }: EmbeddingScatterCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -82,6 +119,7 @@ export function EmbeddingScatterCanvas({
   const drawRef = useRef<(() => void) | null>(null);
   const draggingRef = useRef(false);
   const dragOriginRef = useRef({ x: 0, y: 0 });
+  const downRef = useRef({ x: 0, y: 0 });
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
   const descriptionId = useId();
 
@@ -105,6 +143,38 @@ export function EmbeddingScatterCanvas({
   useEffect(() => {
     resetView();
   }, [positions, resetView]);
+
+  // Search hits tend to land in one region, where their rings and numbers
+  // overlap at the default zoom, so new markers bring that region into view.
+  useEffect(() => {
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!markers || markers.length === 0 || !rect || rect.width === 0) return;
+    const { spanX, spanY } = plotMetrics(rect.width, rect.height);
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const marker of markers) {
+      const x = PADDING_PX + marker.x * spanX;
+      const y = PADDING_PX + marker.y * spanY;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+    const width = Math.max(maxX - minX, MARKER_FIT_MIN_PX);
+    const height = Math.max(maxY - minY, MARKER_FIT_MIN_PX);
+    const scale = Math.max(
+      1,
+      Math.min(MARKER_FIT_MAX_SCALE, rect.width / (width * 2.5), rect.height / (height * 2.5)),
+    );
+    viewRef.current = {
+      scale,
+      tx: rect.width / 2 - ((minX + maxX) / 2) * scale,
+      ty: rect.height / 2 - ((minY + maxY) / 2) * scale,
+    };
+    requestDraw();
+  }, [markers, requestDraw]);
 
   const zoomAt = useCallback(
     (factor: number, anchorX: number, anchorY: number) => {
@@ -194,6 +264,65 @@ export function EmbeddingScatterCanvas({
         ctx.arc(x, y, radius + 4.5, 0, Math.PI * 2);
         ctx.stroke();
       }
+
+      if (markers && markers.length > 0) {
+        ctx.font = MARKER_FONT;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.lineJoin = "round";
+        for (const marker of markers) {
+          const x = (PADDING_PX + marker.x * spanX) * scale + tx;
+          const y = (PADDING_PX + marker.y * spanY) * scale + ty;
+          if (x < -20 || y < -20 || x > width + 20 || y > height + 20) continue;
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = surfaceColor;
+          ctx.beginPath();
+          ctx.arc(x, y, radius + 5, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = labelColor;
+          ctx.beginPath();
+          ctx.arc(x, y, radius + 6.5, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = surfaceColor;
+          ctx.strokeText(marker.label, x + 9, y - 9);
+          ctx.fillStyle = labelColor;
+          ctx.fillText(marker.label, x + 9, y - 9);
+        }
+      }
+
+      if (labels && labels.length > 0) {
+        ctx.font = LABEL_FONT;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.lineJoin = "round";
+        ctx.lineWidth = 4;
+        const placed: { left: number; right: number; top: number; bottom: number }[] = [];
+        const ordered = [...labels].sort((a, b) => b.weight - a.weight);
+        for (const label of ordered) {
+          if (placed.length >= LABEL_MAX_DRAWN) break;
+          if (highlightedGroupIds !== null && !highlightedGroupIds.has(label.groupId)) continue;
+          const text =
+            label.text.length > LABEL_MAX_CHARS ? `${label.text.slice(0, LABEL_MAX_CHARS - 1)}…` : label.text;
+          const anchorX = (PADDING_PX + label.x * spanX) * scale + tx;
+          const anchorY = (PADDING_PX + label.y * spanY) * scale + ty;
+          if (anchorX < 0 || anchorX > width || anchorY < 0 || anchorY > height) continue;
+          const halfW = (ctx.measureText(text).width + 8) / 2;
+          // Sit just above the anchor so a tight cluster stays visible under its
+          // label, and slide inward rather than clip at the plot's edges.
+          const x = Math.min(Math.max(anchorX, halfW + 2), width - halfW - 2);
+          const y = Math.min(Math.max(anchorY - LABEL_OFFSET_PX, 10), height - 10);
+          const rect = { left: x - halfW, right: x + halfW, top: y - 8, bottom: y + 8 };
+          if (placed.some((p) => rect.left < p.right && rect.right > p.left && rect.top < p.bottom && rect.bottom > p.top)) {
+            continue;
+          }
+          placed.push(rect);
+          ctx.strokeStyle = surfaceColor;
+          ctx.strokeText(text, x, y);
+          ctx.fillStyle = labelColor;
+          ctx.fillText(text, x, y);
+        }
+      }
     };
     requestDraw();
   });
@@ -222,6 +351,9 @@ export function EmbeddingScatterCanvas({
   useEffect(
     () => () => {
       if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+      // requestDraw skips while a frame is pending; a cancelled frame left here
+      // would silence every draw after a remount (StrictMode does exactly that).
+      frameRef.current = null;
     },
     [],
   );
@@ -240,10 +372,10 @@ export function EmbeddingScatterCanvas({
     return () => container.removeEventListener("wheel", onWheel);
   }, [zoomAt]);
 
-  const updateHover = useCallback(
+  const pointAt = useCallback(
     (clientX: number, clientY: number) => {
       const container = containerRef.current;
-      if (!container) return;
+      if (!container) return null;
       const rect = container.getBoundingClientRect();
       const sx = clientX - rect.left;
       const sy = clientY - rect.top;
@@ -253,7 +385,16 @@ export function EmbeddingScatterCanvas({
       const dataY = ((sy - ty) / scale - PADDING_PX) / spanY;
       const radius = HIT_RADIUS_PX / (scale * Math.min(spanX, spanY));
       const found = grid.nearest(dataX, dataY, radius);
-      const next = found >= 0 ? found : null;
+      return { index: found >= 0 ? found : null, sx, sy, rect };
+    },
+    [grid],
+  );
+
+  const updateHover = useCallback(
+    (clientX: number, clientY: number) => {
+      const hit = pointAt(clientX, clientY);
+      if (!hit) return;
+      const { index: next, sx, sy, rect } = hit;
 
       // Position imperatively — a tooltip that follows the cursor must not
       // re-render React on every mousemove.
@@ -265,13 +406,14 @@ export function EmbeddingScatterCanvas({
       }
       setHoverIndex((prev) => (prev === next ? prev : next));
     },
-    [grid],
+    [pointAt],
   );
 
   const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
     draggingRef.current = true;
     dragOriginRef.current = { x: event.clientX, y: event.clientY };
+    downRef.current = { x: event.clientX, y: event.clientY };
     event.currentTarget.setPointerCapture(event.pointerId);
     setHoverIndex(null);
   };
@@ -295,6 +437,14 @@ export function EmbeddingScatterCanvas({
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!draggingRef.current) return;
     draggingRef.current = false;
+    if (
+      onPointClick &&
+      event.type === "pointerup" &&
+      Math.hypot(event.clientX - downRef.current.x, event.clientY - downRef.current.y) < CLICK_SLOP_PX
+    ) {
+      const hit = pointAt(event.clientX, event.clientY);
+      if (hit && hit.index !== null) onPointClick(hit.index);
+    }
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }

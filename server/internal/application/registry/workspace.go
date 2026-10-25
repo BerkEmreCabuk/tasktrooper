@@ -47,6 +47,7 @@ func EffectiveWorkspaceDir(ctx context.Context) string {
 
 const taskEnvKey contextKey = "task_env"
 const branchKey contextKey = "task_branch"
+const sessionEnvKey contextKey = "session_env"
 
 // ContextWithBranch records which git branch the run's workspace has checked
 // out, so retrieval can prefer that branch's index.
@@ -79,6 +80,26 @@ func ContextWithTaskEnv(ctx context.Context, env []string) context.Context {
 func TaskEnvFromContext(ctx context.Context) []string {
 	if v := ctx.Value(taskEnvKey); v != nil {
 		if env, ok := v.([]string); ok {
+			return env
+		}
+	}
+	return nil
+}
+
+// ContextWithSessionEnv carries the session environment the run was resolved
+// with (the repository's own version pins), so a follow-up turn built from the
+// same context — a criteria or verdict sweep — hands the executor the same
+// environment the run started with instead of an empty one.
+func ContextWithSessionEnv(ctx context.Context, env map[string]string) context.Context {
+	if len(env) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, sessionEnvKey, env)
+}
+
+func SessionEnvFromContext(ctx context.Context) map[string]string {
+	if v := ctx.Value(sessionEnvKey); v != nil {
+		if env, ok := v.(map[string]string); ok {
 			return env
 		}
 	}
@@ -147,6 +168,28 @@ func TaskIDFromContext(ctx context.Context) uuid.UUID {
 		}
 	}
 	return uuid.Nil
+}
+
+const taskTypeKey contextKey = "task_type"
+
+// ContextWithTaskType names the board task TYPE a run is working, so a
+// nested call that has no domain.BoardTask in hand (orchestrator.Executor's
+// subtask runner) can still tell an analiz task apart from every other kind
+// — see domain.EnsureAskUserTool's analiz exception in executor.go.
+func ContextWithTaskType(ctx context.Context, taskType string) context.Context {
+	if taskType == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, taskTypeKey, taskType)
+}
+
+func TaskTypeFromContext(ctx context.Context) string {
+	if v := ctx.Value(taskTypeKey); v != nil {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
 }
 
 func ContextWithAgentID(ctx context.Context, id uuid.UUID) context.Context {

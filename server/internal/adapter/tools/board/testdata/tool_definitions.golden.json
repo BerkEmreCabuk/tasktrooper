@@ -284,11 +284,11 @@
             "type": "boolean"
           },
           "assignee": {
-            "description": "Who handles this task: the responsible agent's name (e.g. \"system-architect\", \"backend-developer\") or its UUID. Set this so the assignee is dispatched automatically. Use list_team to see valid names.",
+            "description": "Who handles this task: the responsible agent's name (e.g. \"system-architect\", \"backend-developer\") or its UUID. Set this so the assignee is dispatched automatically. Use list_team to see valid names. Never the product manager: it cannot hold a board task.",
             "type": "string"
           },
           "assignee_role": {
-            "description": "Assign by ROLE instead of by agent name: the role key (e.g. \"developer\", \"qa\") whose agent for this task's repository area should be assigned. Ignored when assignee is also set — assignee wins. Use list_team to see role keys and which areas they cover.",
+            "description": "Assign by ROLE instead of by agent name: the role key (e.g. \"developer\", \"qa\") whose agent for this task's repository area should be assigned. Ignored when assignee is also set — assignee wins. Use list_team to see role keys and which areas they cover. product_manager is refused.",
             "type": "string"
           },
           "before_deploy": {
@@ -296,7 +296,7 @@
             "type": "string"
           },
           "blocked_by": {
-            "description": "Work ordering: task UUIDs or board keys (e.g. [\"T-1\"]) that must be FINISHED (done or released) before anyone starts this task. THIS task waits for the ones you list — same direction as deploy_depends_on. Enforced: while any of them is open this task is parked in `blocked` instead of being dispatched, and it is picked up automatically the moment the last one lands. Use it when one task's code has to exist before the next can be written; use deploy_depends_on when the order is about shipping, and both when it is both. A cycle is refused at creation.",
+            "description": "Work ordering: task UUIDs or board keys (e.g. [\"T-1\"]) that must be FINISHED (done or released; a design task only once released, after its designer wrote the hand-off) before anyone starts this task. THIS task waits for the ones you list, and an approved design task among them hands this task its documents — same direction as deploy_depends_on. Enforced: while any of them is open this task is parked in `blocked` instead of being dispatched, and it is picked up automatically the moment the last one lands. Use it when one task's code has to exist before the next can be written; use deploy_depends_on when the order is about shipping, and both when it is both. A cycle is refused at creation.",
             "items": {
               "type": "string"
             },
@@ -405,6 +405,64 @@
   {
     "type": "function",
     "function": {
+      "name": "declare_env_vars",
+      "description": "Declare the environment variables your change needs in its deployed environment, in the same run that adds the code reading them. Before the task ships, TaskTrooper sets value and generated variables on the deploy target itself and asks a human on the task for human_secret and human_bcrypt ones; the merge waits until every non-optional variable is set. You never see, choose or handle a secret value — so never generate, write, commit or comment one, and do not ask the human for it yourself. Keep .env.example in step: an undeclared name found there still blocks the ship until a human classifies it. Re-declaring a name updates it; a human's own classification of a name is kept.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\"). Optional in a run that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          },
+          "vars": {
+            "description": "Every environment variable your change makes the deployed app read — new, renamed, or newly required. One entry each.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "description": {
+                  "description": "What the app uses it for, in one line — a person reads it when entering the value.",
+                  "type": "string"
+                },
+                "kind": {
+                  "description": "value: a non-secret literal you know now (owner/repo, a branch name, a public URL) — put it in value. generated: a random secret nobody has to know (a session, signing or encryption key). human_secret: a credential only a person can obtain (an API key, a personal access token). human_bcrypt: the bcrypt hash of a password a person chooses (the app compares a password against it). optional: the deployed app runs without it — leave it unset there.",
+                  "enum": [
+                    "value",
+                    "generated",
+                    "human_secret",
+                    "human_bcrypt",
+                    "optional"
+                  ],
+                  "type": "string"
+                },
+                "name": {
+                  "description": "The variable's name exactly as the code reads it (e.g. SESSION_SECRET).",
+                  "type": "string"
+                },
+                "value": {
+                  "description": "Only for kind=value, and only a non-secret. Never put a key, token, password or hash here.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "kind"
+              ],
+              "type": "object"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "vars"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "delete_board_task",
       "description": "Delete a board task permanently, with everything on it: comments, acceptance criteria, documents and relations. There is no undo. Use it when the user asks for a task to be removed — a duplicate, a task opened by mistake, or work that was merged into another task. When several tasks are being merged into one, delete the ones that were merged away instead of leaving them open. A task that has left backlog/todo is refused unless force=true: past those columns it carries a branch and a work history, and cancelled work belongs in a terminal column, not erased.",
       "parameters": {
@@ -451,7 +509,7 @@
     "type": "function",
     "function": {
       "name": "finish_release",
-      "description": "Confirm this release as shipped: moves every task it carries to `released`. This is the ONLY way a task may reach `released` — never move the card there yourself. Call it only while the release is `awaiting_verdict`, and only after you have actually read the evidence in THIS run: query_runtime_logs and list_runtime_errors since deployed_at, and the release's own health/smoke checks (get_release). A `failed` release can only be finished by a human overriding it (\"ship it anyway\") — an agent call is refused. `note` is required and must say what you actually checked (the log window, the error groups, the smoke results), not just \"looks fine\".",
+      "description": "Confirm this release as shipped: moves every task it carries to `released`. This is the ONLY way a task may reach `released` — never move the card there yourself. Call it only while the release is `awaiting_verdict`, and only after you have actually read the evidence in THIS run, for every task the release carries, not only the one you were woken on: query_runtime_logs and list_runtime_errors since deployed_at (pass the release's own component — get_release returns it — and judge an error group's novelty by its own first_seen against deployed_at, not by `new` alone), and the release's own health/smoke checks (get_release). A `failed` release can only be finished by a human overriding it (\"ship it anyway\") — an agent call is refused. `note` is required and must say what you actually checked (the log window, the error groups, the smoke results), not just \"looks fine\".",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -479,6 +537,23 @@
       "parameters": {
         "additionalProperties": false,
         "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "get_deploy_impact",
+      "description": "Read what the release covering this task did to its component in production: for each golden signal with a confirmed binding (request rate, error rate, p95 latency for a backend; backlog, consume rate, errors for a worker; page views, LCP, INP for a frontend; crash-free users, cold start, ANR for mobile), its mean over the hour before the deploy (`before`), the hour after it (`after`) and that same hour a day earlier (`baseline`), with `delta`, `delta_pct`, `higher_is_better` and a per-signal `verdict` (`improved`, `neutral`, `worse`, `unknown`); the overall `verdict` is the worst of them. A move the baseline also shows is read as the time of day, not the deploy, and stays `neutral`. `pending: true` means the hour after the deploy is not over yet and `after` covers only what has passed. `verdict: \"unknown\"` with no signals means nothing is bound (or the release never deployed) — not that production is fine. The result also carries the release's own `auto_rollback`: with it on, `rollback_release` executes; with it off, `rollback_release` only writes a proposal and a human is asked to approve it. It changes nothing and never parks the run. Read it whenever an incident lands in a release's window, and before a verdict, beside the logs and errors — never as the only evidence.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\" for a task, \"B-1\" for a bug, \"A-1\" for an analysis). Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
         "type": "object"
       }
     }
@@ -546,7 +621,7 @@
     "type": "function",
     "function": {
       "name": "get_release",
-      "description": "Read the release covering this task: status, mode/executor, commit and tag, deploy result (including a batch release's local_run or store_builds), the health/smoke/runtime-error evidence gathered so far, verdict and rollback (if any), and what to do next. It changes nothing and never parks the run — call it any time you want the current picture, including right after a merge and again whenever you are unsure what state the release is in. For a `batch` component (mobile and other human-cut releases) it may return a `draft` release still collecting merged tasks — there is nothing to do until a human cuts it. If nothing has opened a release for this task, it says why instead of a bare not-found (never merged, the component does not deploy on merge, or its delivery profile is unconfirmed).",
+      "description": "Read the release covering this task: status, mode/executor, commit and tag, deploy result (including a batch release's local_run or store_builds), the health/smoke/runtime-error evidence gathered so far, verdict and rollback (if any), and what to do next. It changes nothing and never parks the run — call it any time you want the current picture, including right after a merge and again whenever you are unsure what state the release is in. For a `batch` component (mobile and other human-cut releases) it may return a `draft` release still collecting merged tasks — there is nothing to do until a human cuts it. If nothing has opened a release for this task, it says why instead of a bare not-found (never merged, the component does not deploy on merge, or its delivery profile is unconfirmed). When the release's component is known, the result carries a top-level `component` — the release's own `component_id` is an id, not a path, and in a repository with more than one component this is what you pass as `component` to query_runtime_logs/list_runtime_errors; an omitted `component` on those tools silently reads the repository's root component instead.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -663,6 +738,23 @@
   {
     "type": "function",
     "function": {
+      "name": "list_open_questions",
+      "description": "READ every open question recorded on an analiz task, withdrawn ones included, each with its kind, whether it is blocking, its status and the human's answer (or recommended answer, for an unanswered non-blocking one). Call it after `resumed: questions_answered` or when the run context shows new answers, to see every question's current state before continuing the report from where it stopped.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"A-1\"). Optional in a task run — omit it there and the task in context is used.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "list_projects",
       "description": "List the projects on the board (id, name, description). Use to answer how many projects exist or what they are.",
       "parameters": {
@@ -767,7 +859,7 @@
     "type": "function",
     "function": {
       "name": "list_team",
-      "description": "List the orchestration team: each agent's name, role description, whether it is enabled, which roles it holds (with the repo areas each covers), and which board columns it is subscribed to. Use to see who is on the team and which role handles which kind of work before assigning or decomposing.",
+      "description": "List the orchestration team. `team` is who works now: each enabled agent's name, role description, which roles it holds (with the repo areas each covers), and which board columns it is subscribed to. `available_to_add` is the agents that exist but are switched off, each with its name, catalog slug, role description and roles; the user can switch them on from the pencil (\"Edit team\") next to \"Team\" in the sidebar. Assign work only to agents in `team`. When no agent in `team` fits the work, name the agent in `available_to_add` that does.",
       "parameters": {
         "additionalProperties": false,
         "properties": {},
@@ -840,6 +932,97 @@
   {
     "type": "function",
     "function": {
+      "name": "record_open_questions",
+      "description": "Record open questions on an analiz task for the human to answer on the report page — never type them into the report HTML and never ask them with ask_user on this task type. `questions` ADDS up to 10 new ones; `update` edits a question you already recorded (you cannot change the PROMPT of one the human already answered — withdraw it and add a new one instead); `withdraw` removes questions an answer made moot. Default to non-blocking with your recommended answer; blocking is the exception for something the code and brief genuinely cannot settle. A blocking question still requires exploring first — a question the code already answers is not a question — and the report you attach before ending the run should say as far as you got. Returns the full current list (key, kind, blocking, status, answer).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "questions": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "blocking": {
+                  "description": "true if the analysis cannot responsibly continue without an answer; false if a reasonable default exists.",
+                  "type": "boolean"
+                },
+                "kind": {
+                  "description": "\"product\" or \"technical\".",
+                  "enum": [
+                    "product",
+                    "technical"
+                  ],
+                  "type": "string"
+                },
+                "prompt": {
+                  "description": "The question itself, as the human will read it.",
+                  "type": "string"
+                },
+                "recommended_answer": {
+                  "description": "Required when blocking is false: the default you will proceed with if the human leaves it unanswered.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "prompt",
+                "kind",
+                "blocking"
+              ],
+              "type": "object"
+            },
+            "maxItems": 10,
+            "type": "array"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"A-1\"). Optional in a task run — omit it there and the task in context is used.",
+            "type": "string"
+          },
+          "update": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "blocking": {
+                  "type": "boolean"
+                },
+                "key": {
+                  "description": "Which question to edit, e.g. \"Q2\".",
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "product",
+                    "technical"
+                  ],
+                  "type": "string"
+                },
+                "prompt": {
+                  "type": "string"
+                },
+                "recommended_answer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "key"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "withdraw": {
+            "items": {
+              "description": "Keys of questions to withdraw, e.g. \"Q3\".",
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "record_test_cases",
       "description": "Write the task's test cases onto the card — the whole matrix, not only the acceptance criteria. Derive the cases from what was ASKED FOR and what the request IMPLIES: happy path, boundaries, invalid input, auth, empty state, async/worker side effects, visual states, and regression of adjacent behaviour. Record them BEFORE executing (status=planned), then call this again (or set_test_case_result) with each verdict. Cases are matched by title, so re-sending a title updates that case. Record the cases you considered and rejected too, as status=invalid with the reason in notes — a case that was thought about and dismissed is part of the evidence, not noise.",
       "parameters": {
@@ -873,7 +1056,7 @@
                   "type": "string"
                 },
                 "evidence": {
-                  "description": "Command + output, request/response, or screenshot path.",
+                  "description": "Command + output, request/response, or — for a screenshot — the url and viewport browser_screenshot reported and what it showed, plus the file name it was saved under when you passed attach_to_task (without it no file is saved, so never a path).",
                   "type": "string"
                 },
                 "expected": {
@@ -1107,7 +1290,7 @@
             "type": "string"
           },
           "evidence": {
-            "description": "The command and its output, the request/response, or the screenshot path that proves this verdict.",
+            "description": "The command and its output, the request/response, or — for a screenshot — the url and viewport browser_screenshot reported and what it showed (it saves no file, so never a path).",
             "type": "string"
           },
           "notes": {
@@ -1142,7 +1325,7 @@
     "type": "function",
     "function": {
       "name": "start_task_preview",
-      "description": "Start (or reuse) the task branch's local preview — the product built from this task's branch, running on this machine, never production. Checks out the branch, detects how to run it, starts it, and returns its http://localhost URL once the dev server has printed one, for the browser tools. Needs no shell.",
+      "description": "Start (or reuse) the task branch's local preview — the product built from this task's branch, running on this machine, never production. Checks out the branch, detects how to run it (an npm dev/start script, a Makefile dev/run target, a Maven or Gradle Spring Boot/Quarkus project, or a Go module — including one whose main package lives under cmd/), starts it, and returns its http://localhost URL once the dev server has printed one (a bare port line such as \"Tomcat started on port 8080\" resolves to that URL too) — for the browser tools, or for http_request against a backend-only endpoint. Needs no shell.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -1179,13 +1362,14 @@
             "type": "string"
           },
           "blocked_by": {
-            "description": "Work ordering: task UUIDs or board keys that must be FINISHED (done or released) before anyone starts this task — THIS task waits for them. ADDS to the task's existing blockers rather than replacing them, so send only the ones you are adding. Enforced: while any blocker is open the task is parked in `blocked` instead of being dispatched, and it is picked up automatically when the last one lands. A cycle is refused.",
+            "description": "Work ordering: task UUIDs or board keys that must be FINISHED (done or released; a design task only once released, after its designer wrote the hand-off) before anyone starts this task — THIS task waits for them, and an approved design task among them hands this task its documents. ADDS to the task's existing blockers rather than replacing them, so send only the ones you are adding. Enforced: while any blocker is open the task is parked in `blocked` instead of being dispatched, and it is picked up automatically when the last one lands. A cycle is refused.",
             "items": {
               "type": "string"
             },
             "type": "array"
           },
           "column": {
+            "description": "Put the task in this board column. For workflow moves prefer move_board_task; this is for sending your own task back to todo in the same call that adds the blocker it now waits for.",
             "type": "string"
           },
           "component": {

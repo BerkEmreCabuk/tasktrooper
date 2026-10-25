@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -14,6 +13,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/proctree"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/winshim"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -51,10 +52,9 @@ type FamilySpec struct {
 	SinceOwnTool func(string) bool
 	LedgerTool   func(string) string
 	// ApplyMCP hands the run's MCP config to the CLI the way only it can: a
-	// config file in the workspace (cursor, antigravity) or an inline env var
-	// (opencode). It returns extra env entries and a cleanup for the run's
-	// credential.
-	ApplyMCP func(ctx context.Context, workDir string, cfg MCPConfig) (env []string, cleanup func(), err error)
+	// config file in the workspace (cursor, antigravity), an inline env var
+	// (opencode 1.x) or a private server the run attaches to (opencode 2.x).
+	ApplyMCP func(ctx context.Context, workDir string, cfg MCPConfig) (Launch, error)
 	// WatchStderr wraps the stderr tail with anything that needs raw stderr
 	// (opencode's rate-limit watcher). nil means the tail is all there is.
 	WatchStderr func(cancel context.CancelFunc, tail io.Writer) io.Writer
@@ -64,6 +64,24 @@ type FamilySpec struct {
 	AllowCleanExitAsResult bool
 	// BlockFrom detects a spent-subscription outcome for this CLI.
 	BlockFrom func(out Outcome, stderrTail, sessionID string, now time.Time) *domain.QuotaBlock
+	// ChildUsage prices the subagent sessions in Outcome.ChildSessions, which
+	// the CLI's own stream leaves out. nil means the stream's usage is all
+	// there is.
+	ChildUsage func(ctx context.Context, bin string, sessionIDs []string) domain.Usage
+}
+
+// Launch is what ApplyMCP adds to one run: env entries, args appended after
+// BuildArgs', and a cleanup that runs once the session has ended.
+type Launch struct {
+	Env     []string
+	Args    []string
+	Cleanup func()
+}
+
+func (l Launch) cleanup() {
+	if l.Cleanup != nil {
+		l.Cleanup()
+	}
 }
 
 // Family is the shared role-CLI executor. A flavor package embeds it as a
@@ -98,11 +116,11 @@ func (f *Family) Execute(ctx context.Context, req domain.TaskExecution, now func
 	if err != nil {
 		return domain.AgentResponse{}, err
 	}
-	extraEnv, cleanupMCP, err := f.spec.ApplyMCP(ctx, req.WorkDir, mcpCfg)
+	launch, err := f.spec.ApplyMCP(ctx, req.WorkDir, mcpCfg)
 	if err != nil {
 		return domain.AgentResponse{}, err
 	}
-	defer cleanupMCP()
+	defer launch.cleanup()
 
 	inv := Invocation{
 		Trace:   NewTrace(ctx, req.TaskKey, f.spec.TraceStep, f.spec.SinceOwnTool, f.spec.LedgerTool),
@@ -111,7 +129,7 @@ func (f *Family) Execute(ctx context.Context, req domain.TaskExecution, now func
 		Model:   req.Model,
 		Label:   req.TaskKey,
 	}
-	s, err := f.spawn(ctx, inv, extraEnv)
+	s, err := f.spawn(ctx, inv, launch)
 	if err != nil {
 		return domain.AgentResponse{}, err
 	}
@@ -128,11 +146,11 @@ func (f *Family) ExecuteChat(ctx context.Context, req domain.ChatExecution, out 
 	if err != nil {
 		return domain.ChatResult{}, err
 	}
-	extraEnv, cleanupMCP, err := f.spec.ApplyMCP(ctx, req.WorkDir, mcpCfg)
+	launch, err := f.spec.ApplyMCP(ctx, req.WorkDir, mcpCfg)
 	if err != nil {
 		return domain.ChatResult{}, err
 	}
-	defer cleanupMCP()
+	defer launch.cleanup()
 
 	inv := Invocation{
 		Trace:   NewTrace(ctx, req.SessionID, f.spec.TraceStep, f.spec.SinceOwnTool, f.spec.LedgerTool),
@@ -142,7 +160,7 @@ func (f *Family) ExecuteChat(ctx context.Context, req domain.ChatExecution, out 
 		Label:   req.SessionID,
 		Stream:  out,
 	}
-	s, err := f.spawn(ctx, inv, extraEnv)
+	s, err := f.spawn(ctx, inv, launch)
 	if err != nil {
 		return domain.ChatResult{}, err
 	}
@@ -150,14 +168,21 @@ func (f *Family) ExecuteChat(ctx context.Context, req domain.ChatExecution, out 
 	return domain.ChatResult{Response: resp}, err
 }
 
-func (f *Family) spawn(ctx context.Context, inv Invocation, extraEnv []string) (Session, error) {
+func (f *Family) spawn(ctx context.Context, inv Invocation, launch Launch) (Session, error) {
 	runCtx, cancel := context.WithTimeout(ctx, f.runTimeout)
 	defer cancel()
 
-	args := f.spec.BuildArgs(inv)
-	cmd := exec.CommandContext(runCtx, f.bin, args...)
+	argPrompt, cleanupPrompt, err := ArgvSafePrompt(inv.Prompt)
+	if err != nil {
+		return Session{}, err
+	}
+	defer cleanupPrompt()
+	inv.Prompt = argPrompt
+
+	args := append(f.spec.BuildArgs(inv), launch.Args...)
+	cmd := winshim.Command(runCtx, f.bin, args...)
 	cmd.Dir = inv.WorkDir
-	cmd.Env = append(ChildEnv(ctx, false, nil), extraEnv...)
+	cmd.Env = append(ChildEnv(ctx, false, nil), launch.Env...)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -171,9 +196,14 @@ func (f *Family) spawn(ctx context.Context, inv Invocation, extraEnv []string) (
 		}
 	}
 
-	if err := cmd.Start(); err != nil {
+	tree, err := proctree.Start(cmd)
+	if err != nil {
 		return Session{}, fmt.Errorf(f.spec.StartFmt, err)
 	}
+	defer func() {
+		tree.Terminate(3 * time.Second)
+		tree.Close()
+	}()
 
 	out, parseErr := f.spec.Parse(stdout, NewStreamingSink(inv.Trace, inv.Stream))
 	if parseErr != nil {
@@ -194,6 +224,14 @@ func (f *Family) spawn(ctx context.Context, inv Invocation, extraEnv []string) (
 
 func (f *Family) finishInner(ctx context.Context, label string, s Session, now func() time.Time) (domain.AgentResponse, error) {
 	out := s.Out
+	if f.spec.ChildUsage != nil && len(out.ChildSessions) > 0 {
+		child := f.spec.ChildUsage(ctx, f.bin, out.ChildSessions)
+		out.Usage.PromptTokens += child.PromptTokens
+		out.Usage.CompletionTokens += child.CompletionTokens
+		out.Usage.TotalTokens += child.TotalTokens
+		out.Usage.CacheReadTokens += child.CacheReadTokens
+		out.Usage.CacheWriteTokens += child.CacheWriteTokens
+	}
 	// At the top, ahead of every failure branch below: a session that timed
 	// out or hit its quota still burned the tokens the CLI reports, and those
 	// must still count against the run and the dashboard.
@@ -245,9 +283,16 @@ func (f *Family) finishInner(ctx context.Context, label string, s Session, now f
 		return domain.AgentResponse{}, fmt.Errorf("%s failed (%s): %s",
 			f.spec.ProcessName, out.Status, domain.TruncateHead(FirstNonEmpty(out.Text, strings.TrimSpace(s.StderrTail)), 1000))
 	}
-	if s.WaitErr != nil {
+	if waitErr := s.exitErr(); waitErr != nil {
 		return domain.AgentResponse{}, fmt.Errorf("%s exited with an error after reporting success (%v): %s",
-			f.spec.ProcessName, s.WaitErr, domain.TruncateHead(strings.TrimSpace(s.StderrTail), 500))
+			f.spec.ProcessName, waitErr, domain.TruncateHead(strings.TrimSpace(s.StderrTail), 500))
+	}
+	if out.RecoveredError != "" {
+		log.Warn().
+			Str("task_key", label).
+			Str("cli_session_id", out.SessionID).
+			Str("recovered_error", domain.TruncateHead(out.RecoveredError, 500)).
+			Msgf("%s reported an error mid-session and carried on; keeping its answer", f.spec.ProcessName)
 	}
 	if strings.TrimSpace(out.Text) == "" {
 		return domain.AgentResponse{}, errors.New(f.spec.ProcessName + " finished without producing any answer")

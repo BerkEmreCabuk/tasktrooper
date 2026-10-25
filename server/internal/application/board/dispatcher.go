@@ -145,6 +145,9 @@ func (d *Dispatcher) Dispatch(ctx context.Context, input DispatchInput) error {
 	if err != nil {
 		return err
 	}
+	if input.EventType == domain.BoardEventTaskCommented && informationalComment(payload) {
+		return nil
+	}
 	if d.spans != nil &&
 		(input.EventType == domain.BoardEventTaskMoved || input.EventType == domain.BoardEventTaskCreated) {
 		if err := d.spans.RecordMove(ctx, input.RepositoryID, input.Task.ID, string(input.Task.Column), event.CreatedAt); err != nil {
@@ -336,6 +339,11 @@ func parkResume(payload map[string]interface{}) (string, bool) {
 	return resource, true
 }
 
+func informationalComment(payload map[string]interface{}) bool {
+	informational, _ := payload[domain.EventPayloadInformational].(bool)
+	return informational
+}
+
 func actorAgentIDFromPayload(payload map[string]interface{}) uuid.UUID {
 	raw, ok := payload["actor_agent_id"].(string)
 	if !ok {
@@ -381,12 +389,18 @@ func (d *Dispatcher) resolveAgents(ctx context.Context, wf domain.Workflow, wfOK
 	taskType := string(task.TaskType)
 
 	switch input.EventType {
-	case domain.BoardEventTaskCommented:
-		if isHandoffGateColumn(wf, wfOK, task.Column) {
+	case domain.BoardEventTaskCommented, domain.BoardEventTaskCreated, domain.BoardEventTaskMoved:
+		// An unreadable workflow reads as a gate; todo and need_revision still
+		// must not fan an unassigned card out to every developer.
+		if isHandoffGateColumn(wf, wfOK, task.Column) && !domain.AssigneeOnlyColumn(task.Column) {
 			return d.board.AgentsForColumn(ctx, string(task.Column), taskType)
 		}
 		if task.AssigneeAgentID != nil {
 			return []uuid.UUID{*task.AssigneeAgentID}, nil
+		}
+		// A design task waits for its role in any column, not only the queues.
+		if domain.AssigneeOnlyColumn(task.Column) || (wfOK && wf.ReservedForRole()) {
+			return nil, nil
 		}
 		return d.board.AgentsForColumn(ctx, string(task.Column), taskType)
 	case domain.BoardEventTaskAssigned:
@@ -394,14 +408,6 @@ func (d *Dispatcher) resolveAgents(ctx context.Context, wf domain.Workflow, wfOK
 			return nil, nil
 		}
 		return []uuid.UUID{*task.AssigneeAgentID}, nil
-	case domain.BoardEventTaskCreated, domain.BoardEventTaskMoved:
-		if isHandoffGateColumn(wf, wfOK, task.Column) {
-			return d.board.AgentsForColumn(ctx, string(task.Column), taskType)
-		}
-		if task.AssigneeAgentID != nil {
-			return []uuid.UUID{*task.AssigneeAgentID}, nil
-		}
-		return d.board.AgentsForColumn(ctx, string(task.Column), taskType)
 	default:
 		return nil, nil
 	}

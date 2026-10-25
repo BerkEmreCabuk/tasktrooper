@@ -21,8 +21,16 @@ type cancelSessionStore struct {
 	port.SessionStore
 	session domain.Session
 
+	// rejectCancelledCtx makes AppendMessage fail the write when the ctx it
+	// receives is already done — the shape a raw, un-detached ctx would have
+	// if a dropped SSE connection cancelled it out from under a still-running
+	// turn. It catches a caller that passes that ctx straight to the store
+	// instead of a persistCtx-derived one.
+	rejectCancelledCtx bool
+
 	mu       sync.Mutex
 	appended []domain.SessionMessage
+	deleted  []uuid.UUID
 }
 
 func (s *cancelSessionStore) Get(_ context.Context, id uuid.UUID) (domain.Session, error) {
@@ -32,18 +40,34 @@ func (s *cancelSessionStore) Get(_ context.Context, id uuid.UUID) (domain.Sessio
 	return s.session, nil
 }
 
+func (s *cancelSessionStore) Delete(_ context.Context, id uuid.UUID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deleted = append(s.deleted, id)
+	return nil
+}
+
+func (s *cancelSessionStore) deletedIDs() []uuid.UUID {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.deleted)
+}
+
 func (s *cancelSessionStore) ListMessages(context.Context, uuid.UUID) ([]domain.SessionMessage, error) {
 	return s.messages(), nil
 }
 
 func (s *cancelSessionStore) AppendMessage(
-	_ context.Context,
+	ctx context.Context,
 	sessionID uuid.UUID,
 	role domain.Role,
 	content string,
 	_ []byte,
 	_ []byte,
 ) (domain.SessionMessage, error) {
+	if s.rejectCancelledCtx && ctx.Err() != nil {
+		return domain.SessionMessage{}, ctx.Err()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	msg := domain.SessionMessage{ID: uuid.New(), SessionID: sessionID, Role: role, Content: content}
@@ -260,6 +284,46 @@ func TestCancelSessionRejectsAnUnknownSession(t *testing.T) {
 
 	if _, err := svc.CancelSession(context.Background(), uuid.New(), ""); !errors.Is(err, domain.ErrSessionNotFound) {
 		t.Fatalf("CancelSession on an unknown session returned %v, want domain.ErrSessionNotFound", err)
+	}
+}
+
+func TestDeleteSessionStopsTheTurnAndRemovesTheRow(t *testing.T) {
+	svc, store, runs, llm := newCancelTestService(t)
+	sessionID := store.session.ID
+
+	sent := make(chan error, 1)
+	go func() {
+		_, err := svc.SendMessageStream(context.Background(), sessionID, domain.SessionMessageRequest{
+			Role: domain.RoleUser, Content: "do the thing",
+		}, domain.ToolPolicy{}, func(string) {})
+		sent <- err
+	}()
+	select {
+	case <-llm.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn never reached the model")
+	}
+
+	if err := svc.Delete(context.Background(), sessionID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	select {
+	case err := <-sent:
+		if !errors.Is(err, domain.ErrRunCancelled) {
+			t.Fatalf("SendMessageStream returned %v, want domain.ErrRunCancelled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the turn kept going after its chat was deleted")
+	}
+
+	for id, status := range runs.statuses() {
+		if status != domain.SessionRunStatusCancelled {
+			t.Fatalf("run %s ended as %q, want cancelled", id, status)
+		}
+	}
+	if got := store.deletedIDs(); len(got) != 1 || got[0] != sessionID {
+		t.Fatalf("deleted sessions = %v, want [%s]", got, sessionID)
 	}
 }
 

@@ -2,6 +2,7 @@ package cloud_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -142,6 +143,49 @@ func (s *RuntimeSuite) TestErrorsPropagatesNonUnsupportedProviderError() {
 	s.Require().Error(err)
 }
 
+func (s *RuntimeSuite) TestErrorsCachesAProviderFailureButNotARunOutDeadline() {
+	tests := []struct {
+		name        string
+		firstErr    error
+		secondFails bool
+	}{
+		{name: "deadline", firstErr: context.DeadlineExceeded, secondFails: false},
+		{name: "cancelled", firstErr: context.Canceled, secondFails: false},
+		{name: "provider failure", firstErr: errors.New("upstream 503"), secondFails: true},
+	}
+	for _, tt := range tests {
+		s.Run(tt.name, func() {
+			env := s.envs.seed(domain.ComponentEnvironment{
+				RepositoryID: s.repoID, ComponentID: uuid.New(), Environment: domain.EnvironmentProduction,
+				Status: domain.LinkConfirmed, Provider: domain.CloudVercel, AccountID: s.env.AccountID, Resource: s.env.Resource,
+			})
+			since := time.Now().Add(-time.Hour)
+			s.provider.errorsErr = tt.firstErr
+			_, err := s.svc.Errors(s.ctx, env.ID, since)
+			s.Require().ErrorIs(err, tt.firstErr)
+
+			s.provider.errorsErr = nil
+			s.provider.errorGroups = []domain.RuntimeErrorGroup{{Fingerprint: "f1"}}
+			groups, err := s.svc.Errors(s.ctx, env.ID, since)
+			if tt.secondFails {
+				s.Error(err)
+				return
+			}
+			s.Require().NoError(err)
+			s.Len(groups, 1)
+		})
+	}
+}
+
+func (s *RuntimeSuite) TestErrorsSupportedIsFalseForAPerBranchPreview() {
+	preview := s.envs.seed(domain.ComponentEnvironment{
+		RepositoryID: s.repoID, ComponentID: uuid.New(), Environment: domain.EnvironmentPreview,
+		Status: domain.LinkConfirmed, Provider: domain.CloudVercel, AccountID: s.env.AccountID, Resource: s.env.Resource,
+	})
+	s.False(s.svc.ErrorsSupported(preview))
+	s.True(s.svc.ErrorsSupported(s.env))
+}
+
 func (s *RuntimeSuite) TestDeploymentsDefaultsLimit() {
 	s.provider.deployments = []domain.CloudDeployment{{ID: "d1"}, {ID: "d2"}}
 	got, err := s.svc.Deployments(s.ctx, s.env.ID, 0)
@@ -160,4 +204,41 @@ func (s *RuntimeSuite) TestUnboundLogsAndErrorsReturnNotConnected() {
 
 	_, err = s.svc.Deployments(s.ctx, unbound.ID, 10)
 	s.ErrorIs(err, cloud.ErrNotConnected)
+}
+
+func (s *RuntimeSuite) analyticsService(p port.CloudProvider) *cloud.Service {
+	return cloud.NewService(cloud.Deps{
+		Accounts:     s.accounts,
+		Environments: s.envs,
+		Providers:    []port.CloudProvider{p},
+		Components:   newFakeComponents(),
+		Scans:        newFakeScans(),
+		Repos:        newFakeRepos(domain.Repository{ID: s.repoID, Name: "acme"}),
+	})
+}
+
+func (s *RuntimeSuite) TestAnalyticsSaysWhichFeaturesTheProviderMeasures() {
+	off := domain.CloudAnalytics{WebAnalytics: domain.AnalyticsNotEnabled, SpeedInsights: domain.AnalyticsEnabled}
+	svc := s.analyticsService(&analyticsProvider{fakeProvider: s.provider, state: off})
+
+	got, ok := svc.Analytics(s.ctx, s.env.ID)
+
+	s.True(ok)
+	s.Equal(off, got)
+}
+
+func (s *RuntimeSuite) TestAnalyticsIsAbsentRatherThanAFailureWhenItCannotBeRead() {
+	s.False(s.analyticsStatusOf(s.svc), "a provider without the capability")
+
+	failing := s.analyticsService(&analyticsProvider{fakeProvider: s.provider, err: errors.New("vercel is down")})
+	_, ok := failing.Analytics(s.ctx, s.env.ID)
+	s.False(ok)
+
+	_, ok = failing.Analytics(s.ctx, uuid.New())
+	s.False(ok, "an environment that does not exist")
+}
+
+func (s *RuntimeSuite) analyticsStatusOf(svc *cloud.Service) bool {
+	_, ok := svc.Analytics(s.ctx, s.env.ID)
+	return ok
 }

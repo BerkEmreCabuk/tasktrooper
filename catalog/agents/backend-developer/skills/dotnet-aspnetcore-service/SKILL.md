@@ -1,74 +1,104 @@
 ---
 name: dotnet-aspnetcore-service
 category: architecture
-description: Use when writing or changing C#/.NET backend code (ASP.NET Core APIs, workers, class libraries) - project layout, DI, options, async and cancellation, error responses, and when NOT to add abstractions
+description: Use when building or extending a C# service on ASP.NET Core - Minimal APIs or controllers, DI and options, EF Core with Npgsql, ProblemDetails, HttpClientFactory resilience, async and cancellation
 tech_stack: .NET
 ---
-
-# ASP.NET Core Service Patterns
+# ASP.NET Core Service (C#)
 
 ## Overview
 
-Modern .NET (8+) with nullable reference types on. Follow the repository first: if it uses controllers, add a controller; if it uses minimal APIs, add an endpoint group; if it has MediatR handlers, write a handler. Never introduce a second style into one service.
+ASP.NET Core is the .NET backend stack: one host for HTTP, DI, configuration, logging and background work. Build in layers so the framework stays at the edges and the domain stays plain C#.
 
-**Core principle:** The framework already gives you DI, configuration, logging, validation hooks and ProblemDetails. Use them before writing your own layer.
+**Core principle:** the repository's shape wins. Minimal APIs or MVC controllers, EF Core or Dapper, Clean Architecture projects or one project — follow what is there. The patterns below are for new code and for the gaps.
 
-## Before writing code
+## Layers
 
-1. `dotnet build <the .sln>` once, so you know the baseline is green and which warnings already exist.
-2. Find the neighbouring feature (the similar endpoint, the similar handler) and copy its shape — folder, naming, registration, tests.
-3. Check `Directory.Build.props` / `Directory.Packages.props`: with central package management a `PackageReference` has NO `Version`; the version goes in `Directory.Packages.props`.
+| Layer | Responsibility | ASP.NET Core surface |
+|-------|----------------|----------------------|
+| Endpoint | HTTP in/out, binding, status codes | `MapGroup` + `MapPost` (Minimal APIs) or `[ApiController]` controllers |
+| Application service | Use-case orchestration, business rules | a class registered in DI, constructor-injected, `CancellationToken` on every async method |
+| Domain | Entities, value objects, invariants | plain C#, no ASP.NET or EF attributes driving behaviour |
+| Infrastructure | Persistence, outbound HTTP, queues | `DbContext`, typed `HttpClient`, `BackgroundService` |
 
-## Rules that hold everywhere
+Dependencies point inward: an endpoint calls a service, a service depends on an interface the infrastructure implements. An endpoint never contains business rules; a service never takes `HttpContext`.
 
-| Area | Do | Don't |
-|------|----|-------|
-| Async | `async Task`/`ValueTask` all the way; accept and pass `CancellationToken ct` through every I/O call | `.Result`, `.Wait()`, `async void` (except event handlers) |
-| Nullability | Treat warnings as bugs; `?` only where null is a real state | `!` to silence the compiler |
-| DTOs | `record` / `sealed record` for requests, responses and messages | Exposing EF entities from an endpoint |
-| Config | `IOptions<T>` bound from a section, validated with `ValidateDataAnnotations().ValidateOnStart()` | Reading `IConfiguration["X"]` deep in a service |
-| DI lifetime | Scoped for anything touching a `DbContext`; singleton only for stateless or thread-safe services | Injecting a scoped service into a singleton (captive dependency) |
-| Errors | Return `Results.Problem(...)` / `ProblemDetails` with the right status; map domain failures in one place (`IExceptionHandler` or an endpoint filter) | `catch (Exception) { return 500; }` in every endpoint |
-| Logging | `ILogger<T>` with message templates: `logger.LogInformation("Order {OrderId} placed", id)` | String interpolation in log calls; logging secrets or tokens |
-| Time/IDs | Inject `TimeProvider`; `Guid.CreateVersion7()` when the repo wants sortable ids | `DateTime.Now` in domain logic (untestable) |
-| HTTP clients | `IHttpClientFactory` / typed clients, resilience via `AddStandardResilienceHandler()` | `new HttpClient()` per call |
+## Patterns
 
-## Abstractions — earn them
+- **Target framework:** keep the repository's `TargetFramework`. A new service targets the current LTS (`net10.0`); never move a repository to a preview SDK in a feature task. `global.json` pins the SDK when the repository has one.
+- **Nullable reference types on** (`<Nullable>enable</Nullable>`); treat a new nullable warning as a bug, not noise. Respect `TreatWarningsAsErrors` and `.editorconfig` analyzers.
+- **Central package management:** when the repository has `Directory.Packages.props`, a `PackageReference` carries NO `Version`; the version goes in `Directory.Packages.props`.
+- **Abstractions earn their place:** an interface needs a second implementation or a test seam at an I/O boundary. Do not wrap EF Core in a generic `IRepository<T>` — `DbContext` is already the unit of work and `DbSet<T>` the repository; add a repository only when the repo already has them.
+- **Constructor injection** (primary constructors are fine): `public sealed class TaskService(ITaskRepository repo, TimeProvider clock)`. Lifetimes: `DbContext` scoped, stateless services scoped or singleton, never a scoped dependency captured by a singleton.
+- **Options pattern** for configuration: `builder.Services.AddOptions<SmtpOptions>().BindConfiguration("Smtp").ValidateDataAnnotations().ValidateOnStart();` — never read `IConfiguration["..."]` in a service, never hardcode.
+- **DTOs at the edge** (records), mapped to and from the domain in the service. Never bind a request onto an EF entity or return one.
+- **Validation at the boundary:** DataAnnotations on the request record with `builder.Services.AddValidation()` (Minimal APIs, .NET 10) or `[ApiController]` model validation; FluentValidation where the repository already uses it. The domain enforces its own invariants too.
+- **Errors in one shape:** `builder.Services.AddProblemDetails()`, `app.UseExceptionHandler()` and an `IExceptionHandler` that maps domain exceptions to 400/404/409. Endpoints return `TypedResults` (`Results<Created<TaskResponse>, ValidationProblem>`), not ad-hoc anonymous objects. No stack trace in a response body.
+- **Async all the way:** `await` every I/O call and pass the request's `CancellationToken` down to EF and `HttpClient`. Never `.Result`, `.Wait()` or `async void` (outside event handlers).
+- **EF Core:** `AsNoTracking()` for reads, projection (`Select`) to DTOs instead of loading graphs, `Include` only for what the response needs. Postgres via `Npgsql.EntityFrameworkCore.PostgreSQL`. Raw SQL only through `FromSql`/`SqlQuery` with interpolated parameters (they are parameterized) — never `FromSqlRaw` with string concatenation.
+- **Migrations:** `dotnet ef migrations add <Name>`, review the generated `Up`/`Down`, commit the migration and the model snapshot together. Deploys apply an idempotent script (`dotnet ef migrations script --idempotent`) or a migration bundle; `Database.Migrate()` at startup races when several instances start and `EnsureCreated()` never belongs outside tests. postgres-migrations covers safe DDL.
+- **Outbound HTTP:** a typed client from `IHttpClientFactory` (`builder.Services.AddHttpClient<PaymentsClient>()`) with `AddStandardResilienceHandler()` (`Microsoft.Extensions.Http.Resilience`) for timeouts, retries and circuit breaking. Never `new HttpClient()` per call.
+- **Background work:** a `BackgroundService` that creates a scope per unit of work (`IServiceScopeFactory`) and honours `stoppingToken`.
+- **Logging:** `ILogger<T>` with message templates (`logger.LogInformation("Task {TaskId} created", id)`), never string interpolation in a log call; `[LoggerMessage]` source-generated methods on hot paths. No secrets or PII in a log or a ProblemDetails body.
+- **Time and ids:** inject `TimeProvider` instead of `DateTime.UtcNow` so tests control the clock; `Guid.CreateVersion7()` for new time-ordered ids where the repository has no id scheme.
+- **OpenAPI:** the built-in `builder.Services.AddOpenApi()` / `app.MapOpenApi()` document; keep it in step with api-contract-openapi. New code does not add Swashbuckle.
 
-- An interface is justified by a second implementation or a test seam at an I/O boundary (external API, clock, queue). A service with one implementation and no I/O does not need `IFooService`.
-- Do NOT wrap EF Core in a generic `IRepository<T>`: `DbContext` already is a unit of work and `DbSet<T>` already is a repository. Add a repository only when the repo already has them or a query is complex enough to deserve a name.
-- Clean/Onion layering: follow it when the solution already has `Domain`/`Application`/`Infrastructure` projects; don't impose it on a single-project API.
+## Worked Example
 
-## Minimal API shape (when the repo uses minimal APIs)
+`POST /tasks` creating a task:
 
 ```csharp
-public static class OrderEndpoints
+public sealed record CreateTaskRequest([property: Required, StringLength(200)] string Title);
+public sealed record TaskResponse(Guid Id, string Title);
+
+public static class TaskEndpoints
 {
-    public static RouteGroupBuilder MapOrders(this IEndpointRouteBuilder app)
+    public static RouteGroupBuilder MapTasks(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/orders").WithTags("Orders");
-        group.MapGet("/{id:guid}", GetById);
+        var group = app.MapGroup("/tasks").RequireAuthorization();
+        group.MapPost("/", Create);
         return group;
     }
 
-    private static async Task<Results<Ok<OrderResponse>, NotFound>> GetById(
-        Guid id, OrderService orders, CancellationToken ct)
+    private static async Task<Created<TaskResponse>> Create(
+        CreateTaskRequest req, TaskService service, CancellationToken ct)
     {
-        var order = await orders.FindAsync(id, ct);
-        return order is null ? TypedResults.NotFound() : TypedResults.Ok(order.ToResponse());
+        var task = await service.CreateAsync(req.Title, ct);
+        return TypedResults.Created($"/tasks/{task.Id}", new TaskResponse(task.Id, task.Title));
+    }
+}
+
+public sealed class TaskService(ITaskRepository repo, TimeProvider clock)
+{
+    public async Task<TodoTask> CreateAsync(string title, CancellationToken ct)
+    {
+        var task = TodoTask.Create(title, clock.GetUtcNow()); // the domain enforces the 200-character invariant too
+        await repo.AddAsync(task, ct);
+        return task;
     }
 }
 ```
 
-`TypedResults` keeps the OpenAPI document honest; register the group from `Program.cs` next to the others.
+The endpoint binds and validates; the service orchestrates; `TodoTask.Create` rejects an invalid title even when it is called from a job instead of HTTP.
 
 ## Verify
 
-`dotnet build` with zero NEW warnings, then `dotnet test` on the affected test projects. If the repo has an `.editorconfig`, run `dotnet format --include <the files you changed>` so your diff matches the house style; do not reformat files you did not touch.
+Use the repository's own commands first (list_component_checks, the README, CI). Otherwise: `dotnet build` (warnings read, not skipped), `dotnet format --verify-no-changes` when the repository is formatted with it, and `dotnet test`. For the runtime check build once and run the output — `dotnet publish <Api>.csproj -c Release -o /tmp/tt-<task key>/out`, then `ASPNETCORE_URLS=http://127.0.0.1:18080 dotnet /tmp/tt-<task key>/out/<Api>.dll` in the background — rather than `dotnet run`, whose child process a terminal timeout can orphan.
 
-## Red flags
+## Common Mistakes
+
+- Business logic in the endpoint or controller.
+- Returning an EF entity (lazy-loading surprises, leaked columns, cycles in the JSON).
+- `.Result` / `.Wait()` on a task — thread-pool starvation under load.
+- A `CancellationToken` accepted and never passed on.
+- `new HttpClient()` in a loop — socket exhaustion; `IHttpClientFactory` exists for this.
+- Applying migrations from every pod at startup.
+
+## Red Flags
 
 - A new `IXxx` interface with exactly one implementation and no test that substitutes it.
-- `Task.Run` inside a request handler to "make it async".
-- A `static` mutable field in a service.
 - A package added with a `Version` attribute in a repo that has `Directory.Packages.props`.
+- `using Microsoft.AspNetCore.*` inside the domain project.
+- `FromSqlRaw($"... {input}")` or any SQL assembled from strings.
+- A singleton service with a `DbContext` constructor parameter.
+- A catch-all `catch (Exception)` that returns 200.

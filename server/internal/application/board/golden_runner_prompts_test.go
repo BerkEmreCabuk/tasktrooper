@@ -151,7 +151,10 @@ func TestGoldenBuildTriggerMessage(t *testing.T) {
 
 func TestGoldenClosingStep(t *testing.T) {
 	assertGolden(t, "closing_step_build_verify", closingStep(taskWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnTodo}}))
-	assertGolden(t, "closing_step_default", closingStep(taskWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnDone}}))
+	assertGolden(t, "closing_step_default", closingStep(analizWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnAnalizReview, TaskType: domain.TaskTypeAnaliz}}))
+	assertGolden(t, "closing_step_review", closingStep(taskWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnCodeReview, TaskType: "task"}}))
+	assertGolden(t, "closing_step_release", closingStep(taskWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnDone, TaskType: "task"}}))
+	assertGolden(t, "closing_step_default_analiz_done", closingStep(analizWF, RunJob{Task: domain.BoardTask{Column: domain.TaskColumnDone, TaskType: domain.TaskTypeAnaliz}}))
 }
 
 func TestGoldenPrependProjectContext(t *testing.T) {
@@ -277,6 +280,13 @@ func TestGoldenHandoffComments(t *testing.T) {
 	analizRefusedRunner.advanceToAnalizReview(context.Background(), runJobFor(refusedTask, agentID), analizWF, documentedUsage())
 	require1(t, len(analizRefusedUpdater.comments) == 1, "expected the analiz_review handoff refusal comment")
 	assertGolden(t, "handoff_analiz_review_refused_comment", analizRefusedUpdater.comments[0].Content)
+}
+
+func TestGoldenHandoffRevisionComments(t *testing.T) {
+	assertGolden(t, "handoff_code_review_refused_revision_comment",
+		handoffCodeReviewRefusedRevisionKey.Render(handoffReasonInput{Reason: "criteria are open"}))
+	assertGolden(t, "handoff_analiz_review_refused_revision_comment",
+		handoffAnalizReviewRefusedRevisionKey.Render(handoffReasonInput{Reason: "criteria are open"}))
 }
 
 func require1(t *testing.T, cond bool, msg string) {

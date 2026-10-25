@@ -1,45 +1,85 @@
+import { lazy } from "react";
 import { BrowserRouter, Navigate, Route, Routes, useParams } from "react-router-dom";
 import { Toaster } from "sonner";
 import { ProtectedRoute } from "@/components/layout/ProtectedRoute";
 import { SetupProvider } from "@/hooks/useSetup";
 import { ThemeProvider } from "@/hooks/useTheme";
 import { I18nProvider } from "@/hooks/useI18n";
+import { useRestoreFocusOnReturn } from "@/hooks/useRestoreFocusOnReturn";
+import { useScreenTracking } from "@/lib/analytics";
 import { SetupPage } from "@/pages/SetupPage";
 import { WorkspaceAgentLayout } from "@/components/layout/WorkspaceAgentLayout";
-import { AgentSettingsPage } from "@/pages/AgentSettingsPage";
-import { AgentColumnsPage } from "@/pages/AgentColumnsPage";
-import { AddRepositoryPage } from "@/pages/AddRepositoryPage";
-import { ProjectPage } from "@/pages/ProjectPage";
-import { RepositoryPage } from "@/pages/RepositoryPage";
-import { IncidentsPage } from "@/pages/IncidentsPage";
-import { DeploymentsPage } from "@/pages/DeploymentsPage";
-import { MobileAppsPage } from "@/pages/MobileAppsPage";
-import { OperationsLayout } from "@/components/layout/OperationsLayout";
-import { FilesPage } from "@/pages/FilesPage";
-import { RulesPage } from "@/pages/RulesPage";
-import { IntegrationsSettingsPage } from "@/pages/IntegrationsSettingsPage";
-import { MCPServersPage } from "@/pages/MCPServersPage";
 import { SettingsLayout } from "@/components/layout/SettingsLayout";
-import { SettingsPage } from "@/pages/SettingsPage";
-import { BoardSettingsPage } from "@/pages/BoardSettingsPage";
-import { RolesSettingsPage } from "@/pages/RolesSettingsPage";
-import { WorkflowSettingsPage } from "@/pages/WorkflowSettingsPage";
-import { LLMSettingsPage } from "@/pages/LLMSettingsPage";
-import { UsageSettingsPage } from "@/pages/UsageSettingsPage";
-import { CatalogPage } from "@/pages/CatalogPage";
-import { SkillsPage } from "@/pages/SkillsPage";
-import { ProjectsPage } from "@/pages/ProjectsPage";
 import { WorkspaceLayout } from "@/components/layout/WorkspaceLayout";
-import { BacklogPage } from "@/pages/BacklogPage";
-import { ReleasedPage } from "@/pages/ReleasedPage";
-import { BoardPage } from "@/pages/BoardPage";
-import { AgentChatPage } from "@/pages/AgentChatPage";
-import { AnalysisReviewPage } from "@/pages/AnalysisReviewPage";
-import { AgentPerformancePage } from "@/pages/AgentPerformancePage";
-import { AgentMemoryPage } from "@/pages/AgentMemoryPage";
-import { SharedMemoryPage } from "@/pages/SharedMemoryPage";
+import { HomePage } from "@/pages/HomePage";
+
+// Every page but the first screens is its own chunk: the shell and /home paint
+// without parsing the code of thirty pages nobody has opened yet.
+const AgentSettingsPage = lazy(() => import("@/pages/AgentSettingsPage").then((m) => ({ default: m.AgentSettingsPage })));
+const AgentColumnsPage = lazy(() => import("@/pages/AgentColumnsPage").then((m) => ({ default: m.AgentColumnsPage })));
+const AddRepositoryPage = lazy(() => import("@/pages/AddRepositoryPage").then((m) => ({ default: m.AddRepositoryPage })));
+const ProjectPage = lazy(() => import("@/pages/ProjectPage").then((m) => ({ default: m.ProjectPage })));
+const RepositoryPage = lazy(() => import("@/pages/RepositoryPage").then((m) => ({ default: m.RepositoryPage })));
+const OpsShell = lazy(() => import("@/components/operations/shell/OpsShell").then((m) => ({ default: m.OpsShell })));
+const OpsExplorerPage = lazy(() => import("@/pages/ops/OpsExplorerPage"));
+const OpsEntityPage = lazy(() => import("@/pages/ops/OpsEntityPage"));
+const OpsErrorsInboxPage = lazy(() => import("@/pages/ops/OpsErrorsInboxPage"));
+const OpsErrorDefinitionsPage = lazy(() => import("@/pages/ops/OpsErrorDefinitionsPage"));
+const OpsLogsPage = lazy(() => import("@/pages/ops/OpsLogsPage"));
+const OpsChangesPage = lazy(() => import("@/pages/ops/OpsChangesPage"));
+const OpsStoreAppsPage = lazy(() => import("@/pages/ops/OpsStoreAppsPage"));
+const OpsIssuesPage = lazy(() => import("@/pages/ops/OpsIssuesPage"));
+const OpsAlertsPage = lazy(() => import("@/pages/ops/OpsAlertsPage"));
+const EntitySummary = lazy(() => import("@/pages/ops/entity/EntitySummary"));
+const EntityErrors = lazy(() => import("@/pages/ops/entity/EntityErrors"));
+const EntityLogs = lazy(() => import("@/pages/ops/entity/EntityLogs"));
+const EntityChanges = lazy(() => import("@/pages/ops/entity/EntityChanges"));
+const EntityIssues = lazy(() => import("@/pages/ops/entity/EntityIssues"));
+const EntityReleases = lazy(() => import("@/pages/ops/entity/EntityReleases"));
+const EntityQueues = lazy(() => import("@/pages/ops/entity/EntityQueues"));
+const EntitySignals = lazy(() => import("@/pages/ops/entity/EntitySignals"));
+const EntityAlerts = lazy(() => import("@/pages/ops/entity/EntityAlerts"));
+const EntityEndpoints = lazy(() => import("@/pages/ops/entity/EntityEndpoints"));
+const EntityPages = lazy(() => import("@/pages/ops/entity/EntityPages"));
+const EntityCrashes = lazy(() => import("@/pages/ops/entity/EntityCrashes"));
+const EntityTraces = lazy(() => import("@/pages/ops/entity/EntityTraces"));
+const DataSourcesPage = lazy(() => import("@/pages/DataSourcesPage").then((m) => ({ default: m.DataSourcesPage })));
+const OpsAlertConnectionsPage = lazy(() => import("@/pages/ops/OpsAlertConnectionsPage"));
+const FilesPage = lazy(() => import("@/pages/FilesPage").then((m) => ({ default: m.FilesPage })));
+const RulesPage = lazy(() => import("@/pages/RulesPage").then((m) => ({ default: m.RulesPage })));
+const IntegrationsSettingsPage = lazy(() => import("@/pages/IntegrationsSettingsPage").then((m) => ({ default: m.IntegrationsSettingsPage })));
+const MCPServersPage = lazy(() => import("@/pages/MCPServersPage").then((m) => ({ default: m.MCPServersPage })));
+const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+import { AdvancedConfigRoute } from "@/components/layout/AdvancedConfigRoute";
+import { EntitySubRoute } from "@/pages/ops/entity/EntitySubRoute";
+import { EntityIndexRedirect, LegacyComponentRedirect, RedirectKeepingSearch } from "@/pages/ops/opsRedirects";
+const BoardSettingsPage = lazy(() => import("@/pages/BoardSettingsPage").then((m) => ({ default: m.BoardSettingsPage })));
+const RolesSettingsPage = lazy(() => import("@/pages/RolesSettingsPage").then((m) => ({ default: m.RolesSettingsPage })));
+const WorkflowSettingsPage = lazy(() => import("@/pages/WorkflowSettingsPage").then((m) => ({ default: m.WorkflowSettingsPage })));
+const LLMSettingsPage = lazy(() => import("@/pages/LLMSettingsPage").then((m) => ({ default: m.LLMSettingsPage })));
+const UsageSettingsPage = lazy(() => import("@/pages/UsageSettingsPage").then((m) => ({ default: m.UsageSettingsPage })));
+const CatalogPage = lazy(() => import("@/pages/CatalogPage").then((m) => ({ default: m.CatalogPage })));
+const EnvironmentSettingsPage = lazy(() => import("@/pages/EnvironmentSettingsPage").then((m) => ({ default: m.EnvironmentSettingsPage })));
+const SkillsPage = lazy(() => import("@/pages/SkillsPage").then((m) => ({ default: m.SkillsPage })));
+const ProjectsPage = lazy(() => import("@/pages/ProjectsPage").then((m) => ({ default: m.ProjectsPage })));
+const BacklogPage = lazy(() => import("@/pages/BacklogPage").then((m) => ({ default: m.BacklogPage })));
+const ReleasedPage = lazy(() => import("@/pages/ReleasedPage").then((m) => ({ default: m.ReleasedPage })));
+const BoardPage = lazy(() => import("@/pages/BoardPage").then((m) => ({ default: m.BoardPage })));
+const AgentChatPage = lazy(() => import("@/pages/AgentChatPage").then((m) => ({ default: m.AgentChatPage })));
+const AnalysisReviewPage = lazy(() => import("@/pages/AnalysisReviewPage").then((m) => ({ default: m.AnalysisReviewPage })));
+const AgentPerformancePage = lazy(() => import("@/pages/AgentPerformancePage").then((m) => ({ default: m.AgentPerformancePage })));
+const AgentMemoryPage = lazy(() => import("@/pages/AgentMemoryPage").then((m) => ({ default: m.AgentMemoryPage })));
+const SharedMemoryPage = lazy(() => import("@/pages/SharedMemoryPage").then((m) => ({ default: m.SharedMemoryPage })));
+
+function ScreenTracker() {
+  useScreenTracking();
+  return null;
+}
 
 export default function App() {
+  // Alt-tabbing out drops document focus to <body>; restore it to the field
+  // the user was in when the window comes back.
+  useRestoreFocusOnReturn();
   return (
     <ThemeProvider>
       <I18nProvider>
@@ -48,11 +88,13 @@ export default function App() {
             and must not disagree. It derives everything and stores nothing. */}
         <SetupProvider>
         <BrowserRouter>
+          <ScreenTracker />
           <Routes>
-            <Route path="/" element={<Navigate to="/board" replace />} />
+            <Route path="/" element={<Navigate to="/home" replace />} />
             <Route element={<ProtectedRoute />}>
               <Route path="/setup" element={<SetupPage />} />
               <Route element={<WorkspaceLayout />}>
+                <Route path="home" element={<HomePage />} />
                 <Route path="board" element={<BoardPage />} />
                 <Route path="backlog" element={<BacklogPage />} />
                 <Route path="released" element={<ReleasedPage />} />
@@ -67,7 +109,7 @@ export default function App() {
                 <Route path="projects/:projectId" element={<ProjectPage />} />
                 <Route path="agents/:agentId/chat" element={<AgentChatPage />} />
                 <Route path="agents/:agentId/chat/:sessionId" element={<AgentChatPage />} />
-                <Route path="agents/new" element={<WorkspaceAgentLayout />}>
+                <Route path="agents/new" element={<AdvancedConfigRoute redirectTo="/board"><WorkspaceAgentLayout /></AdvancedConfigRoute>}>
                   <Route index element={<Navigate to="settings" replace />} />
                   <Route path="settings" element={<AgentSettingsPage />} />
                 </Route>
@@ -88,20 +130,55 @@ export default function App() {
                     operations matrix's "not configured" link still points here. */}
                 <Route path="repositories/:repositoryId/deploy" element={<RepositoryDeployRedirect />} />
                 <Route path="repositories/:repositoryId/tasks/:taskId/analysis" element={<AnalysisReviewPage />} />
-                <Route path="operations" element={<OperationsLayout />}>
-                  <Route index element={<Navigate to="deployments" replace />} />
-                  <Route path="deployments" element={<DeploymentsPage />} />
-                  <Route path="apps" element={<MobileAppsPage />} />
-                  <Route path="incidents" element={<IncidentsPage />} />
+                {/* The Operations console (New Relic style): its own shell with a
+                    grouped nav and a top bar whose range/env/compare live in the URL. */}
+                <Route path="operations" element={<OpsShell />}>
+                  <Route index element={<OpsExplorerPage />} />
+                  <Route path="services" element={<OpsExplorerPage type="services" />} />
+                  <Route path="web" element={<OpsExplorerPage type="web" />} />
+                  <Route path="mobile" element={<OpsExplorerPage type="mobile" />} />
+                  <Route path="mobile/app/:repositoryId" element={<OpsStoreAppsPage />} />
+                  <Route path="workers" element={<OpsExplorerPage type="workers" />} />
+                  <Route path="errors" element={<OpsErrorsInboxPage />} />
+                  <Route path="errors/definitions" element={<OpsErrorDefinitionsPage />} />
+                  <Route path="logs" element={<OpsLogsPage />} />
+                  <Route path="changes" element={<OpsChangesPage />} />
+                  <Route path="issues" element={<OpsIssuesPage />} />
+                  <Route path="alerts" element={<OpsAlertsPage />} />
+                  <Route path="sources" element={<DataSourcesPage />} />
+                  <Route path="alert-connections" element={<OpsAlertConnectionsPage />} />
+                  <Route path="entity/:componentId" element={<OpsEntityPage />}>
+                    <Route index element={<EntityIndexRedirect />} />
+                    <Route path="summary" element={<EntitySubRoute tab="summary" page={EntitySummary} />} />
+                    <Route path="endpoints" element={<EntitySubRoute tab="endpoints" page={EntityEndpoints} />} />
+                    <Route path="pages" element={<EntitySubRoute tab="pages" page={EntityPages} />} />
+                    <Route path="crashes" element={<EntitySubRoute tab="crashes" page={EntityCrashes} />} />
+                    <Route path="queues" element={<EntitySubRoute tab="queues" page={EntityQueues} />} />
+                    <Route path="releases" element={<EntitySubRoute tab="releases" page={EntityReleases} />} />
+                    <Route path="errors" element={<EntitySubRoute tab="errors" page={EntityErrors} />} />
+                    <Route path="logs" element={<EntitySubRoute tab="logs" page={EntityLogs} />} />
+                    <Route path="traces" element={<EntitySubRoute tab="traces" page={EntityTraces} />} />
+                    <Route path="changes" element={<EntitySubRoute tab="changes" page={EntityChanges} />} />
+                    <Route path="issues" element={<EntitySubRoute tab="issues" page={EntityIssues} />} />
+                    <Route path="alerts" element={<EntitySubRoute tab="alerts" page={EntityAlerts} />} />
+                    <Route path="signals" element={<EntitySubRoute tab="signals" page={EntitySignals} />} />
+                    <Route path="*" element={<EntityIndexRedirect />} />
+                  </Route>
+                  {/* The screens the console replaced; old links land on their successors. */}
+                  <Route path="deployments" element={<RedirectKeepingSearch to="/operations/changes" />} />
+                  <Route path="incidents" element={<RedirectKeepingSearch to="/operations/issues" />} />
+                  <Route path="apps" element={<RedirectKeepingSearch to="/operations/mobile" />} />
+                  <Route path="c/:componentId" element={<LegacyComponentRedirect />} />
+                  <Route path="*" element={<Navigate to="/operations" replace />} />
                 </Route>
-                <Route path="incidents" element={<Navigate to="/operations/incidents" replace />} />
+                <Route path="incidents" element={<RedirectKeepingSearch to="/operations/issues" />} />
                 <Route path="files" element={<FilesPage />} />
                 <Route path="memory" element={<SharedMemoryPage />} />
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route index element={<SettingsPage />} />
-                  <Route path="board" element={<BoardSettingsPage />} />
-                  <Route path="roles" element={<RolesSettingsPage />} />
-                  <Route path="workflows" element={<WorkflowSettingsPage />} />
+                  <Route path="board" element={<AdvancedConfigRoute><BoardSettingsPage /></AdvancedConfigRoute>} />
+                  <Route path="roles" element={<AdvancedConfigRoute><RolesSettingsPage /></AdvancedConfigRoute>} />
+                  <Route path="workflows" element={<AdvancedConfigRoute><WorkflowSettingsPage /></AdvancedConfigRoute>} />
                   {/* Roles replace the single analiz-assignment picker (any role may now
                       carry that duty, not just an analyst) — old bookmarks/links land here. */}
                   <Route path="analiz-assignment" element={<Navigate to="/settings/roles" replace />} />
@@ -118,6 +195,7 @@ export default function App() {
                   <Route path="team" element={<Navigate to="/settings" replace />} />
                   <Route path="usage" element={<UsageSettingsPage />} />
                   <Route path="catalog" element={<CatalogPage />} />
+                  <Route path="environment" element={<EnvironmentSettingsPage />} />
                 </Route>
                 <Route path="workspace-settings" element={<Navigate to="/settings/board" replace />} />
               </Route>
@@ -134,7 +212,7 @@ export default function App() {
               <Route path="/profile" element={<Navigate to="/board" replace />} />
               <Route path="/llm" element={<Navigate to="/settings/llm" replace />} />
             </Route>
-            <Route path="*" element={<Navigate to="/board" replace />} />
+            <Route path="*" element={<Navigate to="/home" replace />} />
           </Routes>
         </BrowserRouter>
         <Toaster richColors position="top-right" closeButton />

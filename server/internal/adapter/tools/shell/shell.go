@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -19,6 +18,8 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/childenv"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/hostshell"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/proctree"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
 )
@@ -165,7 +166,7 @@ func (s *shellTool) Execute(ctx context.Context, arguments string) domain.ToolRe
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(execCtx, "sh", "-c", a.Command)
+	cmd := hostshell.Default().Command(execCtx, a.Command)
 	cmd.Dir = workDir
 
 	// Per-task toolchain: a board run resolves the overlay once and passes it
@@ -187,7 +188,15 @@ func (s *shellTool) Execute(ctx context.Context, arguments string) domain.ToolRe
 
 	log.Debug().Str("command", a.Command).Str("working_dir", workDir).Msg("executing shell command")
 
-	err := cmd.Run()
+	tree, err := proctree.Start(cmd)
+	if err == nil {
+		err = cmd.Wait()
+		if execCtx.Err() == nil && backgroundsAProcess(strings.TrimSpace(a.Command), hostshell.Default().Kind) {
+			proctree.Default.Track(proctree.ScopeFrom(ctx), tree)
+		} else {
+			tree.Close()
+		}
+	}
 	output := out.String()
 
 	if execCtx.Err() == context.DeadlineExceeded {
@@ -363,7 +372,13 @@ func (s *shellTool) validateSandbox(ctx context.Context, command, workDir string
 		if err != nil {
 			return fmt.Errorf("invalid configured working directory")
 		}
-		if !strings.HasPrefix(absWork, absBase) {
+		// A bare prefix test let /data/ws-evil pass for /data/ws, and refused
+		// c:\data for C:\data on Windows.
+		ok, err := workspace.IsWithinRoot(absWork, absBase)
+		if err != nil {
+			return err
+		}
+		if !ok {
 			return fmt.Errorf("working directory %q outside allowed path %q", workDir, s.workingDir)
 		}
 	}

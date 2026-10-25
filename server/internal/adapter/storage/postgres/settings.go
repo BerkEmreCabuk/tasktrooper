@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -250,4 +251,63 @@ func (s *SettingsStore) SetGitHubToken(ctx context.Context, token string) error 
 // DeleteGitHubToken, kayıtlı token'ı siler.
 func (s *SettingsStore) DeleteGitHubToken(ctx context.Context) error {
 	return s.forgetKeys(ctx, githubTokenKey)
+}
+
+const githubAppAuthKey = "github_app_auth"
+
+// GitHubAppAuth is the GitHub App connection, encrypted like the token: it
+// holds a refresh token that keeps the connection alive for months.
+func (s *SettingsStore) GitHubAppAuth(ctx context.Context) (domain.GitHubAppAuth, bool, error) {
+	raw, err := s.secret(ctx, githubAppAuthKey)
+	if err != nil || raw == "" {
+		return domain.GitHubAppAuth{}, false, err
+	}
+	var auth domain.GitHubAppAuth
+	if err := json.Unmarshal([]byte(raw), &auth); err != nil {
+		return domain.GitHubAppAuth{}, false, fmt.Errorf("decode %s: %w", githubAppAuthKey, err)
+	}
+	return auth, auth.Token.AccessToken != "", nil
+}
+
+func (s *SettingsStore) SetGitHubAppAuth(ctx context.Context, auth domain.GitHubAppAuth) error {
+	raw, err := json.Marshal(auth)
+	if err != nil {
+		return err
+	}
+	return s.setSecret(ctx, githubAppAuthKey, string(raw))
+}
+
+func (s *SettingsStore) DeleteGitHubAppAuth(ctx context.Context) error {
+	return s.forgetKeys(ctx, githubAppAuthKey)
+}
+
+const githubRunnerKey = "github_runner"
+
+// GitHubRunnerConfig is plain JSON: it names repositories and holds no
+// credential — each runner's registration is fetched per job.
+func (s *SettingsStore) GitHubRunnerConfig(ctx context.Context) (domain.GitHubRunnerConfig, error) {
+	var value string
+	err := s.pool.QueryRow(ctx, `SELECT value FROM app_settings WHERE key = $1`, githubRunnerKey).Scan(&value)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && value == "") {
+		return domain.GitHubRunnerConfig{Repos: []string{}}, nil
+	}
+	if err != nil {
+		return domain.GitHubRunnerConfig{}, fmt.Errorf("get %s: %w", githubRunnerKey, err)
+	}
+	var cfg domain.GitHubRunnerConfig
+	if err := json.Unmarshal([]byte(value), &cfg); err != nil {
+		return domain.GitHubRunnerConfig{}, fmt.Errorf("decode %s: %w", githubRunnerKey, err)
+	}
+	if cfg.Repos == nil {
+		cfg.Repos = []string{}
+	}
+	return cfg, nil
+}
+
+func (s *SettingsStore) SetGitHubRunnerConfig(ctx context.Context, cfg domain.GitHubRunnerConfig) error {
+	raw, err := json.Marshal(cfg)
+	if err != nil {
+		return err
+	}
+	return s.setPlain(ctx, githubRunnerKey, string(raw))
 }

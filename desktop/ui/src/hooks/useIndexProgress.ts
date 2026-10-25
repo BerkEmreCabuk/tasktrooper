@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type WorkspaceIndex } from "@/api";
+import { api, ApiError, type WorkspaceIndex } from "@/api";
+import { usePolling } from "@/hooks/usePolling";
+import { keepEqual } from "@/lib/stableState";
 
 function progressPercent(index: WorkspaceIndex | null): number {
   if (!index) return 0;
@@ -26,19 +28,27 @@ type UseIndexProgressOptions = {
 export function useIndexProgress(repositoryId: string | undefined, options: UseIndexProgressOptions = {}) {
   const { pollMs = 1500, forcePoll = false, onIndexingFinished } = options;
   const [index, setIndex] = useState<WorkspaceIndex | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(false);
   const sawActiveIndexingRef = useRef(false);
 
   const refresh = useCallback(async () => {
     if (!repositoryId) return null;
-    const data = await api.getRepositoryIndexStatus(repositoryId);
-    setIndex(data);
-    return data;
+    try {
+      const data = await api.getRepositoryIndexStatus(repositoryId);
+      setIndex((prev) => keepEqual(prev, data));
+      setError(null);
+      return data;
+    } catch (e) {
+      setError(e instanceof ApiError ? e : null);
+      throw e;
+    }
   }, [repositoryId]);
 
   useEffect(() => {
     if (!repositoryId) {
       setIndex(null);
+      setError(null);
       return;
     }
     setLoading(true);
@@ -68,16 +78,12 @@ export function useIndexProgress(repositoryId: string | undefined, options: UseI
     !!repositoryId &&
     (forcePoll || isActiveIndexStatus(index?.status));
 
-  useEffect(() => {
-    if (!shouldPoll) return;
-    const timer = window.setInterval(() => {
-      refresh().catch(() => undefined);
-    }, pollMs);
-    return () => window.clearInterval(timer);
-  }, [shouldPoll, pollMs, refresh]);
+  const poll = useCallback(() => refresh().then(() => undefined, () => undefined), [refresh]);
+  usePolling(poll, pollMs, shouldPoll, { leading: false });
 
   return {
     index,
+    error,
     loading,
     percent: progressPercent(index),
     refresh,

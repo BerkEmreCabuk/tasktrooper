@@ -1,7 +1,7 @@
 // Labels that live in non-component modules (lib/*). Resolved via tStatic().
 export const lib = {
   projectBoard: {
-    taskType: { task: "Task", analiz: "Analysis", bug: "Bug", technical: "Technical" },
+    taskType: { task: "Task", analiz: "Analysis", bug: "Bug", technical: "Technical", design: "Design" },
     taskPriority: { low: "Low", medium: "Medium", high: "High", critical: "Critical" },
     pipelineStatus: {
       pending: "Pending",
@@ -25,8 +25,14 @@ export const lib = {
       deploy_watch: "Waiting for the deploy",
       work_order: "Waiting for blocking tasks",
       human_decision: "Needs a human decision",
+      analysis_questions: "Open questions need your answer",
+      deploy_order: "Merge waits for the deploy order",
+      before_deploy: "Merge waits for before-deploy steps",
+      delivery_profile: "Merge waits for the delivery profile",
+      deploy_env: "Merge waits for env vars",
     },
     blockedResourceFallback: "Waiting for a shared resource",
+    deployOrderBlocker: "Merge waits for {keys}",
   },
   plan: {
     step: {
@@ -69,6 +75,7 @@ export const lib = {
       run_terminal: "Terminal (shell)",
       web_search: "Web search",
       fetch_url: "Fetch URL",
+      http_request: "HTTP request (localhost)",
       codebase_search: "Codebase search",
       grep_code: "Grep code",
       get_repo_tree: "Repo tree",

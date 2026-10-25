@@ -1,5 +1,6 @@
 import { Box, Pencil, Plus } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import {
   api,
@@ -10,10 +11,12 @@ import {
   type ComponentGates,
   type CommandPurpose,
   type ComponentRole,
+  type GateCITask,
   type RepositoryModel,
 } from "@/api";
 import { AddComponentDialog } from "@/components/projects/repository/AddComponentDialog";
 import { ComponentDocsCard } from "@/components/projects/repository/ComponentDocsCard";
+import { ComponentFindingsSummary } from "@/components/projects/repository/findings/ComponentFindingsSummary";
 import { ComponentRail } from "@/components/projects/repository/ComponentRail";
 import { RepositoryReviewSettings } from "@/components/projects/repository/RepositoryReviewSettings";
 import { evidenceLabel } from "@/components/projects/model/EvidenceList";
@@ -37,9 +40,11 @@ interface ComponentsTabProps {
   selectedComponentId: string | null;
   onSelectComponent: (id: string) => void;
   onReload: () => void;
+  /** Opens the Findings tab on this component; without it the summary card is not shown. */
+  onOpenFindings?: (componentId: string) => void;
 }
 
-export function ComponentsTab({ model, repositoryId, selectedComponentId, onSelectComponent, onReload }: ComponentsTabProps) {
+export function ComponentsTab({ model, repositoryId, selectedComponentId, onSelectComponent, onReload, onOpenFindings }: ComponentsTabProps) {
   const { t } = useI18n();
   const [addOpen, setAddOpen] = useState(false);
 
@@ -92,7 +97,14 @@ export function ComponentsTab({ model, repositoryId, selectedComponentId, onSele
           }
         />
         <div className="min-w-0 flex-1 space-y-4">
-          <ComponentDetail key={selected.id} component={selected} model={model} repositoryId={repositoryId} onReload={onReload} />
+          <ComponentDetail
+            key={selected.id}
+            component={selected}
+            model={model}
+            repositoryId={repositoryId}
+            onReload={onReload}
+            onOpenFindings={onOpenFindings}
+          />
         </div>
         <AddComponentDialog
           open={addOpen}
@@ -114,20 +126,34 @@ function ComponentDetail({
   model,
   repositoryId,
   onReload,
+  onOpenFindings,
 }: {
   component: Component;
   model: RepositoryModel;
   repositoryId: string;
   onReload: () => void;
+  onOpenFindings?: (componentId: string) => void;
 }) {
   const { t } = useI18n();
+  const navigate = useNavigate();
   const [dismissOpen, setDismissOpen] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  const announceGateTask = (task: GateCITask) => {
+    const gate = task.gate === "mutation" ? "Mutation" : "Coverage";
+    const action = { label: task.task_key, onClick: () => navigate(`/board?task=${encodeURIComponent(task.task_id)}`) };
+    if (task.created) {
+      toast.success(t(`repositoryPage.components.gateCITask.created${gate}`, { languages: (task.languages ?? []).join(", ") }), { action });
+    } else {
+      toast.info(t(`repositoryPage.components.gateCITask.open${gate}`), { action });
+    }
+  };
 
   const patch = async (body: Parameters<typeof api.updateComponent>[1], quiet = false) => {
     setBusy(true);
     try {
-      await api.updateComponent(component.id, body);
+      const updated = await api.updateComponent(component.id, body);
+      updated.gate_ci_tasks?.forEach(announceGateTask);
       onReload();
     } catch (e) {
       if (!quiet) toast.error(e instanceof Error ? e.message : t("repositoryPage.components.saveFailed"));
@@ -155,6 +181,13 @@ function ComponentDetail({
         )}
       </div>
 
+      {onOpenFindings && model.latest_scan && (
+        <ComponentFindingsSummary
+          findings={model.findings ?? []}
+          componentId={component.id}
+          onOpen={() => onOpenFindings(component.id)}
+        />
+      )}
       <IdentityCard component={component} patch={patch} />
       <StackCard component={component} />
       <CommandsCard component={component} patch={patch} />
@@ -388,7 +421,10 @@ function GatesCard({ component, patch }: CardProps) {
 
   return (
     <Card className="space-y-4 p-6">
-      <h3 className="font-semibold">{t("repositoryPage.components.gatesTitle")}</h3>
+      <div className="space-y-1">
+        <h3 className="font-semibold">{t("repositoryPage.components.gatesTitle")}</h3>
+        <p className="text-micro text-muted-foreground">{t("repositoryPage.components.gatesHint")}</p>
+      </div>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="flex items-center justify-between gap-3 rounded-md border border-border p-3">
           <div>

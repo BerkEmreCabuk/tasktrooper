@@ -15,6 +15,8 @@ const (
 	BehaviourEnsurePROnEnter          BehaviourKey = "ensure_pr_on_enter"
 	BehaviourDetectMigrationOnEnter   BehaviourKey = "detect_migration_on_enter"
 	BehaviourStageDeployOnEnter       BehaviourKey = "stage_deploy_on_enter"
+	BehaviourStoreTestBuildOnEnter    BehaviourKey = "store_test_build_on_enter"
+	BehaviourApproveDesignSystem      BehaviourKey = "approve_design_system_on_enter"
 	BehaviourAutoEnter                BehaviourKey = "auto_enter"
 	BehaviourAdvanceOnDiff            BehaviourKey = "advance_on_diff"
 	BehaviourAdvanceOnDocument        BehaviourKey = "advance_on_document"
@@ -158,6 +160,14 @@ var BehaviourRegistry = map[BehaviourKey]BehaviourSpec{
 		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindQueue, StageKindReview}, Label: "Stage deploy on enter",
 		Description: "Entering this stage triggers a stage deploy, per the repository's test strategy.",
 		Params:      []ParamSpec{{Name: "when", Type: ParamTypeEnum, Options: []string{"qa", "per_step"}, Required: true}},
+	},
+	BehaviourStoreTestBuildOnEnter: {
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindQueue, StageKindReview, StageKindApproval}, Label: "Store test build on enter",
+		Description: "Entering this stage builds the task for each linked store app and uploads it to TestFlight / Play internal app sharing.",
+	},
+	BehaviourApproveDesignSystem: {
+		Scope: BehaviourScopeStage, Group: BehaviourGroupEntry, Kinds: []StageKind{StageKindTerminal}, Label: "Approve design system on enter",
+		Description: "Entering this stage approves every design system version the task proposed and supersedes the one each replaces.",
 	},
 	BehaviourAutoEnter: {
 		Scope: BehaviourScopeStage, Group: BehaviourGroupExit, Kinds: []StageKind{StageKindQueue, StageKindRework}, Label: "Auto-enter",

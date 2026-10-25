@@ -90,6 +90,11 @@ export function textQuoteKit() {
         if (child.nodeType === 3) {
           addText(child as Text);
         } else if (child.nodeType === 1) {
+          const element = child as Element;
+          // The Open questions section (frameRuntime.ts) carries this: it is
+          // our own injected UI, never part of the report, so no annotation
+          // may anchor into it and no selection inside it is ever reported.
+          if (element.hasAttribute("data-tt-skip")) continue;
           const tag = child.nodeName.toUpperCase();
           if (SKIP.has(tag)) continue;
           const block = BLOCK.has(tag);

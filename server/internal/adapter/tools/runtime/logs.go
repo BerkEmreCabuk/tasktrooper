@@ -92,13 +92,14 @@ func (t *queryRuntimeLogsTool) Execute(ctx context.Context, arguments string) do
 		return toolError(name, fmt.Sprintf("invalid min_severity %q", args.MinSeverity))
 	}
 
-	since := defaultLogSince
+	now := time.Now().UTC()
+	since := now.Add(-defaultLogSince)
 	if args.Since != "" {
-		d, err := parseSinceDuration(args.Since)
+		s, err := resolveSince(args.Since, now)
 		if err != nil {
 			return toolError(name, err.Error())
 		}
-		since = d
+		since = s
 	}
 
 	limit := args.Limit
@@ -118,9 +119,8 @@ func (t *queryRuntimeLogsTool) Execute(ctx context.Context, arguments string) do
 		return toolError(name, err.Error())
 	}
 
-	now := time.Now().UTC()
 	page, err := t.kit.Cloud.Logs(ctx, env.ID, domain.RuntimeLogQuery{
-		Since:       now.Add(-since),
+		Since:       since,
 		Until:       now,
 		MinSeverity: domain.LogSeverity(args.MinSeverity),
 		Text:        args.Text,

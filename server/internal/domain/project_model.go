@@ -86,13 +86,16 @@ const (
 	ComponentRoleLibrary  ComponentRole = "library"
 	ComponentRoleInfra    ComponentRole = "infra"
 	ComponentRoleCLI      ComponentRole = "cli"
+	ComponentRoleData     ComponentRole = "data"
+	ComponentRoleGame     ComponentRole = "game"
 	ComponentRoleOther    ComponentRole = "other"
 )
 
 func AllComponentRoles() []ComponentRole {
 	return []ComponentRole{
 		ComponentRoleFrontend, ComponentRoleBackend, ComponentRoleMobile, ComponentRoleDesktop,
-		ComponentRoleWorker, ComponentRoleLibrary, ComponentRoleInfra, ComponentRoleCLI, ComponentRoleOther,
+		ComponentRoleWorker, ComponentRoleLibrary, ComponentRoleInfra, ComponentRoleCLI, ComponentRoleData,
+		ComponentRoleGame, ComponentRoleOther,
 	}
 }
 
@@ -115,6 +118,10 @@ func (r ComponentRole) LegacyRepoKind() string {
 		return RepoKindMobile
 	case ComponentRoleWorker:
 		return RepoKindWorker
+	case ComponentRoleData:
+		return RepoKindData
+	case ComponentRoleGame:
+		return RepoKindGame
 	default:
 		return RepoKindBackend
 	}
@@ -216,6 +223,63 @@ type ComponentGates struct {
 	CoverageThreshold *float64 `json:"coverage_threshold,omitempty"`
 	MutationEnabled   *bool    `json:"mutation_enabled,omitempty"`
 	MutationThreshold *float64 `json:"mutation_threshold,omitempty"`
+	// CoverageCITaskID and MutationCITaskID are the board tasks opened when
+	// the gate was switched on while the component's CI did not measure it;
+	// one still open stops a second. Server-owned: a patch never sets them.
+	CoverageCITaskID *uuid.UUID `json:"coverage_ci_task_id,omitempty"`
+	MutationCITaskID *uuid.UUID `json:"mutation_ci_task_id,omitempty"`
+}
+
+type QualityGateKind string
+
+const (
+	QualityGateCoverage QualityGateKind = "coverage"
+	QualityGateMutation QualityGateKind = "mutation"
+)
+
+func (g ComponentGates) Enabled(kind QualityGateKind) bool {
+	flag := g.CoverageEnabled
+	if kind == QualityGateMutation {
+		flag = g.MutationEnabled
+	}
+	return flag != nil && *flag
+}
+
+func (g ComponentGates) Threshold(kind QualityGateKind) float64 {
+	value := g.CoverageThreshold
+	if kind == QualityGateMutation {
+		value = g.MutationThreshold
+	}
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func (g ComponentGates) CITask(kind QualityGateKind) *uuid.UUID {
+	if kind == QualityGateMutation {
+		return g.MutationCITaskID
+	}
+	return g.CoverageCITaskID
+}
+
+func (g *ComponentGates) SetCITask(kind QualityGateKind, id *uuid.UUID) {
+	if kind == QualityGateMutation {
+		g.MutationCITaskID = id
+		return
+	}
+	g.CoverageCITaskID = id
+}
+
+// GateCITask is what switching a gate on did about CI that does not measure
+// it: Created is false when an earlier task for the same gate is still open.
+type GateCITask struct {
+	Gate      QualityGateKind `json:"gate"`
+	Created   bool            `json:"created"`
+	Languages []string        `json:"languages,omitempty"`
+	TaskID    uuid.UUID       `json:"task_id"`
+	TaskKey   string          `json:"task_key"`
+	TaskTitle string          `json:"task_title"`
 }
 
 // Component is one buildable/deployable unit of a repository: the whole repo
@@ -362,6 +426,14 @@ const (
 	EnvironmentDevelopment DeployEnvironment = "development"
 )
 
+func (e DeployEnvironment) Valid() bool {
+	switch e {
+	case EnvironmentProduction, EnvironmentStaging, EnvironmentPreview, EnvironmentDevelopment:
+		return true
+	}
+	return false
+}
+
 // LocalCommand is one argv run without a shell inside Dir (repo-relative).
 type LocalCommand struct {
 	Dir  string   `json:"dir"`
@@ -378,20 +450,20 @@ func (l LocalCommand) Display() string {
 
 // JoinLocalCommands renders a command sequence the way a person would type
 // it: commands sharing a directory run under one `cd`, groups separated by
-// "; " because every Dir is relative to the repository root.
+// "; ". Every Dir is relative to the repository root, so with more than one
+// group each `cd` runs in a subshell — typed as one line, a bare second
+// `cd b` would be relative to the first and fail.
 func JoinLocalCommands(cmds []LocalCommand) string {
 	var groups []string
 	var current []string
 	currentDir := ""
+	var dirs []string
 	flush := func() {
 		if len(current) == 0 {
 			return
 		}
-		g := strings.Join(current, " && ")
-		if currentDir != "." {
-			g = "cd " + currentDir + " && " + g
-		}
-		groups = append(groups, g)
+		groups = append(groups, strings.Join(current, " && "))
+		dirs = append(dirs, currentDir)
 		current = nil
 	}
 	for i, c := range cmds {
@@ -406,6 +478,15 @@ func JoinLocalCommands(cmds []LocalCommand) string {
 		current = append(current, strings.Join(c.Argv, " "))
 	}
 	flush()
+	for i, g := range groups {
+		switch {
+		case dirs[i] == ".":
+		case len(groups) == 1:
+			groups[i] = "cd " + dirs[i] + " && " + g
+		default:
+			groups[i] = "(cd " + dirs[i] + " && " + g + ")"
+		}
+	}
 	return strings.Join(groups, "; ")
 }
 
@@ -614,6 +695,7 @@ const (
 	ScanStageChecks     ScanStage = "checks"
 	ScanStageLinks      ScanStage = "links"
 	ScanStageDeploy     ScanStage = "deploy"
+	ScanStageFindings   ScanStage = "findings"
 	ScanStageMatch      ScanStage = "match"
 )
 

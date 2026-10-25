@@ -13,7 +13,10 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/hooks/useI18n";
+import { usePolling } from "@/hooks/usePolling";
+import { keepEqual } from "@/lib/stableState";
 import { formatDate, formatRelativeDate } from "@/lib/utils";
+import { logEvent } from "@/lib/analytics";
 
 export const RELEASE_STATUS_VARIANT: Record<ReleaseStatus, NonNullable<BadgeProps["variant"]>> = {
   draft: "secondary",
@@ -71,7 +74,8 @@ export function ReleaseDrawer({ releaseId, repositoryName, open, onOpenChange, o
 
   const load = useCallback(async () => {
     try {
-      setRelease(await api.getRelease(releaseId));
+      const next = await api.getRelease(releaseId);
+      setRelease((prev) => keepEqual(prev, next));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("release.taskDetail.loadFailed"));
     } finally {
@@ -87,11 +91,8 @@ export function ReleaseDrawer({ releaseId, repositoryName, open, onOpenChange, o
 
   // The sweeper moves a watched release without anyone in this drawer acting
   // on it; poll so the status shown here does not go stale while it is open.
-  useEffect(() => {
-    if (!open || !release || !RELEASE_ACTIVE_STATUSES.includes(release.status)) return;
-    const id = setInterval(() => void load(), 15_000);
-    return () => clearInterval(id);
-  }, [open, release, load]);
+  const watched = open && !!release && RELEASE_ACTIVE_STATUSES.includes(release.status);
+  usePolling(load, 15_000, watched, { leading: false });
 
   const openAction = (action: PendingAction) => {
     setNote("");
@@ -113,6 +114,7 @@ export function ReleaseDrawer({ releaseId, repositoryName, open, onOpenChange, o
             ? await api.finishRelease(release.id, repositoryName, note.trim())
             : await api.rollbackRelease(release.id, repositoryName, note.trim());
       setRelease(updated);
+      logEvent("release_action", { action: pending });
       toast.success(t(`release.drawer.actions.${pending}Succeeded`));
       setPending(null);
       onChanged?.();

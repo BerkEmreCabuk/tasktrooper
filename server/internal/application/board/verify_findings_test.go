@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -159,7 +160,7 @@ func (s *VerifyFindingsSuite) TestVerdictIsFalseWhenChecksStayRed() {
 		VerifyFixAttempts: 1,
 	})
 
-	_, verified, _ := r.verifyAndFix(context.Background(), RunJob{Task: domain.BoardTask{ID: uuid.New()}}, domain.Agent{},
+	_, verified, _, _ := r.verifyAndFix(context.Background(), RunJob{Task: domain.BoardTask{ID: uuid.New()}}, domain.Agent{},
 		[]domain.Message{{Role: domain.RoleUser, Content: "fix the board"}},
 		domain.AgentResponse{Message: domain.Message{Content: "done"}}, "m", domain.ToolPolicy{}, dir)
 
@@ -173,7 +174,7 @@ func (s *VerifyFindingsSuite) TestVerdictIsTrueWhenThereIsNothingToCheck() {
 		VerifyFixAttempts: 1,
 	})
 
-	_, verified, _ := r.verifyAndFix(context.Background(), RunJob{Task: domain.BoardTask{ID: uuid.New()}}, domain.Agent{},
+	_, verified, _, _ := r.verifyAndFix(context.Background(), RunJob{Task: domain.BoardTask{ID: uuid.New()}}, domain.Agent{},
 		[]domain.Message{{Role: domain.RoleUser, Content: "fix the board"}},
 		domain.AgentResponse{Message: domain.Message{Content: "done"}}, "m", domain.ToolPolicy{}, s.T().TempDir())
 
@@ -241,4 +242,8 @@ func messageContents(messages []domain.Message) string {
 		all += m.Content + "\n"
 	}
 	return all
+}
+
+func (s *tracedStore) ListStepsByRunSince(ctx context.Context, runID uuid.UUID, _ time.Time) ([]domain.SessionStep, error) {
+	return s.ListStepsByRun(ctx, runID)
 }

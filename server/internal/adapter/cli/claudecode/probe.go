@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/core"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/winshim"
 )
 
 type ProbeResult struct {
@@ -71,8 +71,8 @@ func probeVersion(ctx context.Context, bin string) (string, string, error) {
 	ctx, cancel := context.WithTimeout(ctx, probeVersionTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, bin, "--version")
-	cmd.Env = core.ChildEnv(ctx, true, claudeEnvPassthrough)
+	cmd := winshim.Command(ctx, bin, "--version")
+	cmd.Env = claudeChildEnv(ctx)
 	cmd.Dir = os.TempDir()
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
@@ -106,8 +106,8 @@ func probeAuth(ctx context.Context, bin string, settingSources string) error {
 		"--setting-sources", normalizeSettingSources(settingSources),
 		"--dangerously-skip-permissions",
 	}
-	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Env = core.ChildEnv(ctx, true, claudeEnvPassthrough)
+	cmd := winshim.Command(ctx, bin, args...)
+	cmd.Env = claudeChildEnv(ctx)
 	cmd.Dir = dir
 	var buf bytes.Buffer
 	cmd.Stdout = &buf

@@ -31,7 +31,8 @@ func TestMissingAnalizTools_DeveloperShapedPolicyIsMissingBoardCreateTools(t *te
 		"get_task_pull_request", "comment_on_pull_request", "commit_task_changes",
 	}}
 	got := domain.MissingAnalizTools(p)
-	assert.ElementsMatch(t, []string{"add_task_document", "update_task_document", "create_board_task"}, got)
+	assert.ElementsMatch(t, []string{"add_task_document", "update_task_document", "create_board_task",
+		"record_open_questions", "list_open_questions"}, got)
 }
 
 // Architect-shaped policy already holds every required tool, so routing an
@@ -45,6 +46,7 @@ func TestMissingAnalizTools_ArchitectShapedPolicyHasNoneMissing(t *testing.T) {
 		"list_task_documents", "list_acceptance_criteria", "set_criterion_completed", "cancel_criterion",
 		"list_test_cases", "list_projects", "list_repositories", "get_board_summary", "list_team",
 		"create_board_task", "add_task_document", "update_task_document", "attach_task_file",
+		"record_open_questions", "list_open_questions",
 		"claim_board_task",
 		"get_pipeline_status",
 		"get_task_pull_request", "comment_on_pull_request",
@@ -235,6 +237,31 @@ func TestDiffNeedsUIEvidence(t *testing.T) {
 		},
 		{"unrecognized extension defaults to requiring evidence", []string{"locales/en.json"}, true},
 		{"github workflow dir is exempt", []string{".github/workflows/ci.yml"}, false},
+		{"vercel serverless function", []string{"api/login.ts"}, false},
+		{"next app router api route", []string{"src/app/api/posts/route.ts"}, false},
+		{"next pages api route", []string{"pages/api/hello.ts"}, false},
+		{"frontend api client", []string{"src/lib/api/client.ts"}, false},
+		{"component test file", []string{"src/App.test.tsx"}, false},
+		{"e2e spec", []string{"e2e/home.spec.ts"}, false},
+		{"vercel config", []string{"vercel.json"}, false},
+		{"package manifest", []string{"package.json"}, false},
+		{"env example", []string{".env.example"}, false},
+		{"prisma schema", []string{"prisma/schema.prisma"}, false},
+		{"go test file", []string{"internal/x/y_test.go"}, false},
+		{"sql migration", []string{"db/0001_init.sql"}, false},
+		{"component", []string{"src/components/Header.tsx"}, true},
+		{"app router page", []string{"app/page.tsx"}, true},
+		{"tailwind config changes pixels", []string{"tailwind.config.ts"}, true},
+		{"stylesheet", []string{"src/styles/globals.css"}, true},
+		{"public asset", []string{"public/logo.svg"}, true},
+		{"index html", []string{"index.html"}, true},
+		{"a path merely containing api is not an api dir", []string{"src/components/apiary/Card.tsx"}, true},
+		{"mixed api and component diff", []string{"api/login.ts", "src/components/Login.tsx"}, true},
+		{"serverless-only foundation diff", []string{"api/login.ts", "api/_lib/session.ts", "package.json", "vercel.json"}, false},
+		{"a tsconfig variant only steers the type checker", []string{"tsconfig.api.json", "tsconfig.node.json"}, false},
+		{"upload ignore files", []string{".vercelignore", ".dockerignore", ".gcloudignore"}, false},
+		{"the T-100 api foundation without its vite plugin", []string{".vercelignore", "api/admin/login.ts", "scripts/local-admin-api-plugin.ts", "tsconfig.api.json", "tsconfig.json"}, false},
+		{"bundler config still changes what renders", []string{"vite.config.ts"}, true},
 	}
 
 	for _, tc := range cases {
@@ -388,4 +415,25 @@ func TestRestrictToolsForStage_UnrestrictedPolicyUntouched(t *testing.T) {
 	stage, typeDef := wfStage(t, "analiz", domain.TaskColumnTodo)
 	got := domain.RestrictToolsForStage(domain.ToolPolicy{}, stage, typeDef)
 	assert.Empty(t, got.AllowTools)
+}
+
+func TestCeilToolPolicyOnlyEverNarrows(t *testing.T) {
+	ceiling := []string{"read_file", "list_error_groups", "propose_error_definitions"}
+
+	got := domain.CeilToolPolicy(domain.ToolPolicy{
+		AllowTools:      []string{"run_terminal", "read_*", "list_error_groups", "fetch_url"},
+		AllowMCPServers: []string{"github"},
+	}, ceiling)
+	assert.Equal(t, []string{"read_file", "list_error_groups"}, got.AllowTools)
+	assert.Equal(t, []string{domain.ReservedMCPServerID}, got.AllowMCPServers, "a ceiled turn reaches no user MCP server")
+
+	assert.Equal(t, ceiling, domain.CeilToolPolicy(domain.ToolPolicy{}, ceiling).AllowTools, "an unrestricted agent gets exactly the ceiling")
+
+	empty := domain.CeilToolPolicy(domain.ToolPolicy{AllowTools: []string{"run_terminal"}}, ceiling)
+	assert.False(t, empty.IsZero(), "an empty intersection must not read as unrestricted")
+	assert.Equal(t, []string{domain.AskUserToolName}, empty.AllowTools)
+	assert.False(t, domain.ToolAllowedByPolicy("run_terminal", empty))
+
+	p := domain.ToolPolicy{AllowTools: []string{"x"}}
+	assert.Equal(t, p, domain.CeilToolPolicy(p, nil), "no ceiling is no change")
 }

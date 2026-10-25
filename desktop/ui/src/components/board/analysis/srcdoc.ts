@@ -1,4 +1,4 @@
-import { ANNOTATION_CONTEXT_MAX } from "@/api";
+import { ANNOTATION_CONTEXT_MAX, TASK_QUESTION_ANSWER_MAX } from "@/api";
 
 /**
  * Agent-written HTML is rendered in an `<iframe sandbox="allow-scripts">` —
@@ -36,6 +36,51 @@ mark[data-tt-id][data-tt-status="resolved"]{background:rgba(34,197,94,.2)!import
 mark[data-tt-id][data-tt-active="true"]{outline:2px solid rgb(249,115,22)!important;outline-offset:1px}
 `;
 
+// Design documents only (see canvasRuntime.ts): the frame never scrolls, the
+// body is moved by a transform from its top-left corner. The overflow and
+// scroll-behavior overrides are there because a document that clips or
+// scrolls itself would otherwise fight every drag.
+const CANVAS_CSS = `
+html[data-tt-canvas]{overflow:hidden!important;overscroll-behavior:none;scroll-behavior:auto!important}
+html[data-tt-canvas]>body{overflow:visible!important;transform-origin:0 0!important}
+html[data-tt-canvas].tt-grab,html[data-tt-canvas].tt-grab *{cursor:grab!important}
+html[data-tt-canvas].tt-panning,html[data-tt-canvas].tt-panning *{cursor:grabbing!important;user-select:none!important;-webkit-user-select:none!important}
+`;
+
+/** The frame body element the Open questions section is mounted in, always present, empty when there are none. */
+export const OPEN_QUESTIONS_ID = "tt-questions";
+
+// Self-contained: the agent's document may carry no theming at all (or the
+// wrong one), so this reads the OS/app color scheme on its own rather than
+// trusting anything the host page sets on <html>.
+const QUESTIONS_CSS = `
+#${OPEN_QUESTIONS_ID}{--tt-q-bg:#f8fafc;--tt-q-border:#cbd5e1;--tt-q-fg:#0f172a;--tt-q-muted:#475569;--tt-q-accent:#b45309;--tt-q-accent-bg:#fef3c7}
+#${OPEN_QUESTIONS_ID}{box-sizing:border-box;margin:0 0 1.5em;padding:1em 1.25em;border:1px solid var(--tt-q-border);border-radius:10px;background:var(--tt-q-bg);color:var(--tt-q-fg);font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Helvetica,Arial,sans-serif}
+#${OPEN_QUESTIONS_ID}:empty,#${OPEN_QUESTIONS_ID}[hidden]{display:none}
+#${OPEN_QUESTIONS_ID} *{box-sizing:border-box}
+#${OPEN_QUESTIONS_ID} .tt-q-heading{margin:0 0 .75em;font-size:1em;font-weight:600}
+#${OPEN_QUESTIONS_ID} .tt-q{margin:0 0 .85em;padding:.75em .9em;border:1px solid var(--tt-q-border);border-radius:8px;background:rgba(255,255,255,.6)}
+#${OPEN_QUESTIONS_ID} .tt-q:last-child{margin-bottom:0}
+#${OPEN_QUESTIONS_ID} .tt-q-head{display:flex;flex-wrap:wrap;align-items:center;gap:.4em;margin:0 0 .4em}
+#${OPEN_QUESTIONS_ID} .tt-q-key{font-weight:700;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+#${OPEN_QUESTIONS_ID} .tt-q-badge{display:inline-block;padding:.1em .55em;border-radius:999px;font-size:.75em;font-weight:600;background:rgba(15,23,42,.08);color:var(--tt-q-muted)}
+#${OPEN_QUESTIONS_ID} .tt-q-badge--blocking{background:var(--tt-q-accent-bg);color:var(--tt-q-accent)}
+#${OPEN_QUESTIONS_ID} .tt-q-prompt{margin:0 0 .5em;white-space:pre-wrap}
+#${OPEN_QUESTIONS_ID} .tt-q-recommended{margin:0 0 .5em;color:var(--tt-q-muted)}
+#${OPEN_QUESTIONS_ID} .tt-q-answer-wrap{margin-top:.25em}
+#${OPEN_QUESTIONS_ID} .tt-q-answer-label{display:block;margin:0 0 .3em;font-size:.8em;font-weight:600;color:var(--tt-q-muted)}
+#${OPEN_QUESTIONS_ID} textarea.tt-q-answer{display:block;width:100%;min-height:4.5em;resize:vertical;padding:.5em .6em;border:1px solid var(--tt-q-border);border-radius:6px;background:#fff;color:var(--tt-q-fg);font:inherit}
+#${OPEN_QUESTIONS_ID} textarea.tt-q-answer:focus{outline:2px solid var(--tt-q-accent);outline-offset:1px}
+#${OPEN_QUESTIONS_ID} .tt-q-answer-static{margin:0;white-space:pre-wrap}
+#${OPEN_QUESTIONS_ID} .tt-q-answer-static--empty{color:var(--tt-q-muted);font-style:italic}
+@media (prefers-color-scheme:dark){
+#${OPEN_QUESTIONS_ID}{--tt-q-bg:#1e293b;--tt-q-border:#334155;--tt-q-fg:#e2e8f0;--tt-q-muted:#94a3b8;--tt-q-accent:#fbbf24;--tt-q-accent-bg:rgba(251,191,36,.18)}
+#${OPEN_QUESTIONS_ID} .tt-q{background:rgba(15,23,42,.4)}
+#${OPEN_QUESTIONS_ID} .tt-q-badge{background:rgba(226,232,240,.12)}
+#${OPEN_QUESTIONS_ID} textarea.tt-q-answer{background:#0f172a;color:var(--tt-q-fg)}
+}
+`;
+
 // Removed rather than trusted: a document's own CSP intersects with ours and
 // could block the runtime, a `refresh` could navigate the frame away, a
 // `<base>` would re-point links, `<link>` can preconnect outside CSP's reach,
@@ -51,7 +96,10 @@ const STRIPPED = "meta[http-equiv], base, link, noscript";
  * `<body>`. Scripts the document carries stay in place but, lacking the nonce,
  * are refused by the policy.
  */
-export function buildAnalysisSrcdoc(html: string, options: { nonce: string; script: string }): string {
+export function buildAnalysisSrcdoc(
+  html: string,
+  options: { nonce: string; script: string; canvas?: boolean },
+): string {
   const parsed = new DOMParser().parseFromString(html, "text/html");
   for (const element of Array.from(parsed.querySelectorAll(STRIPPED))) element.remove();
   for (const element of Array.from(parsed.querySelectorAll("[nonce]"))) element.removeAttribute("nonce");
@@ -63,8 +111,20 @@ export function buildAnalysisSrcdoc(html: string, options: { nonce: string; scri
   head.insertBefore(csp, head.firstChild);
 
   const style = parsed.createElement("style");
-  style.textContent = HIGHLIGHT_CSS;
+  style.textContent = HIGHLIGHT_CSS + QUESTIONS_CSS + (options.canvas ? CANVAS_CSS : "");
   head.appendChild(style);
+  if (options.canvas) parsed.documentElement.setAttribute("data-tt-canvas", "");
+
+  // Always present so the runtime never has to create it later — just filled
+  // (or hidden) once the page posts `tt:questions`. Excluded from text-quote
+  // collection (textQuote.ts honours `data-tt-skip`) so it can never anchor an
+  // annotation and a selection inside it is never reported.
+  const questions = parsed.createElement("section");
+  questions.id = OPEN_QUESTIONS_ID;
+  questions.setAttribute("data-tt-skip", "");
+  questions.setAttribute("aria-live", "polite");
+  questions.hidden = true;
+  parsed.body.insertBefore(questions, parsed.body.firstChild);
 
   const script = parsed.createElement("script");
   script.setAttribute("nonce", options.nonce);
@@ -109,13 +169,54 @@ export interface FrameSelection {
   suffix: string;
 }
 
+/** One open question, as drawn inside the frame's Open questions section. */
+export interface FrameQuestion {
+  id: string;
+  key: string;
+  kind: "product" | "technical";
+  blocking: boolean;
+  prompt: string;
+  recommendedAnswer: string;
+  answer: string;
+  status: "open" | "answered" | "withdrawn";
+  /** Whether this question's answer box is an editable `<textarea>` or static text. */
+  editable: boolean;
+}
+
+/** Every piece of display text the section needs, translated by the host before it crosses into the frame. */
+export interface QuestionsLabels {
+  heading: string;
+  kindProduct: string;
+  kindTechnical: string;
+  blocking: string;
+  recommendedPrefix: string;
+  answerLabel: string;
+  answerPlaceholder: string;
+  unanswered: string;
+  recommendedStands: string;
+}
+
 export type FrameMessage =
   | { type: "tt:ready" }
   | ({ type: "tt:selection"; rect: { top: number; left: number; width: number; height: number } } & FrameSelection)
   | { type: "tt:anchored"; results: { id: string; found: boolean }[] }
-  | { type: "tt:focus"; id: string };
+  | { type: "tt:focus"; id: string }
+  | { type: "tt:answer"; id: string; text: string }
+  | { type: "tt:zoom"; zoom: number }
+  | { type: "tt:outline"; pages: CanvasPage[] }
+  | { type: "tt:page"; id: string | null; cause: "view" | "goto" };
+
+/** One page of a design canvas: a `<h2>` and what it heads (see canvasRuntime.ts). */
+export interface CanvasPage {
+  id: string;
+  title: string;
+}
 
 const QUOTE_LIMIT = 20000;
+const ZOOM_MIN = 0.05;
+const ZOOM_MAX = 10;
+const PAGES_LIMIT = 100;
+const PAGE_TITLE_LIMIT = 200;
 const ID_LIMIT = 200;
 
 function isId(value: unknown): value is string {
@@ -158,6 +259,33 @@ export function parseFrameMessage(data: unknown): FrameMessage | null {
       };
     case "tt:focus":
       return isId(d.id) ? { type: "tt:focus", id: d.id } : null;
+    case "tt:answer":
+      if (!isId(d.id) || typeof d.text !== "string" || d.text.length > TASK_QUESTION_ANSWER_MAX) return null;
+      return { type: "tt:answer", id: d.id, text: d.text };
+    case "tt:zoom":
+      if (typeof d.zoom !== "number" || !Number.isFinite(d.zoom) || d.zoom < ZOOM_MIN || d.zoom > ZOOM_MAX) return null;
+      return { type: "tt:zoom", zoom: d.zoom };
+    case "tt:outline":
+      if (!Array.isArray(d.pages)) return null;
+      return {
+        type: "tt:outline",
+        pages: d.pages
+          .filter(
+            (p): p is CanvasPage =>
+              Boolean(p) &&
+              typeof p === "object" &&
+              isId(p.id) &&
+              typeof p.title === "string" &&
+              p.title.trim().length > 0 &&
+              p.title.length <= PAGE_TITLE_LIMIT,
+          )
+          .slice(0, PAGES_LIMIT)
+          .map((p) => ({ id: p.id, title: p.title })),
+      };
+    case "tt:page":
+      if (d.id !== null && !isId(d.id)) return null;
+      if (d.cause !== "view" && d.cause !== "goto") return null;
+      return { type: "tt:page", id: d.id, cause: d.cause };
     default:
       return null;
   }

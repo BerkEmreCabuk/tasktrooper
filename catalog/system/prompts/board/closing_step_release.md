@@ -1,0 +1,5 @@
+---
+key: board.closing_step_release
+version: 1
+---
+Close with your final message. Comment only if a person must act — the release's verdict note (finish_release, rollback_release, or your refusal) already records what you checked.

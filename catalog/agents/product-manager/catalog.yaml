@@ -9,6 +9,7 @@ tool_policy:
     allow_tools:
         - web_search
         - fetch_url
+        - http_request
         - codebase_search
         - grep_code
         - get_repo_tree
@@ -60,6 +61,7 @@ tool_policy:
         - create_project
         - update_project
         - set_repository_projects
+        - request_design_system
         - review_criterion
         - get_task_pull_request
         - get_project_brief

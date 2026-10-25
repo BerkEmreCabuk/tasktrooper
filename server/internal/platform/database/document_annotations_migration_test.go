@@ -39,7 +39,10 @@ func TestDocumentAnnotationsMigrationSuite(t *testing.T) {
 func (s *DocumentAnnotationsMigrationSuite) SetupSuite() {
 	s.ctx, s.cancel = context.WithTimeout(context.Background(), 5*time.Minute)
 	tmp := s.T().TempDir()
-	pg, err := database.StartEmbedded(s.ctx, database.EmbeddedConfig{DataDir: filepath.Join(tmp, "postgres")})
+	pg, err := database.StartEmbedded(s.ctx, database.EmbeddedConfig{
+		DataDir:     filepath.Join(tmp, "postgres"),
+		RuntimePath: filepath.Join(tmp, "runtime"),
+	})
 	s.Require().NoError(err)
 	s.pg = pg
 	boot, err := pgxpool.New(s.ctx, pg.DSN())
@@ -114,12 +117,20 @@ func (s *DocumentAnnotationsMigrationSuite) TestAnalystAgentsGainTheAnnotationTo
 	architect := s.allowTools(pool, "architect-under-test")
 	s.Contains(architect, "list_document_annotations")
 	s.Contains(architect, "resolve_document_annotations")
-	s.Len(architect, 5, "the backfill appends each tool once")
+	// migration 169 backfills record_open_questions/list_open_questions onto
+	// the same analyst-role, add_task_document-holding agents.
+	s.Contains(architect, "record_open_questions")
+	s.Contains(architect, "list_open_questions")
+	s.Len(architect, 7, "the backfill appends each tool once")
 
 	s.NotContains(s.allowTools(pool, "pm-under-test"), "list_document_annotations",
 		"an agent that holds no analyst role is not the one revising analyses")
+	s.NotContains(s.allowTools(pool, "pm-under-test"), "record_open_questions",
+		"an agent that holds no analyst role does not record open questions either")
 	s.NotContains(s.allowTools(pool, "reader-analyst"), "resolve_document_annotations",
 		"an agent that cannot rewrite the document gets nothing to answer comments with")
+	s.NotContains(s.allowTools(pool, "reader-analyst"), "record_open_questions",
+		"an agent that holds no add_task_document gets nothing to ask questions with either")
 	s.Empty(s.allowTools(pool, "unrestricted"), "an empty allow list stays unrestricted")
 }
 

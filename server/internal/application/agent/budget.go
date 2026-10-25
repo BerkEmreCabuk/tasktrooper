@@ -341,6 +341,13 @@ func emptyResultNote(name string) string {
 	return emptyResultNoteKey.Render(emptyResultNoteInput{Name: name})
 }
 
+// attachmentIDsNote is appended to a tool result that carried images: the
+// archived ids are otherwise visible only in the run's activity log, never to
+// the model that just took the screenshot.
+func attachmentIDsNote(ids []string) string {
+	return attachmentIDsKey.Render(attachmentIDsInput{IDs: strings.Join(ids, ", ")})
+}
+
 func errorStreakMessage(streak int) string {
 	left := max(errStreakAbortThreshold-streak, 1)
 	return errorStreakNudgeKey.Render(errorStreakNudgeInput{Streak: streak, Left: left})
@@ -355,3 +362,7 @@ var wrapUpPrompt = prompt.Text(wrapUpKey)
 var emptyTurnPrompt = prompt.Text(emptyTurnPromptKey)
 
 var emptyTurnFallback = prompt.Text(emptyTurnFallbackKey)
+
+func outputTruncatedMessage(limit int) string {
+	return outputTruncatedKey.Render(outputTruncatedInput{Limit: limit})
+}

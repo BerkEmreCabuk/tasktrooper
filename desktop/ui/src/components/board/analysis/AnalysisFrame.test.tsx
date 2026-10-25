@@ -101,6 +101,35 @@ describe("AnalysisFrame", () => {
     expect(post).toHaveBeenLastCalledWith({ type: "tt:scrollTo", id: "a1" }, "*");
   });
 
+  it("posts the Open questions section's translated labels and items, and reports an answer typed in the frame", async () => {
+    const onAnswer = vi.fn();
+    const question = {
+      id: "q1",
+      key: "Q1",
+      kind: "technical" as const,
+      blocking: true,
+      prompt: "Which cache?",
+      recommendedAnswer: "",
+      answer: "",
+      status: "open" as const,
+      editable: true,
+    };
+    const { container } = renderFrame({ questions: [question], onAnswer });
+    const iframe = await frameOf(container);
+    const post = vi.spyOn(iframe.contentWindow!, "postMessage");
+
+    fromFrame({ type: "tt:ready" }, iframe.contentWindow);
+    expect(post).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "tt:questions", items: [question] }),
+      "*",
+    );
+    const [[sent]] = post.mock.calls.filter(([m]) => (m as { type: string }).type === "tt:questions");
+    expect((sent as { labels: { heading: string } }).labels.heading).toBe("Open questions");
+
+    fromFrame({ type: "tt:answer", id: "q1", text: "Redis" }, iframe.contentWindow);
+    expect(onAnswer).toHaveBeenCalledWith("q1", "Redis");
+  });
+
   it("renders a markdown document to HTML inside the same sandbox", async () => {
     const { container } = renderFrame({
       document: { id: "doc-2", content: "# spec: old\n\nPlain **markdown**.", format: undefined },
@@ -112,5 +141,30 @@ describe("AnalysisFrame", () => {
     expect(srcdoc).toContain("<h1>spec: old</h1>");
     expect(srcdoc).toContain("<strong>markdown</strong>");
     expect(srcdoc).toContain("Content-Security-Policy");
+  });
+
+  it("shows an HTML canvas with its zoom bar, which drives and mirrors the frame's zoom", async () => {
+    const { container, getByRole } = renderFrame({ canvas: true });
+    const iframe = await frameOf(container);
+    expect(iframe.getAttribute("srcdoc")).toMatch(/<html[^>]*\sdata-tt-canvas/);
+    const post = vi.spyOn(iframe.contentWindow!, "postMessage");
+
+    act(() => getByRole("button", { name: "Zoom in" }).click());
+    expect(post).toHaveBeenLastCalledWith({ type: "tt:zoom", action: "in" }, "*");
+    act(() => getByRole("button", { name: "Fit to width" }).click());
+    expect(post).toHaveBeenLastCalledWith({ type: "tt:zoom", action: "fit" }, "*");
+
+    fromFrame({ type: "tt:zoom", zoom: 0.5 }, iframe.contentWindow);
+    expect(getByRole("button", { name: "Zoom to 100%" })).toHaveTextContent("50%");
+  });
+
+  it("keeps a markdown document out of canvas mode", async () => {
+    const { container, queryByRole } = renderFrame({
+      canvas: true,
+      document: { id: "doc-3", content: "# design review: list", format: "markdown" },
+    });
+    const iframe = await frameOf(container);
+    expect(iframe.getAttribute("srcdoc")).not.toMatch(/<html[^>]*\sdata-tt-canvas/);
+    expect(queryByRole("toolbar")).toBeNull();
   });
 });

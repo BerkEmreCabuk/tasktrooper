@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -233,6 +234,44 @@ func TestRouterResumesTheCLISessionOnAFollowUpStep(t *testing.T) {
 	require.Equal(t, followUp, secondReq.History, "History travels unchanged even though the executor ignores it on a resume")
 }
 
+func TestRouterCarriesTheRunEnvironmentIntoFollowUpTurns(t *testing.T) {
+	ex := &cliExecutor{
+		supports: domain.LLMProviderClaudeCode,
+		resp:     domain.AgentResponse{Message: domain.Message{Content: "ticked"}, CLISessionID: "sess-main"},
+	}
+	router, _, _ := newRouter(t, ex)
+	env := map[string]string{"NODE_VERSION": "20.11.0", "GOTOOLCHAIN": "go1.24.0"}
+	ctx := agent.ContextWithCLISession(
+		registry.ContextWithSessionEnv(
+			registry.ContextWithWorkspaceDir(context.Background(), t.TempDir()), env),
+		&agent.CLISession{},
+	)
+	policy := domain.ToolPolicy{}
+
+	main := []domain.Message{{Role: domain.RoleUser, Content: "implement the gate"}}
+	_, err := router.RunTask(ctx, main, "opus", domain.LLMProviderClaudeCode, policy,
+		agent.WithCLILabel("tt-42", "wire the gate"))
+	require.NoError(t, err)
+	_, firstReq := ex.snapshot()
+
+	followUp := []domain.Message{
+		{Role: domain.RoleUser, Content: "implement the gate"},
+		{Role: domain.RoleAssistant, Content: "done, the gate is wired"},
+		{Role: domain.RoleUser, Content: "these criteria are still open: the gate refuses a red build"},
+	}
+	_, err = router.RunTask(ctx, followUp, "opus", domain.LLMProviderClaudeCode, policy,
+		agent.WithCLILabel("tt-42 criteria-sweep 1", "wire the gate"))
+	require.NoError(t, err)
+	calls, secondReq := ex.snapshot()
+
+	require.Equal(t, 2, calls)
+	require.Equal(t, env, secondReq.Env,
+		"a follow-up turn must hand the executor the environment the run was resolved with")
+	require.Equal(t, firstReq.Env, secondReq.Env,
+		"a follow-up turn must hand the executor the same environment as the original run")
+	require.Equal(t, env, firstReq.Env)
+}
+
 func TestRouterFallsBackToFullHistoryWhenThereIsNoTrailingUserInstruction(t *testing.T) {
 	ex := &cliExecutor{
 		supports: domain.LLMProviderClaudeCode,
@@ -268,4 +307,62 @@ func TestRouterDoesNotFakeAStreamForHostExecutedProviders(t *testing.T) {
 	require.True(t, strings.Contains(err.Error(), "local runner host"))
 	calls, _ := ex.snapshot()
 	require.Zero(t, calls)
+}
+
+func TestRouterSeedsTheScratchWorkspaceItCreates(t *testing.T) {
+	var seen map[string]string
+	ex := &seedingExecutor{cliExecutor: cliExecutor{supports: domain.LLMProviderClaudeCode}, read: []string{"EVIDENCE.md", "skills/001-a.md"}, seen: &seen}
+	router, _, _ := newRouter(t, ex)
+
+	_, err := router.Run(context.Background(), nil, "", domain.LLMProviderClaudeCode, domain.ToolPolicy{},
+		agent.WithScratchFiles(map[string]string{"EVIDENCE.md": "# report", "skills/001-a.md": "body"}))
+	require.NoError(t, err)
+
+	require.Equal(t, map[string]string{"EVIDENCE.md": "# report", "skills/001-a.md": "body"}, seen)
+}
+
+// A run with a workspace of its own keeps it untouched: the files belong to the scratch directory only.
+func TestRouterNeverWritesScratchFilesIntoARealWorkspace(t *testing.T) {
+	ex := &cliExecutor{supports: domain.LLMProviderClaudeCode}
+	router, _, _ := newRouter(t, ex)
+	dir := t.TempDir()
+
+	_, err := router.Run(registry.ContextWithWorkspaceDir(context.Background(), dir), nil, "", domain.LLMProviderClaudeCode,
+		domain.ToolPolicy{}, agent.WithScratchFiles(map[string]string{"EVIDENCE.md": "# report"}))
+	require.NoError(t, err)
+
+	entries, _ := os.ReadDir(dir)
+	require.Empty(t, entries)
+}
+
+func TestRouterRefusesScratchFilesOutsideTheScratchDirectory(t *testing.T) {
+	var seen map[string]string
+	ex := &seedingExecutor{cliExecutor: cliExecutor{supports: domain.LLMProviderClaudeCode}, read: []string{"ok.md"}, seen: &seen}
+	router, _, _ := newRouter(t, ex)
+	outside := filepath.Join(os.TempDir(), "tt-scratch-escape-"+t.Name())
+	t.Cleanup(func() { _ = os.Remove(outside) })
+
+	_, err := router.Run(context.Background(), nil, "", domain.LLMProviderClaudeCode, domain.ToolPolicy{},
+		agent.WithScratchFiles(map[string]string{"../" + filepath.Base(outside): "escaped", outside: "escaped"}))
+	require.NoError(t, err, "a bad file name must not fail the run")
+
+	_, statErr := os.Stat(outside)
+	require.True(t, os.IsNotExist(statErr), "a scratch file escaped the scratch directory")
+}
+
+type seedingExecutor struct {
+	cliExecutor
+	read []string
+	seen *map[string]string
+}
+
+func (e *seedingExecutor) Execute(ctx context.Context, req domain.TaskExecution) (domain.AgentResponse, error) {
+	got := map[string]string{}
+	for _, rel := range e.read {
+		if raw, err := os.ReadFile(filepath.Join(req.WorkDir, filepath.FromSlash(rel))); err == nil {
+			got[rel] = string(raw)
+		}
+	}
+	*e.seen = got
+	return e.cliExecutor.Execute(ctx, req)
 }

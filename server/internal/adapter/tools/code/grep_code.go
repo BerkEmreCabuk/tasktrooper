@@ -1,16 +1,17 @@
 package code
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 
-	"github.com/makifbaysal/tasktrooper/server/internal/application/mapper"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
@@ -37,11 +38,12 @@ type grepCodeResponse struct {
 }
 
 type grepCodeTool struct {
-	kit *ToolKit
+	kit      *ToolKit
+	lookPath func(string) (string, error)
 }
 
 func newGrepCodeTool(kit *ToolKit) port.ToolExecutor {
-	return &grepCodeTool{kit: kit}
+	return &grepCodeTool{kit: kit, lookPath: exec.LookPath}
 }
 
 func (t *grepCodeTool) Name() string {
@@ -113,11 +115,32 @@ func (t *grepCodeTool) Execute(ctx context.Context, arguments string) domain.Too
 		maxResults = 100
 	}
 
+	rg, err := t.lookPath("rg")
+	if err != nil {
+		matches, err := searchWithoutRipgrep(ctx, root, searchPath, args, maxResults)
+		if err != nil {
+			return toolError(grepCodeToolName, err.Error())
+		}
+		return toolJSON(grepCodeToolName, grepCodeResponse{Matches: matches})
+	}
+
+	// --null ends the path with NUL instead of ':' — a Windows path's drive
+	// colon otherwise split every line in the wrong place and every match was
+	// dropped. --with-filename because rg omits the path when `path` names a
+	// single file, and a line without one cannot be parsed.
 	rgArgs := []string{
 		"--line-number",
 		"--no-heading",
+		"--null",
+		"--with-filename",
 		"--color=never",
 		"--max-count", strconv.Itoa(maxResults),
+		"--max-columns", strconv.Itoa(grepMaxColumns),
+		"--max-columns-preview",
+		// rg reads .gitignore only inside a git repository unless told
+		// otherwise; a workspace that is a plain directory must still keep
+		// its ignored trees out, as Walk does for the fallback.
+		"--no-require-git",
 	}
 
 	// A model searching for UI copy or a symbol it half-remembers types the
@@ -136,70 +159,100 @@ func (t *grepCodeTool) Execute(ctx context.Context, arguments string) domain.Too
 		rgArgs = append(rgArgs, "--glob", args.Glob)
 	}
 
-	patterns, err := mapper.GitignorePatterns(root)
-	if err != nil {
-		return toolError(grepCodeToolName, fmt.Sprintf("load gitignore: %v", err))
-	}
-	for _, pat := range patterns {
-		rgArgs = append(rgArgs, "--glob", "!"+pat)
-	}
-
 	rgArgs = append(rgArgs, args.Pattern, searchPath)
 
-	cmd := exec.CommandContext(ctx, "rg", rgArgs...)
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	cmd.Stdout = &out
-	cmd.Stderr = &stderr
+	matches, err := runRipgrep(ctx, rg, rgArgs, root, maxResults)
+	if err != nil {
+		return toolError(grepCodeToolName, err.Error())
+	}
+	return toolJSON(grepCodeToolName, grepCodeResponse{Matches: matches})
+}
 
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
-			return toolJSON(grepCodeToolName, grepCodeResponse{Matches: []grepMatch{}})
+// runRipgrep reads matches as rg prints them and stops it once maxResults are
+// in: --max-count only caps matches per file, so a common pattern over a big
+// tree used to be searched to the end and then thrown away.
+func runRipgrep(ctx context.Context, rg string, rgArgs []string, root string, maxResults int) ([]grepMatch, error) {
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, rg, rgArgs...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	matches := []grepMatch{}
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	for len(matches) < maxResults && scanner.Scan() {
+		if m, ok := parseRipgrepLine(scanner.Text(), root); ok {
+			matches = append(matches, m)
 		}
-		if _, lookErr := exec.LookPath("rg"); lookErr != nil {
-			return toolError(grepCodeToolName, "ripgrep (rg) not found in PATH")
+	}
+	capped := len(matches) >= maxResults
+	if capped {
+		cancel()
+	}
+	scanErr := scanner.Err()
+	waitErr := cmd.Wait()
+	if capped {
+		return matches, nil
+	}
+	if scanErr != nil {
+		return nil, fmt.Errorf("read ripgrep output: %w", scanErr)
+	}
+	if waitErr != nil {
+		if exitErr, ok := waitErr.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return []grepMatch{}, nil
 		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg == "" {
-			msg = err.Error()
+			msg = waitErr.Error()
 		}
-		return toolError(grepCodeToolName, msg)
+		return nil, errors.New(msg)
 	}
-
-	matches := parseRipgrepOutput(out.String(), root)
-	if len(matches) > maxResults {
-		matches = matches[:maxResults]
-	}
-
-	return toolJSON(grepCodeToolName, grepCodeResponse{Matches: matches})
+	return matches, nil
 }
 
 func parseRipgrepOutput(output, root string) []grepMatch {
 	lines := strings.Split(strings.TrimSpace(output), "\n")
 	matches := make([]grepMatch, 0, len(lines))
 	for _, line := range lines {
-		if line == "" {
-			continue
+		if m, ok := parseRipgrepLine(line, root); ok {
+			matches = append(matches, m)
 		}
-		parts := strings.SplitN(line, ":", 3)
-		if len(parts) < 3 {
-			continue
-		}
-		lineNum, err := strconv.Atoi(parts[1])
-		if err != nil {
-			continue
-		}
-		filePath := parts[0]
-		if rel, err := filepath.Rel(root, filePath); err == nil {
-			filePath = filepath.ToSlash(rel)
-		} else {
-			filePath = filepath.ToSlash(filePath)
-		}
-		matches = append(matches, grepMatch{
-			FilePath: filePath,
-			Line:     lineNum,
-			Content:  parts[2],
-		})
 	}
 	return matches
+}
+
+func parseRipgrepLine(line, root string) (grepMatch, bool) {
+	if line == "" {
+		return grepMatch{}, false
+	}
+	filePath, rest, ok := strings.Cut(line, "\x00")
+	if !ok {
+		return grepMatch{}, false
+	}
+	num, content, ok := strings.Cut(rest, ":")
+	if !ok {
+		return grepMatch{}, false
+	}
+	lineNum, err := strconv.Atoi(num)
+	if err != nil {
+		return grepMatch{}, false
+	}
+	if rel, err := filepath.Rel(root, filePath); err == nil {
+		filePath = filepath.ToSlash(rel)
+	} else {
+		filePath = filepath.ToSlash(filePath)
+	}
+	return grepMatch{
+		FilePath: filePath,
+		Line:     lineNum,
+		Content:  strings.TrimSuffix(content, "\r"),
+	}, true
 }

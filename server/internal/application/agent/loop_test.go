@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -246,6 +247,63 @@ func (s *AgentLoopSuite) TestRunTaskUsesTaskBudget() {
 	var budgetErr *agent.BudgetExhaustedError
 	s.Require().True(errors.As(err, &budgetErr))
 	s.Equal(3, budgetErr.Budget)
+}
+
+// stubArchiver is agent.ScreenshotArchiver: it fabricates a deterministic
+// attachment id per upload instead of writing anywhere real.
+type stubArchiver struct{ next int }
+
+func (a *stubArchiver) Upload(_ context.Context, _, _ string, _ []byte, _ *uuid.UUID, _, _ string) (domain.AttachmentMeta, error) {
+	a.next++
+	return domain.AttachmentMeta{ID: uuid.MustParse(fmt.Sprintf("00000000-0000-0000-0000-%012d", a.next))}, nil
+}
+
+func (s *AgentLoopSuite) TestToolResultImageGetsAnAttachmentIDTheModelCanCite() {
+	messages := []domain.Message{{Role: domain.RoleUser, Content: "look at the screen"}}
+	policy := domain.ToolPolicy{}
+	toolDefs := []domain.ToolDefinition{{Type: "function", Function: domain.FunctionDefinition{Name: "browser_screenshot"}}}
+
+	s.loop.SetScreenshotArchiver(&stubArchiver{})
+
+	toolCallResp := domain.AgentResponse{
+		Message: domain.Message{
+			Role: domain.RoleAssistant,
+			ToolCalls: []domain.ToolCall{{
+				ID: "tc1", Type: "function",
+				Function: domain.FunctionCall{Name: "browser_screenshot", Arguments: `{}`},
+			}},
+		},
+	}
+	finalResp := domain.AgentResponse{Message: domain.Message{Role: domain.RoleAssistant, Content: "done"}}
+	toolResult := domain.ToolResult{
+		ToolCallID: "tc1", Name: "browser_screenshot", Content: "HTTP 200 url=http://127.0.0.1:3000",
+		Images: []domain.ToolResultImage{{MediaType: "image/png", Data: "aGVsbG8="}},
+	}
+
+	s.registry.On("DefinitionsForPolicy", policy).Return(toolDefs)
+	s.llm.On("Chat", context.Background(), domain.AgentRequest{
+		Messages: messages, Tools: toolDefs, Model: "", ToolPolicy: policy,
+		CacheAnchorIndex: len(messages),
+	}).Return(toolCallResp, nil).Once()
+
+	expectedTC := domain.ToolCall{ID: "tc1", Type: "function", Function: domain.FunctionCall{Name: "browser_screenshot", Arguments: `{}`}}
+	s.registry.On("ExecuteWithPolicy", context.Background(), expectedTC, policy).Return(toolResult)
+
+	var sentToolMessage domain.Message
+	s.llm.On("Chat", context.Background(), mock.MatchedBy(func(req domain.AgentRequest) bool {
+		for _, m := range req.Messages {
+			if m.Role == domain.RoleTool && m.ToolCallID == "tc1" {
+				sentToolMessage = m
+				return true
+			}
+		}
+		return false
+	})).Return(finalResp, nil).Once()
+
+	_, err := s.loop.Run(context.Background(), messages, "", "", policy)
+	s.NoError(err)
+	s.Contains(sentToolMessage.Content, "HTTP 200 url=http://127.0.0.1:3000")
+	s.Contains(sentToolMessage.Content, "attachment: 00000000-0000-0000-0000-000000000001")
 }
 
 func TestAgentLoopSuite(t *testing.T) {

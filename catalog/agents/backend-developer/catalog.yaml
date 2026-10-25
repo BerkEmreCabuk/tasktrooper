@@ -1,5 +1,5 @@
 name: backend-developer
-description: Go, Java and .NET backend development (Fiber/hexagonal, Quarkus/Spring, ASP.NET Core), migrations, and test coverage
+description: Backend development in Go, Java, C#/.NET, TypeScript on Node.js and Rust - APIs, migrations, and test coverage
 subagent_type: backend-engineer
 effort: high
 max_turns: 0
@@ -60,6 +60,16 @@ tool_policy:
         - get_task_pull_request
         - comment_on_pull_request
         - commit_task_changes
+        - get_incident
+        - propose_incident_remedy
+        - resolve_incident
+        - list_incidents
+        - get_deploy_target
+        - list_deploy_templates
+        - load_deploy_template
+        - search_boilerplate_catalog
+        - get_pipeline_status
+        - declare_env_vars
     allow_mcp_servers: []
 roles:
     - key: developer
@@ -70,17 +80,23 @@ subscriptions:
     - need_revision
 tech_stacks:
     - name: Go
-      description: 'Go services: Fiber HTTP handlers, hexagonal architecture, Mockery-generated tests'
+      description: 'Go services: HTTP handlers (Fiber v3 for new code; follow the repo''s router), hexagonal ports/adapters, table-driven tests'
       position: 1
     - name: Java
       description: 'Java services: Quarkus first, Spring Boot fallback, JPA/Panache persistence'
       position: 2
-    - name: PostgreSQL
-      description: Schema migrations and query patterns for the shared Postgres database
-      position: 3
     - name: .NET
-      description: 'C# services: ASP.NET Core APIs and workers, EF Core persistence, xUnit tests'
+      description: 'C# services on ASP.NET Core: Minimal APIs or controllers, EF Core with Npgsql, xUnit'
+      position: 3
+    - name: TypeScript (Node.js)
+      description: 'TypeScript services on Node.js: Fastify or NestJS (or the repo''s Express/Hono), runtime validation, Vitest'
       position: 4
+    - name: Rust
+      description: 'Rust services: axum on tokio, sqlx, typed errors, cargo test and clippy'
+      position: 5
+    - name: PostgreSQL
+      description: Schema migrations and query patterns for PostgreSQL
+      position: 6
 kpis:
     - metric_key: tasks_completed
       name: Weekly tasks completed

@@ -53,8 +53,6 @@ tool_policy:
         - get_task_pull_request
         - comment_on_pull_request
         - commit_task_changes
-        - add_task_document
-        - update_task_document
         - get_pipeline_status
         - get_deploy_target
         - list_deploy_templates
@@ -66,6 +64,8 @@ tool_policy:
         - get_incident
         - propose_incident_remedy
         - resolve_incident
+        - search_boilerplate_catalog
+        - declare_env_vars
     allow_mcp_servers: []
 roles:
     - key: devops

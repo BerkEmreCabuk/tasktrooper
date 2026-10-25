@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
 // chromeNotFoundMsg is deliberately operator-facing: this process ships
@@ -44,6 +46,13 @@ const (
 	// cannot answer them in this long is a browser that gets torn down.
 	guardTimeout = 5 * time.Second
 	scrubTimeout = 5 * time.Second
+
+	// browserStartTimeout bounds chromium printing its DevTools address.
+	// chromedp's default is 20s, which a cold first launch — a fresh CI
+	// runner, a first Chrome start on Windows with Defender scanning it —
+	// overruns, and every browser_* call then fails as "could not open that
+	// URL" though nothing is wrong with the page.
+	browserStartTimeout = 60 * time.Second
 )
 
 // Session is the single shared browser behind all browser_* tools. One tab is
@@ -70,6 +79,21 @@ type Session struct {
 
 	// extraFlags are additional chromium command-line flags. Tests only.
 	extraFlags []chromedp.ExecAllocatorOption
+
+	attacher port.TaskImageAttacher
+}
+
+// SetTaskAttacher lets browser_screenshot save a shot on the run's task.
+func (s *Session) SetTaskAttacher(a port.TaskImageAttacher) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.attacher = a
+}
+
+func (s *Session) taskAttacher() port.TaskImageAttacher {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.attacher
 }
 
 // Option customises a Session at construction.
@@ -108,15 +132,51 @@ func resolveExecPath() (string, error) {
 		}
 		return "", errChromeNotFound
 	}
-	if _, err := os.Stat("/usr/bin/chromium"); err == nil {
-		return "/usr/bin/chromium", nil
+	paths, names := chromeCandidates(runtime.GOOS, os.Getenv)
+	for _, p := range paths {
+		if info, err := os.Stat(p); err == nil && !info.IsDir() {
+			return p, nil
+		}
 	}
-	for _, name := range []string{"chromium", "chromium-browser", "google-chrome", "Chromium"} {
+	for _, name := range names {
 		if p, err := exec.LookPath(name); err == nil {
 			return p, nil
 		}
 	}
 	return "", errChromeNotFound
+}
+
+// chromeCandidates lists where each OS's Chrome, Chromium and Edge installers
+// put the browser, then the names to look up on PATH. The macOS and Windows
+// installers never touch PATH, so without the fixed locations a stock install
+// is invisible. Edge is last: it is Chromium underneath and ships with every
+// Windows, so it is what a Windows host without Chrome still has.
+func chromeCandidates(goos string, getenv func(string) string) (paths, names []string) {
+	switch goos {
+	case "darwin":
+		paths = []string{
+			"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+			"/Applications/Chromium.app/Contents/MacOS/Chromium",
+			"/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+		}
+	case "windows":
+		for _, c := range []struct{ env, rel string }{
+			{"ProgramFiles", `Google\Chrome\Application\chrome.exe`},
+			{"ProgramFiles(x86)", `Google\Chrome\Application\chrome.exe`},
+			{"LOCALAPPDATA", `Google\Chrome\Application\chrome.exe`},
+			{"LOCALAPPDATA", `Chromium\Application\chrome.exe`},
+			{"ProgramFiles(x86)", `Microsoft\Edge\Application\msedge.exe`},
+			{"ProgramFiles", `Microsoft\Edge\Application\msedge.exe`},
+		} {
+			if root := strings.TrimRight(strings.TrimSpace(getenv(c.env)), `\`); root != "" {
+				paths = append(paths, root+`\`+c.rel)
+			}
+		}
+		return paths, []string{"chrome", "msedge"}
+	default:
+		paths = []string{"/usr/bin/chromium"}
+	}
+	return paths, []string{"chromium", "chromium-browser", "google-chrome", "google-chrome-stable", "microsoft-edge", "microsoft-edge-stable"}
 }
 
 // run executes actions on the shared tab with a per-call timeout, with the
@@ -317,6 +377,7 @@ func (s *Session) ensureLocked() error {
 		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.DisableGPU,
 		chromedp.WindowSize(defaultViewportWidth, defaultViewportHeight),
+		chromedp.WSURLReadTimeout(browserStartTimeout),
 	)
 	opts = append(opts, s.extraFlags...)
 	// Background, not the request context: the browser must outlive the call

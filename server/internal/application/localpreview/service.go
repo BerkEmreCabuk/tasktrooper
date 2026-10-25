@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/dotnet"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/proctree"
 )
 
 type TaskReader interface {
@@ -39,6 +41,13 @@ const stopGrace = 10 * time.Second
 const logTailLines = 200
 
 var urlPattern = regexp.MustCompile(`https?://(?:localhost|127\.0\.0\.1|0\.0\.0\.0)(?::\d+)?[^\s"'<>]*`)
+
+// portPattern is the fallback when a server prints its port without a full
+// URL — Go's net/http default log line, Spring Boot's embedded-Tomcat
+// banner, and bare framework conventions all do this. It matches "listening
+// on :8080", "Listening on port 8080", "Tomcat started on port 8080 (http)"
+// and "port(s): 8080"; group 1 is the port.
+var portPattern = regexp.MustCompile(`(?i)\b(?:listening on(?: port)?|started on port(?:\(s\))?|port(?:\(s\))?)\s*:?\s*(\d{2,5})\b`)
 
 type Deps struct {
 	Tasks         TaskReader
@@ -73,22 +82,49 @@ func (s *Service) reapStale() {
 		return
 	}
 	for _, e := range loadState(s.workspaceRoot) {
-		if e.PID <= 0 {
+		if e.PID <= 0 || !isStalePreview(e.PID, processCommand(e.PID), e.Command) {
 			continue
 		}
-		terminateProcessGroup(e.PID)
-		go func(pid int) {
-			time.Sleep(stopGrace)
-			killProcessGroup(pid)
-		}(e.PID)
+		log.Info().Int("pid", e.PID).Str("command", e.Command).
+			Msg("local preview: stopping a preview a previous server left running")
+		go stopStale(e.PID, stopGrace)
 	}
 
 	saveState(s.workspaceRoot, nil)
 }
 
+// commandMatches decides whether a persisted pid is still the preview that was
+// started under it. The OS hands a pid out again once its process is gone —
+// on Windows within seconds — so a pid alone could name anything the user
+// runs. The live command line is `sh -c <command>`, or the command itself once
+// the shell exec'd it, so containing it is the test. Where the command line
+// cannot be read (Windows) nothing matches; the job object the preview ran in
+// already ended it with the server that started it.
+func commandMatches(live, started string) bool {
+	live, started = strings.TrimSpace(live), strings.TrimSpace(started)
+	return live != "" && started != "" && strings.Contains(live, started)
+}
+
+// isStalePreview is commandMatches plus the one shape it cannot see: the
+// Maven and Gradle wrappers end in `exec java …`, so a `./mvnw spring-boot:run`
+// preview's pid shows a java command line. That pid still leads the process
+// group the preview was started in, which a recycled pid almost never does.
+func isStalePreview(pid int, live, started string) bool {
+	if commandMatches(live, started) {
+		return true
+	}
+	return jvmWrapper.MatchString(started) && javaCommand.MatchString(live) && leadsOwnGroup(pid)
+}
+
+var (
+	jvmWrapper  = regexp.MustCompile(`(^|[\s/])(mvnw|gradlew|mvn|gradle)(\.bat|\.cmd)?(\s|$)`)
+	javaCommand = regexp.MustCompile(`(^|/)java(\.exe)?(\s|$)`)
+)
+
 type process struct {
 	preview domain.LocalPreview
 	cmd     *exec.Cmd
+	tree    *proctree.Tree
 	done    chan struct{}
 
 	mu      sync.Mutex
@@ -119,6 +155,9 @@ func (p *process) appendLine(line string) {
 	if p.url == "" {
 		if m := urlPattern.FindString(line); m != "" {
 			p.url = strings.Replace(m, "0.0.0.0", "127.0.0.1", 1)
+			p.status = domain.LocalPreviewRunning
+		} else if m := portPattern.FindStringSubmatch(line); m != nil {
+			p.url = "http://127.0.0.1:" + m[1]
 			p.status = domain.LocalPreviewRunning
 		}
 	}
@@ -165,11 +204,16 @@ func (s *Service) Start(ctx context.Context, repositoryID, taskID uuid.UUID, com
 	}
 
 	command := strings.TrimSpace(commandOverride)
+	var detectDetail string
 	if command == "" {
-		command = DetectRunCommand(workspacePath)
+		command, detectDetail = DetectRunCommand(workspacePath)
 	}
 	if command == "" {
-		return domain.LocalPreview{}, fmt.Errorf("could not detect a way to run this repository locally (looked for an npm dev/start script, a Makefile dev target, or a Go module)")
+		msg := "could not detect a way to run this repository locally (looked for an npm dev/start script, a Makefile dev/run target, a Maven or Gradle Spring Boot/Quarkus project, or a Go module)"
+		if detectDetail != "" {
+			msg += ": " + detectDetail
+		}
+		return domain.LocalPreview{}, fmt.Errorf("%s", msg)
 	}
 
 	releaseStaleDevServer(workspacePath)
@@ -209,9 +253,11 @@ func (s *Service) Start(ctx context.Context, repositoryID, taskID uuid.UUID, com
 		status: domain.LocalPreviewStarting,
 	}
 
-	if err := cmd.Start(); err != nil {
+	tree, err := proctree.Start(cmd)
+	if err != nil {
 		return domain.LocalPreview{}, fmt.Errorf("start %q: %w", command, err)
 	}
+	p.tree = tree
 
 	s.active[repositoryID] = p
 	s.persistLocked()
@@ -294,7 +340,7 @@ func (s *Service) persistLocked() {
 		if p.cmd.Process == nil || p.exited() {
 			continue
 		}
-		entries = append(entries, persistedEntry{RepositoryID: repositoryID, PID: p.cmd.Process.Pid})
+		entries = append(entries, persistedEntry{RepositoryID: repositoryID, PID: p.cmd.Process.Pid, Command: p.preview.Command})
 	}
 	saveState(s.workspaceRoot, entries)
 }
@@ -307,34 +353,182 @@ func (s *Service) stopProcess(p *process) {
 	if p.cmd.Process == nil || p.exited() {
 		return
 	}
-	pgid := p.cmd.Process.Pid
-	terminateProcessGroup(pgid)
+	terminateProcessGroup(p.cmd.Process.Pid)
 	select {
 	case <-p.done:
-		return
 	case <-time.After(stopGrace):
+		p.tree.Kill()
+		<-p.done
 	}
-	killProcessGroup(pgid)
-	<-p.done
+	p.tree.Close()
 }
 
-func DetectRunCommand(dir string) string {
+// Close stops every active preview and forgets them, so the next boot finds
+// nothing of this process's to reap. Safe to call more than once.
+func (s *Service) Close() {
+	s.mu.Lock()
+	procs := make([]*process, 0, len(s.active))
+	for _, p := range s.active {
+		procs = append(procs, p)
+	}
+	s.active = make(map[uuid.UUID]*process)
+	s.persistLocked()
+	s.mu.Unlock()
+
+	var wg sync.WaitGroup
+	for _, p := range procs {
+		wg.Add(1)
+		go func(p *process) {
+			defer wg.Done()
+			s.stopProcess(p)
+		}(p)
+	}
+	wg.Wait()
+}
+
+// DetectRunCommand returns the shell command to run dir's project locally.
+// command is "" when nothing recognised matched; detail, only ever set
+// alongside an empty command, names what was ambiguous (today: a Go module
+// with several cmd/*/main.go candidates and no root main) so the caller's
+// error can tell the agent what commandOverride to pass instead of a bare
+// "could not detect".
+func DetectRunCommand(dir string) (command, detail string) {
 	if hasNPMScript(dir, "dev") {
-		return "npm run dev"
+		return "npm run dev", ""
 	}
 	if hasNPMScript(dir, "start") {
-		return "npm start"
+		return "npm start", ""
 	}
-	if fileExists(filepath.Join(dir, "Makefile")) && makeHasTarget(dir, "dev") {
-		return "make dev"
+	if fileExists(filepath.Join(dir, "Makefile")) {
+		if makeHasTarget(dir, "dev") {
+			return "make dev", ""
+		}
+		if makeHasTarget(dir, "run") {
+			return "make run", ""
+		}
+	}
+	if cmd := mavenRunCommand(dir); cmd != "" {
+		return cmd, ""
+	}
+	if cmd := gradleRunCommand(dir); cmd != "" {
+		return cmd, ""
 	}
 	if fileExists(filepath.Join(dir, "go.mod")) {
-		return "go run ."
+		if hasRootMainPackage(dir) {
+			return "go run .", ""
+		}
+		switch mains := cmdMainPackages(dir); len(mains) {
+		case 0:
+			// No root main.go and no cmd/<name>/main.go either; "go run ."
+			// is the same best-effort guess this returned before cmd/ was
+			// understood — still the least-wrong default for an unusual
+			// layout DetectRunCommand does not otherwise recognise.
+			return "go run .", ""
+		case 1:
+			return "go run ./cmd/" + mains[0], ""
+		default:
+			return "", fmt.Sprintf(
+				"this Go module's main package is not at the root, and cmd/ holds several: %s — pass commandOverride with the one to run, e.g. %q",
+				strings.Join(mains, ", "), "go run ./cmd/"+mains[0],
+			)
+		}
 	}
 	// Only a lone project file is a guess worth making: a solution holds
 	// several projects and `dotnet run` refuses to pick the startup one.
 	if target, ok := dotnet.BuildTarget(dir); ok && dotnet.IsProjectFile(target) && dotnet.HasProject(dir) {
-		return "dotnet run --project " + target
+		return "dotnet run --project " + target, ""
+	}
+	return "", ""
+}
+
+// packageMainPattern matches a top-level "package main" declaration; it is a
+// text scan rather than go/parser because DetectRunCommand runs against a
+// freshly checked-out workspace that need not build yet.
+var packageMainPattern = regexp.MustCompile(`(?m)^package\s+main\s*$`)
+
+// hasRootMainPackage reports whether dir itself (not a subdirectory) holds a
+// "package main" .go file — the common case `go run .` targets.
+func hasRootMainPackage(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		if packageMainPattern.Match(data) {
+			return true
+		}
+	}
+	return false
+}
+
+// cmdMainPackages lists the cmd/<name> directories that hold a main.go, sorted
+// for a deterministic pick when exactly one exists.
+func cmdMainPackages(dir string) []string {
+	cmdDir := filepath.Join(dir, "cmd")
+	entries, err := os.ReadDir(cmdDir)
+	if err != nil {
+		return nil
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() && fileExists(filepath.Join(cmdDir, e.Name(), "main.go")) {
+			names = append(names, e.Name())
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// mavenRunCommand detects a Maven-wrapper project and which plugin to run it
+// with. Only the committed wrapper is used (mvnw), never a bare "mvn" — a
+// task workspace has no guarantee the right Maven is on PATH.
+func mavenRunCommand(dir string) string {
+	if !fileExists(filepath.Join(dir, "mvnw")) {
+		return ""
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "pom.xml"))
+	if err != nil {
+		return ""
+	}
+	content := string(data)
+	switch {
+	case strings.Contains(content, "quarkus"):
+		return "./mvnw quarkus:dev"
+	case strings.Contains(content, "spring-boot"):
+		return "./mvnw spring-boot:run"
+	}
+	return ""
+}
+
+// gradleRunCommand is mavenRunCommand's Gradle-wrapper counterpart; Kotlin
+// and Groovy build scripts carry the same plugin ids as plain text.
+func gradleRunCommand(dir string) string {
+	if !fileExists(filepath.Join(dir, "gradlew")) {
+		return ""
+	}
+	var content string
+	for _, name := range []string{"build.gradle.kts", "build.gradle"} {
+		if data, err := os.ReadFile(filepath.Join(dir, name)); err == nil {
+			content = string(data)
+			break
+		}
+	}
+	if content == "" {
+		return ""
+	}
+	switch {
+	case strings.Contains(content, "quarkus"):
+		return "./gradlew quarkusDev"
+	case strings.Contains(content, "spring-boot") || strings.Contains(content, "org.springframework.boot"):
+		return "./gradlew bootRun"
 	}
 	return ""
 }

@@ -9,6 +9,7 @@ package workflowtest
 
 import (
 	"context"
+	"slices"
 
 	"github.com/google/uuid"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -55,6 +56,7 @@ const (
 	taskTypeAnaliz    = domain.TaskType("analiz")
 	taskTypeBug       = domain.TaskType("bug")
 	taskTypeTechnical = domain.TaskType("technical")
+	taskTypeDesign    = domain.TaskType("design")
 )
 
 // Default builds the roles, task types and per-type workflow stages the
@@ -71,6 +73,8 @@ func Default() Fixture {
 	qaID := RoleID("qa")
 	pmID := RoleID("product_manager")
 	releaseID := RoleID("release")
+	designerID := RoleID("designer")
+	securityID := RoleID("security")
 	devopsID := RoleID("devops")
 
 	roles := []domain.AgentRole{
@@ -114,6 +118,18 @@ func Default() Fixture {
 			Description: "Merges signed-off work, ships it, verifies production after the deploy and rolls back what breaks.",
 		},
 		{
+			// No assignment: the ui-designer agent is created by the catalog
+			// sync at boot, after migrations have run (migration 178).
+			ID: designerID, Key: "designer", Name: "Designer",
+			Description: "Owns the design system and designs screens before they are built.",
+		},
+		{
+			// No assignment: the security-agent is created by the catalog sync
+			// at boot, after migrations have run.
+			ID: securityID, Key: "security", Name: "Security Reviewer",
+			Description: "Reviews every pull request in code_review for security issues and blocks the ones that introduce an exploitable vulnerability.",
+		},
+		{
 			// Fork-only (migration 169_fork_devops_role). Like release, the
 			// devops-engineer agent is assigned by the catalog sync.
 			ID: devopsID, Key: "devops", Name: "DevOps Engineer",
@@ -139,6 +155,11 @@ func Default() Fixture {
 		},
 		{Key: taskTypeBug, Label: "Bug", KeyPrefix: "B", Position: 2, IsDefect: true, BuiltIn: true, AssigneeMode: domain.AssigneeModeNone},
 		{Key: taskTypeTechnical, Label: "Technical", KeyPrefix: "TC", Position: 3, BuiltIn: true, AssigneeMode: domain.AssigneeModeNone},
+		{
+			Key: taskTypeDesign, Label: "Design", KeyPrefix: "D", Position: 4, BuiltIn: true,
+			AssigneeRoleID: &designerID, AssigneeMode: domain.AssigneeModeOverride,
+			Behaviours: []domain.BehaviourRef{ref(domain.BehaviourNoWorkspaceWrites)},
+		},
 	}
 
 	workflows := map[domain.TaskType]domain.Workflow{}
@@ -151,12 +172,17 @@ func Default() Fixture {
 
 // requiredAnalizToolsSnapshot mirrors domain.RequiredAnalizTools at the time
 // migration 143 was written (CodeExplorationTools ++ AnalizDocumentTools ++
-// BoardProgressTools ++ the four extras) — see tool_policy.go.
+// BoardProgressTools ++ the four extras) — see tool_policy.go — PLUS every
+// later migration's own addition to the analyst role's required_tools
+// (migration 169: record_open_questions, list_open_questions), since
+// TestParityWithWorkflowtestDefault compares this fixture against the
+// result of running every migration, not only 143.
 var requiredAnalizToolsSnapshot = []string{
 	"codebase_search", "grep_code", "get_repo_tree", "get_symbol_skeleton", "expand_symbol_context", "read_file",
 	"add_task_document", "update_task_document",
 	"claim_board_task", "move_board_task",
 	"add_task_comment", "list_task_comments", "list_task_documents", "create_board_task",
+	"record_open_questions", "list_open_questions",
 }
 
 // ---- workflow.Reader / RoleResolver fakes ----
@@ -230,6 +256,7 @@ func (f Fixture) Resolver() interface {
 	AgentForRole(ctx context.Context, roleID uuid.UUID, area string) (*uuid.UUID, error)
 	AgentForPurpose(ctx context.Context, purpose domain.RolePurposeKey, area string) (*uuid.UUID, error)
 	AgentArea(ctx context.Context, agentID uuid.UUID) string
+	AgentAreas(ctx context.Context, agentID uuid.UUID) []string
 	AssigneeForNewTask(ctx context.Context, taskType domain.TaskType, area string, requested *uuid.UUID) (*uuid.UUID, error)
 } {
 	return resolver{f: f}
@@ -251,7 +278,7 @@ func (r resolver) AgentForRole(_ context.Context, roleID uuid.UUID, area string)
 	}
 	var anyMatch *uuid.UUID
 	for _, a := range role.Assignments {
-		if a.Areas == nil {
+		if len(a.Areas) == 0 {
 			if anyMatch == nil {
 				id := a.AgentID
 				anyMatch = &id
@@ -268,6 +295,20 @@ func (r resolver) AgentForRole(_ context.Context, roleID uuid.UUID, area string)
 	return anyMatch, nil
 }
 
+func (r resolver) AgentHoldsRole(_ context.Context, agentID uuid.UUID, roleKey string) (bool, error) {
+	for _, role := range r.f.Roles {
+		if role.Key != roleKey {
+			continue
+		}
+		for _, a := range role.Assignments {
+			if a.AgentID == agentID {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func (r resolver) AgentForPurpose(ctx context.Context, purpose domain.RolePurposeKey, area string) (*uuid.UUID, error) {
 	for _, p := range r.f.Purposes {
 		if p.Purpose == purpose && p.RoleID != nil {
@@ -277,25 +318,29 @@ func (r resolver) AgentForPurpose(ctx context.Context, purpose domain.RolePurpos
 	return nil, nil
 }
 
-func (r resolver) AgentArea(_ context.Context, agentID uuid.UUID) string {
-	areas := map[string]bool{}
+func (r resolver) AgentArea(ctx context.Context, agentID uuid.UUID) string {
+	if areas := r.AgentAreas(ctx, agentID); len(areas) == 1 {
+		return areas[0]
+	}
+	return ""
+}
+
+func (r resolver) AgentAreas(_ context.Context, agentID uuid.UUID) []string {
+	var areas []string
 	for _, role := range r.f.Roles {
 		for _, a := range role.Assignments {
-			if a.AgentID != agentID || a.Areas == nil {
+			if a.AgentID != agentID {
 				continue
 			}
 			for _, ar := range a.Areas {
-				areas[ar] = true
+				if !slices.Contains(areas, ar) {
+					areas = append(areas, ar)
+				}
 			}
 		}
 	}
-	if len(areas) != 1 {
-		return ""
-	}
-	for ar := range areas {
-		return ar
-	}
-	return ""
+	slices.Sort(areas)
+	return areas
 }
 
 func (r resolver) AssigneeForNewTask(ctx context.Context, taskType domain.TaskType, area string, requested *uuid.UUID) (*uuid.UUID, error) {

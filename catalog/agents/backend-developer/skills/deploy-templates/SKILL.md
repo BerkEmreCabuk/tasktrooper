@@ -1,7 +1,7 @@
 ---
 name: deploy-templates
 category: operations
-description: Author a repository's deploy from the built-in provider recipes (GCP, AWS, Vercel, Fly) instead of hand-rolling a workflow, and make it verifiable and reversible.
+description: Built-in deploy recipes and deploy targets. Use when a task asks you to set up or change a stage/preprod/prod deploy workflow, including the system's "Set up <env> deploy" tasks.
 ---
 # Deploy templates
 
@@ -12,14 +12,20 @@ workflow to write, the secrets it needs, the smoke check and the rollback.
 
 ## Workflow
 
-1. `list_deploy_templates` (optionally filtered by repo kind) to see what is available.
-2. `get_deploy_target` with the repository id and env to read what this repo actually
-   ships to, plus the recipe already rendered with its variables.
-3. `load_deploy_template` for the full recipe when you need the raw version.
+1. A "Set up `<env>` deploy" task already carries the rendered recipe in its description —
+   start from that rather than asking the tools for it again.
+2. `get_deploy_target` with the repository id and env to re-read what this repo ships to,
+   plus the recipe rendered with its variables, whenever you need it again mid-task.
+3. `load_deploy_template` for the full raw recipe (secrets, smoke check, rollback) when the
+   rendered version in the task description is not enough, or the task gives no recipe
+   (a change to an existing deploy rather than a new one) — `list_deploy_templates`,
+   optionally filtered by repo kind, to see what is available first.
 4. Write the workflow into `.github/workflows/` exactly as the recipe describes. Keep the
    `workflow_dispatch` trigger: the board dispatches deploys by workflow file.
-5. Map the workflow under Repository Settings → Pipeline for the matching category
-   (`stage_deploy` / `preprod_deploy` / `prod_deploy`), otherwise nothing will ever run it.
+5. Name the file and the workflow's `name:` per ci-cd-pipeline-authoring so the detector maps
+   it to the right slot (`stage_deploy` / `preprod_deploy` / `prod_deploy`). If the slot still
+   shows unmapped after that, say so in one comment: mapping the detected slot is the human's
+   action, not something you can force from here.
 
 ## Non-negotiables
 

@@ -8,6 +8,9 @@ func (p Policy) blockedReason(ip net.IP) string {
 	if ip == nil {
 		return "not an IP address"
 	}
+	if p.RequireLoopback {
+		return p.loopbackOnlyReason(ip)
+	}
 
 	// To4 unwraps v4-mapped v6, so the v4 rules below cover them.
 	if v4 := ip.To4(); v4 != nil {
@@ -28,6 +31,33 @@ func (p Policy) blockedReason(ip net.IP) string {
 	return p.reasonV6(ip16)
 }
 
+// loopbackOnlyReason is RequireLoopback's whole policy: everything that is not
+// 127.0.0.0/8 or ::1 is refused, deliberately bypassing reasonV4/reasonV6 (which
+// exist to find exceptions in an otherwise-public-only policy, the opposite
+// shape from "only loopback dials").
+func (p Policy) loopbackOnlyReason(ip net.IP) string {
+	if v4 := ip.To4(); v4 != nil {
+		if v4.IsLoopback() {
+			return ""
+		}
+		return "not a loopback address"
+	}
+	ip16 := ip.To16()
+	if ip16 == nil {
+		return "not an IP address"
+	}
+	if embedded := embeddedV4(ip16); embedded != nil {
+		if embedded.IsLoopback() {
+			return ""
+		}
+		return "not a loopback address"
+	}
+	if ip16.IsLoopback() {
+		return ""
+	}
+	return "not a loopback address"
+}
+
 func (p Policy) reasonV4(ip net.IP) string {
 	switch {
 	case ip.IsUnspecified():
@@ -45,6 +75,8 @@ func (p Policy) reasonV4(ip net.IP) string {
 		return "link-local address"
 	case ip.IsInterfaceLocalMulticast(), ip.IsLinkLocalMulticast(), ip.IsMulticast():
 		return "multicast address"
+	case isMetadataIP(ip):
+		return "cloud metadata address"
 	case ip.IsPrivate():
 		if p.AllowPrivate {
 			return ""
@@ -78,6 +110,8 @@ func (p Policy) reasonV6(ip net.IP) string {
 		return "link-local address"
 	case ip.IsInterfaceLocalMulticast(), ip.IsLinkLocalMulticast(), ip.IsMulticast():
 		return "multicast address"
+	case isMetadataIP(ip):
+		return "cloud metadata address"
 	case ip.IsPrivate():
 		if p.AllowPrivate {
 			return ""
@@ -85,6 +119,26 @@ func (p Policy) reasonV6(ip net.IP) string {
 		return "unique local address"
 	}
 	return ""
+}
+
+// metadataIPs are cloud instance metadata endpoints. Some sit inside ranges
+// AllowPrivate opens (Alibaba's in CGNAT, EC2's and GCE's IPv6 ones in ULA), so
+// every policy refuses them before it consults that switch. 169.254.169.254 is
+// link-local and refused earlier still; it is listed so the set is whole.
+var metadataIPs = []net.IP{
+	net.ParseIP("169.254.169.254"),
+	net.ParseIP("100.100.100.200"),
+	net.ParseIP("fd00:ec2::254"),
+	net.ParseIP("fd20:ce::254"),
+}
+
+func isMetadataIP(ip net.IP) bool {
+	for _, m := range metadataIPs {
+		if ip.Equal(m) {
+			return true
+		}
+	}
+	return false
 }
 
 // blockedV4 covers ranges net.IP has no predicate for. CGNAT (100.64.0.0/10)

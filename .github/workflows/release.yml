@@ -11,6 +11,13 @@ name: release
 # its `v`) into desktop/package.json before building, so cutting a release is
 # just pushing an annotated tag — no version-bump commit needed first, and
 # nothing here writes that version back to the repo.
+#
+# GA_MEASUREMENT_ID and GA_API_SECRET are baked into the main process at build
+# time (desktop/src/main/analytics). Without them, a hand-started build, a fork
+# or a job that cannot see the secret produces an app that sends nothing. Only
+# the mac job binds the Release environment; for the Windows and Linux builds
+# to carry them too, store both as repository secrets (or bind the environment
+# there as well).
 on:
   push:
     tags: ["v*"]
@@ -76,12 +83,17 @@ jobs:
         run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
       - name: Install and build
+        env:
+          TT_GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
+          TT_GA_API_SECRET: ${{ secrets.GA_API_SECRET }}
         run: |
           npm ci
           npm --prefix ui ci
           npm run build
           npm run build:ui
           npm run build:server:universal
+          npm run build:executor:universal
+          npm run build:runner:universal
           npm run build:embedder
 
       # @electron/notarize wants APPLE_API_KEY to be a *path* to the .p8 and the
@@ -201,12 +213,17 @@ jobs:
         run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
       - name: Install and build
+        env:
+          TT_GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
+          TT_GA_API_SECRET: ${{ secrets.GA_API_SECRET }}
         run: |
           npm ci
           npm --prefix ui ci
           npm run build
           npm run build:ui
           npm run build:server
+          npm run build:executor
+          npm run build:runner
           npm run build:embedder
 
       - name: Package
@@ -265,12 +282,17 @@ jobs:
         run: npm version --no-git-tag-version --allow-same-version "${GITHUB_REF_NAME#v}"
 
       - name: Install and build
+        env:
+          TT_GA_MEASUREMENT_ID: ${{ secrets.GA_MEASUREMENT_ID }}
+          TT_GA_API_SECRET: ${{ secrets.GA_API_SECRET }}
         run: |
           npm ci
           npm --prefix ui ci
           npm run build
           npm run build:ui
           npm run build:server
+          npm run build:executor
+          npm run build:runner
           npm run build:embedder
 
       - name: Package

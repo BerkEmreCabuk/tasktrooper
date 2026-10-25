@@ -1,9 +1,13 @@
 import { Outlet, useLocation } from "react-router-dom";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type Agent, type WorkspaceConfig } from "@/api";
+import { PageSuspense } from "@/components/layout/PageSuspense";
 import { WorkspaceShell } from "@/components/layout/WorkspaceShell";
 import { useCachedState, useFirstLoad } from "@/hooks/useCachedState";
+import type { WorkspaceOutletContext } from "@/hooks/useWorkspaceOutlet";
+import { productManagerIds, resolveLeadAgent } from "@/lib/leadAgent";
 import { CACHE_CONFIG } from "@/lib/project-board";
+import { keepEqual } from "@/lib/stableState";
 import { cn } from "@/lib/utils";
 
 // Boot syncs the role catalog in the background (no embedding calls, and
@@ -18,21 +22,35 @@ const SEED_POLL_MAX_ATTEMPTS = 20;
 // The sidebar shows only enabled agents, so it caches that filtered list under
 // its own key rather than sharing the board's full roster.
 const SIDEBAR_AGENTS_CACHE = "workspace.sidebarAgents";
+const LEAD_AGENT_CACHE = "workspace.leadAgentId";
+const UNASSIGNABLE_AGENTS_CACHE = "workspace.unassignableAgentIds";
+// The server gives the first sync 10 minutes; polling a little past that covers
+// it without spinning forever on an install whose catalog never records a run.
+const FIRST_SYNC_POLL_INTERVAL_MS = 4000;
+const FIRST_SYNC_POLL_MAX_ATTEMPTS = 165;
 
 export function WorkspaceLayout() {
   const { pathname } = useLocation();
   const isChat = pathname.includes("/agents/") && pathname.includes("/chat");
+  const isHome = pathname === "/home";
   const isBoard = pathname === "/board";
   const isBacklog = pathname === "/backlog";
   const isReleased = pathname === "/released";
   const isAnalysisReview = /^\/repositories\/[^/]+\/tasks\/[^/]+\/analysis\/?$/.test(pathname);
-  const fullBleed = isChat || isBoard || isBacklog || isReleased || isAnalysisReview;
+  // The Operations console brings its own nav column and scroll area.
+  const isOperations = pathname === "/operations" || pathname.startsWith("/operations/");
+  const fullBleed = isHome || isChat || isBoard || isBacklog || isReleased || isAnalysisReview || isOperations;
   // The sidebar's roster and column config come back from cache first: a
   // reload (or the desktop shell restoring a tab) renders the nav immediately
   // instead of holding it on skeletons until the server answers.
   const [config, setConfig] = useCachedState<WorkspaceConfig | null>(CACHE_CONFIG, null);
   const [agents, setAgents] = useCachedState<Agent[]>(SIDEBAR_AGENTS_CACHE, []);
-  const [loading, setLoading] = useFirstLoad(CACHE_CONFIG, SIDEBAR_AGENTS_CACHE);
+  const [leadAgentId, setLeadAgentId] = useCachedState<string | null>(LEAD_AGENT_CACHE, null);
+  const [unassignableAgentIds, setUnassignableAgentIds] = useCachedState<string[]>(UNASSIGNABLE_AGENTS_CACHE, []);
+  // The lead's key gates loading too: /home must not read "no lead cached yet"
+  // as "no lead" and send the first launch after an upgrade to the board.
+  const [loading, setLoading] = useFirstLoad(CACHE_CONFIG, SIDEBAR_AGENTS_CACHE, LEAD_AGENT_CACHE);
+  const [teamPreparing, setTeamPreparing] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const load = useCallback(async () => {
@@ -42,11 +60,17 @@ export function WorkspaceLayout() {
     // it would take the user's nav away over a blip.
     const fail = () => {
       setLoading(false);
+      setTeamPreparing(false);
     };
 
     const attempt = async (tries: number): Promise<void> => {
-      const [cfg, catalog] = await Promise.all([api.getWorkspaceConfig(), api.listAgents()]);
-      setConfig(cfg);
+      const [cfg, catalog, rolesResult, catalogStatus] = await Promise.all([
+        api.getWorkspaceConfig(),
+        api.listAgents(),
+        api.listRoles().catch(() => null),
+        api.getCatalogStatus().catch(() => null),
+      ]);
+      setConfig((prev) => keepEqual(prev, cfg));
       if (catalog.seeding && tries < SEED_POLL_MAX_ATTEMPTS) {
         // The retry is fire-and-forget, so it must handle its own rejection —
         // the try/catch below only covers attempt(0). A blip on any later poll
@@ -56,8 +80,26 @@ export function WorkspaceLayout() {
         }, SEED_POLL_INTERVAL_MS);
         return;
       }
-      setAgents((catalog.agents ?? []).filter((a) => a.enabled));
+      const enabledAgents = (catalog.agents ?? []).filter((a) => a.enabled);
+      const lead = resolveLeadAgent(enabledAgents, rolesResult?.roles ?? null);
+      setAgents((prev) => keepEqual(prev, enabledAgents));
+      setLeadAgentId(lead?.id ?? null);
+      setUnassignableAgentIds((prev) =>
+        keepEqual(prev, productManagerIds(catalog.agents ?? [], rolesResult?.roles ?? null)),
+      );
       setLoading(false);
+      // A fresh install's first catalog sync creates the agents one at a time,
+      // each after its skills are embedded — minutes, long after `seeding` has
+      // gone false (the boot step only launches the sync). Until it records its
+      // first run, keep refreshing so the team fills in and the lead appears.
+      const firstSyncRunning = catalogStatus?.configured === true && !catalogStatus.state?.last_sync_at;
+      const keepPolling = firstSyncRunning && tries < FIRST_SYNC_POLL_MAX_ATTEMPTS;
+      setTeamPreparing(keepPolling && !lead);
+      if (keepPolling) {
+        pollTimer.current = setTimeout(() => {
+          void attempt(tries + 1).catch(fail);
+        }, FIRST_SYNC_POLL_INTERVAL_MS);
+      }
     };
 
     try {
@@ -65,17 +107,40 @@ export function WorkspaceLayout() {
     } catch {
       fail();
     }
-  }, [setConfig, setAgents, setLoading]);
+  }, [setConfig, setAgents, setLeadAgentId, setUnassignableAgentIds, setLoading]);
 
   useEffect(() => {
     load();
     return () => clearTimeout(pollTimer.current);
   }, [load]);
 
+  const leadAgent = useMemo(() => agents.find((a) => a.id === leadAgentId) ?? null, [agents, leadAgentId]);
+  const outletContext = useMemo<WorkspaceOutletContext>(
+    () => ({
+      config,
+      agents,
+      refreshWorkspace: load,
+      leadAgent,
+      unassignableAgentIds,
+      workspaceLoading: loading,
+      teamPreparing,
+    }),
+    [config, agents, load, leadAgent, unassignableAgentIds, loading, teamPreparing],
+  );
+
   return (
-    <WorkspaceShell config={config} agents={agents} loading={loading} fullBleed={fullBleed} onRefresh={load}>
+    <WorkspaceShell
+      config={config}
+      agents={agents}
+      leadAgent={leadAgent}
+      loading={loading}
+      fullBleed={fullBleed}
+      onRefresh={load}
+    >
       <div className={cn("flex min-h-0 flex-1 flex-col", fullBleed ? "h-full overflow-hidden" : "")}>
-        <Outlet context={{ config, agents, refreshWorkspace: load }} />
+        <PageSuspense>
+          <Outlet context={outletContext} />
+        </PageSuspense>
       </div>
     </WorkspaceShell>
   );

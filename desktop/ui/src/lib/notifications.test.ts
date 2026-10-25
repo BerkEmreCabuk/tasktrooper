@@ -89,6 +89,21 @@ describe("toNotificationItems", () => {
     expect(items.find((i) => i.id === "evt-7")?.kind).toBe("question");
   });
 
+  it("routes a blocked analysis_questions park to the report, not a chat", () => {
+    const questionsTask = task({ id: "task-5", repository_id: "repo-9", blocked_resource: "analysis_questions" });
+    const questionsMove = movedItem({
+      id: "evt-13",
+      task_id: "task-5",
+      payload: { from_column: "in_progress", to_column: "blocked" },
+    });
+    const items = toNotificationItems([questionsMove], [questionsTask]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      kind: "question",
+      path: "/repositories/repo-9/tasks/task-5/analysis",
+    });
+  });
+
   it("excludes a blocked move with neither a decision nor a question", () => {
     const plainTask = task({ id: "task-4" });
     const plainMove = movedItem({

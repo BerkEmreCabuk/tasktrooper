@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/core"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -16,6 +17,7 @@ const maxStreamLine = 8 << 20
 
 type event struct {
 	Type    string `json:"type"`
+	ParentToolUseID string `json:"parent_tool_use_id"`
 	Subtype string `json:"subtype"`
 	SessionID string `json:"session_id"`
 	Model     string `json:"model"`
@@ -27,6 +29,7 @@ type event struct {
 	NumTurns     int       `json:"num_turns"`
 	TotalCostUSD float64   `json:"total_cost_usd"`
 	Usage        *cliUsage `json:"usage"`
+	ModelUsage   map[string]cliModelUsage `json:"modelUsage"`
 	Error string `json:"error"`
 	APIErrorStatus int `json:"api_error_status"`
 	RateLimit *rateLimitInfo `json:"rate_limit_info"`
@@ -157,6 +160,40 @@ func (u *cliUsage) toDomain() domain.Usage {
 	}
 }
 
+// cliModelUsage is one model's share of the whole session. Unlike a result's
+// usage, which covers only the query that produced it, it is cumulative and
+// includes the session's subagents.
+type cliModelUsage struct {
+	InputTokens              int `json:"inputTokens"`
+	OutputTokens             int `json:"outputTokens"`
+	CacheReadInputTokens     int `json:"cacheReadInputTokens"`
+	CacheCreationInputTokens int `json:"cacheCreationInputTokens"`
+}
+
+func sessionUsage(models map[string]cliModelUsage) (domain.Usage, bool) {
+	if len(models) == 0 {
+		return domain.Usage{}, false
+	}
+	var u cliUsage
+	for _, m := range models {
+		u.InputTokens += m.InputTokens
+		u.OutputTokens += m.OutputTokens
+		u.CacheReadInputTokens += m.CacheReadInputTokens
+		u.CacheCreationInputTokens += m.CacheCreationInputTokens
+	}
+	return u.toDomain(), true
+}
+
+func addUsage(a, b domain.Usage) domain.Usage {
+	return domain.Usage{
+		PromptTokens:     a.PromptTokens + b.PromptTokens,
+		CompletionTokens: a.CompletionTokens + b.CompletionTokens,
+		TotalTokens:      a.TotalTokens + b.TotalTokens,
+		CacheReadTokens:  a.CacheReadTokens + b.CacheReadTokens,
+		CacheWriteTokens: a.CacheWriteTokens + b.CacheWriteTokens,
+	}
+}
+
 type sink interface {
 	OnSession(sessionID, model string)
 	OnTurn()
@@ -169,6 +206,14 @@ type streamingSink struct {
 	inner sink
 	out   port.ChatStream
 	streamed bool
+	parent   string
+}
+
+func (s *streamingSink) SetParentCall(callID string) {
+	s.parent = callID
+	if ps, ok := s.inner.(core.ParentScoper); ok {
+		ps.SetParentCall(callID)
+	}
 }
 
 func newStreamingSink(inner sink, out port.ChatStream) sink {
@@ -184,6 +229,9 @@ func (s *streamingSink) OnTurn() { s.inner.OnTurn() }
 
 func (s *streamingSink) OnAssistantText(text string) {
 	s.inner.OnAssistantText(text)
+	if s.parent != "" {
+		return
+	}
 	if s.streamed {
 		s.out.Text("\n\n")
 	}
@@ -193,7 +241,7 @@ func (s *streamingSink) OnAssistantText(text string) {
 
 func (s *streamingSink) OnToolUse(callID, name, arguments string) {
 	s.inner.OnToolUse(callID, name, arguments)
-	if s.streamed {
+	if s.parent == "" && s.streamed {
 		s.out.SegmentBreak()
 		s.streamed = false
 	}
@@ -224,6 +272,7 @@ func parseStream(r io.Reader, s sink) (outcome, error) {
 	scanner.Buffer(make([]byte, 0, 64<<10), maxStreamLine)
 
 	var out outcome
+	var queryUsage domain.Usage
 	lastAssistantText := ""
 	toolNames := map[string]string{}
 
@@ -256,6 +305,7 @@ func parseStream(r io.Reader, s sink) (outcome, error) {
 				reportInit(s, out.Init)
 			}
 		case "assistant":
+			scopeParent(s, ev.ParentToolUseID)
 			blocks := decodeBlocks(ev.Message)
 			if turnHasContent(blocks) {
 				s.OnTurn()
@@ -266,7 +316,9 @@ func parseStream(r io.Reader, s sink) (outcome, error) {
 					if strings.TrimSpace(block.Text) == "" {
 						continue
 					}
-					lastAssistantText = block.Text
+					if ev.ParentToolUseID == "" {
+						lastAssistantText = block.Text
+					}
 					s.OnAssistantText(block.Text)
 				case "tool_use":
 					toolNames[block.ID] = block.Name
@@ -274,6 +326,7 @@ func parseStream(r io.Reader, s sink) (outcome, error) {
 				}
 			}
 		case "user":
+			scopeParent(s, ev.ParentToolUseID)
 			for _, block := range decodeBlocks(ev.Message) {
 				if block.Type != "tool_result" {
 					continue
@@ -289,9 +342,15 @@ func parseStream(r io.Reader, s sink) (outcome, error) {
 			out.SawResult = true
 			out.Subtype = ev.Subtype
 			out.IsError = ev.IsError
-			out.NumTurns = ev.NumTurns
+			// A run whose main agent waited on a background subagent emits one
+			// result per query; the last one carries the answer.
+			out.NumTurns += ev.NumTurns
 			out.CostUSD = ev.TotalCostUSD
-			out.Usage = ev.Usage.toDomain()
+			queryUsage = addUsage(queryUsage, ev.Usage.toDomain())
+			out.Usage = queryUsage
+			if total, ok := sessionUsage(ev.ModelUsage); ok {
+				out.Usage = total
+			}
 			out.Text = firstNonEmpty(ev.Result, ev.Error, lastAssistantText)
 			out.APIErrorStatus = ev.APIErrorStatus
 		case "rate_limit_event":
@@ -307,6 +366,12 @@ func parseStream(r io.Reader, s sink) (outcome, error) {
 		out.Text = lastAssistantText
 	}
 	return out, nil
+}
+
+func scopeParent(s sink, parentCallID string) {
+	if ps, ok := s.(core.ParentScoper); ok {
+		ps.SetParentCall(parentCallID)
+	}
 }
 
 func turnHasContent(blocks []contentBlock) bool {

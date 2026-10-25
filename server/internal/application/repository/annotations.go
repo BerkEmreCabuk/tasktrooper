@@ -115,28 +115,60 @@ func (s *Service) SubmitAnnotations(ctx context.Context, repositoryID, taskID uu
 			open = append(open, a)
 		}
 	}
-	if len(open) == 0 {
+
+	// A review with zero comments but at least one answered open question is
+	// still a real send: the human may have answered a non-blocking question
+	// here without annotating anything else.
+	var answeredQuestions []domain.TaskQuestion
+	if s.questions != nil {
+		if qs, qErr := s.questions.ListByTask(ctx, taskID); qErr == nil {
+			answeredQuestions = domain.AnsweredUnsubmitted(qs)
+		}
+	}
+	if len(open) == 0 && len(answeredQuestions) == 0 {
 		return 0, domain.BoardTask{}, domain.ErrNoOpenAnnotations
 	}
-	ids := make([]uuid.UUID, 0, len(open))
-	for _, a := range open {
-		ids = append(ids, a.ID)
+
+	var submitted []domain.TaskDocumentAnnotation
+	if len(open) > 0 {
+		ids := make([]uuid.UUID, 0, len(open))
+		for _, a := range open {
+			ids = append(ids, a.ID)
+		}
+		moved, err := s.annotations.MarkSubmitted(ctx, taskID, ids, time.Now().UTC())
+		if err != nil {
+			return 0, domain.BoardTask{}, err
+		}
+		submitted = keepAnnotations(open, moved)
 	}
-	moved, err := s.annotations.MarkSubmitted(ctx, taskID, ids, time.Now().UTC())
-	if err != nil {
-		return 0, domain.BoardTask{}, err
+
+	var submittedQuestions []domain.TaskQuestion
+	if len(answeredQuestions) > 0 {
+		submittedQuestions, err = s.questions.MarkSubmitted(ctx, taskID, time.Now().UTC())
+		if err != nil {
+			s.reopenAnnotations(ctx, taskID, submitted)
+			return 0, domain.BoardTask{}, err
+		}
 	}
-	if len(moved) == 0 {
-		return 0, domain.BoardTask{}, domain.ErrNoOpenAnnotations
-	}
-	submitted := keepAnnotations(open, moved)
 
 	if s.comments != nil {
+		var parts []string
+		switch {
+		case len(submitted) > 0:
+			parts = append(parts, reviewSummaryComment(submitted, req.Note))
+		case strings.TrimSpace(req.Note) != "":
+			parts = append(parts, strings.TrimSpace(req.Note))
+		}
+		if len(submittedQuestions) > 0 {
+			parts = append(parts, questionsSubmitSummaryComment(submittedQuestions))
+		}
+		content := strings.Join(parts, "\n\n")
 		if _, err := s.AddComment(ctx, repositoryID, taskID, domain.CreateTaskCommentRequest{
 			AuthorType: "user",
-			Content:    reviewSummaryComment(submitted, req.Note),
+			Content:    content,
 		}); err != nil {
 			s.reopenAnnotations(ctx, taskID, submitted)
+			s.reopenQuestions(ctx, submittedQuestions)
 			return 0, domain.BoardTask{}, err
 		}
 	}
@@ -148,9 +180,22 @@ func (s *Service) SubmitAnnotations(ctx context.Context, repositoryID, taskID uu
 	})
 	if err != nil {
 		s.reopenAnnotations(ctx, taskID, submitted)
+		s.reopenQuestions(ctx, submittedQuestions)
 		return 0, domain.BoardTask{}, err
 	}
 	return len(submitted), updated, nil
+}
+
+// reopenQuestions is reopenAnnotations' twin for the questions this submit
+// also stamped: if the move it was for gets refused, the answers go back to
+// unsubmitted so the next submit tells the agent about them again.
+func (s *Service) reopenQuestions(ctx context.Context, items []domain.TaskQuestion) {
+	for _, q := range items {
+		q.SubmittedAt = nil
+		if _, err := s.questions.Update(ctx, q); err != nil {
+			log.Warn().Err(err).Str("question_id", q.ID.String()).Msg("submit review: putting a question back to unsubmitted failed")
+		}
+	}
 }
 
 func keepAnnotations(all []domain.TaskDocumentAnnotation, ids []uuid.UUID) []domain.TaskDocumentAnnotation {

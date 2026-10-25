@@ -118,6 +118,17 @@ func sanitizeCommitMessage(raw string) string {
 
 const commitCoAuthorDomain = "agents.tasktrooper.ai"
 
+// commitProductName and commitProductEmail are TaskTrooper's own co-author
+// identity, stamped on every agent commit next to the role that made the
+// change. GitHub only links and credits a co-author when the trailer's
+// address belongs to a GitHub account, so commitProductEmail has to be
+// registered on one (the account's own noreply address is the simplest
+// choice) or GitHub leaves it unattributed.
+const (
+	commitProductName  = "Task Trooper"
+	commitProductEmail = "agents@tasktrooper.ai"
+)
+
 func commitTrailers(taskKey, agentName string) string {
 	var lines []string
 	if key := strings.TrimSpace(taskKey); key != "" {
@@ -126,9 +137,7 @@ func commitTrailers(taskKey, agentName string) string {
 	if name := strings.TrimSpace(agentName); name != "" {
 		lines = append(lines, fmt.Sprintf("Co-authored-by: %s <%s@%s>", name, commitCoAuthorSlug(name), commitCoAuthorDomain))
 	}
-	if len(lines) == 0 {
-		return ""
-	}
+	lines = append(lines, fmt.Sprintf("Co-authored-by: %s <%s>", commitProductName, commitProductEmail))
 	return "\n\n" + strings.Join(lines, "\n") + "\n"
 }
 

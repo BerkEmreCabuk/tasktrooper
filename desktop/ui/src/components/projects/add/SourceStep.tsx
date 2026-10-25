@@ -23,10 +23,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useI18n } from "@/hooks/useI18n";
 import { desktopRunner } from "@/lib/desktop-bridge";
+import { exampleFolderPath, isWindowsPlatform } from "@/lib/platform";
 
 // The server's 500 for a create that got past making the repository and then
 // failed a later step: the name is taken now, so Retry would only collide.
 const PARTIAL_CREATE = /^repository ".*?" was created, but /;
+
+// "owner/name", lower-cased, of a github.com remote (https or ssh); "" for any
+// other remote. Same-named repositories of different owners are different.
+export function githubFullName(remoteUrl: string | undefined): string {
+  const m = /github\.com[:/]([^/\s]+)\/([^/\s]+?)(?:\.git)?\/?$/i.exec(remoteUrl ?? "");
+  return m ? `${m[1]}/${m[2]}`.toLowerCase() : "";
+}
 
 interface SourceStepProps {
   initialProjectId?: string;
@@ -86,7 +94,7 @@ export function SourceStep({ initialProjectId, onScan, onCreate, onModeChange }:
   useEffect(() => {
     api
       .listRepositories()
-      .then((d) => setExistingRepoNames(new Set((d.repositories ?? []).map((r) => r.name))))
+      .then((d) => setExistingRepoNames(new Set((d.repositories ?? []).map((r) => githubFullName(r.remote_url)).filter((n) => n !== ""))))
       .catch(() => setExistingRepoNames(new Set()));
   }, []);
 
@@ -293,7 +301,7 @@ export function SourceStep({ initialProjectId, onScan, onCreate, onModeChange }:
               <Input
                 value={folderPath}
                 onChange={(e) => setFolderPath(e.target.value)}
-                placeholder={t("addRepository.source.folderPathPlaceholder")}
+                placeholder={isWindowsPlatform() ? exampleFolderPath() : t("addRepository.source.folderPathPlaceholder")}
                 className="flex-1"
               />
               {canBrowse && (

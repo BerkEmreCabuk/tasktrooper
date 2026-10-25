@@ -23,7 +23,7 @@ func TestGolden_ProdopsCommentsPart2(t *testing.T) {
 		TaskKey: "TT-42", Title: "Add the export", MergeSHA: "abcdef1234567890", Env: "prod", DeployedAt: deployedAt,
 	}, 30*time.Minute, true)
 	want := "Attributed to release TT-42 (Add the export): its merge commit abcdef123456 is what prod is running, deployed 10 min ago — " +
-		"inside the 30 min post-release window. auto_rollback is ON in this release's delivery profile: the rollback is being executed."
+		"inside the 30 min post-release window. auto_rollback is ON in this release's delivery profile: the release engineer is checking it and rolls back if the evidence ties it to this release."
 	if note != want {
 		t.Fatalf("got %q, want %q", note, want)
 	}

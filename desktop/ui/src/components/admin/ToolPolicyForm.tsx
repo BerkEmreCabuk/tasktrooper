@@ -20,13 +20,13 @@ interface ToolPolicyFormProps {
 export function ToolPolicyForm({ value, onChange }: ToolPolicyFormProps) {
   const { t } = useI18n();
   const [tools, setTools] = useState<{ name: string; description: string }[]>([]);
-  const [mcpServerIds, setMcpServerIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([api.listTools(true), api.listMCPServers()])
-      .then(([toolsData, mcpData]) => {
+    api
+      .listTools(true)
+      .then((toolsData) => {
         setTools(
           (toolsData.tools ?? [])
             .map((tool) => ({
@@ -35,11 +35,9 @@ export function ToolPolicyForm({ value, onChange }: ToolPolicyFormProps) {
             }))
             .filter((tool) => tool.name && isBuiltinTool(tool.name)),
         );
-        setMcpServerIds((mcpData.servers ?? []).map((s) => s.id));
       })
       .catch(() => {
         setTools([]);
-        setMcpServerIds([]);
       })
       .finally(() => setLoading(false));
   }, []);
@@ -61,10 +59,7 @@ export function ToolPolicyForm({ value, onChange }: ToolPolicyFormProps) {
     [value, builtinNames],
   );
 
-  const selectedServers = useMemo(
-    () => selectedMCPServers(value, mcpServerIds),
-    [value, mcpServerIds],
-  );
+  const selectedServers = useMemo(() => selectedMCPServers(value), [value]);
 
   return (
     <div className="space-y-4">
@@ -81,11 +76,14 @@ export function ToolPolicyForm({ value, onChange }: ToolPolicyFormProps) {
         emptyText={t("frame.admin.toolPolicy.noBuiltinTools")}
       />
 
-      <MCPServerPicker
-        label={t("frame.admin.toolPolicy.mcpServers")}
-        selected={selectedServers}
-        onChange={(ids) => onChange(withAllowedMCPServers(value, ids))}
-      />
+      <div className="space-y-1.5">
+        <MCPServerPicker
+          label={t("frame.admin.toolPolicy.mcpServers")}
+          selected={selectedServers}
+          onChange={(ids) => onChange(withAllowedMCPServers(value, ids))}
+        />
+        <p className="text-xs text-muted-foreground">{t("frame.admin.toolPolicy.mcpServersHint")}</p>
+      </div>
     </div>
   );
 }

@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
@@ -35,6 +37,7 @@ const (
 	runSmokeChecksToolName  = domain.RunSmokeChecksToolName
 	finishReleaseToolName   = domain.FinishReleaseToolName
 	rollbackReleaseToolName = domain.ReleaseRollbackToolName
+	getDeployImpactToolName = domain.GetDeployImpactToolName
 )
 
 // releaseNotConfigured is the shared refusal every release tool gives when the
@@ -134,7 +137,26 @@ func (t *getReleaseTool) Execute(ctx context.Context, arguments string) domain.T
 	if res != nil {
 		return *res
 	}
-	return toolJSON(getReleaseToolName, map[string]any{"release": rel, "next": releaseNextStep(rel)})
+	out := map[string]any{"release": rel, "next": releaseNextStep(rel)}
+	if path, ok := t.kit.componentPath(ctx, rel.ComponentID); ok {
+		out["component"] = path
+	}
+	return toolJSON(getReleaseToolName, out)
+}
+
+// componentPath resolves a release's ComponentID to the path argument
+// query_runtime_logs/list_runtime_errors expect — the release itself only
+// carries the id, so without this a monorepo's agent has no way to map one
+// to the other and silently falls back to the root component.
+func (kit *ToolKit) componentPath(ctx context.Context, componentID *uuid.UUID) (string, bool) {
+	if kit.Components == nil || componentID == nil {
+		return "", false
+	}
+	comp, err := kit.Components.GetComponent(ctx, *componentID)
+	if err != nil {
+		return "", false
+	}
+	return comp.Path, true
 }
 
 // --------------------------------------------------------------- deploy_release
@@ -431,5 +453,60 @@ func (t *rollbackReleaseTool) Execute(ctx context.Context, arguments string) dom
 	return toolJSON(rollbackReleaseToolName, map[string]any{
 		"release": updated,
 		"next":    rollbackReleaseNextKey.Render(struct{}{}),
+	})
+}
+
+// ------------------------------------------------------------ get_deploy_impact
+
+type getDeployImpactTool struct{ kit *ToolKit }
+
+func newGetDeployImpactTool(kit *ToolKit) port.ToolExecutor { return &getDeployImpactTool{kit: kit} }
+
+func (t *getDeployImpactTool) Name() string { return getDeployImpactToolName }
+
+func (t *getDeployImpactTool) Definition() domain.ToolDefinition {
+	return domain.ToolDefinition{
+		Type: "function",
+		Function: domain.FunctionDefinition{
+			Name: getDeployImpactToolName,
+			Parameters: map[string]interface{}{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]interface{}{
+					"task_id": taskRefProperty,
+				},
+			},
+		},
+	}
+}
+
+// Execute carries the release's frozen auto_rollback beside the impact: it
+// decides whether a rollback the impact calls for executes or is proposed.
+func (t *getDeployImpactTool) Execute(ctx context.Context, arguments string) domain.ToolResult {
+	var args struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal([]byte(arguments), &args); err != nil {
+		return toolError(getDeployImpactToolName, fmt.Sprintf("invalid arguments: %v", err))
+	}
+	if t.kit.Releases == nil {
+		return releaseNotConfigured(getDeployImpactToolName)
+	}
+	rel, res := t.kit.resolveRelease(ctx, getDeployImpactToolName, args.TaskID)
+	if res != nil {
+		return *res
+	}
+	impact, err := t.kit.Releases.Impact(ctx, rel.ID)
+	if err != nil {
+		return toolError(getDeployImpactToolName, err.Error())
+	}
+	return toolJSON(getDeployImpactToolName, map[string]any{
+		"impact":        impact,
+		"auto_rollback": rel.Profile.AutoRollback,
+		"next": deployImpactNextKey.Render(deployImpactNextInput{
+			Verdict:      string(impact.Verdict),
+			Pending:      impact.Pending,
+			AutoRollback: rel.Profile.AutoRollback,
+		}),
 	})
 }

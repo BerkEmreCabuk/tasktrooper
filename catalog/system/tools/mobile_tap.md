@@ -9,4 +9,4 @@ params:
     xpath: XPath over the hierarchy from mobile_read_ui. Last resort — prefer the other three, they survive layout changes
     "y": Absolute y pixel; only with x
 ---
-Tap an element on the connected Android device. Address it by text, resource_id or content_desc; x/y is a fallback for canvases and maps.
+Tap an element on the connected device (Android or iOS simulator). Address it by text, resource_id or content_desc; x/y is a fallback for canvases and maps.

@@ -432,7 +432,7 @@ func TestNormalizeAppStoreState(t *testing.T) {
 		"PENDING_APPLE_RELEASE":     domain.TrackStatusInReview,
 		"PREPARE_FOR_SUBMISSION":    domain.TrackStatusDraft,
 		"DEVELOPER_REJECTED":        domain.TrackStatusDraft,
-		"PENDING_DEVELOPER_RELEASE": domain.TrackStatusDraft,
+		"PENDING_DEVELOPER_RELEASE": domain.TrackStatusApproved,
 	}
 	for raw, want := range cases {
 		if got := normalizeAppStoreState(raw); got != want {
@@ -803,7 +803,7 @@ func TestListAppsLeavesStateEmptyWhenIncludedVersionsAreTruncated(t *testing.T) 
 				"data":[{"type":"appStoreVersions","id":"V2"}],
 				"meta":{"paging":{"total":1,"limit":50}}}}}
 		],"included":[
-			{"type":"appStoreVersions","id":"V1","attributes":{"versionString":"1.1.0","appStoreState":"READY_FOR_SALE"}},
+			{"type":"appStoreVersions","id":"V1","attributes":{"versionString":"1.1.0","appStoreState":"PREPARE_FOR_SUBMISSION"}},
 			{"type":"appStoreVersions","id":"V2","attributes":{"versionString":"4.0.0","appStoreState":"IN_REVIEW"}}
 		]}`))
 	})

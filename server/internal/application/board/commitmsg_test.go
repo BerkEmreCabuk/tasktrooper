@@ -49,7 +49,7 @@ func TestWriteCommitMessageRewritesIntoEnglishAndStampsTheAgent(t *testing.T) {
 	})
 
 	assert.Equal(t,
-		"feat(web): add the android app link\n\nDrop the wishlist section from the landing page.\n\nTask: PI-3\nCo-authored-by: Frontend Developer <frontend-developer@agents.tasktrooper.ai>\n",
+		"feat(web): add the android app link\n\nDrop the wishlist section from the landing page.\n\nTask: PI-3\nCo-authored-by: Frontend Developer <frontend-developer@agents.tasktrooper.ai>\nCo-authored-by: Task Trooper <agents@tasktrooper.ai>\n",
 		msg)
 
 	require.Len(t, llm.seen.Messages, 2)
@@ -67,7 +67,7 @@ func TestWriteCommitMessageFallsBackToTheOriginalOnError(t *testing.T) {
 		AgentName: "Backend Developer",
 	})
 
-	assert.Equal(t, "Bir şeyi düzelt\n\nDüzeltildi.\n\nTask: PI-3\nCo-authored-by: Backend Developer <backend-developer@agents.tasktrooper.ai>\n", msg)
+	assert.Equal(t, "Bir şeyi düzelt\n\nDüzeltildi.\n\nTask: PI-3\nCo-authored-by: Backend Developer <backend-developer@agents.tasktrooper.ai>\nCo-authored-by: Task Trooper <agents@tasktrooper.ai>\n", msg)
 }
 
 func TestWriteCommitMessageWithoutLLMKeepsTheOriginal(t *testing.T) {
@@ -76,7 +76,7 @@ func TestWriteCommitMessageWithoutLLMKeepsTheOriginal(t *testing.T) {
 		AgentName: "Backend Developer",
 	})
 
-	assert.Equal(t, "Fix the deploy target lookup\n\nCo-authored-by: Backend Developer <backend-developer@agents.tasktrooper.ai>\n", msg)
+	assert.Equal(t, "Fix the deploy target lookup\n\nCo-authored-by: Backend Developer <backend-developer@agents.tasktrooper.ai>\nCo-authored-by: Task Trooper <agents@tasktrooper.ai>\n", msg)
 }
 
 func TestWriteCommitMessageKeepsThePrefix(t *testing.T) {
@@ -115,23 +115,28 @@ func TestWriteCommitMessageCapsMaxTokens(t *testing.T) {
 	assert.Equal(t, commitMessageMaxTokens, llm.seen.MaxTokens)
 }
 
-func TestCommitTrailersCombinesTaskAndAgent(t *testing.T) {
+func TestCommitTrailersCombinesTaskAgentAndProduct(t *testing.T) {
 	assert.Equal(t,
-		"\n\nTask: PI-3\nCo-authored-by: Frontend Developer <frontend-developer@agents.tasktrooper.ai>\n",
+		"\n\nTask: PI-3\nCo-authored-by: Frontend Developer <frontend-developer@agents.tasktrooper.ai>\nCo-authored-by: Task Trooper <agents@tasktrooper.ai>\n",
 		commitTrailers("PI-3", "Frontend Developer"))
 }
 
-func TestCommitTrailersOmitsWhicheverIsMissing(t *testing.T) {
-	assert.Equal(t, "\n\nTask: T-1\n", commitTrailers("T-1", ""))
+func TestCommitTrailersCreditsTheProductWithoutATaskOrAgent(t *testing.T) {
 	assert.Equal(t,
-		"\n\nCo-authored-by: Backend Developer <backend-developer@agents.tasktrooper.ai>\n",
+		"\n\nTask: T-1\nCo-authored-by: Task Trooper <agents@tasktrooper.ai>\n",
+		commitTrailers("T-1", ""))
+	assert.Equal(t,
+		"\n\nCo-authored-by: Backend Developer <backend-developer@agents.tasktrooper.ai>\nCo-authored-by: Task Trooper <agents@tasktrooper.ai>\n",
 		commitTrailers("", "Backend Developer"))
-	assert.Equal(t, "", commitTrailers("", ""))
+	assert.Equal(t,
+		"\n\nCo-authored-by: Task Trooper <agents@tasktrooper.ai>\n",
+		commitTrailers("", ""))
 }
 
 func TestCommitTrailersUsesCoAuthoredByNotABespokeAgentLine(t *testing.T) {
 	trailer := commitTrailers("", "QA Reviewer")
 	assert.Contains(t, trailer, "Co-authored-by: QA Reviewer <qa-reviewer@agents.tasktrooper.ai>")
+	assert.Contains(t, trailer, "Co-authored-by: Task Trooper <agents@tasktrooper.ai>")
 	assert.NotContains(t, trailer, "Agent:")
 }
 

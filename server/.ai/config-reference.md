@@ -12,8 +12,8 @@ see `.env.local.example`.
 | `model` | string | `""` | Bootstrap-only model; normally empty — each agent carries its own |
 | `api_key` | string | `""` | Bootstrap-only key for the fallback endpoint |
 | `max_iterations` | int | `10` | Max agent loop iterations |
-| `run_max_total_tokens` | int | `0` | Mid-run circuit breaker over `PromptTokens+CompletionTokens` of one run; ends it at the next iteration boundary through the exhausted-budget path. `0` disables |
-| `timeout` | duration | `120s` | LLM HTTP timeout |
+| `run_max_total_tokens` | int | `0` | Mid-run circuit breaker over the tokens of one run — prompt tokens processed in full, cache reads at a tenth (their billed weight), plus completion tokens; ends it at the next iteration boundary through the exhausted-budget path. `0` disables |
+| `timeout` | duration | `600s` | LLM HTTP timeout for one whole response (an output-cap retry asks for up to 32K tokens) |
 
 **Provider catalog** (`domain.AllLLMProviderDefinitions`, not YAML-configured): every declared
 provider is `Available:true` today, including the four host-executed CLIs (`claude_code`,
@@ -67,7 +67,7 @@ Merged with per-request and per-API-key policies.
 
 | Key | Type | Description |
 |---|---|---|
-| `allow_mcp_servers` | []string | Whitelist MCP server IDs |
+| `allow_mcp_servers` | []string | Whitelist MCP server IDs (exact or `*` pattern). Non-empty: exactly these servers. Empty: only servers whose `access` is `all` — a `listed` server is never served to a policy that does not name it (migration 179) |
 | `allow_tools` | []string | Whitelist tool names (wildcards supported) |
 | `deny_mcp_servers` | []string | Blacklist MCP server IDs |
 | `deny_tools` | []string | Blacklist tool names (deny wins) |
@@ -133,6 +133,7 @@ Connects a real device to the `mobile_*` tool set through Appium (`mobile_launch
 | Key | Env | Description |
 |---|---|---|
 | `hub_url` | `MOBILE_APPIUM_HUB_URL` | Appium server (service address in a cluster, `http://127.0.0.1:4723` locally) |
+| `appium_bin` | `APPIUM_BIN` | The `appium` executable. Set (the desktop does when Appium is installed), a loopback `http` hub is started on demand by the first mobile tool call and stopped after 10 idle minutes (`adapter/local/appiumhub`); a hub already answering is adopted and never stopped. Unset, the hub is the user's to run |
 | `device_udid` | `MOBILE_DEVICE_UDID` | Which device; `100.x.y.z:5555` for wireless adb |
 | `platform_version` | `MOBILE_PLATFORM_VERSION` | Optional capability. Not used for simulators — the version is derived from the simctl runtime (`iOS 17.4` → `17.4`) |
 | `device_pin` | `MOBILE_DEVICE_PIN` | Screen-lock PIN; Android only |
@@ -194,7 +195,7 @@ every call — no restart needed.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `true` | Enable multi-agent orchestration |
+| `enabled` | bool | `true` | Enable multi-agent orchestration (intake, planner, verifier) for chat. `false` builds no orchestrator at all. Board runs never go through it: they run the agent loop directly |
 | `fast_path` | bool | `true` | Skip orchestration unless `orchestrate: true` |
 | `max_parallel_tasks` | int | `3` | Parallel subtask limit |
 | `max_plan_tasks` | int | `10` | Max tasks per plan |
@@ -207,16 +208,46 @@ every call — no restart needed.
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `max_tokens` | int | `32000` | Context budget |
-| `reserve_output` | int | `4096` | Reserved for completion |
-| `summarize_threshold` | int | `24000` | Rolling summary threshold |
+| `max_tokens` | int | `0` | History budget override. `0` = the model's own window, capped at 200,000 tokens (every turn resends the whole history; raise it here to use more of a 1M window) |
+| `reserve_output` | int | `0` | Output cap each turn asks for, also reserved out of the window. `0` = the model's default cap; never raised past the model's maximum |
+| `summarize_threshold` | int | `0` | Where a trimmed history lands. `0` = 45% of the window |
 | `keep_recent_messages` | int | `10` | Messages kept during trim |
+
+Limits are resolved per run from the model id (`application/context/limits.go`,
+`appcontext.LimitsFor`); providers do not report them on the endpoints in use.
+A history is trimmed (summarised, then oldest-first) once it exceeds
+window − output cap − tool schemas, and lands at the summarize threshold.
+
+| Model family | Window | Default turn cap | Max output |
+|---|---|---|---|
+| Claude Fable/Mythos 5.x, Opus/Sonnet 5.x, Opus 4.6–4.8, Sonnet 4.6 | 1,000,000 | 16,384 | 128,000 |
+| Claude Opus 4.5, Sonnet 4.5, Haiku 4.5, Sonnet 4, Sonnet 3.7 | 200,000 | 16,384 | 64,000 |
+| Claude Opus 4 / 4.1 | 200,000 | 16,384 | 32,000 |
+| Claude 3.5 Sonnet/Haiku | 200,000 | 8,192 | 8,192 |
+| Claude 3 Opus/Sonnet/Haiku | 200,000 | 4,096 | 4,096 |
+| Other `claude-*` | 200,000 | 16,384 | 32,000 |
+| `gpt-5*` | 400,000 | 16,384 | 128,000 |
+| `gpt-4.1*` | 1,047,576 | 16,384 | 32,768 |
+| `gpt-4o*` | 128,000 | 16,384 | 16,384 |
+| `o1*` / `o3*` / `o4*` | 200,000 | 16,384 | 100,000 |
+| `gemini-2.5*` / `gemini-3*` | 1,048,576 | 16,384 | 65,536 |
+| `gemini-1.5-pro` | 2,097,152 | 8,192 | 8,192 |
+| other `gemini*` | 1,048,576 | 8,192 | 8,192 |
+| Llama 3.x, Qwen 2.5/3, `gpt-oss` | 131,072 | 16,384 | 32,768 |
+| Llama 4 | 131,072 | 8,192 | 8,192 |
+| Devstral / Mistral / Magistral | 128,000 | 16,384 | 32,768 |
+| Any model on the `local` provider, or unrecognised | 32,000 | 4,096 | 8,192 |
+
+A turn that hits the cap while writing a tool call is not executed: the loop
+asks again once with the cap doubled (within the max and the window), and past
+that tells the model to write in smaller parts.
 
 ## `mapping` / `indexer` / `graph`
 
 | Key | Default | Description |
 |---|---|---|
 | `indexer.query_rewrite` | `false` | Rewrites the task text into 2 extra code-search queries (multi-query retrieval) |
+| `indexer.index_generated` | `false` | `true` also indexes generated code and mocks (mockery, protoc, `*_gen.go`, `__generated__`, ...); `false` leaves them out. `.tasktrooperignore` at the repository root (`.gitignore` syntax) is honoured either way |
 | `indexer.allowed_roots` | `[]` | Roots a repository or session may be pointed at, **in addition to** `storage.sessions.workspace_root`, which is always allowed |
 
 `allowed_roots` only ever WIDENS the set. Empty means nothing extra — not
@@ -284,22 +315,26 @@ Periodic reflections, KPI evaluation, impact tracking.
 
 | Key | Default | Description |
 |---|---|---|
-| `enabled` | `false` | Master switch for the evolution ticker |
-| `allow_web_research` | `false` | Reflection runs with `web_search`/`fetch_url` |
+| `enabled` | `false` | Master switch: the ticker, revision-triggered and manual reflections (409 `evolution_disabled`), and the `save_memory` classifier |
+| `allow_web_research` | `false` | Reflection is an agentic run with `web_search`/`fetch_url`, and gets its evidence as files (`EVIDENCE.md`, `skills/`, `rules/`, `runs/`) it can open with `read_file` |
 | `tick_interval` | `10m` | Ticker cadence (impact sweep, KPI sweep, due-reflection check) |
 | `reflect_interval` | `24h` | Minimum gap between periodic reflections per agent |
 | `revision_debounce` | `30m` | Minimum gap between revision-triggered mini-reflections |
 | `impact_window` | `168h` | Observation window before/after a change |
 | `min_events_for_impact` | `3` | Fewer after-events → `insufficient_data` |
 | `max_skill_changes` / `max_rule_changes` | `3` | Per-reflection change caps |
-| `max_skills_per_agent` | `25` | Standing skill budget; at budget a `create` is rejected (merge/update/delete first). Also caps the agent's own `create_skill` |
+| `max_skills_per_agent` | `100` | Standing skill budget; at budget a `create` is rejected (merge/update/delete first). Also caps the agent's own `create_skill` |
 | `max_rules_per_agent` | `15` | Standing rule budget; same behaviour |
-| `golden_gate` | `false` (config.yml ships `true`) | Golden suite before AND after applied changes; an independent judge keeps or rolls back the whole set |
+| `golden_gate` | `false` (config.yml ships `true`) | Probe gate: skill/rule changes are rehearsed on the golden suite and recent requests before anything is written, per dimension and together; only a variant that does better (and breaks no golden task) is adopted. Nothing measured → nothing written |
+| `probe_cases` | `2` | Recent real requests (board tasks, then chats) each change set is rehearsed on, besides the golden suite |
+| `probe_max_turns` | `6` | Turn cap for a rehearsal/judge session on a CLI engine |
+| `max_always_on_chars` | `8000` | Cap on the total text of an agent's enabled rules; a change set that grows them past it is refused |
+| `reflection_timeout` | `30m` | One reflection end to end, rehearsals included |
 | `max_memory_changes` | `5` | Per-reflection memory change cap |
 | `memory_max_count` | `200` | Per-agent memory cap; oldest evicted |
 | `evidence_max_chars` | `24000` | Reflection evidence truncation |
-| `model` / `provider_type` | _(empty)_ | Reflection + golden eval override (a cheap model is recommended) |
-| `judge_model` / `judge_provider_type` | _(empty)_ | Independent model that makes the golden-gate decision; the reflection model when empty |
+| `model` / `provider_type` | _(empty)_ | Reflection + rehearsal override |
+| `judge_model` / `judge_provider_type` | _(empty)_ | Independent model that scores the rehearsals blind and distills the lesson; the agent's `model_heavy` when empty |
 
 ## Board quality gates (`board`)
 
@@ -326,7 +361,12 @@ Periodic reflections, KPI evaluation, impact tracking.
 | Key | Default | Description |
 |---|---|---|
 | `monitor_enabled` | `true` | Probes deploy targets' `health_url` |
-| `probe_interval` | `1m` | Two consecutive failed probes open an incident; the first successful probe closes it |
+| `probe_interval` | `3m` | Two consecutive failed probes open an incident; the first successful probe closes it |
+| `alert_ingest.requests_per_minute` | `60` | Per alert ingest token: the refill rate of its request bucket on `POST /v1/alerts/ingest/:token`. Over it: 429 `{"error":"rate_limited"}` |
+| `alert_ingest.burst` | `10` | Per token: requests allowed back to back before the rate applies |
+| `alert_ingest.new_incidents_per_hour` | `20` | Per token, rolling hour: how many NEW incidents it may open. Past it a new alert gets 429; an alert that folds into an incident already open still counts its occurrence, and a recovery still resolves |
+
+The three `alert_ingest` limits are in memory (one process; a restart resets them), and `0` or less means the default above — never unlimited.
 
 ## Deploy ops (`deploy_ops`)
 
@@ -335,6 +375,21 @@ Periodic reflections, KPI evaluation, impact tracking.
 | `monitor_enabled` | `true` | Mirrors Actions deploy runs into `deployment_runs`, matches console dispatches, turns a failed deploy into an incident. When off, rollback cannot find the commit to return to and release attribution is impossible |
 | `poll_interval` | `2m` | At most one GitHub call per sweep, per (repository × environment) |
 | `health_window` | `15m` | How long after a successful deploy an incident is attributed to the releasing task; `auto_rollback` fires inside this window. Deliberately short — it authorizes rolling back a specific card's release. The 45-minute general correlation in `prodops/remedy.go` is independent of it and only writes advice |
+| `impact.change_pct` | `10` | Deploy impact (`GET /v1/releases/{id}/impact`, `get_deploy_impact`): how far a golden signal must move from the hour before the deploy, in percent of its value then, to read as improved or worse rather than neutral |
+| `impact.ratio_points` | `0.5` | The same for a ratio signal (`http.error_ratio`, `mobile.crash_free_users`, …), in percentage points |
+| `impact.throughput_change_pct` | `25` | `change_pct` for a rate where higher is better (`http.requests`, `queue.consume_rate`, `web.page_views`), which swings more on its own |
+| `impact.count_floor` | `1` | A gauge where lower is better (`queue.backlog`, `queue.dead_letter`, `infra.restarts`) must also move by at least this many units |
+| `impact.rate_floor` | `0.05` | A rate where lower is better (`process.errors`, `web.js_errors`), per second, must also move by at least this |
+| `impact.floor_pct` | `5` | Each of the two floors above is at least this percent of the larger of the before and after values |
+| `impact.latency_floor_ms` | `50` | A quantile in ms (`http.latency`, `web.lcp`, …) must also move by at least this; the soak's `max_p95_delta_pct` breaches only past it too. `0` or less means the default for every `impact.*` key |
+
+## Alerting (`alerting`)
+
+| Key | Default | Description |
+|---|---|---|
+| `enabled` | `true` | Runs the alert rule evaluator (`internal/application/alerting`, migration 189) and the error definition sweep (`internal/application/errordef`, migration 191, every 2 min: the alert, incident and task actions). Off, rules can still be edited and backtested and the Errors inbox is still annotated; none changes state |
+| `interval` | `1m` | How often each enabled rule is judged: one query against its data source per rule per interval. A sweep runs every quarter interval and takes the rules last judged at least an interval ago, never-judged first |
+| `max_rules_per_sweep` | `200` | At most this many rules per sweep, four at a time; the rest wait for the next sweep. `0` or less means the default |
 
 ## Store ops (`storeops`)
 
@@ -355,7 +410,7 @@ grounding, verify gate, commit/PR, column advance).
 | `max_turns` | — | `100` | Turn budget for one session; a session that hits it returns what it has |
 | `setting_sources` | — | `project,local` | Which CLI settings files a session loads. The operator's own `~/.claude` (hooks, plugins, permission rules) is out: none of it was chosen for TaskTrooper and all of it would otherwise run inside board tasks. Set `user,project,local` only if this host authenticates through a user-level apiKeyHelper |
 | `run_timeout` | — | `1h` | Deadline for one session — the only thing that ever gives up on a wedged CLI, since a subprocess has no provider timeout and the run's heartbeat keeps the row fresh. A plain run failure, never a quota park |
-| `max_concurrent_sessions` | — | `3` | How many board CLI sessions run at once. `-1` is unlimited. The subscription's usage limit is shared by every session on the account, so N sessions hitting it in parallel all park together; the cap keeps the burn sequential enough that the sessions that started actually finish. Chat turns never queue on it |
+| `max_concurrent_sessions` | — | unset (none) | An optional host-wide cap on board CLI sessions, on top of the Settings concurrency limits (which are the only ones by default; 0 there is unlimited). Unset, `0` or negative adds no cap. Chat turns never queue on it |
 
 - **No `enabled` flag**: the switch is whether the binary is on PATH. Absent, no
   executor is registered and a `claude_code` run — board or chat — fails with one
@@ -428,6 +483,14 @@ directory: OpenCode's own docs confirm it reads that layout, but nothing confirm
 role file becomes the ACTIVE persona from `run`, so role + rules go into the prompt instead.
 MCP tools reach the session via `OPENCODE_CONFIG_CONTENT` (inline JSON env var) — nothing is
 written to the workspace at all.
+
+OpenCode 2.x (`@opencode/cli`, `opencode --version` prints `opencode v2.…`) runs every
+`opencode run` on a shared background service that was started with someone else's
+environment, so it never sees that env var. On 2.x each run therefore gets a private
+`opencode serve --stdio` started with the config (tools direct, not behind code mode), waits
+until `/api/mcp` reports the `tasktrooper` server connected, and attaches with
+`opencode run --server`; the server's lease ends with the run. The version is read once per
+binary and re-read when the file changes.
 
 | Key | Env | Default | Description |
 |---|---|---|---|

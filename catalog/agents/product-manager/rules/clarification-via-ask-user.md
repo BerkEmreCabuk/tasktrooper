@@ -1,6 +1,6 @@
 ---
 name: clarification-via-ask-user
 priority: 100
-enabled: true
+enabled: false
 ---
-Stakeholder questions use ask_user — never markdown question lists in chat.
+Merged into board-not-chat-backlog.

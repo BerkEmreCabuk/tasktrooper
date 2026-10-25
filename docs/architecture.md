@@ -1,11 +1,11 @@
 ---
 title: Architecture
-description: One machine, three processes, one window. How the desktop app, the Go backend, embedded Postgres and the agent sessions fit together.
+description: One machine, two processes, one window. How the desktop app, the Go backend, embedded Postgres and the agent sessions fit together.
 ---
 
 # Architecture
 
-One machine, three processes, one window.
+One machine, two processes, one window.
 
 ```
 TaskTrooper.app (Electron main)
@@ -13,7 +13,7 @@ TaskTrooper.app (Electron main)
  ├─ agent-server  Go child   · HTTP API + board + agent loop · 127.0.0.1:<p2>
  │    └─ postgres  started by agent-server from the zonky binaries · 127.0.0.1:<p3>
  │    └─ claude    one headless `claude -p` per running task, MCP back to <p2>/mcp
- └─ appium        optional, only when installed · 127.0.0.1:4723
+ │    └─ appium    only when installed AND a mobile task needs it; stopped after 10 idle min · 127.0.0.1:4723
  window ── app://tasktrooper (ui/dist) ── fetch → http://127.0.0.1:<p2>
 ```
 
@@ -25,11 +25,12 @@ TaskTrooper.app (Electron main)
 | load or create `local.bin` (`api_token`, `mcp_secrets_key`) | shell | Keychain via `safeStorage` |
 | spawn embedder | shell | stdout `EMBEDDER_LISTENING <port>` |
 | spawn agent-server with `PORT=0 DATA_DIR SERVER_API_KEY MCP_SECRETS_KEY EMBEDDINGS_BASE_URL CLAUDE_CODE_BIN …` | shell | stdout `LISTENING http://127.0.0.1:<port>` |
-| start embedded Postgres, run migrations, seed the local tenant | agent-server | `GET /health` → 200 |
+| start embedded Postgres, run migrations, seed the default board | agent-server | `GET /health` → 200 |
 | attach the web view, hand the page `apiBase` + `apiToken` | shell | `window.__tasktrooperDesktop` |
 
 Stop order is the reverse of start: agent-server drains its Claude sessions on
-SIGTERM (30 s budget), then Postgres, then appium; the embedder lives until quit.
+SIGTERM (30 s budget), then stops the Appium hub it started and Postgres; the
+embedder lives until quit.
 
 ## Identity
 
@@ -47,10 +48,13 @@ scope a request to beyond the token.
 
 ```
 postgres/       cluster (pgdata)
-postgres-bin/   zonky download + extracted runtime
-workspaces/     git checkouts, one per task
+workspaces/     git checkouts — one repository mirror, one per-task checkout
 files/          RAG uploads
 ```
+
+`postgres-bin/` (the zonky download + extracted runtime) sits beside `data/`
+under `userData`, not inside `DATA_DIR`: it is a cache that can be deleted and
+re-fetched without touching your data.
 
 Delete `DATA_DIR` to start over.
 

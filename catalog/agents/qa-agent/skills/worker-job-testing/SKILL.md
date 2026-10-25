@@ -1,7 +1,7 @@
 ---
 name: worker-job-testing
 category: qa
-description: Verify background workers and async jobs through their real triggers and observable side effects - including retries, idempotency, and failure paths
+description: Use when the task has a background job, queue consumer, scheduler or webhook - firing the real trigger, polling for the side effect, and the retry, idempotency and poison-message cases
 ---
 # Worker & Async Job Testing
 
@@ -13,7 +13,7 @@ A worker has no HTTP response to assert on. You verify it the way the product us
 
 1. **Identify the worker processes** the repo defines (a `cmd/worker`, a queue consumer, a scheduler) and start them alongside the API with logs captured to a file.
 2. **Trigger through the product path.** Prefer the API call or user action that enqueues the job over inserting queue rows by hand — the enqueue side is part of what you are testing. Hand-crafted messages are a fallback for hard-to-reach cases and must match the real schema.
-3. **Assert on observable outcomes**: the DB state the job must produce, the outbound request it must make (assert against the WireMock stub's received requests — test-doubles-wiremock), the file/notification/event it must emit, and the log line that marks completion.
+3. **Assert on observable outcomes**: the DB state the job must produce, the outbound request it must make (assert against the stub's received requests — test-data-and-stubs), the file/notification/event it must emit, and the log line that marks completion.
 4. **Poll, don't guess.** Async means eventually: loop with a timeout (`for i in $(seq 30); do check && break; sleep 1; done`) instead of one arbitrary sleep. A job that needs longer than the product's own expectation is a finding.
 
 ## The scenarios a worker always owes you

@@ -1,0 +1,1 @@
+Close with the move and nothing else: a review changes nothing, so a clean verdict is the move to the next column (or, for a tested run, your recorded per-criterion verdicts) with no comment — the move, the green pipeline and the history are the record. Comment only when a need_revision verdict requires one; that comment IS the close, not something to add on top of.

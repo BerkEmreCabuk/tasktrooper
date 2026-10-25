@@ -18,7 +18,7 @@ const goldenToolDefinitionsPath = "testdata/tool_definitions.golden.json"
 // board/golden_tool_definitions_test.go (WP8a) for the full rationale.
 func TestGoldenToolDefinitionsSurviveCatalogMigration(t *testing.T) {
 	reg := registry.New()
-	for _, ex := range []port.ToolExecutor{New(1048576), NewDownloadTool()} {
+	for _, ex := range []port.ToolExecutor{New(1048576), NewDownloadTool(), NewHTTPRequestTool()} {
 		reg.Register(ex)
 	}
 

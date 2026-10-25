@@ -26,6 +26,7 @@ import {
   storeChannelLabelKey,
   trackStatusBadgeVariant,
   trackStatusLabelKey,
+  PendingVersionLine,
 } from "@/components/operations/StoreReleaseControls";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -87,6 +88,7 @@ function ChannelCard({ channel, release, actions }: ChannelCardProps) {
                 {t("projectAdmin.mobileStore.audience")}: {release.audience}
               </p>
             )}
+            <PendingVersionLine release={release} />
             {showRollout && (
               <div className="space-y-1">
                 <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -218,6 +220,7 @@ function StorePlatformSection({
                 channel === "production" ? (
                   <StoreReleaseControls
                     app={{ ...app, repository_name: repository.name }}
+                    production={tracks.production}
                     onActed={onReload}
                   />
                 ) : (

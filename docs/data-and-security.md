@@ -7,8 +7,8 @@ description: Everything TaskTrooper keeps runs on this machine — what is in th
 
 TaskTrooper is local-first in the literal sense: one machine, one user, no
 login, no control plane. The desktop app, the Go backend and the embedded
-Postgres are three processes on your Mac, and nothing about how they talk to
-each other assumes a second machine exists.
+Postgres are three processes on your computer, and nothing about how they talk
+to each other assumes a second machine exists.
 
 ## What is in the data directory
 
@@ -16,7 +16,13 @@ The backend keeps everything that has to survive a restart under one
 directory (`DATA_DIR`):
 
 - **macOS app**: `~/Library/Application Support/TaskTrooper/data`
+- **Windows app**: `%APPDATA%\TaskTrooper\data`
+  (`C:\Users\<you>\AppData\Roaming\TaskTrooper\data`)
+- **Linux app**: `~/.config/TaskTrooper/data`
 - **`make dev`**: `server/data`, or wherever `DATA_DIR` points
+
+On every platform the data directory is `data/` inside the app's `userData`
+folder; the paths above are just where that folder lives on each OS.
 
 ```
 postgres/       the embedded Postgres cluster (pgdata)
@@ -65,8 +71,10 @@ per-row tenant columns) was removed outright rather than kept dormant.
 A second secret, `mcp_secrets_key`, is generated alongside the bearer token
 and handed to the backend as `MCP_SECRETS_KEY`. It encrypts everything the
 backend stores that should not sit in the database in the clear: connected
-provider API keys, MCP server credentials, the GitHub token, Vercel and
-store credentials, and mobile signing assets.
+provider API keys, MCP server credentials and OAuth sign-in tokens, the GitHub
+token, Vercel and store credentials, mobile signing assets, and the
+credentials of [data sources](data-sources.md) (bearer tokens, passwords and
+extra headers, which are never shown again once saved).
 
 **`mcp_secrets_key` must never be regenerated on an install that already has
 encrypted rows.** It is meant to stay stable for the life of the install —
@@ -100,9 +108,49 @@ Everything else stays local. The things that do reach the network are:
 - **Any MCP server you add** — a server you configure under Settings → MCP
   Servers reaches whatever host you pointed it at, on your authority. See
   [MCP servers](mcp-servers.md).
+- **Any data source you add** — the URL you enter on Operations → Settings
+  → Data sources, with its saved credentials: when you save the source or press
+  Verify, and when you list its metrics or run a query from its details. See
+  [Data sources](data-sources.md).
 
-Nothing else calls out on its own. There is no telemetry endpoint, no
-license check, and no home-phoning of any kind built into the product.
+- **Usage statistics** — official desktop builds only. See
+  [Usage statistics](#usage-statistics) below.
+
+Nothing else calls out on its own. There is no license check and no other
+home-phoning built into the product.
+
+## Usage statistics
+
+Official TaskTrooper desktop builds send usage statistics to Google Analytics
+so the project can see how many installs are in use and which parts of the app
+people use. It is on by default and you can turn it off.
+
+- **What is sent:** a random ID made on this computer (not tied to your
+  hardware), the app version, the operating system and its version, the CPU
+  architecture, the system language, the screen resolution, and whether you are
+  using TaskTrooper locally or with an account. One event when the app opens,
+  one at most every 30 minutes while its window is in use, one each time you
+  open a screen (named by the screen, such as `board` or `project_detail` —
+  never an ID from the address), and one when you use a feature such as
+  creating a task, moving a card or connecting an integration, with only fixed
+  values attached (a column, an agent's catalog role, a provider name). Google
+  Analytics also sees the connection's IP address, as any web request does, and
+  derives a rough region from it.
+- **Signed in to an account:** a one-way hash (SHA-256) of your account ID is
+  sent as well, so the same person using the desktop app, the web app and the
+  mobile app counts once. The hash cannot be turned back into your account ID
+  or your email; it stops being sent when you sign out.
+- **What is never sent:** tasks, prompts, chat messages, code, file paths,
+  repository or project names, issue titles, API keys, your email, or your
+  account ID itself. The desktop app checks every event before it leaves:
+  anything that is not an ID, a fixed value or a number is refused.
+- **Turn it off:** Settings → General → "Usage statistics", locally
+  or signed in to an account. Turning it off stops sending at once and deletes
+  the random ID and the stored account hash. Setting the environment variable `TASKTROOPER_TELEMETRY=0` or
+  `DO_NOT_TRACK=1` keeps it off regardless.
+- **Builds from source and forks send nothing.** The measurement settings are
+  compiled in by the official release build only; without them there is no
+  network call and no ID file.
 
 ## The outbound URL guard
 
@@ -131,6 +179,14 @@ points a tool at another service on the same machine. Browser tools are the
 one exception with the opposite default: loopback is allowed for them out of
 the box, because a developer role routinely boots its own dev server on
 `127.0.0.1` and opens it to look at what it just built.
+
+A [data source](data-sources.md) URL is the other exception: a person types
+it on Operations → Settings → Data sources, and a self-hosted Prometheus
+usually runs on this machine or the local network, so in local mode it may
+point at loopback and private addresses. Link-local and cloud metadata addresses
+(`169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254`, `metadata.google.internal`)
+are always refused for it, both when the source is saved and when each
+request dials.
 
 ## The pre-upgrade Postgres backup
 

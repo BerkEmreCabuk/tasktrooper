@@ -7,6 +7,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
 type fakeSyncGit struct {
@@ -71,5 +75,102 @@ func TestPullSkippedWithoutWorkingCopy(t *testing.T) {
 	svc.pullProjectRoot(context.Background(), id, "/data/workspaces/repos/app")
 	if got := svc.syncWarning(id); got != "" {
 		t.Fatalf("non-git root produced a warning: %q", got)
+	}
+}
+
+func TestFreshnessWaitDoublesPerFailedPullUpToAnHour(t *testing.T) {
+	tests := []struct {
+		name     string
+		failures int
+		want     time.Duration
+	}{
+		{"pulling fine", 0, 10 * time.Minute},
+		{"one failed pull", 1, 20 * time.Minute},
+		{"two failed pulls", 2, 40 * time.Minute},
+		{"three failed pulls", 3, time.Hour},
+		{"offline all day", 50, time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, freshnessWait(tt.failures))
+		})
+	}
+}
+
+func TestFailedPullsBackOffTheFreshnessCheckAndASuccessResetsIt(t *testing.T) {
+	git := &fakeSyncGit{syncErr: errors.New("git fetch: could not resolve host: github.com")}
+	git.hasGit = true
+	svc := newSyncService(git)
+	id := uuid.New()
+	checkedAgo := func(d time.Duration) {
+		svc.syncMu.Lock()
+		svc.syncCheckedAt[id] = time.Now().Add(-d)
+		svc.syncMu.Unlock()
+	}
+
+	svc.pullProjectRoot(context.Background(), id, "/data/workspaces/repos/app")
+	svc.pullProjectRoot(context.Background(), id, "/data/workspaces/repos/app")
+
+	checkedAgo(freshnessCheckInterval + time.Second)
+	assert.False(t, svc.freshnessCheckDue(id), "an offline repository is retried on the plain interval")
+	assert.False(t, svc.claimFreshnessCheck(id))
+	checkedAgo(40*time.Minute + time.Second)
+	assert.True(t, svc.freshnessCheckDue(id))
+
+	git.syncErr = nil
+	svc.pullProjectRoot(context.Background(), id, "/data/workspaces/repos/app")
+	checkedAgo(freshnessCheckInterval + time.Second)
+	assert.True(t, svc.claimFreshnessCheck(id), "a successful pull goes back to the plain interval")
+}
+
+type syncRepoStore struct {
+	port.RepositoryStore
+	repo domain.Repository
+}
+
+func (f syncRepoStore) Get(context.Context, uuid.UUID) (domain.Repository, error) {
+	return f.repo, nil
+}
+
+type countingSyncGit struct {
+	fakeSyncGit
+	pulled chan string
+}
+
+func (f *countingSyncGit) SyncDefaultBranch(_ context.Context, root string) error {
+	f.pulled <- root
+	return nil
+}
+
+func TestSyncAfterMergePullsRootEvenWithoutIndexer(t *testing.T) {
+	git := &countingSyncGit{pulled: make(chan string, 1)}
+	git.hasGit = true
+	id := uuid.New()
+	svc := newSyncService(&git.fakeSyncGit)
+	svc.git = git
+	svc.repos = syncRepoStore{repo: domain.Repository{ID: id, RootPath: "/data/workspaces/repos/app"}}
+
+	svc.SyncAfterMerge(context.Background(), id)
+
+	select {
+	case root := <-git.pulled:
+		assert.Equal(t, "/data/workspaces/repos/app", root)
+	case <-time.After(2 * time.Second):
+		t.Fatal("merge did not pull the project root")
+	}
+}
+
+func TestFreshnessSweepPullsWithoutIndexer(t *testing.T) {
+	git := &countingSyncGit{pulled: make(chan string, 1)}
+	git.hasGit = true
+	svc := newSyncService(&git.fakeSyncGit)
+	svc.git = git
+
+	svc.ensureIndexFresh(context.Background(), domain.Repository{ID: uuid.New(), RootPath: "/r"}, domain.WorkspaceIndex{})
+
+	select {
+	case <-git.pulled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("poll did not pull a repository with no index")
 	}
 }

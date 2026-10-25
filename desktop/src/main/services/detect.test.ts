@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { PreflightId, PreflightItem, PreflightReport } from "../../ipc/types.js";
@@ -38,8 +38,26 @@ vi.mock("electron", () => ({
   app: { getAppPath: () => paths.appPath, getPath: () => paths.userData, isPackaged: false },
 }));
 
-const { androidSdkDefaultRoot, classifyAuthStatus, firstBlocker, gitRemediation, preflight, preflightReady, probePostgres } =
-  await import("./detect.js");
+// The developer's own shell profile is not part of what this suite tests: a
+// login PATH that happens to hold an `appium` or a `claude` would change the
+// reports below from one machine to the next.
+vi.mock("./login-env.js", () => ({
+  loginShellPath: () => Promise.resolve([]),
+  knownLoginShellPath: () => [],
+}));
+
+const {
+  agentAccessItem,
+  androidSdkDefaultRoot,
+  androidToolPath,
+  classifyAuthStatus,
+  fallbackDirs,
+  firstBlocker,
+  gitRemediation,
+  preflight,
+  preflightReady,
+  probePostgres,
+} = await import("./detect.js");
 
 // --- the fake CLI ----------------------------------------------------------
 
@@ -486,13 +504,18 @@ describe("preflight: the mobile toolchain", () => {
     // The hub's address is stated before it matters, so nobody has to find out
     // which port this app uses by reading a failure.
     expect(appium.detail).toContain("127.0.0.1:4723");
+    // And who runs it: nothing is running until a mobile task asks, which
+    // reads as broken to anybody looking for an appium process otherwise.
+    expect(appium.detail).toMatch(/^Started on demand by the server|already answering/);
 
     expect(item(report, "appium-uiautomator2").status).toBe("ok");
 
-    const missing = item(report, "appium-xcuitest");
-    expect(missing.status).toBe("missing");
-    expect(missing.required).toBe(false);
-    expect(missing.command).toBe("appium driver install xcuitest");
+    if (process.platform === "darwin") {
+      const missing = item(report, "appium-xcuitest");
+      expect(missing.status).toBe("missing");
+      expect(missing.required).toBe(false);
+      expect(missing.command).toBe("appium driver install xcuitest");
+    }
 
     // Still optional, still not a blocker.
     expect(report.ready).toBe(true);
@@ -511,14 +534,28 @@ describe("preflight: the mobile toolchain", () => {
 
 // --- Windows and Linux: right place, right remediation ----------------------
 
+/**
+ * Runs `fn` as if on `platform`, until it has finished — including, for an
+ * async `fn`, everything after its first await. `preflight()` awaits the login
+ * shell before it probes, so restoring the platform when the promise is merely
+ * returned would run every probe on the real one.
+ */
 function withPlatform<T>(platform: NodeJS.Platform, fn: () => T): T {
   const original = Object.getOwnPropertyDescriptor(process, "platform");
-  Object.defineProperty(process, "platform", { value: platform, configurable: true });
-  try {
-    return fn();
-  } finally {
+  const restore = (): void => {
     if (original) Object.defineProperty(process, "platform", original);
+  };
+  Object.defineProperty(process, "platform", { value: platform, configurable: true });
+  let result: T;
+  try {
+    result = fn();
+  } catch (err) {
+    restore();
+    throw err;
   }
+  if (result instanceof Promise) return result.finally(restore) as T;
+  restore();
+  return result;
 }
 
 describe("git remediation, by platform", () => {
@@ -551,6 +588,22 @@ describe("preflight: xcode-clt is macOS-only", () => {
   });
 });
 
+describe("preflight: iOS tooling is macOS-only", () => {
+  it("has no xcuitest row and promises no iOS simulator on Windows or Linux", async () => {
+    for (const platform of ["win32", "linux"] as const) {
+      const withAppium = await withPlatform(platform, () =>
+        preflight({ overrides: { claudeBin: fakeClaude({ auth: signedIn }), appiumBin: fakeAppium(["uiautomator2"]) } }),
+      );
+      expect(withAppium.items.map((i) => i.id)).not.toContain("appium-xcuitest");
+
+      const noAppium = await withPlatform(platform, () =>
+        preflight({ overrides: { claudeBin: fakeClaude({ auth: signedIn }), appiumBin: "/nonexistent/appium" } }),
+      );
+      expect(item(noAppium, "appium").detail).not.toMatch(/iOS|Mac/);
+    }
+  });
+});
+
 describe("Android SDK default install root, by platform", () => {
   it("uses LOCALAPPDATA on Windows", () => {
     vi.stubEnv("LOCALAPPDATA", "C:\\Users\\me\\AppData\\Local");
@@ -567,6 +620,65 @@ describe("Android SDK default install root, by platform", () => {
   it("uses ~/Library/Android/sdk on macOS", () => {
     const root = withPlatform("darwin", androidSdkDefaultRoot);
     expect(root.endsWith(path.join("Library", "Android", "sdk"))).toBe(true);
+  });
+});
+
+describe("Android SDK tool paths, by platform", () => {
+  /**
+   * The SDK's binaries are `adb.exe` and `emulator.exe` on Windows. Looking for
+   * the bare name there found neither, on every Windows machine.
+   */
+  it("carries .exe on Windows and nothing elsewhere", () => {
+    expect(withPlatform("win32", () => androidToolPath("SDK", "platform-tools", "adb"))).toBe(
+      path.join("SDK", "platform-tools", "adb.exe"),
+    );
+    expect(withPlatform("win32", () => androidToolPath("SDK", "emulator", "emulator"))).toBe(
+      path.join("SDK", "emulator", "emulator.exe"),
+    );
+    for (const platform of ["darwin", "linux"] as const) {
+      expect(withPlatform(platform, () => androidToolPath("SDK", "platform-tools", "adb"))).toBe(
+        path.join("SDK", "platform-tools", "adb"),
+      );
+    }
+  });
+});
+
+describe("fallback search directories, by platform", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("looks where Git for Windows and per-user installers put things, under %APPDATA%-style roots", () => {
+    vi.stubEnv("ProgramFiles", "PF");
+    vi.stubEnv("ProgramFiles(x86)", "PF86");
+    vi.stubEnv("LOCALAPPDATA", "LAD");
+    const dirs = withPlatform("win32", () => fallbackDirs("HOME")).map((d) => d.dir);
+    expect(dirs).toEqual(
+      expect.arrayContaining([
+        path.join("PF", "Git", "cmd"),
+        path.join("PF86", "Git", "cmd"),
+        path.join("LAD", "Programs", "Git", "cmd"),
+        path.join("PF", "nodejs"),
+        path.join("LAD", "pnpm"),
+      ]),
+    );
+  });
+
+  it("covers the version managers and Linuxbrew a GUI session on Linux knows nothing about", () => {
+    vi.stubEnv("PNPM_HOME", "/home/me/pnpm-home");
+    vi.stubEnv("XDG_DATA_HOME", "");
+    const dirs = withPlatform("linux", () => fallbackDirs("/home/me")).map((d) => d.dir);
+    expect(dirs).toEqual(
+      expect.arrayContaining([
+        "/home/me/.volta/bin",
+        "/home/me/pnpm-home",
+        "/home/me/.fnm",
+        "/home/linuxbrew/.linuxbrew/bin",
+        "/usr/local/bin",
+      ]),
+    );
+    expect(dirs.some((d) => d.includes("Program Files"))).toBe(false);
+    // XDG_DATA_HOME="" means the default, not a directory relative to the cwd.
+    expect(dirs).toContain("/home/me/.local/share/fnm/aliases/default/bin");
+    expect(dirs.every((d) => d.startsWith("/"))).toBe(true);
   });
 });
 
@@ -597,5 +709,231 @@ describe("the two items the user cannot install", () => {
     expect(pg.required).toBe(false);
     expect(pg.status).toBe("ok");
     expect(pg.remediation).toBeUndefined();
+  });
+});
+
+/**
+ * Account mode: a member runs tasks with their own API keys or with an agent
+ * CLI, and either is enough. Claude Code is no longer required; a computer
+ * with neither a key nor a usable CLI is refused at Connect, by the
+ * `api-keys` row, with the sentence that fixes it.
+ */
+describe("account preflight: a way to run an agent", () => {
+  const ok = (id: PreflightId): PreflightItem => ({ id, label: id, required: false, status: "ok", path: `/bin/${id}` });
+  const missing = (id: PreflightId): PreflightItem => ({ id, label: id, required: false, status: "missing" });
+  const none = { executor: ok("executor"), claude: missing("claude"), claudeAccount: missing("claude-account"), clis: [] };
+
+  it("passes with a key and the executor that uses it, and names the providers but nothing else", () => {
+    const item = agentAccessItem({ ...none, providerIds: ["anthropic", "openai"] });
+    expect(item).toMatchObject({ id: "api-keys", status: "ok", required: true });
+    expect(item.detail).toBe("2 providers on this computer: anthropic, openai.");
+    expect(firstBlocker({ generatedAt: 1, ready: true, items: [item] })).toBeUndefined();
+  });
+
+  it("blocks Connect with neither a key nor a usable CLI, and says both ways out", () => {
+    const item = agentAccessItem({ ...none, providerIds: [] });
+    expect(item).toMatchObject({ status: "missing", required: true });
+    expect(item.remediation).toMatch(/Settings → LLM Connection → API connections/);
+    expect(item.remediation).toMatch(/Claude Code \(signed in\), OpenCode or Cursor/);
+    expect(firstBlocker({ generatedAt: 1, ready: false, items: [item] })?.id).toBe("api-keys");
+  });
+
+  it("is optional once any CLI can run an agent — Claude Code signed in, OpenCode, or Cursor", () => {
+    for (const cli of [
+      { claude: ok("claude"), claudeAccount: ok("claude-account") },
+      { clis: [ok("opencode")] },
+      { clis: [ok("cursor-agent")] },
+    ]) {
+      const item = agentAccessItem({ ...none, ...cli, providerIds: [] });
+      expect(item.required, JSON.stringify(cli)).toBe(false);
+      expect(item.status).toBe("missing");
+    }
+  });
+
+  it("does not count a Claude Code whose account cannot run it", () => {
+    const unusable: PreflightItem = { ...missing("claude-account"), status: "unusable" };
+    expect(agentAccessItem({ ...none, claude: ok("claude"), claudeAccount: unusable, providerIds: [] }).required).toBe(true);
+  });
+
+  it("does not count keys without the executor that would use them", () => {
+    const item = agentAccessItem({ ...none, executor: missing("executor"), providerIds: ["openai"] });
+    expect(item).toMatchObject({ status: "unusable", required: true });
+  });
+});
+
+// --- the two halves, and what is remembered between launches ---------------
+
+const { startPreflight } = await import("./detect.js");
+const { PreflightCache } = await import("./preflight-cache.js");
+
+/**
+ * A fake `claude` that also records every time it is asked anything, so a
+ * test can say not just what the report contains but how many processes it
+ * took to get there.
+ */
+function countingClaude(version = "2.1.220"): { bin: string; calls: () => string[] } {
+  scripts += 1;
+  const dir = path.join(paths.appPath, "fakes", `counting-${scripts}`);
+  mkdirSync(dir, { recursive: true });
+  const bin = path.join(dir, "claude");
+  const log = path.join(dir, "calls.log");
+  writeFileSync(log, "");
+  writeFileSync(
+    bin,
+    [
+      "#!/bin/sh",
+      `echo "$1" >> '${log}'`,
+      'case "$1" in',
+      `  --version) echo '${version} (Claude Code)'; exit 0;;`,
+      `  auth) printf '%s' '${signedIn.stdout}'; exit 0;;`,
+      "esac",
+      "exit 1",
+      "",
+    ].join("\n"),
+  );
+  chmodSync(bin, 0o755);
+  return { bin, calls: () => readFileSync(log, "utf8").split("\n").filter(Boolean) };
+}
+
+function cacheFile(): string {
+  scripts += 1;
+  return path.join(paths.appPath, `preflight-cache-${scripts}.json`);
+}
+
+describe("preflight: the gating half", { timeout: 30_000 }, () => {
+  it("decides what the backend needs without running a single probe", async () => {
+    const claude = countingClaude();
+    const run = startPreflight({ overrides: { claudeBin: claude.bin, appiumBin: fakeAppium(["uiautomator2"]) } });
+    const gating = await run.gating;
+
+    // The two required items, fully answered.
+    expect(item(gating, "agent-server").status).toBe("ok");
+    expect(item(gating, "git").required).toBe(true);
+    expect(gating.ready).toBe(true);
+    expect(firstBlocker(gating)).toBeUndefined();
+
+    // Found, provisionally usable, and not yet asked anything.
+    expect(item(gating, "claude").status).toBe("ok");
+    expect(item(gating, "claude").path).toBe(claude.bin);
+    expect(item(gating, "claude").version).toBeUndefined();
+    expect(claude.calls()).toEqual([]);
+
+    // Only a process can answer these, so the gating half leaves them out
+    // rather than guessing.
+    const ids = gating.items.map((i) => i.id);
+    expect(ids).not.toContain("claude-account");
+    expect(ids).not.toContain("appium-uiautomator2");
+    expect(item(gating, "appium").status).toBe("ok");
+
+    const complete = await run.complete;
+    expect(item(complete, "claude").version).toBe("2.1.220");
+    expect(item(complete, "claude-account").status).toBe("ok");
+    expect(item(complete, "appium-uiautomator2").status).toBe("ok");
+    expect(complete.items.map((i) => i.id)).toEqual(
+      expect.arrayContaining(["agent-server", "postgres", "git", "claude", "claude-account", "chrome", "appium", "android-sdk"]),
+    );
+  });
+
+  it("keeps the same order in both halves", async () => {
+    const run = startPreflight({ overrides: { claudeBin: countingClaude().bin } });
+    const [gating, complete] = await Promise.all([run.gating, run.complete]);
+    const order = complete.items.map((i) => i.id);
+    expect(gating.items.map((i) => i.id)).toEqual(order.filter((id) => gating.items.some((i) => i.id === id)));
+  });
+
+  it("reports a missing required item in the gating half, so the start is refused without waiting", async () => {
+    const gating = await startPreflight({ overrides: { claudeBin: countingClaude().bin, gitBin: "/nowhere/git" } }).gating;
+    expect(item(gating, "git").status).toBe("missing");
+    expect(firstBlocker(gating)?.id).toBe("git");
+  });
+});
+
+describe("preflight: the version cache", { timeout: 30_000 }, () => {
+  it("answers versions from the cache, in both halves, without asking the binary again", async () => {
+    const claude = countingClaude();
+    const file = cacheFile();
+    const cache = new PreflightCache(file);
+
+    await startPreflight({ overrides: { claudeBin: claude.bin }, cache }).complete;
+    expect(claude.calls().filter((c) => c === "--version")).toHaveLength(1);
+    await cache.flush();
+
+    // A later launch: a new cache object over the same file.
+    const later = new PreflightCache(file);
+    const run = startPreflight({ overrides: { claudeBin: claude.bin }, cache: later });
+    expect(item(await run.gating, "claude").version).toBe("2.1.220");
+    expect(item(await run.complete, "claude").version).toBe("2.1.220");
+    expect(claude.calls().filter((c) => c === "--version")).toHaveLength(1);
+    // The account is never cached: it is the answer most likely to change.
+    expect(claude.calls().filter((c) => c === "auth")).toHaveLength(2);
+  });
+
+  it("asks again when forced, and when the binary changed", async () => {
+    const claude = countingClaude();
+    const cache = new PreflightCache(cacheFile());
+    await startPreflight({ overrides: { claudeBin: claude.bin }, cache }).complete;
+
+    await startPreflight({ overrides: { claudeBin: claude.bin }, cache, force: true }).complete;
+    expect(claude.calls().filter((c) => c === "--version")).toHaveLength(2);
+
+    // An upgrade writes a different file.
+    writeFileSync(claude.bin, readFileSync(claude.bin, "utf8").replace("2.1.220", "2.2.0") + "\n");
+    const report = await startPreflight({ overrides: { claudeBin: claude.bin }, cache }).complete;
+    expect(item(report, "claude").version).toBe("2.2.0");
+    expect(claude.calls().filter((c) => c === "--version")).toHaveLength(3);
+  });
+
+  /**
+   * A forced sweep asks every binary again; when the answer is now a failure,
+   * the success remembered before it must not be what the next, unforced
+   * sweep shows.
+   */
+  it("forgets a remembered version once a forced sweep finds the binary failing", async () => {
+    scripts += 1;
+    const dir = path.join(paths.appPath, "fakes", `git-${scripts}`);
+    mkdirSync(dir, { recursive: true });
+    const git = path.join(dir, "git");
+    const broken = path.join(dir, "broken");
+    const log = path.join(dir, "calls.log");
+    writeFileSync(log, "");
+    writeFileSync(
+      git,
+      ["#!/bin/sh", `echo "$1" >> '${log}'`, `[ -f '${broken}' ] && exit 1`, "echo 'git version 2.40.0'", ""].join("\n"),
+    );
+    chmodSync(git, 0o755);
+    const versions = () => readFileSync(log, "utf8").split("\n").filter((c) => c === "--version").length;
+    const overrides = { claudeBin: countingClaude().bin, gitBin: git };
+    const cache = new PreflightCache(cacheFile());
+
+    expect(item(await startPreflight({ overrides, cache }).complete, "git").version).toBe("2.40.0");
+    expect(versions()).toBe(1);
+
+    writeFileSync(broken, "");
+    const forced = startPreflight({ overrides, cache, force: true });
+    expect(item(await forced.gating, "git").version).toBe("2.40.0");
+    expect(item(await forced.complete, "git").version).toBeUndefined();
+    expect(versions()).toBe(2);
+
+    const next = await startPreflight({ overrides, cache }).complete;
+    expect(item(next, "git").version).toBeUndefined();
+    expect(versions()).toBe(3);
+  });
+
+  /**
+   * Remembered, so the next launch starts the backend on the same answer
+   * (without CLAUDE_CODE_BIN) instead of a provisional "ok" it would then have
+   * to restart over; asked again every sweep, so a fix is seen at once.
+   */
+  it("starts from a claude it cannot drive but asks it again every time", async () => {
+    const claude = countingClaude("1.4.0");
+    const cache = new PreflightCache(cacheFile());
+    const first = await startPreflight({ overrides: { claudeBin: claude.bin }, cache }).complete;
+    expect(item(first, "claude").status).toBe("unusable");
+    expect(cache.version(claude.bin)?.fresh).toBe(false);
+
+    const run = startPreflight({ overrides: { claudeBin: claude.bin }, cache });
+    expect(item(await run.gating, "claude").status).toBe("unusable");
+    expect(item(await run.complete, "claude").status).toBe("unusable");
+    expect(claude.calls().filter((c) => c === "--version")).toHaveLength(2);
   });
 });

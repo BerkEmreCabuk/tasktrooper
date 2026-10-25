@@ -31,6 +31,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/hooks/useI18n";
 import { isHostExecutedProvider, isProviderAvailable, SUBAGENT_TYPES } from "@/lib/constants";
+import { isCoreAgent } from "@/lib/teamTemplates";
 
 /**
  * Stands in for the catalog entry whose id is the empty string ("let the CLI
@@ -88,6 +89,7 @@ export function AgentSettingsPage() {
   // two sync gates below are only meaningful then; a hand-made agent owns its
   // own prompt and no upstream will ever reach it.
   const [catalogManaged, setCatalogManaged] = useState(false);
+  const [coreAgent, setCoreAgent] = useState(false);
   const [policy, setPolicy] = useState<ToolPolicy>({});
   const [loading, setLoading] = useState(!isNew);
   const [saving, setSaving] = useState(false);
@@ -220,12 +222,15 @@ export function AgentSettingsPage() {
         tool_policy: agent.tool_policy ?? {},
         enabled: agent.enabled,
         self_evolution_enabled: agent.self_evolution_enabled ?? false,
+        max_turns: agent.max_turns,
+        effort: agent.effort,
         // Born connected to the catalog is the server's own default; a load
         // from an older server that predates these fields reads as "on".
         auto_pull_agent_updates: agent.auto_pull_agent_updates ?? true,
         keep_skills_updated: agent.keep_skills_updated ?? true,
       });
       setCatalogManaged(Boolean(agent.catalog_slug));
+      setCoreAgent(isCoreAgent(agent));
       setPolicy(agent.tool_policy ?? {});
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("agentArea.settings.toast.loadFailed"));
@@ -616,9 +621,16 @@ export function AgentSettingsPage() {
             </div>
           </div>
         )}
-        <div className="flex items-center gap-2">
-          <Switch checked={form.enabled} onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))} />
-          <Label>{t("agentArea.settings.enabled")}</Label>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <Switch
+              checked={form.enabled}
+              disabled={coreAgent && form.enabled}
+              onCheckedChange={(v) => setForm((f) => ({ ...f, enabled: v }))}
+            />
+            <Label>{t("agentArea.settings.enabled")}</Label>
+          </div>
+          {coreAgent && <p className="text-xs text-muted-foreground">{t("agentArea.settings.coreHint")}</p>}
         </div>
         <Button onClick={handleSave} disabled={!canSave || saving}>
           {saving ? t("common.saving") : isNew ? t("agentArea.settings.create") : t("agentArea.settings.update")}

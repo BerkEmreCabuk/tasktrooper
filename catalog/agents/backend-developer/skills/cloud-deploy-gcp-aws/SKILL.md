@@ -1,13 +1,13 @@
 ---
 name: cloud-deploy-gcp-aws
 category: deployment
-description: Use when a backend or worker service needs a cloud deploy - container-first GitHub Actions deploys to Google Cloud Run (WIF) or AWS App Runner/ECS (OIDC), with migrate-before-deploy and a health-check gate
+description: Use when a backend or worker service needs a cloud deploy - container-first GitHub Actions deploys to Google Cloud Run (WIF) or AWS ECS/App Runner (OIDC), with migrate-before-deploy and a health-check gate
 ---
 # Cloud Deploy — GCP & AWS (backend/worker)
 
 ## Overview
 
-A backend deploy ships the **container the repo already builds**, not a re-implementation. The same image runs on Google Cloud Run and on AWS App Runner/ECS — the deploy workflow only differs in the auth handshake and the deploy command. Read [[ci-cd-pipeline-authoring]] first: it defines the workflow naming/dispatch contract this skill fills in with real cloud steps.
+A backend deploy ships the **container the repo already builds**, not a re-implementation. The same image runs on Google Cloud Run and on AWS ECS — the deploy workflow only differs in the auth handshake and the deploy command. Read [[ci-cd-pipeline-authoring]] first: it defines the workflow naming/dispatch contract this skill fills in with real cloud steps.
 
 **Core principle:** One image, one health-checked deploy per environment, authenticated by OIDC — never a hand-rolled server or a committed key.
 
@@ -23,11 +23,11 @@ A backend deploy ships the **container the repo already builds**, not a re-imple
 - Deploy: `gcloud run deploy $SERVICE --image $IMAGE --region $REGION` (or `--source .` to build on deploy). Cloud Run gives you the revision URL to smoke-test.
 - Worker (no HTTP ingress): deploy as a Cloud Run **job** (`gcloud run jobs deploy ... && gcloud run jobs execute`) or a GKE workload — not a public service.
 
-## AWS — App Runner / ECS
+## AWS — ECS Express Mode / Fargate
 
 - Auth: `aws-actions/configure-aws-credentials` with `role-to-assume` (OIDC), no access keys.
-- **App Runner** (simplest): push the image to ECR, then `aws apprunner start-deployment` (or update the service). Good default for a single service.
-- **ECS Fargate** (more control): push to ECR, render the task definition, `aws-actions/amazon-ecs-deploy-task-definition` with `wait-for-service-stability: true`.
+- **ECS Express Mode** is AWS's recommended default (App Runner stopped accepting new customers on 2026-04-30; existing App Runner services keep working, but don't build new ones there): push the image to ECR, then let Express Mode provision and run the service from it — the simplest path for a single service today.
+- **ECS Fargate** (more control over task definitions, scaling, networking): push to ECR, render the task definition, `aws-actions/amazon-ecs-deploy-task-definition` with `wait-for-service-stability: true`.
 - Worker: an ECS service with no load balancer / no public subnet.
 
 ## Migrate before deploy
@@ -38,8 +38,8 @@ A backend deploy ships the **container the repo already builds**, not a re-imple
 
 ## Health-check gate & rollback
 
-- End every deploy job with a smoke step: curl the health endpoint (Cloud Run revision URL / App Runner service URL / ALB DNS) and **fail the job on non-200**. That exit code is what moves the task to `released` vs `need_revision`.
-- Rollback is redeploying the previous image tag/revision — keep deploys immutable-tagged (git SHA), never `:latest`. Put the rollback command in the task's `rollback_plan` field (`update_board_task`) so QA reads it when a prod deploy goes bad — that field is posted on the card automatically at deploy time, which a comment is not.
+- End every deploy job with a smoke step: curl the health endpoint (Cloud Run revision URL / ECS service URL / ALB DNS) and **fail the job on non-200**. A failing smoke step fails the deploy — the release goes `failed` and the release engineer rolls it back; only `finish_release` moves a task to `released`. This workflow's smoke step is a build-time gate, not the release verdict itself.
+- Rollback is redeploying the previous image tag/revision — keep deploys immutable-tagged (git SHA), never `:latest`. Put the rollback command in the task's `rollback_plan` field (`update_board_task`) so the release engineer reads it on rollback — that field is posted on the card automatically at deploy time, which a comment is not.
 
 ## Common Mistakes
 
@@ -48,9 +48,10 @@ A backend deploy ships the **container the repo already builds**, not a re-imple
 - Stage deploy sharing the prod database.
 - A deploy job that reports success without ever hitting the health endpoint.
 - Storing a GCP service-account JSON or AWS access key in `secrets` instead of using OIDC/WIF.
+- Standing up a new App Runner service instead of ECS Express Mode — it still works for existing services, but it is closed to new customers.
 
 ## Red Flags
 
 - The workflow has no `id-token: write` permission (OIDC can't work).
 - No smoke step, or a smoke step whose failure doesn't fail the job.
-- Preprod/prod deploy triggers on `push` instead of `workflow_dispatch`.
+- Preprod/prod deploy triggers on `push` instead of `workflow_dispatch` (unless the component's delivery profile is genuinely `on_merge`).

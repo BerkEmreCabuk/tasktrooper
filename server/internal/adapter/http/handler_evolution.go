@@ -143,6 +143,8 @@ func agentParam(c *fiber.Ctx) (uuid.UUID, error) {
 	return agentID, nil
 }
 
+const kpiRefreshMaxAge = time.Minute
+
 func (h *Handler) GetAgentPerformance(c *fiber.Ctx) error {
 	agentID, err := agentParam(c)
 	if err != nil {
@@ -160,8 +162,9 @@ func (h *Handler) GetAgentPerformance(c *fiber.Ctx) error {
 		resp["events"] = orEmptyScoreEvents(events)
 	}
 	if h.kpiSvc != nil {
-		// Refresh current-period results on read so the page is always live.
-		if _, err := h.kpiSvc.EvaluateAgent(ctx, agentID, time.Now()); err == nil {
+		// Evaluating resolves every metric and upserts its result, so a page that
+		// polls reuses the stored results until they are kpiRefreshMaxAge old.
+		if err := h.kpiSvc.RefreshAgent(ctx, agentID, time.Now(), kpiRefreshMaxAge); err == nil {
 			kpis, _ := h.kpiSvc.ListKPIs(ctx, agentID)
 			results, _ := h.kpiSvc.LatestResults(ctx, agentID)
 			resp["kpis"] = kpis
@@ -227,6 +230,9 @@ func (h *Handler) ReflectNow(c *fiber.Ctx) error {
 	if err != nil {
 		if errors.Is(err, evolution.ErrReflectionInFlight) {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": fiber.Map{"message": err.Error(), "type": "conflict"}})
+		}
+		if errors.Is(err, evolution.ErrEvolutionDisabled) {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": fiber.Map{"message": err.Error(), "type": "evolution_disabled"}})
 		}
 		return internalError(c, err)
 	}

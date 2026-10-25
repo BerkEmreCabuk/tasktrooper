@@ -25,6 +25,8 @@ func init() {
 		listTaskDocumentsToolName,
 		listDocumentAnnotationsToolName,
 		resolveDocumentAnnotationsToolName,
+		recordOpenQuestionsToolName,
+		listOpenQuestionsToolName,
 		listCriteriaToolName,
 		setCriterionToolName,
 		cancelCriterionToolName,
@@ -36,6 +38,7 @@ func init() {
 		getPipelineStatusToolName,
 		getTaskPreviewToolName,
 		startTaskPreviewToolName,
+		declareEnvVarsToolName,
 		listProjectsToolName,
 		listRepositoriesToolName,
 		createProjectToolName,
@@ -54,6 +57,7 @@ func init() {
 		runSmokeChecksToolName,
 		finishReleaseToolName,
 		rollbackReleaseToolName,
+		getDeployImpactToolName,
 	} {
 		prompt.Define[struct{}]("tool."+name, struct{}{})
 	}

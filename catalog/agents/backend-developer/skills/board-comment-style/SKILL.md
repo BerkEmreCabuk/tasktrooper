@@ -1,7 +1,7 @@
 ---
 name: board-comment-style
 category: collaboration
-description: Write board comments the way a colleague does — lead with the finding, a few lines, no preamble or process narration
+description: Write board comments the way a colleague does — lead with the finding, a few lines, no preamble or process narration. Use when about to call add_task_comment or comment_on_pull_request, or when deciding whether something deserves a comment at all.
 ---
 # Board comment style
 
@@ -10,6 +10,10 @@ Write task comments the way a colleague writes them: short, specific, done.
 A board comment is read by a teammate scrolling a card, not by a grader. Nobody
 reads the second screen. A long comment does not prove more work happened — it
 buries the one line that mattered.
+
+Your run's final message is not a comment: it becomes the run summary and,
+for a developer, the commit message. The rules below are about `add_task_comment`
+and `comment_on_pull_request`, not that message.
 
 ## First: is this a comment at all?
 
@@ -43,15 +47,19 @@ records it — and for the branch name.
 feel wrong.** A hand-off, a verdict, a status note — each is a few sentences.
 
 If the detail genuinely doesn't fit, it isn't a comment. Put it in a task
-document (`add_task_document`) and link it in one line.
+document if your role can attach one (`add_task_document`); otherwise cut it to
+the actionable lines — the evidence stays. QA: your `review_criterion` note on
+the rejected criterion already carries the per-criterion evidence; a comment
+repeats it only when something needs a person's decision beyond the verdict
+itself.
 
 ## Write this
 
 ```
-Fixed. The 500 was `session_id` arriving as an empty string, not null —
-the guard only checked null. Added the empty check plus a test.
-
-Verified: POST /v1/sessions with "" now returns 400, suite green.
+Blocked on AC3: "export streams large projects" — `GET /v1/export`
+buffers the whole CSV in memory (exporter.go:88) and the 30s proxy
+timeout cuts it at ~40k rows. Streaming needs the chunked writer in
+internal/http — in scope for this task, or a follow-up?
 ```
 
 ## Not this
@@ -70,9 +78,9 @@ This task was assigned to me in the in_progress column...
 [continues for two screens]
 ```
 
-The second one says less. Everything before "the guard only checked null" is
-throat-clearing, and the numbered narration of which files you opened is a
-transcript, not a finding.
+The second one says less. Everything before "Blocked on AC3" is throat-clearing,
+and the numbered narration of which files you opened is a transcript, not a
+finding.
 
 ## Rules
 
@@ -91,8 +99,8 @@ transcript, not a finding.
   result are all on the card.
 - **Don't pad.** No "I hope this helps", no "please let me know if you need
   anything else", no summary of the summary.
-- **Evidence stays, prose goes.** Commands, outputs, screenshot paths and
-  reproduction steps are the valuable part — keep every one of them, and cut the
+- **Evidence stays, prose goes.** Commands, outputs, the url and viewport of a
+  screenshot, and reproduction steps are the valuable part — keep every one of them, and cut the
   sentences around them.
 
 ## Where this does not apply

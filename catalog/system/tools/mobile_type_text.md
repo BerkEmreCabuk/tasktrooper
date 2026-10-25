@@ -9,4 +9,4 @@ params:
     value: Text to type into the field
     xpath: XPath over the hierarchy from mobile_read_ui. Last resort — prefer the other three, they survive layout changes
 ---
-Type text into a field on the connected Android device.
+Type text into a field on the connected device (Android or iOS simulator).

@@ -1,1 +1,0 @@
-- [ ] solid ve design patternleri kodda kulllansin

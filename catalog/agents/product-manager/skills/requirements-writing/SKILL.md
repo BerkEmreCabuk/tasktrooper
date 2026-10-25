@@ -20,9 +20,9 @@ A requirement is a promise about behavior, written so QA can later prove it and 
 
 ## Rules
 
-- **WHAT/WHY, not HOW.** "Users can export tasks to CSV" — not "add a `/export` endpoint using library X."
+- **WHAT/WHY, not HOW — but field-aware.** `description` and `acceptance_criteria` state WHAT and WHY: "Users can export tasks to CSV" — not "add a `/export` endpoint using library X." Endpoints, files and tables belong only in `technical_description`, only once verified with code tools (`get_repo_tree`, `codebase_search`/`grep_code`), and only for small direct tasks you write yourself. A criterion may name an endpoint only when the API itself is the product surface (see acceptance-criteria-gwt's API-surface example) — not as a stand-in for what a user sees.
 - **Independently testable.** If a requirement contains "and", consider splitting.
-- **No solutioning.** Naming a datastore, framework, or endpoint is an architect/dev decision leaking in.
+- **No solutioning in `description`/`acceptance_criteria`.** Naming a datastore, framework, or endpoint there is an architect/dev decision leaking in, even though the same name is correct in `technical_description`.
 
 ## Worked Example
 

@@ -67,13 +67,14 @@ func (t *listRuntimeErrorsTool) Execute(ctx context.Context, arguments string) d
 		return toolError(name, fmt.Sprintf("invalid arguments: %v", err))
 	}
 
-	since := defaultErrorsSince
+	now := time.Now().UTC()
+	since := now.Add(-defaultErrorsSince)
 	if args.Since != "" {
-		d, err := parseSinceDuration(args.Since)
+		s, err := resolveSince(args.Since, now)
 		if err != nil {
 			return toolError(name, err.Error())
 		}
-		since = d
+		since = s
 	}
 
 	repositoryID, err := resolveRepositoryID(ctx, args.RepositoryID, name)
@@ -85,7 +86,7 @@ func (t *listRuntimeErrorsTool) Execute(ctx context.Context, arguments string) d
 		return toolError(name, err.Error())
 	}
 
-	groups, err := t.kit.Cloud.Errors(ctx, env.ID, time.Now().UTC().Add(-since))
+	groups, err := t.kit.Cloud.Errors(ctx, env.ID, since)
 	if err != nil {
 		return toolError(name, err.Error())
 	}
