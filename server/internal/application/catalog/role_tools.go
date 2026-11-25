@@ -151,6 +151,7 @@ var (
 		domain.FinishReleaseToolName,
 		domain.ReleaseRollbackToolName,
 		domain.GetDeployImpactToolName,
+		domain.ProposeCutToolName,
 	}
 )
 
@@ -167,6 +168,7 @@ func developerToolPolicy() domain.ToolPolicy {
 	tools = append(tools, roleSkillTools...)
 	tools = append(tools, roleProjectModelReadTools...)
 	tools = append(tools, roleRuntimeReadTools...)
+	tools = append(tools, roleTelemetryDiagnoseTools...)
 	tools = append(tools, rolePRReadTools...)
 	tools = append(tools, rolePRReplyTools...)
 	tools = append(tools, rolePRCommitTools...)
@@ -183,35 +185,27 @@ func developerToolPolicy() domain.ToolPolicy {
 }
 
 func productManagerToolPolicy() domain.ToolPolicy {
-	tools := make([]string, 0, len(roleWebTools)+len(roleCodeTools)+len(roleBrowserTools)+len(roleBoardReadTools)+len(roleBoardCreateTools)+len(roleBoardDeleteTools)+len(roleWorkspaceManageTools)+len(roleMemoryTools)+len(roleSkillTools)+4)
+	tools := make([]string, 0, len(roleWebTools)+len(roleCodeTools)+len(roleBoardReadTools)+len(roleBoardCreateTools)+len(roleBoardDeleteTools)+len(roleWorkspaceManageTools)+len(roleAudienceResearchTools)+len(roleMemoryTools)+len(roleSkillTools)+5)
 	tools = append(tools, roleWebTools...)
-	// pm_uat: backend/API-only acceptance criteria are tested too, headless
-	// against the task's own preview — no "backend exception".
-	tools = append(tools, "http_request")
 	// Read-only code tools: the PM verifies real file/endpoint names for technical_description — no shell.
 	tools = append(tools, roleCodeTools...)
-	// pm_uat: the PM walks the critical flows itself, in the browser; get_deploy_target resolves a stage base_url when one exists.
-	tools = append(tools, roleBrowserTools...)
-	tools = append(tools, roleMobileTools...)
-	// update_deploy_target only writes base_url/health_url when UAT finds the stage address unrecorded.
-	tools = append(tools, "get_deploy_target", "update_deploy_target")
-	// pm_uat: the PM launches the task's own build and walks it in the browser — no shell, so no other way to see it run.
-	tools = append(tools, "get_task_preview", "start_task_preview")
 	tools = append(tools, roleBoardReadTools...)
+	// A change the stakeholder asks for on a task an agent is working reaches that agent.
+	tools = append(tools, "notify_task_agent")
 	tools = append(tools, roleBoardCreateTools...)
 	tools = append(tools, roleBoardDeleteTools...)
 	tools = append(tools, roleWorkspaceManageTools...)
 	// A project with UI and no design system gets the server-briefed design task, never a hand-written one.
 	tools = append(tools, "request_design_system")
-	// pm_uat: the PM records its own verdict per criterion.
-	tools = append(tools, "review_criterion")
 	// The PM answers "what shipped?" from the PR rather than the implementer's summary.
 	tools = append(tools, rolePRReadTools...)
 	tools = append(tools, "get_project_brief", "list_links")
-	// pm_uat: where a stage/production environment actually runs, without the
-	// live-debugging tools (query_runtime_logs, list_runtime_errors,
-	// list_deployments) a PM never needs.
-	tools = append(tools, "get_environment")
+	// Whether a service is healthy and meeting its SLOs, to answer "how is it doing" and to size work; nothing deeper.
+	tools = append(tools, "telemetry_get_service", "telemetry_list_slos")
+	// Audience research: synthetic personas written from the project's brief,
+	// studies that ask them whether they would pay, reports, 1:1 talks. Every
+	// call that spends model calls needs the user's yes (`user_approved`).
+	tools = append(tools, roleAudienceResearchTools...)
 	tools = append(tools, roleMemoryTools...)
 	tools = append(tools, roleSkillTools...)
 	return domain.ToolPolicy{AllowTools: tools}
@@ -232,6 +226,9 @@ func architectToolPolicy() domain.ToolPolicy {
 	// ask_user or prose in the risks section.
 	tools = append(tools, "record_open_questions", "list_open_questions")
 	tools = append(tools, "get_pipeline_status")
+	// What the review found, where a person should look and what it could not
+	// verify, for the task's review history.
+	tools = append(tools, "record_review_findings")
 	// The architect reads the PR it is judging and answers threads; no commit_task_changes.
 	tools = append(tools, rolePRReadTools...)
 	tools = append(tools, rolePRReplyTools...)
@@ -243,6 +240,8 @@ func architectToolPolicy() domain.ToolPolicy {
 	// tail (query_runtime_logs) or the deploy history (list_deployments) —
 	// those are for the implementer and QA, not the reviewer.
 	tools = append(tools, "get_environment", "list_runtime_errors")
+	// The connected telemetry's view of a service: its endpoints and what it depends on, for judging a design against how it really runs.
+	tools = append(tools, "telemetry_get_service")
 	// Decomposition opens the design system UI tasks wait for through the server's brief, not a hand-written task.
 	tools = append(tools, "request_design_system")
 	return domain.ToolPolicy{AllowTools: tools}
@@ -252,12 +251,16 @@ func qaToolPolicy() domain.ToolPolicy {
 	tools := make([]string, 0, len(roleShellTools)+len(roleWebTools)+len(roleQALookupTools)+len(roleBrowserTools)+len(roleMobileTools)+len(roleMemoryTools)+len(roleSkillTools)+10)
 	tools = append(tools, roleShellTools...)
 	tools = append(tools, roleWebTools...)
+	// Backend/API-only criteria are tested too, headless against the task's own preview.
+	tools = append(tools, "http_request")
 	tools = append(tools, roleQALookupTools...)
 	tools = append(tools, roleBrowserTools...)
 	tools = append(tools, roleMobileTools...)
 	tools = append(tools, roleProjectModelReadTools...)
 	tools = append(tools, roleRuntimeReadTools...)
-	tools = append(tools, "list_board_tasks", "list_ready_tasks", "move_board_task", "add_task_comment", "list_task_comments", "list_task_documents", "list_acceptance_criteria", "review_criterion", "list_repositories")
+	// A failing case on a deployed environment is explained from its traces and logs before it is reported.
+	tools = append(tools, roleTelemetryDiagnoseTools...)
+	tools = append(tools, "list_board_tasks", "list_ready_tasks", "move_board_task", "add_task_comment", "list_task_comments", "list_task_documents", "list_acceptance_criteria", "review_criterion", "list_repositories", "record_review_findings")
 	// QA is the only role that WRITES test cases.
 	tools = append(tools, "list_test_cases", "record_test_cases", "set_test_case_result")
 	// Green CI and stage base_url for the suite; prod requests banned — the rule layer says so separately.
@@ -291,6 +294,13 @@ func releaseEngineerToolPolicy() domain.ToolPolicy {
 	// get_deploy_logs stays for a CI job's own output; the release tools above cover the release's own checks.
 	tools = append(tools, domain.DeployLogsToolName)
 	tools = append(tools, "list_incidents", "get_incident")
+	// An incident the connected telemetry opened is the release engineer's to
+	// diagnose: it reads the telemetry, hands code causes to a developer with
+	// create_board_task, and tells the user about the rest with
+	// propose_incident_remedy.
+	tools = append(tools, roleTelemetryReadTools...)
+	tools = append(tools, roleTelemetryWriteTools...)
+	tools = append(tools, "propose_incident_remedy", "resolve_incident")
 	tools = append(tools, roleObservabilityTools...)
 	// Enabling observability ends in a developer task, never in an edit: the
 	// release engineer opens it and parks its own card on it with blocked_by.
@@ -298,6 +308,46 @@ func releaseEngineerToolPolicy() domain.ToolPolicy {
 	tools = append(tools, roleMemoryTools...)
 	tools = append(tools, roleSkillTools...)
 	return domain.ToolPolicy{AllowTools: tools}
+}
+
+// The Product Manager's audience research tools (adapter/tools/audience); each
+// answers with guidance when no agent runtime is available to run the models on.
+var roleAudienceResearchTools = []string{
+	"audience_list",
+	"audience_get",
+	"audience_create",
+	"audience_update",
+	"audience_build",
+	"audience_talk",
+	"study_list",
+	"study_status",
+	"study_report",
+	"study_plan",
+	"study_script",
+	"study_start",
+	"study_cancel",
+	"study_rerun",
+	"study_compare",
+	"study_follow_up",
+	"study_ask_everyone",
+	"study_ask_research",
+}
+
+// Read-only access to the TaskTrooper Telemetry the user connected in Settings;
+// each answers with a guidance message when none is connected.
+var roleTelemetryReadTools = []string{
+	"telemetry_get_incident",
+	"telemetry_list_incidents",
+	"telemetry_get_service",
+	"telemetry_search_logs",
+	"telemetry_search_traces",
+	"telemetry_list_errors",
+	"telemetry_list_deploys",
+	"telemetry_api_get",
+	"telemetry_explain_endpoint",
+	"telemetry_list_slos",
+	"telemetry_list_monitors",
+	"telemetry_list_load_tests",
 }
 
 // The release engineer's observability work: read error groups and data
@@ -333,4 +383,25 @@ func mobileDeveloperToolPolicy() domain.ToolPolicy {
 	tools = append(tools, roleMobileTools...)
 	base.AllowTools = tools
 	return base
+}
+
+// Diagnosing one's own component in the connected telemetry: the service's
+// health, why one endpoint got worse, and its traces, logs and error groups.
+// Not incidents (the release engineer works those), deploys or the raw API.
+var roleTelemetryDiagnoseTools = []string{
+	"telemetry_get_service",
+	"telemetry_explain_endpoint",
+	"telemetry_search_traces",
+	"telemetry_search_logs",
+	"telemetry_list_errors",
+}
+
+// The release engineer alone changes telemetry, and each of these but
+// telemetry_stop_load_test acts only after the user approved the exact change.
+var roleTelemetryWriteTools = []string{
+	"telemetry_propose_monitor",
+	"telemetry_propose_slo",
+	"telemetry_accept_suggestion",
+	"telemetry_run_load_test",
+	"telemetry_stop_load_test",
 }

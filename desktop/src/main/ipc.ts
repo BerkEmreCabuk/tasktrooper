@@ -7,6 +7,8 @@ import {
   type KeySetRequest,
   type KeysWindowPrefill,
   type McpServerSetRequest,
+  type RemoteAccessConfigureRequest,
+  type RemoteAccessNgrokConnectRequest,
 } from "../ipc/channels.js";
 import type {
   HostOverrides,
@@ -26,6 +28,9 @@ import type {
   PreflightReport,
   McpServersState,
   ProviderKeysState,
+  RemoteAccessState,
+  RemoteBinaryDetection,
+  RemoteProvider,
   RunnerPairingBundle,
   RunnerPairingSummary,
   SupervisorSnapshot,
@@ -33,6 +38,9 @@ import type {
   ToolchainJobState,
   ToolchainReport,
   UpdateStatus,
+  VoiceCapabilities,
+  VoiceChoice,
+  VoiceLanguage,
 } from "../ipc/types.js";
 import type { McpServerConsent } from "./keys/keys.js";
 import {
@@ -56,11 +64,18 @@ import {
   validatePreferences,
   validatePreflightRequest,
   validateRestartChild,
+  validateRemoteAccessConfigure,
+  validateRemoteAccessNgrokConnect,
+  validateRemoteAccessProvider,
   validateReveal,
   validateSignIn,
   validateToolchainId,
   validateToolchainIds,
   validateToolchainReportRequest,
+  validateVoiceId,
+  validateVoiceListenAudio,
+  validateVoiceListenStart,
+  validateVoiceSpeak,
 } from "../ipc/validate.js";
 
 /**
@@ -118,6 +133,14 @@ export interface IpcServices {
   accountMcpConsent(request: McpServerSetRequest): McpServerConsent | null;
   /** The native "Add the MCP server …?" dialog; true when the person agreed. */
   confirmMcpServer(consent: McpServerConsent): Promise<boolean>;
+
+  voiceCapabilities(): Promise<VoiceCapabilities>;
+  voiceListenStart(lang: VoiceLanguage): { id: string };
+  voiceListenAudio(id: string, pcm: Uint8Array): void;
+  voiceListenStop(id: string): void;
+  voiceListenCancel(id: string): void;
+  voiceSpeak(lang: VoiceLanguage, text: string, speed: number, voice: VoiceChoice): Promise<{ id: string }>;
+  voiceSpeakCancel(id: string): void;
 
   analyticsState(): AnalyticsState;
   setAnalytics(on: boolean): AnalyticsState;
@@ -188,6 +211,21 @@ export interface IpcServices {
   toolchainDismiss(): ToolchainJobState;
   /** Opens the tool's page from the table in the real browser. */
   toolchainOpenPage(id: ToolchainId): Promise<void>;
+
+  // --- remote access (local mode only) ---
+  remoteAccessState(): RemoteAccessState;
+  remoteAccessConfigure(request: RemoteAccessConfigureRequest): Promise<RemoteAccessState>;
+  remoteAccessStart(): Promise<RemoteAccessState>;
+  remoteAccessStop(): Promise<RemoteAccessState>;
+  remoteAccessDetect(provider: RemoteProvider): Promise<RemoteBinaryDetection>;
+  remoteAccessOpenInstallPage(provider: RemoteProvider): Promise<void>;
+  remoteAccessLogs(): string[];
+  remoteAccessRefreshAccount(): Promise<RemoteAccessState>;
+  remoteAccessCloudflareLogin(): Promise<RemoteAccessState>;
+  remoteAccessCloudflareLoginCancel(): Promise<RemoteAccessState>;
+  remoteAccessCloudflareLogout(): Promise<RemoteAccessState>;
+  remoteAccessNgrokConnect(request: RemoteAccessNgrokConnectRequest): Promise<RemoteAccessState>;
+  remoteAccessNgrokDisconnect(): Promise<RemoteAccessState>;
 }
 
 /** Answers "is this call really from the web app, right now?". */
@@ -281,6 +319,7 @@ export function registerIpc(services: IpcServices, guard: SenderGuard): void {
   });
   handle(SHELL_CHANNELS.accountState, () => services.accountState());
   shell(SHELL_CHANNELS.accountUseLocalForNow, () => services.accountUseLocalForNow());
+  shell(SHELL_CHANNELS.accountSignOut, () => services.accountSignOut());
 
   // --- the API-key window ---
   /**
@@ -406,6 +445,28 @@ export function registerIpc(services: IpcServices, guard: SenderGuard): void {
   cloud(CLOUD_CHANNELS.diagnostics, (payload) => services.diagnostics(validateDiagnosticsRequest(payload).force ?? false));
   cloud(CLOUD_CHANNELS.overridesSet, (payload) => services.setOverrides(validateOverrides(payload)));
 
+  // Both modes. The ids are this process's own (validateVoiceId); an id it
+  // does not know is ignored, so a page can only end what it started.
+  cloud(CLOUD_CHANNELS.voiceCapabilities, () => services.voiceCapabilities());
+  cloud(CLOUD_CHANNELS.voiceListenStart, (payload) => services.voiceListenStart(validateVoiceListenStart(payload).lang));
+  cloud(CLOUD_CHANNELS.voiceListenAudio, (payload) => {
+    const { id, pcm } = validateVoiceListenAudio(payload);
+    services.voiceListenAudio(id, pcm);
+  });
+  cloud(CLOUD_CHANNELS.voiceListenStop, (payload) => {
+    services.voiceListenStop(validateVoiceId(payload).id);
+  });
+  cloud(CLOUD_CHANNELS.voiceListenCancel, (payload) => {
+    services.voiceListenCancel(validateVoiceId(payload).id);
+  });
+  cloud(CLOUD_CHANNELS.voiceSpeak, (payload) => {
+    const { lang, text, speed, engine, style } = validateVoiceSpeak(payload);
+    return services.voiceSpeak(lang, text, speed, { engine, style });
+  });
+  cloud(CLOUD_CHANNELS.voiceSpeakCancel, (payload) => {
+    services.voiceSpeakCancel(validateVoiceId(payload).id);
+  });
+
   // Both modes: Settings → General is the one place this switch lives — the
   // local bundle's, or in account mode the account's own page.
   cloud(CLOUD_CHANNELS.analyticsGet, () => services.analyticsState());
@@ -453,6 +514,68 @@ export function registerIpc(services: IpcServices, guard: SenderGuard): void {
   cloud(CLOUD_CHANNELS.toolchainCancel, () => services.toolchainCancel());
   cloud(CLOUD_CHANNELS.toolchainDismiss, () => services.toolchainDismiss());
   cloud(CLOUD_CHANNELS.toolchainOpenPage, (payload) => services.toolchainOpenPage(validateToolchainId(payload).id));
+
+  /**
+   * Remote access, local mode only. The account's page is a remote origin, and
+   * a tunnel opens this computer to the internet: it is never that page's to
+   * start, and in account mode the account's cloud is the way in anyway.
+   * Checked after the sender and before the payload, like `accountOnly`.
+   */
+  const localOnly = (): void => {
+    if (services.accountMode() !== "local") throw new Error("Remote access is available while TaskTrooper runs locally.");
+  };
+  cloud(CLOUD_CHANNELS.remoteAccessState, () => {
+    localOnly();
+    return services.remoteAccessState();
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessConfigure, (payload) => {
+    localOnly();
+    return services.remoteAccessConfigure(validateRemoteAccessConfigure(payload));
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessStart, () => {
+    localOnly();
+    return services.remoteAccessStart();
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessStop, () => {
+    localOnly();
+    return services.remoteAccessStop();
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessDetect, (payload) => {
+    localOnly();
+    return services.remoteAccessDetect(validateRemoteAccessProvider(payload).provider);
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessOpenInstallPage, (payload) => {
+    localOnly();
+    return services.remoteAccessOpenInstallPage(validateRemoteAccessProvider(payload).provider);
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessLogs, () => {
+    localOnly();
+    return services.remoteAccessLogs();
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessRefreshAccount, () => {
+    localOnly();
+    return services.remoteAccessRefreshAccount();
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessCloudflareLogin, () => {
+    localOnly();
+    return services.remoteAccessCloudflareLogin();
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessCloudflareLoginCancel, () => {
+    localOnly();
+    return services.remoteAccessCloudflareLoginCancel();
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessCloudflareLogout, () => {
+    localOnly();
+    return services.remoteAccessCloudflareLogout();
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessNgrokConnect, (payload) => {
+    localOnly();
+    return services.remoteAccessNgrokConnect(validateRemoteAccessNgrokConnect(payload));
+  });
+  cloud(CLOUD_CHANNELS.remoteAccessNgrokDisconnect, () => {
+    localOnly();
+    return services.remoteAccessNgrokDisconnect();
+  });
 
   cloud(CLOUD_CHANNELS.updateGet, () => services.updateStatus());
   cloud(CLOUD_CHANNELS.updateCheck, () => services.checkForUpdate());

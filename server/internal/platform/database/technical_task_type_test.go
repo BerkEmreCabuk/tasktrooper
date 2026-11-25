@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -40,12 +39,7 @@ func TestTechnicalTaskTypeSuite(t *testing.T) {
 
 func (s *TechnicalTaskTypeSuite) SetupSuite() {
 	s.ctx, s.cancel = context.WithTimeout(context.Background(), 5*time.Minute)
-	tmp := s.T().TempDir()
-	pg, err := database.StartEmbedded(s.ctx, database.EmbeddedConfig{
-		DataDir:     filepath.Join(tmp, "postgres"),
-		RuntimePath: filepath.Join(tmp, "runtime"),
-	})
-	s.Require().NoError(err)
+	pg := sharedPostgres(s.T())
 	s.pg = pg
 	boot, err := pgxpool.New(s.ctx, pg.DSN())
 	s.Require().NoError(err)
@@ -55,9 +49,6 @@ func (s *TechnicalTaskTypeSuite) SetupSuite() {
 func (s *TechnicalTaskTypeSuite) TearDownSuite() {
 	if s.boot != nil {
 		s.boot.Close()
-	}
-	if s.pg != nil {
-		_ = s.pg.Stop()
 	}
 	if s.cancel != nil {
 		s.cancel()
@@ -104,10 +95,11 @@ func (s *TechnicalTaskTypeSuite) TestRestrictedInstallGainsHumanUATEdges() {
 	s.Require().NoError(database.RunMigrationsUpTo(s.ctx, pool, lastMigrationBeforeTechnicalTaskType))
 
 	_, err := pool.Exec(s.ctx, `INSERT INTO board_column_transitions (from_slug, to_slug) VALUES
-		('ready_for_qa', 'pm_uat'), ('in_qa', 'pm_uat')`)
+		('ready_for_qa', 'uat_gate'), ('in_qa', 'uat_gate')`)
 	s.Require().NoError(err)
 
-	s.Require().NoError(database.RunMigrations(s.ctx, pool))
+	// Up to 140 only: later migrations rework the stock graph.
+	s.Require().NoError(database.RunMigrationsUpTo(s.ctx, pool, "140_technical_task_type"))
 
 	for _, edge := range [][2]string{
 		{"ready_for_qa", "human_uat"},
@@ -122,7 +114,7 @@ func (s *TechnicalTaskTypeSuite) TestRestrictedInstallGainsHumanUATEdges() {
 
 	var stillLegal bool
 	s.Require().NoError(pool.QueryRow(s.ctx,
-		`SELECT EXISTS (SELECT 1 FROM board_column_transitions WHERE from_slug = 'ready_for_qa' AND to_slug = 'pm_uat')`).
+		`SELECT EXISTS (SELECT 1 FROM board_column_transitions WHERE from_slug = 'ready_for_qa' AND to_slug = 'uat_gate')`).
 		Scan(&stillLegal))
 	s.True(stillLegal, "the migration must be additive, not replace the operator's existing graph")
 }

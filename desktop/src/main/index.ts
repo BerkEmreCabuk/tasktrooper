@@ -37,7 +37,7 @@ import type {
   ToolchainReport,
   UpdateStatus,
 } from "../ipc/types.js";
-import { ACCOUNT_MODE_RUNS_EMBEDDER, ModeController } from "./account/mode.js";
+import { ACCOUNT_MODE_RUNS_EMBEDDER, ModeController, REVOKE_WAIT_MS } from "./account/mode.js";
 import { Analytics, GA_OS_NAMES } from "./analytics/analytics.js";
 import { buildConfig } from "./analytics/config.js";
 import { ACCOUNT_HOME_ROUTE, accountPartition, defaultAccountOrigin } from "./account/origin.js";
@@ -72,6 +72,12 @@ import { Supervisor } from "./supervisor/supervisor.js";
 import { confirmInstall } from "./toolchain/consent.js";
 import { jobForRemote, reportForRemote } from "./toolchain/remote.js";
 import { createToolchainService } from "./toolchain/service.js";
+import { detectBinary, installPage } from "./tunnel/detect.js";
+import { TunnelManager } from "./tunnel/manager.js";
+import { HttpStatusError, nodeTunnelFiles, spawnTunnel } from "./tunnel/process.js";
+import { createListenerClient } from "./tunnel/server-client.js";
+import { VoiceService } from "./voice/voice.js";
+import { RemoteAccessStore } from "./tunnel/store.js";
 import { AppTray } from "./tray.js";
 import { openExternally, Shell } from "./window.js";
 
@@ -169,6 +175,54 @@ const toolchain = createToolchainService(
   { fetch: (url, init) => net.fetch(url, init) },
 );
 
+/**
+ * Remote access: the Cloudflare or ngrok tunnel for the phone app, local mode
+ * only. It targets the server's remote listener (never the UI port), and the
+ * server decides what may cross it. Built here like the stores — it starts
+ * nothing until `init()` at launch honours the auto-start switch.
+ */
+/**
+ * Talking to an agent: the speech helper per utterance, the embedder's voice
+ * per spoken text. Both modes; it starts nothing until the page asks.
+ */
+const voice = new VoiceService({
+  platform: process.platform,
+  speechBinary: () => {
+    const file = path.join(binDir(), "tt-speech");
+    try {
+      accessSync(file, constants.X_OK);
+      return file;
+    } catch {
+      return null;
+    }
+  },
+  embedderUrl: () => supervisor.embedderUrl(),
+  publish: (channel, payload) => toCloud(channel, payload),
+  log: (line) => console.warn(line),
+});
+
+const remoteAccess = new TunnelManager({
+  store: new RemoteAccessStore(app.getPath("userData")),
+  detect: (provider) => detectBinary(provider),
+  spawn: spawnTunnel,
+  listener: createListenerClient(),
+  server: () => {
+    const base = supervisor.apiBase;
+    const token = secrets?.api_token;
+    return base && token ? { base, token } : null;
+  },
+  fetchJson: async (url, headers) => {
+    const response = await fetch(url, { ...(headers ? { headers } : {}), signal: AbortSignal.timeout(8_000) });
+    if (!response.ok) throw new HttpStatusError(response.status);
+    return response.json();
+  },
+  files: nodeTunnelFiles,
+  homeDir: os.homedir(),
+  dataDir: app.getPath("userData"),
+  isLocalMode: () => !accountMode(),
+});
+remoteAccess.on("state", (state) => toCloud(CLOUD_EVENTS.remoteAccessState, state));
+
 /** The account's page is another origin: it is told what is installed, not where under this person's home. */
 function jobForPage(state: ToolchainJobState): ToolchainJobState {
   return accountMode() ? jobForRemote(state, os.homedir()) : state;
@@ -207,6 +261,18 @@ const modeController = new ModeController({
   showLocal: () => {
     servedBase = null;
     shellWindow.retire();
+  },
+  revokeAccountSession: async (origin) => {
+    // The control plane's own logout, with the cookie this partition holds and
+    // the header it demands of a cookie-authenticated write. Any outcome —
+    // refused, unreachable, slow — is the caller's to ignore.
+    const partition = session.fromPartition(accountPartition(origin));
+    await partition.fetch(`${origin}/auth/logout`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "X-Requested-With": "tasktrooper" },
+      signal: AbortSignal.timeout(REVOKE_WAIT_MS),
+    });
   },
   clearAccountSession: async (origin) => {
     const partition = session.fromPartition(accountPartition(origin));
@@ -530,6 +596,10 @@ const quit = quitSequence({
     tray = null;
   },
   stopToolchain: () => toolchain.shutdown(),
+  stopRemoteAccess: () => {
+    voice.stopAll();
+    return remoteAccess.shutdown();
+  },
   // Both, whichever mode is current: a session that switched modes can have
   // an embedder from local mode and a runner from account mode, and draining
   // an idle supervisor costs nothing.
@@ -620,6 +690,13 @@ const services: IpcServices = {
     (await updates?.check()) ?? { phase: "unsupported", detail: "The updater has not started yet." },
   restartToUpdate,
 
+  voiceCapabilities: () => voice.capabilities(),
+  voiceListenStart: (lang) => voice.listenStart(lang),
+  voiceListenAudio: (id, pcm) => voice.listenAudio(id, pcm),
+  voiceListenStop: (id) => voice.listenStop(id),
+  voiceListenCancel: (id) => voice.listenCancel(id),
+  voiceSpeak: (lang, text, speed, choice) => voice.speak(lang, text, speed, choice),
+  voiceSpeakCancel: (id) => voice.speakCancel(id),
   analyticsState: () => analytics.state(),
   setAnalytics: (on: boolean): AnalyticsState => analytics.set(on),
   trackAnalytics: (name: string, params: Record<string, string | number>) => analytics.track(name, params),
@@ -769,6 +846,22 @@ const services: IpcServices = {
     if (url === null) throw new Error("There is no page to open for that tool on this computer.");
     await shell.openExternal(url);
   },
+
+  remoteAccessState: () => remoteAccess.snapshot(),
+  remoteAccessConfigure: (request) => remoteAccess.configure(request),
+  remoteAccessStart: () => remoteAccess.start(),
+  remoteAccessStop: () => remoteAccess.stop(),
+  remoteAccessDetect: (provider) => remoteAccess.detect(provider),
+  remoteAccessOpenInstallPage: async (provider) => {
+    await shell.openExternal(installPage(provider));
+  },
+  remoteAccessLogs: () => remoteAccess.logs(),
+  remoteAccessRefreshAccount: () => remoteAccess.refreshAccount(),
+  remoteAccessCloudflareLogin: () => remoteAccess.cloudflareLogin(),
+  remoteAccessCloudflareLoginCancel: () => remoteAccess.cloudflareLoginCancel(),
+  remoteAccessCloudflareLogout: () => remoteAccess.cloudflareLogout(),
+  remoteAccessNgrokConnect: (request) => remoteAccess.ngrokConnect(request),
+  remoteAccessNgrokDisconnect: () => remoteAccess.ngrokDisconnect(),
 };
 
 /**
@@ -941,6 +1034,7 @@ app.whenReady().then(
     // reading a profile) runs beside everything below instead of in front of
     // the first preflight.
     supervisor.warmUp();
+    if (!accountMode()) void remoteAccess.init();
 
     Menu.setApplicationMenu(
       Menu.buildFromTemplate(
@@ -1033,7 +1127,13 @@ app.whenReady().then(
       broadcast(SHELL_EVENTS.supervisorState, snapshot);
       toCloud(CLOUD_EVENTS.runnerState, hostSnapshot(snapshot));
     });
+    let lastMode = modeController.mode;
     modeController.on("state", (state: AccountState) => {
+      // Leaving local mode closes the tunnel; coming back honours auto-start again.
+      if (state.mode !== lastMode) {
+        lastMode = state.mode;
+        void (state.mode === "account" ? remoteAccess.shutdown() : remoteAccess.init());
+      }
       broadcast(SHELL_EVENTS.accountState, state);
       tray?.update(activeSnapshot());
     });
@@ -1057,6 +1157,7 @@ app.whenReady().then(
      * life calling a port nothing is listening on.
      */
     supervisor.on("server", (baseUrl) => {
+      if (baseUrl !== null && !accountMode()) void remoteAccess.onServer();
       if (baseUrl === null || accountMode()) return;
       const moved = servedBase !== null && servedBase !== baseUrl;
       servedBase = baseUrl;

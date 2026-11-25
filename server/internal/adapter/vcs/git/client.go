@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/proctree"
+	"github.com/makifbaysal/tasktrooper/server/internal/port"
 	"github.com/rs/zerolog/log"
 )
 
@@ -655,6 +657,43 @@ func (c *Client) TaskDiff(ctx context.Context, workspacePath string) (string, er
 	return strings.TrimSpace(combined), nil
 }
 
+// TaskNumstat is the per-file line counts of the diff TaskDiff reports.
+func (c *Client) TaskNumstat(ctx context.Context, workspacePath string) ([]port.GitFileStat, error) {
+	if !c.HasGit(workspacePath) {
+		return nil, nil
+	}
+	base := ""
+	for _, ref := range []string{"origin/HEAD", "origin/main", "origin/master"} {
+		if out, err := c.run(ctx, workspacePath, "git", "merge-base", "HEAD", ref); err == nil {
+			base = strings.TrimSpace(out)
+			break
+		}
+	}
+	if base == "" {
+		return nil, nil
+	}
+	out, err := c.run(ctx, workspacePath, "git", "-c", "core.quotepath=off", "diff", "--numstat", "--no-renames", base)
+	if err != nil {
+		return nil, fmt.Errorf("git diff --numstat: %w", err)
+	}
+	var stats []port.GitFileStat
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		st := port.GitFileStat{Path: parts[2]}
+		if parts[0] == "-" || parts[1] == "-" {
+			st.Binary = true
+		} else {
+			st.Added, _ = strconv.Atoi(parts[0])
+			st.Deleted, _ = strconv.Atoi(parts[1])
+		}
+		stats = append(stats, st)
+	}
+	return stats, nil
+}
+
 // TaskPatchID is `git patch-id --stable` of the task's diff against its
 // merge-base with the default branch — the same diff TaskDiff reports, minus
 // the --stat header patch-id was never meant to read. Stable across a rebase
@@ -944,6 +983,9 @@ func shasLabel(shas []string) []string {
 }
 
 func (c *Client) EnsurePullRequest(ctx context.Context, workspacePath string) (string, error) {
+	if domain.IsNonGitHubRemote(c.OriginURL(ctx, workspacePath)) {
+		return "", domain.ErrNotGitHubRepo
+	}
 	if tok := c.token(ctx); tok != "" {
 		return c.ensurePullRequestAPI(ctx, workspacePath, tok)
 	}
@@ -1022,10 +1064,6 @@ func (c *Client) ensurePullRequestAPI(ctx context.Context, workspacePath, token 
 	}
 	branch := strings.TrimSpace(branchOut)
 
-	if url, err := githubapi.FindOpenPR(ctx, token, owner, repoName, owner, branch); err == nil && url != "" {
-		return url, nil
-	}
-
 	repo, err := githubapi.GetRepo(ctx, token, owner, repoName)
 	if err != nil {
 		return "", fmt.Errorf("github repo get: %w", err)
@@ -1034,7 +1072,7 @@ func (c *Client) ensurePullRequestAPI(ctx context.Context, workspacePath, token 
 	if out, err := c.run(ctx, workspacePath, "git", "log", "-1", "--pretty=%s"); err == nil && strings.TrimSpace(out) != "" {
 		title = strings.TrimSpace(out)
 	}
-	url, err := githubapi.CreatePullRequest(ctx, token, owner, repoName, branch, repo.DefaultBranch, title)
+	url, err := githubapi.EnsureOpenPullRequest(ctx, token, owner, repoName, owner, branch, repo.DefaultBranch, title)
 	if err != nil {
 		return "", fmt.Errorf("github pr create: %w", err)
 	}

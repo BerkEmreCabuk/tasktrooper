@@ -169,7 +169,6 @@ export const DEFAULT_BOARD_COLUMNS: {
   { slug: "ready_for_qa", label: "Ready for QA", position: 5, is_backlog: false },
   { slug: "in_qa", label: "In QA", position: 6, is_backlog: false },
   { slug: "need_revision", label: "Need Revision", position: 7, is_backlog: false },
-  { slug: "pm_uat", label: "PM UAT", position: 8, is_backlog: false },
   { slug: "human_uat", label: "Human UAT", position: 9, is_backlog: false },
   // Just before Done, matching domain.BoardColumns and migration 056: blocked is
   // off the happy path, so it sits with the terminal columns instead of breaking
@@ -324,7 +323,13 @@ function blockerKeys(body: string): string[] {
  * is refusing a done task's merge. Unlike every other park, two of them wait on
  * the human reading the card, not on a sweeper.
  */
-export const MERGE_HOLD_RESOURCES = ["deploy_order", "before_deploy", "delivery_profile", "deploy_env"] as const;
+export const MERGE_HOLD_RESOURCES = [
+  "deploy_order",
+  "before_deploy",
+  "delivery_profile",
+  "deploy_env",
+  "release_in_flight",
+] as const;
 
 export type MergeHoldResource = (typeof MERGE_HOLD_RESOURCES)[number];
 
@@ -431,8 +436,8 @@ export function boardColumnsSplit(
 
 /**
  * Board columns that share one lane, stacked vertically instead of taking a
- * lane each — the board had grown too wide, and the two review stages (like the
- * two UAT stages) are read as one step in practice.
+ * lane each — the board had grown too wide, and the two review stages are read
+ * as one step in practice.
  *
  * This is the single source of truth for the pairing: an ordered list of lanes,
  * each lane an ordered list of column slugs. `boardLanes()` renders from it, so
@@ -442,7 +447,6 @@ export function boardColumnsSplit(
  */
 export const BOARD_STACKED_LANES: readonly (readonly string[])[] = [
   ["analiz_review", "code_review"],
-  ["pm_uat", "human_uat"],
 ];
 
 export interface BoardLane<C> {
@@ -458,8 +462,7 @@ export interface BoardLane<C> {
  * Order is taken from the board's own column order (`position`), never from the
  * grouping table: a lane sits where its first member sits, and stages inside a
  * lane are stacked in workflow order. So `analiz_review` (position 3) renders
- * above `code_review` (4), and `pm_uat` (8) above `human_uat` (9), and reordering
- * the board's columns still gets its own order back.
+ * above `code_review` (4), and reordering the board's columns still gets its own order back.
  */
 export function boardLanes<C extends { slug: string; position: number }>(
   columns: C[],

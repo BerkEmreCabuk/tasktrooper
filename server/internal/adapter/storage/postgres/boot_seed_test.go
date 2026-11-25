@@ -69,25 +69,28 @@ func (s *BootSeedSuite) TestBoardIsSeededOnce() {
 
 	s.setSeeded(false)
 	s.Require().NoError(bootseed.NewService(seeds).Ensure(s.ctx))
-	s.Equal(13, s.count("board_columns"), "the 13-column default board")
+	s.Equal(12, s.count("board_columns"), "the 13-column default board")
 	s.Equal(3, s.count("board_task_counters"), "one counter per task type")
 	s.Equal(1, s.count("board_settings"))
 	s.Equal(1, s.count("billing_plan"))
 	s.Positive(s.count("app_settings"))
 	s.Positive(s.count("llm_provider_configs"))
 	s.Positive(s.count("model_prices"))
+	var lang string
+	s.Require().NoError(s.db.QueryRow(s.ctx, `SELECT value FROM app_settings WHERE key = 'default_language'`).Scan(&lang))
+	s.Equal("en", lang, "a fresh install opens in English")
 	// board_tasks.board_column is validated against these slugs and agent
 	// subscriptions name them.
 	s.Equal([]string{
 		"backlog", "todo", "in_progress", "analiz_review", "code_review",
-		"ready_for_qa", "in_qa", "need_revision", "pm_uat", "human_uat",
+		"ready_for_qa", "in_qa", "need_revision", "human_uat",
 		"blocked", "done", "released",
 	}, s.slugs())
 	s.Equal(s.defaultTransitions(), s.transitions(), "the recommended transition rules")
 
 	// A restarted process has an empty cache, so only install_state stops it.
 	s.Require().NoError(bootseed.NewService(seeds).Ensure(s.ctx))
-	s.Equal(13, s.count("board_columns"), "a second start duplicated the board")
+	s.Equal(12, s.count("board_columns"), "a second start duplicated the board")
 	s.Equal(1, s.count("board_settings"))
 	var seeded bool
 	s.Require().NoError(s.db.QueryRow(s.ctx, `SELECT board_seeded_at IS NOT NULL FROM install_state`).Scan(&seeded))

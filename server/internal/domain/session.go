@@ -57,6 +57,19 @@ type PendingSessionTurn struct {
 	ResumeAt  time.Time
 }
 
+// ChatActivityEntry is one agent-authored chat message surfaced on the
+// activity feed — the workspace.Service.ListActivity "chat_message" source,
+// distinct from SessionMessage because the feed never needs tool calls or
+// attachments, only who said what and where.
+type ChatActivityEntry struct {
+	ID        uuid.UUID
+	SessionID uuid.UUID
+	AgentID   uuid.UUID
+	TaskID    *uuid.UUID
+	Content   string
+	CreatedAt time.Time
+}
+
 type SessionMessage struct {
 	ID            uuid.UUID             `json:"id"`
 	SessionID     uuid.UUID             `json:"session_id"`
@@ -96,6 +109,10 @@ type SessionMessageRequest struct {
 	// (RAG context, chunked text) the image ones go to the model as native
 	// multimodal content; documents are linked but not sent.
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	// Voice is set when the user spoke this message and hears the reply: the
+	// language of the voice that reads it out ("tr" or "en"). Any other value
+	// is ignored. Never persisted; it shapes only this turn's reply.
+	Voice string `json:"voice,omitempty"`
 	// ToolCeiling, when set, narrows the turn's tools to these names after
 	// the agent's own policy is applied (CeilToolPolicy). Never read from a
 	// request body and never persisted, so a turn carrying one is never
@@ -114,4 +131,21 @@ type MessageMention struct {
 	Kind string    `json:"kind"` // "agent" | "project" | "repository"
 	ID   uuid.UUID `json:"id"`
 	Name string    `json:"name"`
+}
+
+const (
+	WakeKindAudienceBuild = "audience_build"
+	WakeKindStudy         = "study"
+)
+
+// SessionWake is a chat agent's promise to come back: the session is rerun
+// once the watched thing (Kind, RefID) has ended, or at ExpiresAt.
+type SessionWake struct {
+	ID        uuid.UUID `json:"id"`
+	SessionID uuid.UUID `json:"session_id"`
+	Kind      string    `json:"kind"`
+	RefID     uuid.UUID `json:"ref_id"`
+	Label     string    `json:"label"`
+	CreatedAt time.Time `json:"created_at"`
+	ExpiresAt time.Time `json:"expires_at"`
 }

@@ -1,0 +1,611 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "audience_build",
+      "description": "Write the audience's people from its brief, in the background (it writes them again if they exist). It returns at once and takes a few minutes. This spends model calls on the user's own agent runtime, so show the user the brief and the number of calls and ask first; call it with `user_approved: true` only after they said yes. Then tell them in one short sentence that it is building; this chat is woken automatically when the build ends (the user can stop the wait), so end your turn there and read audience_get when the update arrives. Never poll in a loop.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "audience_id": {
+            "description": "The audience id.",
+            "type": "string"
+          },
+          "user_approved": {
+            "description": "true only after the user said yes to building this audience in this conversation.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "audience_id",
+          "user_approved"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "audience_create",
+      "description": "Write down an audience for a product or project: a brief the people are written from. This only saves the brief; no model call runs and nothing is spent until audience_build. Ground it in the project: call get_project_brief and read the product's README, features and current state first, then describe honestly what exists today and who it is for. Show the user the brief and the number of calls building costs, then ask before audience_build.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "current_solutions": {
+            "description": "What people use today instead.",
+            "type": "string"
+          },
+          "language": {
+            "description": "The language the people speak and the report is written in; use the user's language.",
+            "type": "string"
+          },
+          "locations": {
+            "description": "Where the people live and work.",
+            "type": "string"
+          },
+          "name": {
+            "description": "A short name, for example 'Freelance designers for TaskTrooper'.",
+            "type": "string"
+          },
+          "persona_count": {
+            "description": "How many people, 1 to 40, default 12. Each 8 people cost one model call to write.",
+            "type": "integer"
+          },
+          "pricing": {
+            "description": "The current or planned price, as the owner states it.",
+            "type": "string"
+          },
+          "product": {
+            "description": "What the product is and what state it is in today: what exists and works, what is only planned. People judge what exists. Required.",
+            "type": "string"
+          },
+          "repository": {
+            "description": "A repository name or id whose project brief the people are grounded in. Pass the project's repository when the audience is for a project on the board.",
+            "type": "string"
+          },
+          "segments": {
+            "description": "The kinds of people to ask, each with a name, a one-line description and how many of the audience belong to it. Leave out for one general group.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "type": "integer"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "topic": {
+            "description": "What the research is for, for example 'would they pay for this'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "product"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "audience_get",
+      "description": "Read one audience: its brief, its people (id, name, segment, role, location, bio, a typical quote) once built, its studies with their status, and how many model calls building it again costs. The people are invented, never real: say so when you present them.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "audience_id": {
+            "description": "The audience id from audience_list or audience_create.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "audience_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "audience_list",
+      "description": "List the audiences of this workspace, newest first: id, name, status (draft, building, ready, failed), how many people and how many studies. Look here before creating one: the project may already have an audience a new study can reuse.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {},
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "audience_talk",
+      "description": "Talk to one person of a ready audience, one message at a time. They stay in character, remember the thread and what they told the studies. The people are invented: say so. One model call. Use it for a quick 'why' on a single persona; the conversation is kept and the user sees it on the Audience screen.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "message": {
+            "description": "What the user (or you for them) says to the person.",
+            "type": "string"
+          },
+          "persona_id": {
+            "description": "The person's id from audience_get.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "persona_id",
+          "message"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "audience_update",
+      "description": "Change the brief of an audience (name, product description, segments, locations, current solutions, pricing, topic, language, number of people, repository). Pass only what changes. The people already written stay until audience_build writes them again, so tell the user a rebuild is needed to see the change.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "audience_id": {
+            "description": "The audience id.",
+            "type": "string"
+          },
+          "current_solutions": {
+            "description": "What people use today instead.",
+            "type": "string"
+          },
+          "language": {
+            "description": "The language the people speak and the report is written in; use the user's language.",
+            "type": "string"
+          },
+          "locations": {
+            "description": "Where the people live and work.",
+            "type": "string"
+          },
+          "name": {
+            "description": "A new name.",
+            "type": "string"
+          },
+          "persona_count": {
+            "description": "How many people, 1 to 40, default 12. Each 8 people cost one model call to write.",
+            "type": "integer"
+          },
+          "pricing": {
+            "description": "The current or planned price, as the owner states it.",
+            "type": "string"
+          },
+          "product": {
+            "description": "What the product is and what state it is in today: what exists and works, what is only planned. People judge what exists. Required.",
+            "type": "string"
+          },
+          "repository": {
+            "description": "A repository name or id whose project brief the people are grounded in. Pass the project's repository when the audience is for a project on the board.",
+            "type": "string"
+          },
+          "segments": {
+            "description": "The kinds of people to ask, each with a name, a one-line description and how many of the audience belong to it. Leave out for one general group.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "type": "integer"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "topic": {
+            "description": "What the research is for, for example 'would they pay for this'.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "audience_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_ask_everyone",
+      "description": "Ask every person of a finished study the same follow-up question, in the background. This spends one model call per person, so show the user the question and the number of people and ask first; call it with `user_approved: true` only after they said yes. Read the answers later in study_status under follow_ups.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "question": {
+            "description": "The question for everyone.",
+            "type": "string"
+          },
+          "study_id": {
+            "description": "The study id.",
+            "type": "string"
+          },
+          "user_approved": {
+            "description": "true only after the user said yes to asking everyone this question in this conversation.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "study_id",
+          "question",
+          "user_approved"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_ask_research",
+      "description": "Ask a question about a finished study's findings, for example which segment objected most to the price. It is answered from the report and the people's own answers by one model call, and says so when the study does not show it.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "question": {
+            "description": "The question about the findings.",
+            "type": "string"
+          },
+          "study_id": {
+            "description": "The study id.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "study_id",
+          "question"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_cancel",
+      "description": "Stop a running study. What was answered stays; no report is written and the study cannot be restarted (plan a new one).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "study_id": {
+            "description": "The study id.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "study_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_compare",
+      "description": "Compare two finished studies of one audience and one kind: the verdict score, the answer mix (yes, maybe, no, would pay now, median price), the segments, which objections, needs and alternatives went away, are new or changed their share, and, for user interviews, how each person who answered both changed their own score. It asks no model and costs nothing. Present it faithfully: lead with the verdict score before and after, say how many people answered both and how many scored higher, lower or the same, name the objections that went away and the new ones, quote a person who changed their mind. The differences are from synthetic people asked twice, not a measurement of real customers; say so, and do not claim the change caused the difference beyond what the note of changes says.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "study_id": {
+            "description": "The newer study (the re-run), finished.",
+            "type": "string"
+          },
+          "with_study_id": {
+            "description": "The earlier study to compare with. Leave out for the study this one re-ran.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "study_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_follow_up",
+      "description": "Ask one person of a finished study another question. They answer in character and remember what they said in the study. One model call; the answer is kept under the study. Take the person's id from audience_get.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "persona_id": {
+            "description": "The person's id.",
+            "type": "string"
+          },
+          "question": {
+            "description": "The follow-up question.",
+            "type": "string"
+          },
+          "study_id": {
+            "description": "The study id.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "study_id",
+          "persona_id",
+          "question"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_list",
+      "description": "List studies, newest first: id, title, audience, status (draft, running, synthesizing, done, failed, cancelled), people asked so far and the estimated model calls. Pass an audience to see only its studies.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "audience_id": {
+            "description": "Only the studies of this audience.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_plan",
+      "description": "Plan a study on a ready audience and write its interview script. Four kinds: `user_interviews` (would they buy the product as it is today: score, the most they would pay, what is missing, what holds them back, what they use instead), `landing_page_test` (each person reads one page's text as a first-time visitor with the given intent: first impression, clarity, would they act, frictions, trust signals, the one change they would make), `message_testing` (each person rates 2-5 candidate lines on clarity, relevance, credibility and appeal, picks the best and writes a stronger one) and `ab_test` (every person evaluates both pages, one after the other in a balanced order, scoring each on its own with the same scorecard, and then says which they prefer). Pick the kind from what the stakeholder wants to learn, collect that kind's inputs first, then call this.\n\nPlanning starts one model call in the background: the person's agent writes the interview script, grouped open questions that every person will be asked (skipped when you pass `questions`). Nothing else is asked yet. It returns the study with `script_state` (generating, then ready) and `calls_estimate` (one call per person, the report and the script). Read the script with study_script once it is written, show the stakeholder the questions, the kind's inputs and the call count, let them change questions, and wait for their OK to this version of the script (study_script with approve) before study_start. Nothing starts on its own after the script is written; even questions you pass in `questions` wait for the approval. A URL page is read by the app (public pages only); if it cannot be read, ask the stakeholder to paste the text.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "audience_id": {
+            "description": "The id of a ready audience.",
+            "type": "string"
+          },
+          "currency": {
+            "description": "A three-letter currency code, default USD (user_interviews only).",
+            "type": "string"
+          },
+          "goal": {
+            "description": "What the study should settle, in a sentence.",
+            "type": "string"
+          },
+          "intent": {
+            "description": "landing_page_test and ab_test: what the visitor came to do (evaluate, buy, compare, sign up, or any short phrase). Default: evaluate.",
+            "type": "string"
+          },
+          "kind": {
+            "description": "user_interviews (default), landing_page_test, message_testing or ab_test.",
+            "type": "string"
+          },
+          "pages": {
+            "description": "landing_page_test: exactly one page; ab_test: exactly two pages (A then B). Each is {url} (the text is read from it) or {copy} (the page text pasted).",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "copy": {
+                  "type": "string"
+                },
+                "url": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "price_points": {
+            "description": "user_interviews: prices every person reacts to (would they buy at this price), at most 6.",
+            "items": {
+              "type": "number"
+            },
+            "type": "array"
+          },
+          "questions": {
+            "description": "Your own open questions, at most 5. Giving them means no interview script is written for the study.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": {
+            "description": "A short title; defaults to the audience name and the kind.",
+            "type": "string"
+          },
+          "variants": {
+            "description": "message_testing: 2 to 5 different candidate lines (headlines, taglines or messages).",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "audience_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_report",
+      "description": "The report of a finished study, per kind. All kinds carry the executive summary, the verdict score (0-100, computed from the people's own scores), results by segment, the recurring themes with how many people said each, verbatim quotes, recommendations, the method and the disclaimer. user_interviews adds the willingness-to-pay distribution, price tests, objections, needs and alternatives; landing_page_test the clarity score, frictions, what worked and the recommended edits; message_testing the ranking of the lines with their scores per segment, the winner, why and suggested rewrites; ab_test the A and B mean and median of every scorecard metric with the paired difference, the preference share overall and per segment, objections and quotes per version, why each is preferred or not, a confidence label and the recommendation; the differences are directional, with no p-values. Present it faithfully: lead with the verdict and what it rests on, give the numbers, name the top frictions, quote people, list the recommendations, and always say the findings come from synthetic personas, not real customers. The stakeholder can also open the study page and use Export as HTML to get one self-contained file.\n\nWhen a study was started from the page, its status can be `interviewed`: the interviews are over and the report waits for a click. Calling this with `user_approved: true` (after the user said yes; it costs one model call) writes it; read it again a minute later.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "study_id": {
+            "description": "The study id.",
+            "type": "string"
+          },
+          "user_approved": {
+            "description": "true only after the user said yes to writing the report. Needed only when the status is interviewed.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "study_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_rerun",
+      "description": "Plan the same study again after the product changed, so the new report can be compared with the old one: same audience and people, same kind, goal, prices and interview script, plus the note of what changed. Only a study with a finished report can be run again. This only plans it (nothing is spent): the script waits for the person's OK again, then study_script with approve and study_start with `user_approved: true` run it like any study, after they said yes and you stated the number of model calls. When the new study is done, call study_compare to show what moved. Rebuild nothing in between: the same people must answer both, so do not run audience_build on the audience first.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "changes": {
+            "description": "What changed in the product since that study, in a few plain sentences (what the person did in answer to its findings). It is shown to the people as \"what changed\".",
+            "type": "string"
+          },
+          "study_id": {
+            "description": "The id of a finished study to run again.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "study_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_script",
+      "description": "Read, edit or rewrite the interview script of a planned study. With only `study_id` it returns `script_state` (generating, ready or failed) and the script: sections of open questions every person will be asked on top of the kind's built-in scored questions. With `sections` it replaces the script with the stakeholder's edits (no model call). With `regenerate: true` and `user_approved: true` it has the script written again (one model call). Every script waits for the user's approval: `script_state` is `awaiting_approval` until they say OK, and nothing ever runs on its own after the script is written. Show the stakeholder the script (the questions, and the kind's inputs) and ask whether it is OK. Only after they say yes, call this with `approve: true`, the `version` you showed (`script_version`) and `user_approved: true`; the state becomes `approved` and `study_start` can run it. Any edit (`sections`), rewrite or change of the study's inputs makes an earlier approval void and a new version needs a new OK. If the script failed, regenerate it or pass your own `sections`.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "approve": {
+            "description": "true to record the user's OK to the script version you showed them (needs version and user_approved).",
+            "type": "boolean"
+          },
+          "regenerate": {
+            "description": "true to have the script written again (one model call; needs user_approved). It voids any earlier approval.",
+            "type": "boolean"
+          },
+          "sections": {
+            "description": "Replace the script with these grouped questions: [{title, questions[]}], at most 8 sections and 12 questions. Free; use it for the stakeholder's own edits.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "questions": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "title": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "questions"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "study_id": {
+            "description": "The id of a planned study that has not started.",
+            "type": "string"
+          },
+          "user_approved": {
+            "description": "true only after the user said yes in this conversation: to approving this script version (with approve) or to writing it again (with regenerate).",
+            "type": "boolean"
+          },
+          "version": {
+            "description": "The script_version you showed the user, for approve. An approval of an older version is refused.",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "study_id"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_start",
+      "description": "Start a planned study whose current interview script the user has approved (study_script with approve: true; otherwise this is refused and tells you how). Start a planned study: every person of the audience is asked the kind's questions and the interview script in parallel (a few at a time), then a report is written. It returns at once. This spends the study's model calls on the user's own agent runtime, so show the user the plan, the script and the number of calls and ask first; call it with `user_approved: true` only after they said yes. Then tell them in one short sentence that it started; this chat is woken automatically when the study ends (the user can stop the wait), so end your turn there and read study_status or study_report when the update arrives. Never poll in a loop.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "study_id": {
+            "description": "The id of a planned study whose interview script the user approved.",
+            "type": "string"
+          },
+          "user_approved": {
+            "description": "true only after the user said yes to running this study in this conversation.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "study_id",
+          "user_approved"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "study_status",
+      "description": "Progress of one study: its kind and inputs, its status, the interview script and whether it is ready, how many people answered, how many could not, any error, and the follow-up questions asked so far with the answers. A study takes a few minutes to tens of minutes depending on the number of people; report progress and check back later instead of waiting. When `status` is done, read study_report; when it is interviewed, the report is still to be written (see study_report).",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "study_id": {
+            "description": "The study id from study_plan or study_list.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "study_id"
+        ],
+        "type": "object"
+      }
+    }
+  }
+]

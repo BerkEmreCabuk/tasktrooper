@@ -20,6 +20,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/projectmodel"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/runtrace"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/toolchain"
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
@@ -58,6 +59,7 @@ type ProjectModel interface {
 	RequiredCommands(ctx context.Context, repositoryID uuid.UUID, componentIDs []uuid.UUID) ([]domain.LocalCommand, error)
 	ComponentsForPaths(ctx context.Context, repositoryID uuid.UUID, paths []string) ([]uuid.UUID, error)
 	ComponentsForArea(ctx context.Context, repositoryID uuid.UUID, area string) ([]uuid.UUID, error)
+	ComponentStacks(ctx context.Context, repositoryID uuid.UUID, componentIDs []uuid.UUID) ([]domain.ComponentStack, error)
 }
 
 type TaskUpdater interface {
@@ -127,6 +129,8 @@ func (r *Runner) requireConnectedCLI(ctx context.Context, agentRec domain.Agent)
 	return domain.ErrCLIFlavorNotConnected(agentRec.Name, agentRec.ProviderType)
 }
 
+func (r *Runner) SetRunTraces(s port.RunTraceStore) { r.traces = s }
+
 func (r *Runner) SetTaskPRRecorder(rec TaskPRRecorder) { r.prRecorder = rec }
 
 type PullRequestReader interface {
@@ -158,6 +162,7 @@ type Runner struct {
 	catalog           port.CatalogStore
 	activityStore     port.ActivityStore
 	runs              port.TaskAgentRunStore
+	traces            port.RunTraceStore
 	sessions          port.SessionStore
 	projects          RepositoryResolver
 	indexInjector     IndexInjector
@@ -371,6 +376,25 @@ func (r *Runner) detectToolchain(ctx context.Context, job RunJob, workDir string
 	log.Info().Str("task_id", job.Task.ID.String()).Strs("pins", sources).
 		Msg("toolchain: resolved from the repository's own pin files")
 	return tc.Env
+}
+
+// skillsInProjectStack drops the skills of agent stacks the task's component
+// does not use (a Go-only component never receives the Rust or .NET skills).
+// The task's own component decides, else every active component of the
+// repository; an unscanned project or a failed lookup keeps every skill.
+func (r *Runner) skillsInProjectStack(ctx context.Context, job RunJob, skills []domain.Skill, stacks []domain.TechStack) []domain.Skill {
+	if r.projectModel == nil || len(stacks) == 0 {
+		return skills
+	}
+	var ids []uuid.UUID
+	if job.Task.ComponentID != nil {
+		ids = []uuid.UUID{*job.Task.ComponentID}
+	}
+	detected, err := r.projectModel.ComponentStacks(ctx, job.RepositoryID, ids)
+	if err != nil {
+		return skills
+	}
+	return domain.SkillsForStacks(skills, stacks, detected)
 }
 
 func (r *Runner) SetParkJournal(j *ParkJournal) {
@@ -759,6 +783,7 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 	if err != nil {
 		return fail(err)
 	}
+	enabledSkills = r.skillsInProjectStack(ctx, job, enabledSkills, techStacks)
 	rules, err := r.catalog.ListEnabledRulesByAgent(ctx, agentRec.ID)
 	if err != nil {
 		return fail(err)
@@ -804,6 +829,9 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 	}
 
 	if r.skipUnchangedDiffGate(ctx, job, run, taskWorkspace) {
+		return nil
+	}
+	if r.parkUnchangedRejectedDiff(ctx, job, run, taskWorkspace) {
 		return nil
 	}
 
@@ -891,10 +919,18 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 		}()
 	}
 
+	traceRec := r.startRunTrace(runCtx, job, workDir, taskWorkspace, taskBranch, dispatchedIn)
+	runCtx = runtrace.WithRecorder(runCtx, traceRec)
+	defer r.finishRunTrace(ctx, traceRec)
+
 	systemPrompt := prompt.BuildSystemPromptFor(agentRec, enabledSkills, techStacks, ruleTexts, r.language(runCtx), skillDelivery)
 	criteriaItems := r.criteriaForRun(runCtx, job, wf)
 	changedSinceVerdict := r.changedSinceByVerifiedSHA(runCtx, workDir, criteriaItems)
 	triggerMsg := buildTriggerMessage(job, wf, criteriaItems, changedSinceVerdict)
+	automation := qaAutomationOn(wf, job.Task.Column, repoRec)
+	if automation {
+		triggerMsg += "\n\n" + prompt.Text(qaAutomationOnKey)
+	}
 
 	var prMsg string
 	if wf.Has(job.Task.Column, domain.BehaviourRequirePRForReview) && taskWorkspace != "" && r.git != nil {
@@ -920,6 +956,8 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 		reviewMsg = blocks.review
 	}
 	humanMsg := humanRequirementsMessage(blocks.comments)
+	changeRequestsMsg := changeRequestsMessage(blocks.comments)
+	seenChangeRequests := changeRequestIDs(blocks.comments)
 	clarificationsMsg := prompt.AnsweredClarificationsMessage(blocks.comments)
 	resumeCLISession, resumePrompt := "", ""
 	var prevRuns []domain.TaskAgentRun
@@ -937,7 +975,7 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 		// parked session the one from before the task was sent back.
 		if resumeCLISession != "" && job.isRevision() {
 			resumePrompt = revisionResumePrompt(job.Task, triggerMsg,
-				humanMsg, prMsg, pipelineMsg, revisionMsg, reviewMsg, clarificationsMsg, prevFailuresMsg)
+				humanMsg, changeRequestsMsg, prMsg, pipelineMsg, revisionMsg, reviewMsg, clarificationsMsg, prevFailuresMsg)
 			log.Info().Str("task_id", job.Task.ID.String()).Str("cli_session_id", resumeCLISession).
 				Msg("revision run resumes the agent's previous cli session with the review feedback")
 		}
@@ -947,6 +985,9 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 	policy := domain.MergeToolPolicy(r.defaultPolicy, agentRec.ToolPolicy)
 	stage, _ := wf.Stage(job.Task.Column)
 	upliftedPolicy := domain.RestrictToolsForStage(domain.UpliftWorkspaceTools(policy), stage, wf.Type)
+	if automation {
+		upliftedPolicy = domain.KeepWorkspaceWriters(upliftedPolicy, domain.UpliftWorkspaceTools(policy))
+	}
 
 	history := []domain.Message{{Role: domain.RoleSystem, Content: systemPrompt}}
 	history = append(history, domain.Message{Role: domain.RoleSystem, Content: prompt.SubtaskWorkspaceNote(workDir)})
@@ -966,6 +1007,9 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 	history = append(history, domain.Message{Role: domain.RoleUser, Content: triggerMsg})
 	if humanMsg != "" {
 		history = append(history, domain.Message{Role: domain.RoleSystem, Content: humanMsg})
+	}
+	if changeRequestsMsg != "" {
+		history = append(history, domain.Message{Role: domain.RoleSystem, Content: changeRequestsMsg})
 	}
 	if analysisMsg != "" {
 		history = append(history, domain.Message{Role: domain.RoleSystem, Content: analysisMsg})
@@ -1044,9 +1088,13 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 			Env:             sessionEnv,
 			ResumeSessionID: resumeCLISession,
 			Prompt:          resumePrompt,
-			TaskKey:         job.Task.Key,
-			TaskTitle:       job.Task.Title,
-			SkillsOnDisk:    skillDelivery == prompt.SkillsOnDisk,
+			// A revision resumes the session of every earlier round; above a
+			// size the executor compacts it first instead of re-reading it all
+			// on every turn of a small fix.
+			CompactBeforeResume: resumeCLISession != "" && job.isRevision(),
+			TaskKey:             job.Task.Key,
+			TaskTitle:           job.Task.Title,
+			SkillsOnDisk:        skillDelivery == prompt.SkillsOnDisk,
 		})
 		if resp.Clarification == nil {
 			resp.Clarification = questions.Request()
@@ -1123,22 +1171,19 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 		return err
 	}
 
-	if resp.ResourceBlock == nil && isUngroundedPMUAT(wf, job.Task, resp, toolUsage) {
-		err = r.failRunUngroundedPMUAT(ctx, job, run, resp, ungroundedPMUATReason)
-		return err
-	}
-
-	if resp.Clarification == nil && resp.ResourceBlock == nil && r.pmSkippedCoverageEvidence(ctx, job, wf, run, toolUsage) {
-		err = r.failRunUngroundedPMUAT(ctx, job, run, resp, pmUncoveredCriterionReason)
-		return err
-	}
-
 	criteriaSettled := true
+	reviewStuck := false
 	if resp.Clarification == nil && resp.ResourceBlock == nil {
 		var quotaBlock *domain.QuotaBlock
+		resp, quotaBlock = r.sweepChangeRequests(runCtx, job, agentRec, history, resp, model, upliftedPolicy, seenChangeRequests)
+		if quotaBlock != nil {
+			stampToolStats(&run, toolUsage)
+			stampTokenUsage(&run, tokenUsage)
+			return r.quotaOrPark(ctx, job, run, agentRec, prevRuns, cliSession, quotaBlock, fail)
+		}
 		resp, criteriaSettled, quotaBlock = r.sweepOpenCriteria(runCtx, job, agentRec, history, resp, model, upliftedPolicy)
 		if quotaBlock == nil {
-			quotaBlock = r.sweepReviewVerdict(runCtx, job, agentRec, history, resp, model, upliftedPolicy)
+			reviewStuck, quotaBlock = r.sweepReviewVerdict(runCtx, job, agentRec, history, resp, model, upliftedPolicy)
 		}
 		if quotaBlock != nil {
 			stampToolStats(&run, toolUsage)
@@ -1147,9 +1192,29 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 		}
 	}
 
+	var automationOut automationOutcome
+	if automation && resp.Clarification == nil && resp.ResourceBlock == nil && criteriaSettled && !reviewStuck {
+		var quotaBlock *domain.QuotaBlock
+		automationOut, quotaBlock = r.runAutomationRound(runCtx, job, agentRec, history, resp, model, upliftedPolicy, wf, taskWorkspace)
+		if quotaBlock != nil {
+			stampToolStats(&run, toolUsage)
+			stampTokenUsage(&run, tokenUsage)
+			return r.quotaOrPark(ctx, job, run, agentRec, prevRuns, cliSession, quotaBlock, fail)
+		}
+	}
+	if automation {
+		r.scopeToAutomation(ctx, job, taskWorkspace)
+	}
+
 	if !criteriaSettled {
 		run.Status = domain.TaskAgentRunStatusFailed
 		run.Summary = unsettledCriteriaSummary(len(r.openCriteria(runCtx, job)))
+	} else if reviewStuck {
+		run.Status = domain.TaskAgentRunStatusFailed
+		run.Summary = reviewVerdictMissingSummary(job.Task.Column)
+		if lastReviewVerdictAttempt(blocks.prevRuns, run) {
+			r.reportStuckReview(ctx, job)
+		}
 	} else {
 		run.Status = domain.TaskAgentRunStatusCompleted
 		run.Summary = strings.TrimSpace(resp.Message.Content)
@@ -1165,12 +1230,10 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 		pushRefused := false
 		if job.Task.TaskType.PublishesBranch() {
 			commitMsg := r.writeCommitMessage(ctx, commitDetails{
-				TaskKey:   job.Task.Key,
-				Title:     job.Task.Title,
-				Summary:   run.Summary,
-				AgentName: agentRec.Name,
-				Writer:    agentWriterModel(agentRec),
-			})
+				TaskKey: job.Task.Key,
+				Title:   job.Task.Title,
+				Summary: run.Summary,
+			}.withAgent(agentRec))
 			if pushErr := r.git.CommitAndPush(ctx, taskWorkspace, commitMsg); pushErr != nil {
 				log.Warn().Err(pushErr).Str("task_id", job.Task.ID.String()).Msg("task workspace commit/push failed")
 				// The pull request does not carry this change, so handing it to
@@ -1203,6 +1266,7 @@ func (r *Runner) execute(parent, ctx context.Context, cancel context.CancelFunc,
 				Msg("hand-off: verification failed, task stays in the working column")
 		}
 	}
+	r.applyAutomationOutcome(ctx, job, wf, automationOut)
 	stampCLISession(&run, cliSession.ID(), agentRec.ProviderType)
 	pctx, cancelPersist := persistCtx(ctx)
 	defer cancelPersist()
@@ -1932,123 +1996,6 @@ func (r *Runner) failRunUngroundedQA(ctx context.Context, job RunJob, run domain
 
 var ErrUngroundedQA = errors.New("QA run executed nothing")
 
-func isUngroundedPMUAT(wf domain.Workflow, task domain.BoardTask, resp domain.AgentResponse, usage *registry.ToolUsage) bool {
-	if resp.Clarification != nil || usage == nil {
-		return false
-	}
-	if !wf.Has(task.Column, domain.BehaviourRequireProductCheck) {
-		return false
-	}
-	return !usage.UsedAny(domain.PMUATExecutionTools...)
-}
-
-func (r *Runner) pmSkippedCoverageEvidence(ctx context.Context, job RunJob, wf domain.Workflow, run domain.TaskAgentRun, usage *registry.ToolUsage) bool {
-	if usage == nil || !wf.Has(job.Task.Column, domain.BehaviourRequireProductCheck) {
-		return false
-	}
-	criteria := r.allCriteria(ctx, job)
-	testCases := r.taskTestCases(ctx, job)
-	return pmApprovedUncoveredCriterion(wf, job.Task, criteria, testCases, usage, run.CreatedAt)
-}
-
-func pmApprovedUncoveredCriterion(
-	wf domain.Workflow,
-	task domain.BoardTask,
-	criteria []domain.AcceptanceCriterion,
-	testCases []domain.TaskTestCase,
-	usage *registry.ToolUsage,
-	runStartedAt time.Time,
-) bool {
-	if usage == nil || !wf.Has(task.Column, domain.BehaviourRequireProductCheck) {
-		return false
-	}
-	passedByCriterion := make(map[uuid.UUID]bool, len(testCases))
-	for _, tc := range testCases {
-		if tc.CriterionID != nil && tc.Status == domain.TestCaseStatusPassed {
-			passedByCriterion[*tc.CriterionID] = true
-		}
-	}
-	uncovered := false
-	for _, c := range criteria {
-		if !pmApprovedThisRun(c, runStartedAt) {
-			continue
-		}
-		if !passedByCriterion[c.ID] {
-			uncovered = true
-			break
-		}
-	}
-	if !uncovered {
-		return false
-	}
-	return !usage.UsedAny(domain.PMUATExecutionTools...)
-}
-
-func pmApprovedThisRun(c domain.AcceptanceCriterion, runStartedAt time.Time) bool {
-	for _, check := range c.Checks {
-		if check.Role == domain.CriterionReviewRolePM && check.Approved && check.CheckedAt.After(runStartedAt) {
-			return true
-		}
-	}
-	return false
-}
-
-type taskTestCaseReader interface {
-	ListTestCases(ctx context.Context, taskID uuid.UUID) ([]domain.TaskTestCase, error)
-}
-
-func (r *Runner) taskTestCases(ctx context.Context, job RunJob) []domain.TaskTestCase {
-	reader, ok := r.taskUpdater.(taskTestCaseReader)
-	if !ok {
-		return nil
-	}
-	items, err := reader.ListTestCases(ctx, job.Task.ID)
-	if err != nil {
-		log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("list test cases for coverage-gap gate failed")
-		return nil
-	}
-	return items
-}
-
-// rejectedRunReportReapproveNote appends a rejected pm_uat run's own report
-// to the rejection comment: told to execute it, not to re-approve around it.
-func rejectedRunReportReapproveNote(summary string) string {
-	return "\n\n" + prompt.Text(rejectedRunReportReapproveKey) + "\n\n" + summary
-}
-
-func (r *Runner) failRunUngroundedPMUAT(ctx context.Context, job RunJob, run domain.TaskAgentRun, resp domain.AgentResponse, reason string) error {
-	if r.taskUpdater != nil {
-		content := reason
-		if summary := strings.TrimSpace(resp.Message.Content); summary != "" {
-			content += rejectedRunReportReapproveNote(summary)
-		}
-		if _, err := r.taskUpdater.AddComment(ctx, job.RepositoryID, job.Task.ID, domain.CreateTaskCommentRequest{
-			AuthorType: "system",
-			Content:    truncateHead(content, 3000),
-		}); err != nil {
-			log.Warn().Err(err).Str("task_id", job.Task.ID.String()).Msg("ungrounded pm_uat comment failed")
-		}
-	}
-
-	log.Warn().Str("task_id", job.Task.ID.String()).Str("run_id", run.ID.String()).
-		Str("column", string(job.Task.Column)).Msg("pm_uat run rejected: approval without execution evidence")
-
-	run.Status = domain.TaskAgentRunStatusFailed
-	run.Summary = truncateHead(reason, 500)
-	pctx, cancel := persistCtx(ctx)
-	defer cancel()
-	if _, updateErr := r.runs.Update(pctx, run); updateErr != nil {
-		if errors.Is(updateErr, domain.ErrTaskAgentRunNotFound) {
-			log.Info().Str("run_id", run.ID.String()).Msg("run row gone, task deleted mid-run")
-			return nil
-		}
-		return updateErr
-	}
-	return ErrUngroundedPMUAT
-}
-
-var ErrUngroundedPMUAT = errors.New("pm_uat run approved without execution evidence")
-
 func (r *Runner) failRunOutOfBudget(
 	ctx context.Context,
 	job RunJob,
@@ -2060,13 +2007,11 @@ func (r *Runner) failRunOutOfBudget(
 	published := job.Task.TaskType.PublishesBranch()
 	if workspace != "" && published {
 		commitMsg := r.writeCommitMessage(ctx, commitDetails{
-			TaskKey:   job.Task.Key,
-			Title:     job.Task.Title,
-			Summary:   budgetErr.Partial,
-			AgentName: agentRec.Name,
-			Writer:    agentWriterModel(agentRec),
-			Prefix:    "wip: ",
-		})
+			TaskKey: job.Task.Key,
+			Title:   job.Task.Title,
+			Summary: budgetErr.Partial,
+			Prefix:  "wip: ",
+		}.withAgent(agentRec))
 		if pushErr := r.git.CommitAndPush(ctx, workspace, commitMsg); pushErr != nil {
 			log.Warn().Err(pushErr).Str("task_id", job.Task.ID.String()).Msg("out-of-budget partial commit failed")
 		} else if r.branchIndexer != nil && branch != "" {
@@ -2128,7 +2073,7 @@ func revisionCommentsMessage(comments []domain.TaskComment) string {
 	for _, c := range comments {
 		// The human's own comments ride in humanRequirementsMessage, on every
 		// run; an advisory-checks note describes the change but did not send it back.
-		if c.AuthorType != "user" && !prompt.IsClarificationComment(c.Content) && !isAdvisoryChecksComment(c.Content) {
+		if c.AuthorType != "user" && !prompt.IsClarificationComment(c.Content) && !isAdvisoryChecksComment(c.Content) && !domain.IsChangeRequestComment(c.Content) {
 			feedback = append(feedback, c)
 		}
 	}
@@ -2312,9 +2257,7 @@ func listsEveryCriterion(wf domain.Workflow, task domain.BoardTask) bool {
 func reviewCriteriaHeader(column domain.TaskColumn) string {
 	switch column {
 	case domain.TaskColumnReadyForQA, domain.TaskColumnInQA:
-		return prompt.Text(reviewCriteriaHeaderQAPMKey)
-	case domain.TaskColumnPMUAT:
-		return prompt.Text(reviewCriteriaHeaderPMUATKey)
+		return prompt.Text(reviewCriteriaHeaderQAKey)
 	case domain.TaskColumnCodeReview:
 		return prompt.Text(reviewCriteriaHeaderCodeReviewKey)
 	default:
@@ -2328,7 +2271,6 @@ func criterionStateLine(c domain.AcceptanceCriterion, changedSince map[string][]
 		Text:        c.Text,
 		Implementer: criterionImplementerLabelKey.Render(criterionImplementerInput{Completed: c.Completed}),
 		QA:          criterionVerdictLabel(c, domain.CriterionReviewRoleQA, changedSince),
-		PM:          criterionVerdictLabel(c, domain.CriterionReviewRolePM, changedSince),
 	})
 }
 
@@ -2427,9 +2369,12 @@ func closingStep(wf domain.Workflow, job RunJob) string {
 	if wf.Has(job.Task.Column, domain.BehaviourBuildVerify) {
 		return prompt.Text(closingStepBuildVerifyKey)
 	}
+	if wf.Has(job.Task.Column, domain.BehaviourCriterionVerdict) {
+		return prompt.Text(closingStepReviewKey)
+	}
 	switch wf.KindOf(job.Task.Column) {
 	case domain.StageKindReview:
-		// code_review, in_qa, pm_uat: the run judges or tests, never edits —
+		// code_review, in_qa: the run judges or tests, never edits —
 		// "state what you changed" never applies here.
 		return prompt.Text(closingStepReviewKey)
 	case domain.StageKindTerminal:
@@ -2455,8 +2400,8 @@ func columnInstruction(wf domain.Workflow, task domain.BoardTask) string {
 	if stage, ok := wf.Stage(task.Column); ok && stage.Instructions != "" {
 		return stage.Instructions
 	}
-	// passTo from the workflow, not a literal: pm_uat for everything except technical, which goes straight to human_uat.
-	passTo := "pm_uat"
+	// passTo from the workflow, not a literal; human_uat is the stock hand-off.
+	passTo := "human_uat"
 	if target, ok := wf.Param(task.Column, domain.BehaviourReviewVerdictSweep, "pass_to"); ok && target != "" {
 		passTo = target
 	}
@@ -2494,8 +2439,6 @@ func columnInstruction(wf domain.Workflow, task domain.BoardTask) string {
 		return columnReadyForQAKey.Render(columnPassToInput{PassTo: passTo})
 	case domain.TaskColumnInQA:
 		return columnInQAKey.Render(columnPassToInput{PassTo: passTo})
-	case domain.TaskColumnPMUAT:
-		return prompt.Text(columnPMUATKey)
 	case domain.TaskColumnDone:
 		if analiz {
 			return prompt.Text(columnDoneAnalizKey)

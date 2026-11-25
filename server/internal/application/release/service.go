@@ -309,7 +309,11 @@ type Service struct {
 	lastErrorCheck  map[pacingKey]time.Time
 	lastImpactCheck map[pacingKey]time.Time
 	impact          ImpactReader
+	marker          DeployMarker
 	attributed      map[uuid.UUID]attributedIncident
+
+	queueMu      sync.Mutex
+	queueWokenAt map[uuid.UUID]time.Time
 
 	cadenceMu  sync.Mutex
 	watching   bool

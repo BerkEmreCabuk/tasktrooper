@@ -267,3 +267,64 @@ func TestExecuteChatWithholdsTheCLIsOwnQuestionCard(t *testing.T) {
 	assert.NotContains(t, argv, "--tools")
 	assert.Contains(t, strings.Split(argv[indexOf(t, argv, "--disallowedTools")+1], ","), "AskUserQuestion")
 }
+
+// A screenshot the user attached is on the message as Images, which a CLI
+// prompt cannot carry; without staging it the agent answers as if no image
+// was sent (it could not read the task key off a screenshot). Both the first
+// turn and a resumed one must point the CLI at the image file.
+func TestExecuteChatHandsAttachedImagesToTheCLIAsFiles(t *testing.T) {
+	shot := []domain.ToolResultImage{{MediaType: "image/png", Data: "iVBORw0KGgo="}}
+
+	t.Run("first turn", func(t *testing.T) {
+		ex, workDir := newTestExecutor(t, Config{}, "chat_reply.jsonl")
+		req := chatExecution(workDir)
+		req.History[1].Images = shot
+		_, err := ex.ExecuteChat(context.Background(), req, port.ChatStream{})
+		require.NoError(t, err)
+		prompt := readPrompt(t, workDir)
+		assert.Contains(t, prompt, "Where are the HTTP routes registered?")
+		assert.Contains(t, prompt, "attached 1 image(s)")
+		assert.Contains(t, prompt, "tt-cli-images-")
+	})
+
+	t.Run("resumed turn", func(t *testing.T) {
+		ex, workDir := newTestExecutor(t, Config{}, "chat_resumed.jsonl")
+		req := chatExecution(workDir)
+		req.ResumeSessionID = "cli-chat-1"
+		req.Prompt = "Why did this task bounce five times?"
+		req.History = append(req.History,
+			domain.Message{Role: domain.RoleAssistant, Content: "Routes are registered in handler.go."},
+			domain.Message{Role: domain.RoleUser, Content: req.Prompt, Images: shot},
+		)
+		_, err := ex.ExecuteChat(context.Background(), req, port.ChatStream{})
+		require.NoError(t, err)
+		prompt := readPrompt(t, workDir)
+		assert.Contains(t, prompt, "Why did this task bounce five times?")
+		assert.Contains(t, prompt, "attached 1 image(s)")
+		assert.NotContains(t, prompt, "Routes are registered in handler.go.")
+	})
+}
+
+// A watched chat asks the CLI for partial messages and streams the reply as it
+// is written: each delta goes out once, the whole block that follows only adds
+// what the deltas missed, and thinking never reaches the stream.
+func TestExecuteChatStreamsTheReplyTokenByToken(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "chat_partial.jsonl")
+
+	var rec recorder
+	_, err := ex.ExecuteChat(context.Background(), chatExecution(workDir), rec.stream())
+	require.NoError(t, err)
+
+	assert.Contains(t, readArgv(t, workDir), "--include-partial-messages")
+	assert.Equal(t, []string{
+		"t:Routes are ", "t:registered", "t: in handler.go.", "t:\n\n", "t:Anything else?",
+	}, rec.events)
+	assert.Equal(t, "Routes are registered in handler.go.\n\nAnything else?", rec.text.String())
+}
+
+func TestExecuteChatWithoutAStreamDoesNotAskForPartialMessages(t *testing.T) {
+	ex, workDir := newTestExecutor(t, Config{}, "chat_reply.jsonl")
+	_, err := ex.ExecuteChat(context.Background(), chatExecution(workDir), port.ChatStream{})
+	require.NoError(t, err)
+	assert.NotContains(t, readArgv(t, workDir), "--include-partial-messages")
+}

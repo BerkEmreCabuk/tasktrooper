@@ -56,6 +56,13 @@ client does not know the vector length until an index reports it. A separate cal
 `GET /v1/llm/providers` because it's a cheap, independent read, not because of any
 network round trip.
 
+### PUT /v1/agent-cli/{flavor}/default-model
+
+Body `{"model": "..."}` (empty clears). Sets the model an agent set to "default model" runs
+on for that CLI; answers the same state as `GET /v1/agent-cli`, whose `flavors[]` entries
+carry `default_model`. The usage dashboard flags such runs with `model_from_default` on
+`by_model` rows. API-key providers keep their default via `default_model` on connect.
+
 ### GET /v1/models
 
 Proxies the active provider's model list. `?provider=<type|endpoint uuid>` lists that
@@ -131,6 +138,25 @@ ends as `cancelled` (a later terminal write cannot overwrite it), whatever was s
 is persisted as the assistant message, and the SSE stream ends with a normal
 `finish_reason: "stop"` frame plus `[DONE]`.
 
+### Wakes: the agent comes back when background work ends (migration 204)
+
+A chat tool that starts background work (`audience_build`, `study_start`, writing a study report) registers a
+**wake** on the calling session (`session.Service.WakeSessionOn`, keyed by the chat session on the tool call's
+context; a repeat is idempotent). The `WakeSweeper` (5 s) asks each kind's checker whether the work ended;
+when it did — or after `WakeTimeout` (2 h), with a "still not finished" note — it deletes the row (the claim),
+appends a `**Background update:**` user-role message (`guard.session_wake_update`) and reruns the chat turn
+(`resumeParkedTurn`), so the agent reads the result and carries on. A session with a turn in flight is skipped
+until the next pass. Checkers are wired in `platform/runtime/audience.go`; a new kind needs a
+`domain.WakeKind*` constant, a checker and a `WakeSessionOn` call in its tool.
+
+| Method | Path | |
+|---|---|---|
+| GET | `/v1/sessions/{id}/wakes` | `{wakes: [{id, kind, ref_id, label, created_at, expires_at}]}` |
+| DELETE | `/v1/sessions/{id}/wakes` | stop waiting on all; `{stopped: n}` (the work keeps running) |
+| DELETE | `/v1/sessions/{id}/wakes/{wakeId}` | stop waiting on one |
+
+The chat UI shows them above the composer (`PendingWakesBar`) with a "Stop waiting" button.
+
 ## Files and attachments
 
 | Endpoint | Notes |
@@ -165,7 +191,7 @@ alongside `documents`.
 
 ## Board run control
 
-Both return the run under a `run` key (`{"run": {...domain.TaskAgentRun...}}`), answer
+All return the run under a `run` key (`{"run": {...domain.TaskAgentRun...}}`), answer
 `503 service_unavailable` with no board runner wired, and `404 not_found` when the run
 does not exist or belongs to a different task than the URL names.
 
@@ -179,7 +205,67 @@ does not exist or belongs to a different task than the URL names.
   Returns the new (`pending`) run; `409` while the run is still going or the task is
   blocked — a blocked task is recovered by moving it, not by re-running in place.
 
-Neither goes through the board dispatcher: cancel would immediately fan fresh agents
+- `POST /v1/repositories/{id}/tasks/{taskId}/runs/{runId}/interrupt` — `{message}` (required, `400`
+  when empty). Stops the live run, records the message as a comment on the task (every run reads the
+  human's comments as requirements) and queues a new run of the **same agent** on the task as it
+  stands. Unlike cancel the task is **not** blocked and the workspace is kept. Returns the new
+  (`pending`) run; `409` when the run already stopped. Event: `task.rerun_requested` with
+  `interrupted: true`.
+
+## Run trace (migration 201)
+
+A board run records every tool call when the call finishes — never summarised by a model. Both execution
+styles write it: the in-process agent loop and the MCP endpoint through `registry.ExecuteWithPolicy`, and the
+agent CLIs through `cli/core.Trace` (their native `tool_use` / `tool_result` events). Chat turns record nothing.
+File contents, request bodies and credentials are never stored: a read keeps path and range, a change keeps
+path, hash before/after and size delta, a command keeps the scrubbed command line, cwd, exit code and the first
+and last 20 lines of scrubbed output, an external call keeps method and host. At most 5000 calls per run (the
+rest are counted in `dropped`); traces are swept after 90 days and go with their task.
+
+When the run ends the board asks git (`git diff --name-status base`, untracked files) what actually changed
+since the commit the run started from (`base_sha`) and stores the comparison: files git shows changed that no
+recorded change call accounts for are `unrecorded` ("changed outside recorded tool calls").
+
+All answer `{"recorded": false}` for a run that has no trace (older runs); `404` when the run belongs to
+another task.
+
+- `GET /v1/repositories/{id}/tasks/{taskId}/runs/{runId}/trace?category=&after=&limit=` — `{recorded, events, count, next_after}`;
+  `category` is `read|change|exec|external|board|undo`, `after` the last `seq` read, `limit` ≤ 1000.
+- `GET …/runs/{runId}/trace/summary` — `{recorded, summary: {run, counts, verification, non_undoable}}`.
+- `GET …/runs/{runId}/trace.json` — the whole trace as a download.
+
+## Undo a run's work
+
+Works from the run trace, on the task's own workspace, through git; nothing changes until `confirm: true`
+(the click is the approval). Not available for a run that ran on another computer (`remote_not_supported`),
+for a run still working, or when the workspace is not on the branch the run worked on.
+
+- `GET …/runs/{runId}/undo/preview` — `{preview}`: `supported` (+ `reason` code), `mode` (`reset` | `revert` |
+  `nothing`), the run's `commits` and `files`, `uncommitted`, `pushed` / `remote_ahead`, `pull_request`,
+  `backup_ref` (`tasktrooper/undo-backup/<run id>`), `non_undoable` (effects no reset takes back: PR comments and
+  merges, deploys, non-GET HTTP, browser/device actions, external MCP calls, board comments, shell commands that
+  push/publish/deploy) and `move_to` (the column the card returns to, only when a person has not moved it since
+  the run began).
+- `POST …/runs/{runId}/undo` `{confirm, force_push?, keep_column?}` — saves the whole working tree (committed,
+  staged, unstaged and untracked) as the branch `backup_ref` (`-2`, `-3` … if it exists), then `git reset --hard`
+  to `base_sha` on the task branch only, then removes the untracked files the trace says the run created. The
+  repository's default branch is never reset. A pushed branch is reset locally and `push_pending` says so;
+  `force_push` pushes it with `--force-with-lease` against the remote tip the preview showed, and is refused
+  (`409`) when the remote holds commits the checkout lacks. Afterwards: criteria verdicts given during the run
+  are reopened, the card returns to `move_to`, a `task.run_undone` event is written and an `undo` entry is
+  appended to the run's trace (the original trace is kept). `400` without `confirm`; `409` with the blocking
+  reason (`merged` → use the revert route).
+- `POST …/runs/{runId}/undo/revert` `{confirm}` — for a task whose pull request is merged: history is not rewritten;
+  a branch `tasktrooper/revert-<task key>-<run>` is cut from the default branch, `git revert` of the merge commit
+  (`-m 1` when it is a merge) is pushed and a pull request opened. Nothing is deployed.
+
+- `POST …/runs/{runId}/undo/rollback-proposal` `{confirm, note?}` — for a merged task that shipped in a release
+  (`preview.release` carries the release, `rollback_allowed` and the `rollback_refusal` code): writes the
+  release's rollback **proposal** exactly as the release engineer does when auto rollback is off
+  (`release.Service.ProposeRollback`), whatever the release's profile says. It never reverts or deploys; a
+  person approves it on the release. `409` when the task is not merged or is in no release.
+
+None of them goes through the board dispatcher: cancel would immediately fan fresh agents
 onto the task it just stopped, and re-run would start every agent configured for the
 column rather than the one asked for. Each records its own board event
 (`task.run_cancelled` / `task.rerun_requested`).
@@ -199,6 +285,28 @@ held. A park to `blocked` does not split a round.
   `outcome` is `open` / `approved` / `rejected` / `closed`; `verdict` is `approve` /
   `reject`, or `pending` for a required reviewer of the open round that has not decided.
   `404 not_found` for an unknown task.
+- `GET /v1/repositories/{id}/tasks/{taskId}/review-history` → the task's review
+  loop read from the board's own records (migration 202; nothing is
+  summarised by a model): `summary` (rounds, findings raised/fixed/open,
+  bounces, loop-guard stops, QA failures, open flags), `rounds[]` (one per visit
+  to `code_review` or `in_qa`: `outcome`, `reviewers[]` with verdict and run,
+  `from_sha`/`head_sha`, the finding ids it `raised`/`fixed`/`still_open`/
+  `reopened`, the column `moves[]` it caused with `bounce`/`loop_guard`,
+  the developer `fix_runs[]` that answered it with the run's base/head SHA and
+  files changed, and `coverage`: per reviewer the aspects, files/lines covered
+  against the real diff (`git diff --numstat`, the runs' recorded reads, the diff
+  the reviewer was handed), what it could not review and the changed files no
+  reviewer covered), `findings[]` (identity across rounds is the reviewer's
+  `key`, else a hash of file, category and normalised message; `status` is
+  open/fixed/withdrawn/reopened with a `trail`), and `flags[]` ("Needs your
+  review": `source` agent or automatic, `code`, reason/question/file:line,
+  `reviewed_by`/`reviewed_at`). Automatic flags come from
+  `catalog/review/human_review_rules.yaml` (sensitive paths, large diff, tests
+  missing, loop guard, QA approval with no evidence, files outside the recorded
+  tool calls, files nobody reviewed).
+- `POST /v1/repositories/{id}/tasks/{taskId}/review-flags/{flagId}/reviewed` →
+  marks one flag looked at (idempotent, first reviewer keeps the credit);
+  informational, it never moves or blocks the task.
 
 ## Roles, task types and workflows (migration 143)
 
@@ -290,7 +398,11 @@ session to send messages to plus the agent answering there:
 {"session_id": "0f9b…", "agent_id": "3c4d…"}
 ```
 
-Idempotent: one thread per task for its whole life, so pressing "discuss" again returns
+An optional body `{"agent_id": "…"}` opens the thread with that specific agent (QA, a
+reviewer, …) instead of the assignee: one thread per task **and agent**, `400` when the
+agent does not exist or is disabled.
+
+Idempotent: one thread per task (and agent) for its whole life, so pressing "discuss" again returns
 the same `session_id`. An existing clarification thread becomes the task thread rather
 than a second one being opened. `agent_id` is `""` when no agent is assigned and nobody
 is subscribed to the column — the chat still works, it just has no persona. `404` for an
@@ -417,6 +529,7 @@ requires `confirm` to equal the repository's name, the same guardrail
 | `GET /v1/repositories/{id}/releases?component_id=&task_id=&limit=` | `{"releases": domain.Release[]}`, newest first; default limit 20, max 100 |
 | `GET /v1/releases/{releaseId}` | One release in full: status, mode/executor, commit/tag, `deploy` (incl. a batch release's `local_run`/`store_builds`), `checks` (health/smoke/new error groups), `verdict`, `rollback`, `tasks`, and the rollback state below |
 | `POST /v1/releases/{releaseId}/rollback-proposal/dismiss` | No body, **no confirm** (nothing in production changes) → `Release`: clears `rollback_proposal` and records `rollback_dismissal`. Idempotent — a release without one (or whose proposal was replaced meanwhile) answers as it is. 404 unknown release |
+| `POST /v1/releases/{releaseId}/cut-proposal/dismiss` | No body, **no confirm** (the proposal shipped nothing) → `Release`: clears `cut_proposal`, the cut the release engineer prepared for a draft batch release with `propose_release_cut` (migration 206; `{proposed_at, by, version, notes}`). The draft stays open. Idempotent. `GET …/cut-preview` opens on a stored proposal's version and notes; cutting the release clears it. |
 | `GET /v1/releases/{releaseId}/cut-preview` | `domain.ReleaseCutPreview` for a `draft` release, or a `pending` one `deploy_release` was never attempted on (a re-cut, e.g. after `ErrReleaseTagExists`): suggested/previous version (the HIGHEST semver among the component's last released version, its newest matching git tag, and any tag any of its releases ever carried), the tag it would carry, the commit it would cut at, generated notes, its tasks. 409 `ErrReleaseWrongStatus` off draft/re-cuttable-pending, 409 `ErrReleaseEmpty` with no tasks |
 | `GET /v1/releases/{releaseId}/impact` | `domain.DeployImpact` `{release_id, component_id, environment: "production", deployed_at, window_minutes: 60, pending, verdict, computed_at, signals: [{signal, unit, before, after, after_points, baseline, delta, delta_pct, higher_is_better, verdict}]}` (`application/deployimpact`). T is `deployed_at` (`finished_at` for a release that never deployed on its own); for each golden signal of the component's role (`catalog/observability/golden.yaml`) with a confirmed production binding, read through `signals.ReadSignal` — a quantile signal at p95 alone — and judged by its worst series at each instant where it answers several (the highest where lower is better, the lowest where higher is, as the alert evaluator does): the mean over [T−60m, T) (`before`), (T, T+60m] (`after`; the sample at T itself still straddles the deploy, so it is left out; `after_points` is how many were averaged) and that after-window 24h earlier (`baseline`). A signal is `worse`/`improved` when it moved past `deploy_ops.impact` both from `before` and, when read, from `baseline` — else `neutral`: `change_pct` of `before` (`throughput_change_pct` for a rate where higher is better), or `ratio_points` percentage points for a ratio signal; a count where lower is better must also move by `count_floor` (gauge) or `rate_floor` (rate), each at least `floor_pct` of the larger value, and a quantile in ms by `latency_floor_ms`. `unknown` when unreadable. `higher_is_better` is the catalog's `better` (`signals.yaml`). `verdict` is the worst judged signal, `unknown` when none was; every bound signal failing to read is the answer's error. `pending` while T+60m is in the future: `after`/`baseline` cover what has passed. A fully read answer is kept per (release, minute). 404 unknown release; 200 `verdict: "unknown"`, `signals: []` when nothing is bound, the release has no component or never deployed |
 | `POST /v1/releases/{releaseId}/cut` | `{confirm, version, notes}` → `Release`, `draft → pending` (or re-cutting a `pending` release that never deployed); re-reads and freezes the component's CURRENT confirmed delivery profile, stamps every carried task's before-deploy confirmation, wakes the release engineer. 400 invalid version (`domain.ValidReleaseVersion` — also enforces git ref rules: no `..`, no trailing `.`, no `.lock` suffix, no `@{`, no `//`); 409 `ErrDeployDependencyPending` while any carried task ships after an unreleased dependency |
@@ -424,7 +537,7 @@ requires `confirm` to equal the repository's name, the same guardrail
 | `POST /v1/releases/{releaseId}/finish` | `{confirm, note}` → `Release`, verdict recorded, every task moved to `released`. Same states `finish_release` accepts (`awaiting_verdict`, or `failed` — a human overriding it) |
 | `POST /v1/releases/{releaseId}/rollback` | `{confirm, note}` → `Release`, always `domain.RollbackManual` (an agent's own reasons — `deploy_failed`/`verify_failed`/`health_incident` — only come from the `rollback_release` tool). Claims the release first; refused when the release is not `failed`/`awaiting_verdict`/`released`-within-24h-and-still-newest, or when a newer release of the component is already open or has since shipped |
 | `POST /v1/repositories/{id}/tasks/{taskId}/before-deploy/confirm` | No body. Stamps `board_tasks.before_deploy_confirmed_at` (`COALESCE`, idempotent) and, when the task sits in `done`, wakes the release engineer on it immediately (`release.Service.WakeTask`) instead of waiting for the next sweep |
-| `PATCH /v1/components/{componentId}` | Existing `ComponentPatch` plus `"delivery": domain.ComponentDelivery \| null` — `null` clears the human override back to the detected profile. A save that newly CONFIRMS the profile (crossing into an override, or a detected exact/high) opens releases for every task of that component already sitting in `done`, merged, with no release yet (`OpenPending`), and wakes any of the component's `done` tasks that never merged at all A save that switches `gates.coverage_enabled` or `gates.mutation_enabled` from off to on on an active component reads its CI checks (`discovery/ci.SplitByGate`, per language of the component's stack) and, when a language has no step for that gate, opens one `todo` task per gate (`projectmodel.gate_ci_task`, system task assignee for the component's role) and records it in `gates.coverage_ci_task_id` / `gates.mutation_ci_task_id` (server-owned; a patch never sets them). While that task is not done/released/deleted, a later switch reports it instead of opening another. The response is the component plus `gate_ci_tasks: domain.GateCITask[]` (omitted when empty) |
+| `PATCH /v1/components/{componentId}` | Existing `ComponentPatch` plus `"container": domain.ContainerSettings` (replaces the component's container settings wholesale: `enabled`, `registry`, `platforms`, `tag_pattern`, `container_only`; migration 203; validated by `ContainerSettings.Normalized`) and, in `commands`, the container purposes `buildkit_setup`, `image_build`, `compose_up`, `compose_down`, `compose_stop` (an empty string removes a command even when a scan detected it; `null` restores the detected one), plus `"delivery": domain.ComponentDelivery \| null` — `null` clears the human override back to the detected profile. A save that newly CONFIRMS the profile (crossing into an override, or a detected exact/high) opens releases for every task of that component already sitting in `done`, merged, with no release yet (`OpenPending`), and wakes any of the component's `done` tasks that never merged at all A save that switches `gates.coverage_enabled` or `gates.mutation_enabled` from off to on on an active component reads its CI checks (`discovery/ci.SplitByGate`, per language of the component's stack) and, when a language has no step for that gate, opens one `todo` task per gate (`projectmodel.gate_ci_task`, system task assignee for the component's role) and records it in `gates.coverage_ci_task_id` / `gates.mutation_ci_task_id` (server-owned; a patch never sets them). While that task is not done/released/deleted, a later switch reports it instead of opening another. The response is the component plus `gate_ci_tasks: domain.GateCITask[]` (omitted when empty) |
 | `POST /v1/components/{componentId}/smoke-checks/test` | `{"checks": domain.SmokeCheck[]}` (1..20, same validation `ComponentDelivery.Validate` runs) → 200 `{"base_url": string, "results": domain.SmokeResult[]}`. Runs a DRAFT set of checks right now against the component's resolved production base URL (confirmed environment, else the legacy prod deploy target, else `""` — same resolution a release's verify window uses) with the same runner/policy/timeout `run_smoke_checks` uses. Nothing is persisted — the UI's "test before you save" action while editing a delivery profile. 400 `ErrInvalidDelivery` (including an empty list); 404 unknown component |
 | `POST /v1/components/{componentId}/smoke-checks/generate` | `{"existing": domain.SmokeCheck[]}` → 202 `Job`. Starts an AI draft of smoke checks: the `release-engineer` agent reads the component's code read-only (read_file/grep_code/glob/codebase_search, in the repository checkout) and proposes GET/HEAD checks; the server validates each, drops duplicates of `existing`, caps at 8, then test-runs the survivors like `/smoke-checks/test`. Returns the already-running job for the component instead of starting a second. 404 unknown component; 409 no enabled release-engineer agent with a runtime |
 | `GET /v1/smoke-check-generations/{jobId}` | → 200 `Job` `{job_id, component_id, status: running\|done\|failed\|cancelled, agent_name, started_at, finished_at?, checks: SmokeCheck[], results: SmokeResult[], base_url, dropped, error}` — `results[i]` belongs to `checks[i]`, arrays never null; a `done` job can have zero checks with `error` saying why. Jobs live in memory, 5-minute run timeout, evicted 30 minutes after finishing (then 404). Nothing is saved to the delivery profile |
@@ -929,6 +1042,13 @@ must render with it), `signals` (every key a catalog signal). A query references
   number goes, outside strings (`percentile(duration, $__quantile)` → `95`); `$__rate` and
   `$__interval` are refused (the kind appends SINCE, UNTIL and TIMESERIES). A detect metric is an
   event type (`Transaction`).
+- **Telemetry JSON** (`tasktrooper_telemetry`): `domain.TelemetryQuery`
+  (`{"service", "env", "endpoint", "metric", "quantile"}`), held to the broker rules — a param only
+  in the `service`, `env` or `endpoint` value, escaped for a JSON string. `$__quantile` only as the
+  whole `quantile` value (`"quantile": "$__quantile"` → `"0.99"`); `$__rate` and `$__interval` are
+  refused (telemetry picks its own buckets). A detect metric is `service.name` or
+  `deployment.environment`; the detector probes `service` against `service.name` and `env` against
+  `deployment.environment`.
 
 `applies_to.resource_kind` (a `domain.CloudResourceKind`) says which bound cloud resource the
 recipe fits, and `applies_to.resource_params` which field of that resource's ref fills which
@@ -972,6 +1092,7 @@ validate.
 | `newrelic-apm` | newrelic | — (detect `Transaction`) | `app` (http.requests, error_ratio, latency; `endpoints` table) |
 | `newrelic-browser` | newrelic | — (detect `PageView`) | `app` (page_views, sessions, js_errors, lcp, inp, cls; `pages` table) |
 | `newrelic-mobile` | newrelic | — (detect `MobileSession`) | `app` (crash_rate, crash_free_users) |
+| `tasktrooper-telemetry` | tasktrooper_telemetry | — (detect `service.name`) | `service`, `env` (default `*` = every environment) (http.requests, error_ratio, latency, queue.consume_rate, process.errors, logs.lines, traces.spans, errors.issues; `endpoints` table) |
 
 **Recipe tables.** A recipe may also declare `tables`, by name: `queues` (the queues view reads
 it), `crashes` (one row per crash or error issue — columns `issue`, `type`, `cause`, `location`,
@@ -2198,7 +2319,7 @@ repository's own `local_run` doc (`scripts/dev.sh`).
     answer.
   - The **review chain gate** is always enforced: moving into `done` (or `released`
     when that skips `done`) 400s unless the column-span history shows every review
-    stage the type's workflow requires — `code_review`, `in_qa`, `pm_uat` for
+    stage the type's workflow requires — `code_review`, `in_qa` for
     `task`/`bug`, `analiz_review` for `analiz` — with none of those stages' latest
     visit rejected; the message names the missing/rejected stage and the move that
     earns it (`done means the task passed its review chain, and this one has not …
@@ -2315,6 +2436,85 @@ comment per column change of any linked task, and once every linked task is done
 the GitHub issue is closed (`state_reason=completed`) or the Jira issue transitioned to a done
 status, once (`closed_at`).
 
+## TaskTrooper Telemetry (native client)
+
+`internal/application/telemetry` connects this install to a TaskTrooper Telemetry service (its own product, `/api/v1`, bearer
+project key). The URL is stored in the clear and the key encrypted (`app_settings`, keys `telemetry_base_url` /
+`telemetry_api_key`; no migration), per tenant in the company edition. The key is write-only: no route returns it, and the
+browser never talks to the telemetry host.
+
+| Route | |
+|---|---|
+| `GET /v1/telemetry/settings` | `{base_url, configured}`; configured = URL and key both saved |
+| `PUT /v1/telemetry/settings` | `{base_url, api_key?}`; `api_key` omitted keeps the stored key, `""` clears it. 400 for a URL that is not http(s) with a host. Answers like GET |
+| `POST /v1/telemetry/settings/test` | optional `{base_url?, api_key?}` (omitted = the saved ones, so a form can be tried before it is saved). Always 200 `{ok, error?}`: reaches `/healthz`, then `GET /api/v1/environments` with the key |
+| `GET /v1/telemetry/status` | `{configured, reachable}`; an unconfigured install is never probed, a configured one at most every 15 s |
+| `GET /v1/telemetry/proxy/*path` | read-only GET passthrough. `*path` is relative to the upstream `/api/v1/`; the query string is forwarded; the key is injected server-side and any caller `Authorization`/`Cookie` is dropped. Upstream status, content type and body pass through. Other methods: 405 |
+
+Errors on the proxy are `{code, error}`: `409 telemetry_not_configured`; `403 telemetry_path_not_allowed` (first segment outside the
+allowlist in `application/telemetry/allowlist.go`, or a dot / empty / slash / control segment after one percent-decoding);
+`502 telemetry_unauthorized` (upstream 401: the key, never the caller's session); `502 telemetry_unreachable`. Nothing that holds
+credentials (`auth`, `me`, `orgs`, `api-keys`, `integrations`, `notification-channels`, `assistant`, `repos`, `internal`) is
+reachable. Destinations are vetted by `urlguard.HumanConfigured()` (loopback and private ranges dial, cloud metadata never).
+
+**Alerts become incidents.** `telemetry.IncidentSync` polls `GET /api/v1/incidents?state=open` every minute (no inbound webhook is
+needed, so a local install works). Each firing or acknowledged, non-quiet incident not seen before is ingested into prodops
+(`source: telemetry`, fingerprint `telemetry:<server hash>:<id>`, severity at least `high` so a task always opens; payload carries
+`telemetry_incident_id`, `service`, `endpoint`, `root_cause`) in the repository named after the alert's service (repository name,
+checkout folder or a sub-project folder; the first repository otherwise, said so in the detail). Its remediation task is assigned to
+the **release engineer** (`domain.RoleKeyRelease`) with the `briefs.prodops.telemetry_incident_task` brief; without one it falls
+back to the repository's default assignee and the developer brief. A telemetry incident that resolves resolves the TaskTrooper
+incident (asked about by id, so a page-limited list never closes one by mistake); one a person resolved is not reopened.
+
+**Agent writes.** `telemetry.Service.Write` is the only write path, used by the agents' telemetry tools and the deploy marker,
+never by an HTTP route (the proxy stays GET-only). It accepts exactly the method + route pairs in `writeRoutes`
+(`application/telemetry/allowlist.go`): `POST monitors`, `POST monitors/preview`, `PUT|PATCH|DELETE monitors/{id}`, `POST kpis`,
+`PUT|DELETE kpis/{id}`, `POST loadtests/scenarios`, `POST loadtests/scenarios/{id}/runs`, `POST loadtests/runs/{id}/stop`,
+`POST suggestions/{id}/accept|reject`, `POST deploys`. Creates of monitors, KPIs and scenarios are stamped `source: "agent"`;
+changing or deleting a monitor or KPI first reads it and is refused (`ErrNotOwned`) unless its source is `agent`. The agent tools
+that call it ask for the user's yes first (`user_approved`, see the tool reference).
+
+**Deploy markers.** When a release's deploy succeeds (`release.settleDeploySuccess`, whether it then verifies or goes straight to
+`awaiting_verdict` on a failed smoke check), `telemetry.DeployMarker` posts `POST /api/v1/deploys`
+`{service, environment: "production", version: <commit SHA, else the release version>, commitSha, message, ts: deployed_at}` off
+the sweeper's path. It is best effort: no connection, no version or any failure is logged and dropped, never failing the release.
+TaskTrooper keeps no component → service mapping, so the service is the first of the component's name, its folder, the
+repository's name and its checkout folder that matches (letters and digits, case-insensitive) a service `GET /services?range=7d`
+reports; with no match, the component's name.
+
+**Telemetry as an Operations data source.** Kind `tasktrooper_telemetry` (`adapter/datasource/telemetry`, capabilities
+`metrics`, `logs`, `traces`, `errors`) makes telemetry read like any other source: the console widgets, golden signals, the Logs
+explorer and Errors inbox (`opsquery`, through `logs.lines` / `errors.issues` bindings), traces, deploy impact, deploywatch soak checks,
+alert rules and the runtime agent tools (`query_runtime_logs`, `list_runtime_errors`, `get_deploy_impact`, …) all reach it through
+signal bindings, with no tool of its own.
+
+- **Credentials: one connection.** The kind's schema has no fields and its source stores no URL or key. It reads through
+  `port.TelemetryReader`, which `telemetry.Service` implements (the allowlist, the key injected server-side, the `TelemetryClient`
+  and its `urlguard.HumanConfigured()` policy), so the URL saved in Settings is the only destination and nothing calls our cloud.
+  Wired by `datasource.Service.SetTelemetry(conn, marks)`.
+- **Managed source.** `datasource.Service.SyncTelemetrySource` runs at boot and after every `PUT /v1/telemetry/settings`
+  (`telemetry.Service.OnUpdate`): with the connection configured and no source of the kind, it makes one named
+  `TaskTrooper Telemetry`; an existing one is re-verified (and its cached reads dropped). Deleting it records
+  `app_settings.telemetry_data_source_deleted = true` and it is not made again until a person adds it back
+  (`POST /v1/data-sources {kind: "tasktrooper_telemetry"}`, which clears the mark). The kind is a singleton: a second create answers
+  400 `{kind: "duplicate"}`. Clearing the connection keeps the source and its bindings; it then verifies `error` (not configured).
+- **Reads** (`/api/v1`, every one an allowlisted GET). Telemetry answers fixed windows ending now (`15m`, `30m`, `1h`, `6h`, `24h`,
+  `7d`, buckets 1m … 2h), so a read picks the shortest window reaching back to its start and keeps the points inside `[from, to]`;
+  `Step` is that bucket; a start older than 7 days reads 7 days with a warning. Series: `services/{service}/series` or
+  `…/endpoints/{endpoint}/series` → `requests` = rpm/60 (req/s), `error_ratio` = errorRate×100 (%, null with no traffic),
+  `errors` = rpm×errorRate/60, `latency` = p50/p95/p99 (the nearest at or above the quantile; null with no traffic), `retries` /
+  `dead_letters` (a consumer process's, per second); an unknown service is no data, not a failure. Logs: `logs?service&env&level&q&
+  before&limit` (min severity → `warn,error` etc.; cursor = `nextBefore` ms). Errors: `errors?service&env&status=open&limit`, the
+  most frequent first, `New` when first seen in the window. Traces: `traces?service&env&endpoint&minMs&sort=recent&limit` and
+  `traces/{id}` (span start = trace ts + offset, resource attributes prefixed `resource.`). Endpoints table:
+  `services/{service}/endpoints?range=1h` → `endpoint` ("METHOD /route"), `rpm`, `error_pct`, `p95_ms`, busiest first. Verify:
+  `services?range=1h` (`<n> services reporting in the last hour`); Discover lists `deployment.environment` and `service.name`;
+  `LabelValues` lists `services?range=24h` names or `environments`. Upstream 400 is `bad_query`, 404 not found.
+- **Mapping components.** Recipe `tasktrooper-telemetry` (params `service` = `service.name`, `env` = `deployment.environment`,
+  default `*`). The detector proposes `service` from the service names that best name the component and `env` from the
+  telemetry environment matching the environment being detected (`domain.TelemetryEnvironmentNames`: production ↔
+  production/prod/prd/live, staging ↔ staging/stage/stg/preprod/uat, preview ↔ preview/pr/review, development ↔ development/dev/local).
+
 ## Project model
 
 Components, checks, links, resources and scans — the full route list and
@@ -2372,6 +2572,9 @@ Nothing here approves directly.
 | `PUT /v1/repositories/{id}/design-system/base-project` | Body `{project_id}` (or `null` for automatic). A repository in several projects that each have a base is `ambiguous` until one is chosen; the project must be linked to the repository (400 otherwise) |
 | `GET /v1/design-systems/{designSystemId}` | One `domain.DesignSystem` version |
 | `GET /v1/repositories/{id}/design-system/files` | `{files: [{path, content}]}` — `DESIGN.md`, `design/tokens.json`, `design/tokens.css`, `design/INVENTORY.md` rendered from the effective design system (empty when it has none) |
+| `GET /v1/design-files/{scope}/{id}` | `scope` = `task` \| `project` \| `repository`. The FigCraft file a design task draws in (`DESIGN_FILES/tasks/<task id>.figcraft`) or a design system file (`…/projects/<id>/design-system.figcraft`, `…/repositories/<id>/design-system.figcraft`): `{path, exists, installed, name?, pages: [{id, name, frames: [{id, name, width, height}]}], modified?, error?}` read with `figcraft-cli info --json` |
+| `GET /v1/design-files/{scope}/{id}/pages/{pageId}/preview?scale=` | PNG of one page (`figcraft-cli render`), cached under `DESIGN_FILES/.previews` until the file changes; 404 no file / no page, 409 `figcraft_not_installed` |
+| `POST /v1/design-files/{scope}/{id}/open` · `/reveal` | 204 — opens the file in the FigCraft app (`open -a FigCraft` on macOS) / shows it in Finder |
 | `GET /v1/repositories/{id}/tasks/{taskId}/design` | `{references, design_system?}` — the approved design tasks the task derives from or is blocked by (each a `domain.AnalysisReference` with `task_type: "design"` and its documents) and the version summary of the repository's design system |
 
 Every version, and the repository view's merged tokens, carries `lint`
@@ -2500,3 +2703,117 @@ monitor to retry. The last two already answered 400 and were the stragglers: rig
 no code. Written by `adapter/http.permanentRefusal` / `typedBadRequest` / `codedBadRequest`,
 the first two reached from `internalError` and `badRequestErr`, so any route that propagates
 the error gets the same answer.
+
+## Audience research (native)
+
+`internal/application/audience` writes **synthetic personas** from a project's brief, asks them the same questions in a **study**,
+turns the answers into a **report**, and lets a person talk to any persona 1:1. Every model call runs on the user's own agent
+runtime (`AgentRunner.Run` through `agent.Router`: a coding-agent CLI on this machine in an empty scratch directory with no
+TaskTrooper tools, or an API provider through the loop; the PM agent's runtime when it has one, else the first enabled agent with
+one) and is recorded in the usage ledger; nothing goes to a TaskTrooper service. Tables (migration 197, `audiences`,
+`audience_personas`, `audience_studies`, `audience_study_answers`, `audience_messages`) are tenant-scoped in the company edition.
+
+Audience: `draft` (brief only) -> `building` -> `ready` | `failed`. `PUT`-style edits never touch the people; `build` writes them
+again (`generation` +1) and a failed rebuild keeps the old ones. A study keeps its own copy of each persona that answered
+(`audience_study_answers.persona`), so a rebuild never erases a study. Study: `draft` -> `running` -> (`interviewed`, only when started with `manual_report`) -> `synthesizing` ->
+`done` | `failed` | `cancelled`; it runs once.
+
+| Route | |
+|---|---|
+| `GET /v1/audience-research/status` | `{ready, agent?, provider?, model?, chosen?}`: is there an agent runtime to run on, and is it the person's own pick |
+| `PUT /v1/audience-research/runtime` | `{provider, model}`: the provider and model the calls run on (kept in `app_settings`); an empty provider goes back to the product manager's own runtime. Answers the status |
+| `GET /v1/audiences` / `POST /v1/audiences` | list (`persona_count`, `study_count`) / create `{name, repository?, brief, persona_target?}` (brief = `product`, `segments[{name,description,count}]`, `locations`, `current_solutions`, `pricing`, `topic`, `language`); repository = name or id |
+| `GET /v1/audiences/:id` | audience + `personas` + `studies` (no reports) + `build_calls` |
+| `PATCH /v1/audiences/:id` | `{name?, repository?, brief?, persona_target?}`; 400 while building |
+| `DELETE /v1/audiences/:id` | with its personas, studies, answers and threads; 409 while something runs |
+| `POST /v1/audiences/:id/build` -> 202, `.../build/cancel` -> 204 | writes the people in the background, `ceil(n/8)` calls; cancelling keeps the previous people |
+| `POST /v1/audiences/:id/studies` -> 201 | plan `{kind?, title?, goal?, inputs?, questions[] (<=5), script?, price_points[] (<=6), currency?}`; `kind` is `user_interviews` (default), `landing_page_test`, `message_testing` or `ab_test`; `inputs` = `{intent?, pages[{url?, copy?}], variants[]}` (landing: 1 page; ab: 2 pages, a URL is read once with the guarded fetch and its text kept in `copy`; messages: 2-5 variants). Without `questions`/`script` the person's agent writes the interview script in the background (`script_state` generating -> awaiting_approval -> approved, migration 201); `calls_estimate` = people + 1 (+1 per script written) |
+| `GET /v1/audience-studies?audience_id=` | list without reports |
+| `GET /v1/audience-studies/:id` | study + `report` + `answers[]` (per-persona structured answers) + `follow_ups[]` (grouped) + `running` |
+| `PATCH` / `DELETE /v1/audience-studies/:id` | edit a draft (`script` or `questions` replace the script; a field left out is kept) / delete |
+| `POST /v1/audience-studies/:id/script` -> 202 | write the script again (1 call); voids any approval |
+| `POST /v1/audience-studies/:id/script/approve` | `{version}` (the `script_version` that was shown): records who and when approved that version (`script_approved_*`, `script_state` `approved`); 409 `script_changed` if the script moved on. Every written, edited, uploaded or rewritten script is a new version in `awaiting_approval` and nothing runs until it is approved |
+| `POST /v1/audience-studies/:id/start` -> 202, `.../cancel` -> 204 | body `{user_approved: true, manual_report?}` (400 without the yes, 409 `script_not_approved` unless the current script version is approved): one interview per persona, 3 at a time process-wide, then one synthesis call; with `manual_report` the study stops at `interviewed` until `.../report` |
+| `POST /v1/audience-studies/:id/report` -> 202 | `{user_approved: true}`: writes the report of an `interviewed` study (1 call; uses the completed interviews) |
+| `POST /v1/audience-studies/:id/retry` -> 202 | `{user_approved: true}`: asks again the people whose interview failed (study `interviewed`) |
+| `POST /v1/audience-studies/:id/rerun` -> 201 | `{changes?}`: plans the same study again after the product changed (a finished study only): same audience, kind, goal, prices and script (the script waits for approval again), `parent_study_id` set, `changes` added to the product text its people see; spends nothing until started. 400 when the study has no finished report. Migration 205 |
+| `GET /v1/audience-studies/:id/compare?with=<study id>` | what changed between the earlier study (`with`, default the study this one re-ran) and this one, from the two reports and answers, no model call: `{before, after, kind, changes, paired, improved, worse, same, verdict, verdict_labels, metrics[], segments[], objections[]/needs[]/alternatives[]/strengths[] (each {label, before_count, after_count, before_pct, after_pct, status: resolved\|new\|up\|down\|same}), people[] (those who answered both: intent and verdict before and after)}`. Both studies must be finished, of one audience and one kind (400 otherwise). Themes are paired by the words of their labels (half or more shared); a share moving 10 points or more is up/down |
+| `POST /v1/audience-studies/:id/ask` | `{question}` -> `{answer}` from the report and answers (1 call) |
+| `POST /v1/audience-studies/:id/ask-everyone` -> 202 | `{question}` -> `{group_id, calls}`; replies appear under `follow_ups` |
+| `POST /v1/audience-studies/:id/personas/:persona/follow-up` | `{question}` -> the persona's reply message |
+| `GET`/`POST`/`DELETE /v1/audience-personas/:id/messages` | the 1:1 thread / send `{message}` -> reply / clear |
+
+Errors: `409 audience_no_runtime`, `409 audience_busy`, `502 audience_call_failed`, `400` (message names what to fix), `404`.
+
+**Report** (`study.report`): `summary`, `verdict {label, score, rationale}` (label and score are computed: strong >= 70,
+promising >= 50, weak >= 30, else poor; score = mean intent x 10), `metrics` (intent distribution 0..10, yes/maybe/no, would-pay-now %,
+stated maximum prices with min/p25/median/mean/p75/max, a histogram, `not_willing`, and the buy % at each tested price),
+`segments[]`, `objections[]` / `needs[]` / `alternatives[]` (themes whose counts come from the persona ids the synthesis listed),
+`quotes[]` (kept only when found word for word in that persona's own answers), `recommendations[]`, `open_questions[]`,
+`methodology`, `disclaimer` (synthetic personas, not market data). A failed synthesis sets `synthesis_failed` and the report keeps its
+numbers and frequency-counted themes.
+
+## Remote access (migration 198)
+
+A paired phone reaches this server through a tunnel the desktop app runs. The tunnel targets a
+**second listener** (`127.0.0.1:<port>`, started by `POST /v1/remote-access/enable`), never the UI's
+port. That listener (`adapter/http/remote_app.go`) authenticates a device token, matches the request
+against the allowlist in `remote_allowlist.go` (exact method + canonical path, UUID path params; a body
+check on a few write routes), rate-limits, audits writes, and hands the request to this server's own
+router with the local auth already satisfied. Everything else is `403 route_not_allowed`.
+`TestRemoteAllowlistDeniesEveryOtherRegisteredRoute` scans the source for every registered route, so a
+new route is unreachable remotely until it is added to the allowlist on purpose.
+
+The wire contract for the phone (pairing flow, QR payload, allowlist, error codes, polling) is
+`docs/mobile-app-tunnel.md` for users; developers: the allowlist table in `remote_allowlist.go` and the
+`/remote/v1/*` handlers in `remote_native.go` are the source of truth.
+
+| Endpoint (loopback API, `SERVER_API_KEY`) | Notes |
+|---|---|
+| `GET /v1/remote-access` | `{enabled, port, server_name, device_count, pending_pairings}` |
+| `POST /v1/remote-access/enable` · `/disable` | `{preferred_port?}`; starts / stops the remote listener, returns the status |
+| `PUT /v1/remote-access/settings` | `{server_name?}` |
+| `POST /v1/remote-access/pairings` | `{role: operator\|viewer, expires_in_days: 0..365, public_url, device_label?}` -> `201 {id, code, code_display, uri, expires_at}`; `409 remote_disabled` while off. The code lives 5 minutes, works once, and is stored hashed |
+| `DELETE /v1/remote-access/pairings/{id}` | cancel. One phone at a time: creating a pairing cancels any pending one, and redeeming a code revokes every device that was paired before (its next request is `401 token_revoked`) |
+| `GET /v1/remote-access/devices` · `PATCH` · `DELETE /{id}` | list (revoked ones kept 30 days), rename / change role, revoke (immediate: every request re-reads the row) |
+| `GET /v1/remote-access/audit?limit=&device_id=` | `{entries}`: non-GET requests, failed auth, pairing, revocation, rate limits; route patterns only, never bodies |
+| `GET /v1/remote-access/live` | `{requests_last_minute, last_request_at}` |
+| `GET /v1/repositories/{id}/tasks/{taskId}` | one task with criteria, test cases and relations (404 `not_found`) |
+
+Remote listener (`/remote/v1/*`): `GET info`, `POST pair` (public), `GET|DELETE me`, `GET changes?since=&wait=`,
+`GET pending`, `GET sessions/{id}/turn`, `POST sessions/{id}/messages` (async, 202). Device tokens are
+`ttd_` + 32 random bytes (base64url); only the SHA-256 is stored.
+
+## Repository setup checklist (migration 200)
+
+`internal/application/readiness` builds the "get this project ready" checklist of a repository from
+signals the product already has and starts a step on the person's click. Every status is derived from
+live data when asked (cached for 3 s per repository, cleared by any choice or run); the only stored state
+is `repository_readiness_steps` (migration 200): a skip per step, the board task a step opened, and the
+card's own hide choice under the reserved step id `_card`.
+
+Steps, in the order they are listed and run (a step that does not apply to the repository is left out):
+`scan` (latest scan) -> `toolchain` (the languages the scan found; the app decides whether this
+computer has them, so the server answers `unknown`) -> `index` (code index) -> `guide` (README and an
+agent guide such as `CLAUDE.md`/`AGENTS.md`/`.ai`, read from the working copy's top directory) -> `tests`
+(a component with no test command, or an open `no_automated_tests` finding) -> `ci` (no CI jobs found, only
+with a remote) -> `delivery` (a deployable component whose delivery profile is not confirmed or is `none`) ->
+`observability` (production readiness suggestions of a deployable component; waits for `delivery`) ->
+`findings` (open code-health findings with no task) -> `design` (a frontend with no design system) ->
+`store` (a mobile component with no store app).
+
+Status is `done`, `todo`, `running` (scan or index under way, or the step's task is still open),
+`blocked` (a step it depends on is not done; `reason` is `needs_<step>`), `skipped` or `unknown`. A
+step's action says what "do it" means: `run` (scan, index), `task` (guide, tests, ci: opens a board
+task; briefs `catalog/system/prompts/readiness/{guide,tests}.md`, the CI brief is the existing workflow
+setup brief), `navigate` (needs a decision or credential: delivery, observability, findings, design, store)
+or `desktop` (toolchain, the desktop shell's installer). `reason` is a code and `facts` the numbers the UI
+words per locale; nothing here is prose for a person.
+
+| Endpoint | Notes |
+|---|---|
+| `GET /v1/repositories/{id}/readiness` | `{repository_id, steps[], done, skipped, total, complete, dismissed, run_all: {tasks, runs, steps[]}}`; each step `{id, status, action, depends_on, reason?, facts?, task?}` |
+| `POST /v1/repositories/{id}/readiness/steps/{stepId}/run` | `{approve}`; 202 `{step, task?, started}`. A `task` step needs `approve: true` (400 otherwise, nothing opened); 409 when the step is done, skipped, blocked, already has an open task, or is one the app does itself; 404 for an unknown or inapplicable step. One click is not chained behind other tasks |
+| `POST /v1/repositories/{id}/readiness/run-all` | `{approve_tasks}`; starts every `todo` run/task step in order. `approve_tasks` must equal `run_all.tasks` (400 when missing, 409 when the checklist changed), so the person approves the number they saw. Each task is created with `blocked_by` the task opened before it (or the one already open), so the board's work-order gate runs them one after another with no orchestrator. 202 `{results[]}` |
+| `PUT /v1/repositories/{id}/readiness/steps/{stepId}` | `{skipped}`; returns the checklist. A step that is actually done stays `done` |
+| `PUT /v1/repositories/{id}/readiness` | `{dismissed}`; hides or shows the card, returns the checklist |

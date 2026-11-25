@@ -178,13 +178,11 @@ export const agentArea = {
       task_completed: "Tâche terminée",
       task_released: "Tâche publiée",
       revision_requested: "Révision demandée",
-      pm_uat_failed: "UAT PM échouée",
       human_uat_failed: "UAT humaine échouée",
       qa_bug_found: "Bug trouvé par la QA",
       qa_valid_scenario_confirmed: "Scénario valide confirmé",
       qa_invalid_scenario_confirmed: "Scénario invalide confirmé",
       qa_task_tested: "Tests QA terminés",
-      pm_uat_completed: "UAT PM terminée",
     },
     changeType: {
       skill_created: "Skill ajoutée",
@@ -282,6 +280,13 @@ export const agentArea = {
     systemPrompt: "Prompt système",
     enabled: "Activé",
     coreHint: "Agent central ; il ne peut pas être désactivé.",
+    commitCoauthor: {
+      label: "Co-auteur du commit",
+      help: "Nom <e-mail> ou une ligne Co-authored-by complète. Laisser vide pour les lignes par défaut.",
+      placeholder: "Jeanne Dupont <jeanne@example.com>",
+      disable: "Ne pas ajouter de co-auteur",
+      disableHelp: "Activé : les commits de cet agent ne portent aucune ligne Co-authored-by.",
+    },
     catalog: {
       autoPull: {
         label: "Récupérer les mises à jour de définition depuis le catalogue",
@@ -322,7 +327,8 @@ export const agentArea = {
         label: "Écrire à {name}",
         placeholder: "Demandez une fonctionnalité, signalez un bug ou posez une question sur le tableau…",
         send: "Envoyer",
-        hint: "Enter pour envoyer · Shift+Enter pour un saut de ligne",
+        hint: "Enter pour envoyer · Shift+Enter pour un saut de ligne · @ pour mentionner un agent, un projet ou un dépôt",
+        voice: "Parler à voix haute",
         failed: "Impossible de démarrer une conversation",
         suggestions: {
           board: {
@@ -376,10 +382,6 @@ export const agentArea = {
             qa: {
               label: "QA",
               detail: "Tests",
-            },
-            acceptance: {
-              label: "Contrôle PM",
-              detail: "UAT",
             },
             approval: {
               label: "Validation",

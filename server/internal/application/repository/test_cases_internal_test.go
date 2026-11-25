@@ -58,12 +58,14 @@ func TestTestCaseGate(t *testing.T) {
 		prev    domain.TaskColumn
 		target  domain.TaskColumn
 		require bool
+		actor   domain.TaskActor
+		rejects bool
 		wantErr string
 	}{
 		{
 			name:    "no cases at all refuses the hand-off",
 			prev:    domain.TaskColumnInQA,
-			target:  domain.TaskColumnPMUAT,
+			target:  domain.TaskColumnHumanUAT,
 			require: true,
 			wantErr: "carries no test cases",
 		},
@@ -71,7 +73,7 @@ func TestTestCaseGate(t *testing.T) {
 			name:    "a case written down but never executed refuses it too",
 			items:   []domain.TaskTestCase{testCase("expired token is rejected", domain.TestCaseStatusPlanned)},
 			prev:    domain.TaskColumnInQA,
-			target:  domain.TaskColumnPMUAT,
+			target:  domain.TaskColumnHumanUAT,
 			require: true,
 			wantErr: "expired token is rejected",
 		},
@@ -83,14 +85,14 @@ func TestTestCaseGate(t *testing.T) {
 				testCase("on a real device", domain.TestCaseStatusSkipped),
 			},
 			prev:    domain.TaskColumnInQA,
-			target:  domain.TaskColumnPMUAT,
+			target:  domain.TaskColumnHumanUAT,
 			require: true,
 		},
 		{
 			name:    "a failing case does not block: its exit is need_revision, not this move",
 			items:   []domain.TaskTestCase{testCase("happy path", domain.TestCaseStatusFailed)},
 			prev:    domain.TaskColumnInQA,
-			target:  domain.TaskColumnPMUAT,
+			target:  domain.TaskColumnHumanUAT,
 			require: true,
 		},
 		{
@@ -100,28 +102,77 @@ func TestTestCaseGate(t *testing.T) {
 			require: true,
 		},
 		{
-			name:    "moving back for revision is never gated",
+			name:    "a person dragging the card back for revision is never held",
 			items:   []domain.TaskTestCase{testCase("happy path", domain.TestCaseStatusPlanned)},
 			prev:    domain.TaskColumnInQA,
 			target:  domain.TaskColumnNeedRevision,
 			require: true,
+			actor:   domain.TaskActorHuman,
+		},
+		{
+			name:    "QA bouncing a task with no cases on it is refused",
+			prev:    domain.TaskColumnInQA,
+			target:  domain.TaskColumnNeedRevision,
+			require: true,
+			actor:   domain.TaskActorAgent,
+			wantErr: "carries no test cases",
+		},
+		{
+			name:    "QA bouncing a task with cases never run is refused",
+			items:   []domain.TaskTestCase{testCase("expired token is rejected", domain.TestCaseStatusPlanned), testCase("happy path", domain.TestCaseStatusFailed)},
+			prev:    domain.TaskColumnInQA,
+			target:  domain.TaskColumnNeedRevision,
+			require: true,
+			actor:   domain.TaskActorAgent,
+			wantErr: "expired token is rejected",
+		},
+		{
+			name:    "QA bouncing a task where nothing failed is refused",
+			items:   []domain.TaskTestCase{testCase("happy path", domain.TestCaseStatusPassed), testCase("on a device", domain.TestCaseStatusSkipped)},
+			prev:    domain.TaskColumnInQA,
+			target:  domain.TaskColumnNeedRevision,
+			require: true,
+			actor:   domain.TaskActorAgent,
+			wantErr: "nothing to fix",
+		},
+		{
+			name:    "a recorded failed case carries the bounce",
+			items:   []domain.TaskTestCase{testCase("happy path", domain.TestCaseStatusFailed)},
+			prev:    domain.TaskColumnInQA,
+			target:  domain.TaskColumnNeedRevision,
+			require: true,
+			actor:   domain.TaskActorAgent,
+		},
+		{
+			name:    "a rejected criterion carries the bounce",
+			items:   []domain.TaskTestCase{testCase("happy path", domain.TestCaseStatusSkipped)},
+			prev:    domain.TaskColumnInQA,
+			target:  domain.TaskColumnNeedRevision,
+			require: true,
+			actor:   domain.TaskActorAgent,
+			rejects: true,
 		},
 		{
 			name:    "off without require_criteria_complete",
 			prev:    domain.TaskColumnInQA,
-			target:  domain.TaskColumnPMUAT,
+			target:  domain.TaskColumnHumanUAT,
 			require: false,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			var criteria []domain.AcceptanceCriterion
+			if tc.rejects {
+				criteria = []domain.AcceptanceCriterion{{ID: uuid.New(), Text: "export works", Checks: []domain.CriterionCheck{{Role: domain.CriterionReviewRoleQA, Approved: false, Note: "500"}}}}
+			}
 			svc := &Service{
 				testCases:       &fakeTestCaseStore{items: tc.items},
+				criteria:        &fakeCriteriaStore{items: criteria},
 				requireCriteria: tc.require,
 				workflows:       workflowtest.Default().Reader(),
 			}
-			err := svc.testCaseGate(context.Background(), taskID, "task", tc.prev, tc.target)
+			err := svc.testCaseGate(context.Background(), taskID, "task", tc.prev, tc.target, tc.actor)
 			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("expected pass, got %v", err)

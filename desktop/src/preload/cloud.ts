@@ -7,14 +7,17 @@ import {
   type ChooseDirectoryRequest,
   type KeysWindowPrefill,
   type McpServerSetRequest,
+  type RemoteAccessConfigureRequest,
 } from "../ipc/channels.js";
 import type {
   DesktopAccountHost,
   DesktopAnalyticsHost,
   DesktopHost,
+  DesktopRemoteAccessHost,
   DesktopRunnerHost,
   DesktopToolchainHost,
   DesktopUpdatesHost,
+  DesktopVoiceHost,
   HostLogsRequest,
   HostOverrides,
   HostPreferences,
@@ -30,12 +33,17 @@ import type {
   LogLine,
   McpServersState,
   PreflightReport,
+  RemoteAccessState,
+  RemoteBinaryDetection,
   RunnerPairingBundle,
   RunnerPairingSummary,
   ToolchainId,
   ToolchainJobState,
   ToolchainReport,
   UpdateStatus,
+  VoiceAudioEvent,
+  VoiceCapabilities,
+  VoiceTranscriptEvent,
 } from "../ipc/types.js";
 
 /**
@@ -200,6 +208,35 @@ const toolchain: DesktopToolchainHost = {
   openPage: (id: ToolchainId) => call<void>(CLOUD_CHANNELS.toolchainOpenPage, { id }),
 };
 
+const remoteAccess: DesktopRemoteAccessHost = {
+  state: () => call<RemoteAccessState>(CLOUD_CHANNELS.remoteAccessState),
+  subscribe: (cb) => subscribe<RemoteAccessState>(CLOUD_EVENTS.remoteAccessState, cb),
+  configure: (request: RemoteAccessConfigureRequest) => call<RemoteAccessState>(CLOUD_CHANNELS.remoteAccessConfigure, request),
+  start: () => call<RemoteAccessState>(CLOUD_CHANNELS.remoteAccessStart),
+  stop: () => call<RemoteAccessState>(CLOUD_CHANNELS.remoteAccessStop),
+  detect: (provider) => call<RemoteBinaryDetection>(CLOUD_CHANNELS.remoteAccessDetect, { provider }),
+  openInstallPage: (provider) => call<void>(CLOUD_CHANNELS.remoteAccessOpenInstallPage, { provider }),
+  logs: () => call<string[]>(CLOUD_CHANNELS.remoteAccessLogs),
+  refreshAccount: () => call<RemoteAccessState>(CLOUD_CHANNELS.remoteAccessRefreshAccount),
+  cloudflareLogin: () => call<RemoteAccessState>(CLOUD_CHANNELS.remoteAccessCloudflareLogin),
+  cloudflareLoginCancel: () => call<RemoteAccessState>(CLOUD_CHANNELS.remoteAccessCloudflareLoginCancel),
+  cloudflareLogout: () => call<RemoteAccessState>(CLOUD_CHANNELS.remoteAccessCloudflareLogout),
+  ngrokConnect: (request) => call<RemoteAccessState>(CLOUD_CHANNELS.remoteAccessNgrokConnect, request),
+  ngrokDisconnect: () => call<RemoteAccessState>(CLOUD_CHANNELS.remoteAccessNgrokDisconnect),
+};
+
+const voice: DesktopVoiceHost = {
+  capabilities: () => call<VoiceCapabilities>(CLOUD_CHANNELS.voiceCapabilities),
+  listenStart: (lang) => call<{ id: string }>(CLOUD_CHANNELS.voiceListenStart, { lang }),
+  listenAudio: (id, pcm) => call<void>(CLOUD_CHANNELS.voiceListenAudio, { id, pcm }),
+  listenStop: (id) => call<void>(CLOUD_CHANNELS.voiceListenStop, { id }),
+  listenCancel: (id) => call<void>(CLOUD_CHANNELS.voiceListenCancel, { id }),
+  onTranscript: (cb) => subscribe<VoiceTranscriptEvent>(CLOUD_EVENTS.voiceTranscript, cb),
+  speak: (lang, text, speed, voice) => call<{ id: string }>(CLOUD_CHANNELS.voiceSpeak, { lang, text, speed, voice }),
+  speakCancel: (id) => call<void>(CLOUD_CHANNELS.voiceSpeakCancel, { id }),
+  onAudio: (cb) => subscribe<VoiceAudioEvent>(CLOUD_EVENTS.voiceAudio, cb),
+};
+
 /**
  * The synchronous reads, made once while the preload runs.
  *
@@ -225,7 +262,7 @@ const mode = syncString(CLOUD_CHANNELS.accountMode) === "account" ? "account" : 
 const host: DesktopHost = {
   ...(apiBase !== undefined ? { apiBase } : {}),
   ...(apiToken !== undefined ? { apiToken } : {}),
-  bridgeVersion: 7,
+  bridgeVersion: 9,
   mode,
   info: () => call<{ app: string; version: string; platform: string }>(CLOUD_CHANNELS.hostInfo),
   account,
@@ -233,6 +270,8 @@ const host: DesktopHost = {
   updates,
   analytics,
   toolchain,
+  remoteAccess,
+  voice,
 };
 
 contextBridge.exposeInMainWorld(
@@ -244,5 +283,7 @@ contextBridge.exposeInMainWorld(
     updates: Object.freeze(updates),
     analytics: Object.freeze(analytics),
     toolchain: Object.freeze(toolchain),
+    remoteAccess: Object.freeze(remoteAccess),
+    voice: Object.freeze(voice),
   }),
 );

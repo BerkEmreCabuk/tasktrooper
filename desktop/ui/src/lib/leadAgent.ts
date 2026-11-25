@@ -1,5 +1,5 @@
 import type { NavigateFunction } from "react-router-dom";
-import { api, type Agent, type MessageMention, type Role } from "@/api";
+import { api, type Agent, type AttachmentMeta, type MessageMention, type Role } from "@/api";
 
 /**
  * The lead agent is the one the stakeholder talks to: the product manager,
@@ -28,8 +28,8 @@ export function resolveLeadAgent(agents: Agent[], roles: Role[] | null): Agent |
 }
 
 /**
- * Every agent holding the lead's role. The lead works its own column (pm_uat)
- * and the stakeholder's chats, never a board card as its assignee — the server
+ * Every agent holding the lead's role. The lead works the stakeholder's chats
+ * and never a board card as its assignee — the server
  * refuses that, so the pickers leave these agents out.
  */
 export function productManagerIds(agents: Agent[], roles: Role[] | null): string[] {
@@ -60,7 +60,16 @@ export async function startLeadConversation(
   message: string,
   title: string,
   mentions: MessageMention[] = [],
+  attachments: AttachmentMeta[] = [],
 ): Promise<void> {
   const session = await api.createSession({ title, agent_id: agentId });
-  navigate(`/agents/${agentId}/chat/${session.id}`, { state: { autoSend: message, autoSendMentions: mentions } });
+  navigate(`/agents/${agentId}/chat/${session.id}`, {
+    state: { autoSend: message, autoSendMentions: mentions, autoSendAttachments: attachments },
+  });
+}
+
+/** Opens a new conversation with the lead and starts talking to it by voice there. */
+export async function startLeadVoiceConversation(navigate: NavigateFunction, agentId: string, title: string): Promise<void> {
+  const session = await api.createSession({ title, agent_id: agentId });
+  navigate(`/agents/${agentId}/chat/${session.id}`, { state: { autoVoice: true } });
 }

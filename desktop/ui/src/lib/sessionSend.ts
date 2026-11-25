@@ -139,14 +139,15 @@ export class AgentStreamError extends Error {
 }
 
 /**
- * What the caller can paint while the turn is still running: the answer being
+ * What the caller can paint while the turn is still running: the stretch being
  * written now, and the stretches of reasoning the run has already closed behind
- * it. They are kept apart because they read differently — one is the reply, the
- * other is the model explaining why it went and looked something up.
+ * it. The open stretch is not yet the answer: a tool call after it makes it
+ * reasoning, and only the end of the stream makes it the reply — so a caller
+ * that shows it as the reply shows the model's thinking as an answer first.
  */
 export interface StreamProgress {
-  /** The reply so far. Empty between a closed reasoning stretch and the next token. */
-  answer: string;
+  /** The open stretch so far. Empty between a closed reasoning stretch and the next token. */
+  pending: string;
   /** Finished reasoning stretches, oldest first. */
   reasoning: string[];
 }
@@ -165,6 +166,7 @@ async function streamSessionMessage(
     orchestrate?: boolean;
     mentions?: MessageMention[];
     attachmentIds?: string[];
+    voice?: "tr" | "en";
     signal?: AbortSignal;
   },
   onProgress: (progress: StreamProgress) => void,
@@ -182,12 +184,12 @@ async function streamSessionMessage(
   for await (const event of api.sendMessageStream(sessionId, content, options)) {
     if (event.kind === "token") {
       text += event.token;
-      onProgress({ answer: text, reasoning });
+      onProgress({ pending: text, reasoning });
     } else if (event.kind === "reasoning_end") {
       const closed = text.trim();
       if (closed) reasoning = [...reasoning, closed];
       text = "";
-      onProgress({ answer: text, reasoning });
+      onProgress({ pending: text, reasoning });
     } else if (event.kind === "finished") {
       finished = true;
     } else if (event.kind === "error") {
@@ -240,13 +242,15 @@ export async function sendSessionMessageWithRecovery(
     onProgress?: (progress: StreamProgress) => void;
     /** Cancels the send — and, on the streaming path, the run behind it. */
     signal?: AbortSignal;
+    /** Spoken turn: the reply is shaped to be read aloud in this language (streaming path only). */
+    voice?: "tr" | "en";
   },
 ): Promise<SendSessionMessageResult> {
-  const { fileIds, orchestrate, baselineAssistantCount, mentions, attachmentIds, onProgress, signal } = options;
+  const { fileIds, orchestrate, baselineAssistantCount, mentions, attachmentIds, onProgress, signal, voice } = options;
   const deadline = Date.now() + MAX_WAIT_MS;
 
   const send = onProgress
-    ? streamSessionMessage(sessionId, content, { fileIds, orchestrate, mentions, attachmentIds, signal }, onProgress)
+    ? streamSessionMessage(sessionId, content, { fileIds, orchestrate, mentions, attachmentIds, voice, signal }, onProgress)
     : api.sendMessage(sessionId, content, fileIds, orchestrate, mentions, attachmentIds);
   const sendTask = send.then((response) => ({
     kind: "send" as const,

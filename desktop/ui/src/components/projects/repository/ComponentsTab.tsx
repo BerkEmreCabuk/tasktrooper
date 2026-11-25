@@ -1,4 +1,4 @@
-import { Box, Pencil, Plus } from "lucide-react";
+import { Box, Pencil, Plus, Trash2, Undo2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -6,11 +6,13 @@ import {
   api,
   COMMAND_PURPOSES,
   COMPONENT_ROLES,
+  CONTAINER_COMMAND_PURPOSES,
   type Component,
   type ComponentCommand,
   type ComponentGates,
   type CommandPurpose,
   type ComponentRole,
+  type ContainerSettings,
   type GateCITask,
   type RepositoryModel,
 } from "@/api";
@@ -189,9 +191,10 @@ function ComponentDetail({
         />
       )}
       <IdentityCard component={component} patch={patch} />
-      <StackCard component={component} />
+      <StackCard component={component} patch={patch} />
       <CommandsCard component={component} patch={patch} />
       <GatesCard component={component} patch={patch} />
+      <ContainersCard component={component} patch={patch} />
       <ComponentDocsCard repositoryId={repositoryId} component={component} onReload={onReload} />
       {factValue(component.role) === "mobile" && <MobileCard component={component} />}
 
@@ -263,9 +266,13 @@ function IdentityCard({ component, patch }: CardProps) {
   );
 }
 
-function StackCard({ component }: { component: Component }) {
+function StackCard({ component, patch }: CardProps) {
   const { t } = useI18n();
   const stack = factValue(component.stack);
+  const [langs, setLangs] = useState((stack?.languages ?? []).map((l) => l.name).join(", "));
+  useEffect(() => {
+    setLangs((factValue(component.stack)?.languages ?? []).map((l) => l.name).join(", "));
+  }, [component.id, component.stack]);
   const rows: { label: string; value: string; evidence?: { path: string; line?: number; note?: string } }[] = [];
   for (const item of stack?.languages ?? []) {
     rows.push({ label: t("repositoryPage.components.languages"), value: item.version ? `${item.name} ${item.version}` : item.name, evidence: item.evidence });
@@ -306,6 +313,22 @@ function StackCard({ component }: { component: Component }) {
           </tbody>
         </table>
       )}
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">{t("repositoryPage.components.stackOverrideLabel")}</Label>
+        <Input
+          value={langs}
+          placeholder={t("repositoryPage.components.stackOverridePlaceholder")}
+          onChange={(e) => setLangs(e.target.value)}
+          onBlur={() => {
+            const names = langs.split(",").map((n) => n.trim()).filter(Boolean);
+            const current = (stack?.languages ?? []).map((l) => l.name).join(", ");
+            if (names.join(", ") === current) return;
+            void patch({ stack: names.length ? { languages: names.map((name) => ({ name })) } : null });
+          }}
+        />
+        <p className="text-xs text-muted-foreground">{t("repositoryPage.components.stackOverrideHint")}</p>
+        <FactValue fact={component.stack} render={() => null} onRevert={isOverridden(component.stack) ? () => patch({ stack: null }) : undefined} />
+      </div>
     </Card>
   );
 }
@@ -317,12 +340,22 @@ function CommandsCard({ component, patch }: CardProps) {
   const [addingPurpose, setAddingPurpose] = useState<CommandPurpose | "">("");
   const [addingValue, setAddingValue] = useState("");
 
-  const present = new Set(component.commands.map((c) => c.purpose));
-  const missing = COMMAND_PURPOSES.filter((p) => !present.has(p));
+  const isRemoved = (cmd: ComponentCommand) => (factValue(cmd.command) ?? "") === "";
+  const shown = component.commands.filter((c) => !isRemoved(c));
+  const removed = component.commands.filter(isRemoved);
+  const present = new Set(shown.map((c) => c.purpose));
+  const hasContainers = hasContainerCommands(component);
+  const missing = COMMAND_PURPOSES.filter(
+    (p) => !present.has(p) && (hasContainers || !CONTAINER_COMMAND_PURPOSES.includes(p)),
+  );
 
   const startEdit = (cmd: ComponentCommand) => {
     setEditing(cmd.purpose);
     setDraft(factValue(cmd.command) ?? "");
+  };
+
+  const remove = async (cmd: ComponentCommand) => {
+    await patch({ commands: { [cmd.purpose]: factDetected(cmd) === undefined ? null : "" } });
   };
 
   const save = async (purpose: CommandPurpose, value: string) => {
@@ -338,7 +371,7 @@ function CommandsCard({ component, patch }: CardProps) {
       </div>
       <table className="w-full text-body">
         <tbody>
-          {component.commands.map((cmd) => (
+          {shown.map((cmd) => (
             <tr key={cmd.purpose} className="border-t border-border first:border-t-0">
               <td className="w-32 py-2 pr-3 text-muted-foreground">{t(`projectModel.commandPurposes.${cmd.purpose}`)}</td>
               <td className="py-2 pr-3">
@@ -363,12 +396,42 @@ function CommandsCard({ component, patch }: CardProps) {
                   />
                 )}
               </td>
-              <td className="py-2 text-right">
+              <td className="whitespace-nowrap py-2 text-right">
                 {editing !== cmd.purpose && (
-                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(cmd)}>
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
+                  <>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(cmd)}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      aria-label={t("repositoryPage.components.removeCommand")}
+                      title={t("repositoryPage.components.removeCommand")}
+                      onClick={() => void remove(cmd)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
                 )}
+              </td>
+            </tr>
+          ))}
+          {removed.map((cmd) => (
+            <tr key={cmd.purpose} className="border-t border-border text-muted-foreground">
+              <td className="w-32 py-2 pr-3">{t(`projectModel.commandPurposes.${cmd.purpose}`)}</td>
+              <td className="py-2 pr-3 italic">{t("repositoryPage.components.commandRemoved")}</td>
+              <td className="py-2 text-right">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  aria-label={t("repositoryPage.components.restoreCommand")}
+                  title={t("repositoryPage.components.restoreCommand")}
+                  onClick={() => patch({ commands: { [cmd.purpose]: null } })}
+                >
+                  <Undo2 className="h-3.5 w-3.5" />
+                </Button>
               </td>
             </tr>
           ))}
@@ -391,7 +454,7 @@ function CommandsCard({ component, patch }: CardProps) {
           <Input
             value={addingValue}
             onChange={(e) => setAddingValue(e.target.value)}
-            placeholder={t("repositoryPage.components.commandValuePlaceholder")}
+            placeholder={(addingPurpose && DOCKER_EXAMPLES[addingPurpose]) || t("repositoryPage.components.commandValuePlaceholder")}
             className="flex-1 font-mono text-body"
           />
           <Button
@@ -408,6 +471,106 @@ function CommandsCard({ component, patch }: CardProps) {
             {t("repositoryPage.components.addCommand")}
           </Button>
         </div>
+      )}
+    </Card>
+  );
+}
+
+const DOCKER_EXAMPLES: Partial<Record<CommandPurpose, string>> = {
+  buildkit_setup: "docker buildx create --use",
+  image_build: "docker buildx build -t app:dev .",
+  compose_up: "docker compose up -d",
+  compose_down: "docker compose down --volumes --remove-orphans",
+  compose_stop: "docker compose stop",
+};
+
+function factDetected(cmd: ComponentCommand): string | undefined {
+  return cmd.command.detected ?? undefined;
+}
+
+function hasContainerCommands(component: Component): boolean {
+  if (component.container?.enabled) return true;
+  if (factValue(component.stack)?.container) return true;
+  return component.commands.some((c) => CONTAINER_COMMAND_PURPOSES.includes(c.purpose) && (factValue(c.command) ?? "") !== "");
+}
+
+function ContainersCard({ component, patch }: CardProps) {
+  const { t } = useI18n();
+  const saved: ContainerSettings = component.container ?? {};
+  const [registry, setRegistry] = useState(saved.registry ?? "");
+  const [platforms, setPlatforms] = useState((saved.platforms ?? []).join(", "));
+  const [tag, setTag] = useState(saved.tag_pattern ?? "");
+  useEffect(() => {
+    const c = component.container ?? {};
+    setRegistry(c.registry ?? "");
+    setPlatforms((c.platforms ?? []).join(", "));
+    setTag(c.tag_pattern ?? "");
+  }, [component.id, component.container]);
+
+  const save = (next: ContainerSettings) => patch({ container: { ...saved, ...next } });
+  const savePlatforms = () =>
+    save({
+      platforms: platforms
+        .split(",")
+        .map((p) => p.trim())
+        .filter(Boolean),
+    });
+
+  return (
+    <Card className="space-y-4 p-6">
+      <div className="space-y-1">
+        <h3 className="font-semibold">{t("repositoryPage.components.containersTitle")}</h3>
+        <p className="text-xs text-muted-foreground">{t("repositoryPage.components.containersHint")}</p>
+      </div>
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <Label>{t("repositoryPage.components.hasContainers")}</Label>
+          <p className="text-xs text-muted-foreground">{t("repositoryPage.components.hasContainersHint")}</p>
+        </div>
+        <Switch aria-label={t("repositoryPage.components.hasContainers")} checked={saved.enabled ?? hasContainerCommands(component)} onCheckedChange={(enabled) => void save({ enabled })} />
+      </div>
+      {hasContainerCommands(component) && (
+        <>
+          <div className="space-y-1">
+            <Label>{t("repositoryPage.components.containerRegistry")}</Label>
+            <Input
+              value={registry}
+              placeholder="ghcr.io/acme/app"
+              className="font-mono text-body"
+              onChange={(e) => setRegistry(e.target.value)}
+              onBlur={() => registry.trim() !== (saved.registry ?? "") && void save({ registry: registry.trim() })}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label>{t("repositoryPage.components.containerPlatforms")}</Label>
+            <Input
+              value={platforms}
+              placeholder="linux/amd64, linux/arm64"
+              className="font-mono text-body"
+              onChange={(e) => setPlatforms(e.target.value)}
+              onBlur={savePlatforms}
+            />
+            <p className="text-xs text-muted-foreground">{t("repositoryPage.components.containerPlatformsHint")}</p>
+          </div>
+          <div className="space-y-1">
+            <Label>{t("repositoryPage.components.containerTag")}</Label>
+            <Input
+              value={tag}
+              placeholder="{sha}"
+              className="font-mono text-body"
+              onChange={(e) => setTag(e.target.value)}
+              onBlur={() => tag.trim() !== (saved.tag_pattern ?? "") && void save({ tag_pattern: tag.trim() })}
+            />
+            <p className="text-xs text-muted-foreground">{t("repositoryPage.components.containerTagHint")}</p>
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <Label>{t("repositoryPage.components.containerOnly")}</Label>
+              <p className="text-xs text-muted-foreground">{t("repositoryPage.components.containerOnlyHint")}</p>
+            </div>
+            <Switch aria-label={t("repositoryPage.components.containerOnly")} checked={saved.container_only ?? false} onCheckedChange={(container_only) => void save({ container_only })} />
+          </div>
+        </>
       )}
     </Card>
   );

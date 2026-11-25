@@ -42,6 +42,10 @@ func (s *stubSessionStore) UpdateProjectRoot(context.Context, uuid.UUID, string)
 func (s *stubSessionStore) UpdateTitle(context.Context, uuid.UUID, string, bool) error  { return nil }
 func (s *stubSessionStore) UpdateCLISessionID(context.Context, uuid.UUID, string) error { return nil }
 func (s *stubSessionStore) BindTask(context.Context, uuid.UUID, uuid.UUID) error        { return nil }
+func (s *stubSessionStore) FindByTaskAndAgent(context.Context, uuid.UUID, uuid.UUID) (domain.Session, bool, error) {
+	return domain.Session{}, false, nil
+}
+
 func (s *stubSessionStore) FindByTask(context.Context, uuid.UUID) (domain.Session, bool, error) {
 	return domain.Session{}, false, nil
 }
@@ -50,6 +54,9 @@ func (s *stubSessionStore) ParkPendingTurn(context.Context, uuid.UUID, domain.Se
 }
 func (s *stubSessionStore) TakePendingSessionTurn(context.Context, time.Time) (domain.PendingSessionTurn, bool, error) {
 	return domain.PendingSessionTurn{}, false, nil
+}
+func (s *stubSessionStore) ListRecentChatMessages(context.Context, int) ([]domain.ChatActivityEntry, error) {
+	return nil, nil
 }
 
 type stubActionStore struct {

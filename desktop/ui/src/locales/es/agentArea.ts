@@ -178,13 +178,11 @@ export const agentArea = {
       task_completed: "Tarea completada",
       task_released: "Tarea publicada",
       revision_requested: "Corrección solicitada",
-      pm_uat_failed: "UAT del PM fallida",
       human_uat_failed: "UAT humana fallida",
       qa_bug_found: "Bug encontrado por QA",
       qa_valid_scenario_confirmed: "Escenario válido confirmado",
       qa_invalid_scenario_confirmed: "Escenario no válido confirmado",
       qa_task_tested: "QA terminó las pruebas",
-      pm_uat_completed: "UAT del PM completada",
     },
     changeType: {
       skill_created: "Skill añadida",
@@ -282,6 +280,13 @@ export const agentArea = {
     systemPrompt: "Prompt del sistema",
     enabled: "Activado",
     coreHint: "Agente central; no se puede desactivar.",
+    commitCoauthor: {
+      label: "Coautor del commit",
+      help: "Nombre <correo> o una línea Co-authored-by completa. Déjalo vacío para las líneas por defecto.",
+      placeholder: "Ana Pérez <ana@example.com>",
+      disable: "No añadir coautor",
+      disableHelp: "Activado: los commits de este agente no llevan ninguna línea Co-authored-by.",
+    },
     catalog: {
       autoPull: {
         label: "Traer actualizaciones de la definición desde el catálogo",
@@ -322,7 +327,8 @@ export const agentArea = {
         label: "Mensaje para {name}",
         placeholder: "Pide una funcionalidad, informa de un bug o pregunta por el tablero…",
         send: "Enviar",
-        hint: "Enter para enviar · Shift+Enter para una nueva línea",
+        hint: "Enter para enviar · Shift+Enter para una nueva línea · @ para etiquetar un agente, proyecto o repositorio",
+        voice: "Hablar por voz",
         failed: "No se pudo iniciar una conversación",
         suggestions: {
           board: {
@@ -376,10 +382,6 @@ export const agentArea = {
             qa: {
               label: "QA",
               detail: "Pruebas",
-            },
-            acceptance: {
-              label: "Revisión del PM",
-              detail: "UAT",
             },
             approval: {
               label: "Visto bueno",

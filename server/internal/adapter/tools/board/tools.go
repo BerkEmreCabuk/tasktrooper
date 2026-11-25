@@ -102,6 +102,7 @@ type ReleaseService interface {
 	Finish(ctx context.Context, releaseID uuid.UUID, actor domain.ReleaseActor, note string) (domain.Release, error)
 	Rollback(ctx context.Context, releaseID uuid.UUID, actor domain.ReleaseActor, reason domain.RollbackReason, note string) (domain.Release, error)
 	Impact(ctx context.Context, releaseID uuid.UUID) (domain.DeployImpact, error)
+	ProposeCut(ctx context.Context, releaseID uuid.UUID, actor domain.ReleaseActor, req domain.ReleaseCutRequest) (domain.Release, error)
 }
 
 type ToolKit struct {
@@ -147,6 +148,9 @@ type ToolKit struct {
 	// EnvRequirements backs declare_env_vars. Built after this registration
 	// (it needs the cloud service), so it is read at call time.
 	EnvRequirements EnvDeclarer
+	// ChangeRequests backs notify_task_agent. Built from the run controller and
+	// runner, so it is read at call time like Releases.
+	ChangeRequests ChangeDeliverer
 }
 
 // SubscriptionLister is the read-only slice of port.BoardConfigStore
@@ -168,6 +172,7 @@ func NewExecutors(kit *ToolKit) []port.ToolExecutor {
 		newDeleteTaskTool(kit),
 		newClaimTaskTool(kit),
 		newAddCommentTool(kit),
+		newNotifyTaskAgentTool(kit),
 		newListCommentsTool(kit),
 		newAddDocumentTool(kit),
 		newUpdateDocumentTool(kit),
@@ -176,6 +181,7 @@ func NewExecutors(kit *ToolKit) []port.ToolExecutor {
 		newResolveAnnotationsTool(kit),
 		newRecordQuestionsTool(kit),
 		newListOpenQuestionsTool(kit),
+		newRecordReviewFindingsTool(kit),
 		newListCriteriaTool(kit),
 		newSetCriterionTool(kit),
 		newCancelCriterionTool(kit),
@@ -235,6 +241,7 @@ func NewExecutors(kit *ToolKit) []port.ToolExecutor {
 			newDeployLogsTool(kit),
 			newGetReleaseTool(kit),
 			newDeployReleaseTool(kit),
+			newProposeCutTool(kit),
 			newWatchReleaseTool(kit),
 			newRunSmokeChecksTool(kit),
 			newFinishReleaseTool(kit),

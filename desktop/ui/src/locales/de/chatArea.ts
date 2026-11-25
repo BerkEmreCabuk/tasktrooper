@@ -28,6 +28,7 @@ export const chatArea = {
       textRequired: "Bitte geben Sie Ihre Antwort ein",
       selectOne: "Wählen Sie eine Option",
       selectMany: "Alle zutreffenden auswählen",
+      selectUpTo: "Wählen Sie bis zu {max}",
       other: "Sonstiges",
       skip: "Überspringen",
       answered: "Beantwortet",
@@ -47,6 +48,7 @@ export const chatArea = {
         attached: "angehängt an",
         linked: "verknüpft",
         deleted: "gelöscht",
+        proposed: "vorgeschlagen",
       },
       entity: {
         board_task: "Aufgabe",
@@ -55,6 +57,7 @@ export const chatArea = {
         acceptance_criterion: "Akzeptanzkriterium",
         initiative_project: "Projekt",
         repository: "Repository",
+        release: "Release",
       },
     },
     plan: {
@@ -103,6 +106,12 @@ export const chatArea = {
       queuedRemove: "Aus Warteschlange entfernen",
       queuedHint: "Wird gesendet, sobald der Agent seine aktuelle Arbeit beendet hat.",
       queuedReturned: "Nachrichten aus der Warteschlange wurden in das Eingabefeld zurückgelegt.",
+    },
+    wakes: {
+      waiting: "Wartet auf Hintergrundarbeit und antwortet erneut, sobald sie endet",
+      stop: "Warten beenden",
+      stopFailed: "Warten konnte nicht beendet werden",
+      updateTitle: "Hintergrundarbeit abgeschlossen",
     },
     reasoning: {
       title: "Denkschritte ({count})",
@@ -193,8 +202,28 @@ export const chatArea = {
       resultsCount: "{count} Ergebnisse",
     },
   },
+  voice: {
+    start: "Mit dem Agenten sprechen",
+    end: "Beenden",
+    hint: "Hört zu – sprich, wenn du bereit bist",
+    state: {
+      starting: "Mikrofon wird geöffnet…",
+      listening: "Hört zu",
+      thinking: "Denkt nach…",
+      speaking: "Spricht – sprich, um zu unterbrechen",
+      off: "Sprache aus",
+    },
+    error: {
+      micDenied: "TaskTrooper kann das Mikrofon nicht verwenden. Erlaube es unter Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon.",
+      micMissing: "Kein Mikrofon gefunden.",
+      generic: "Sprache beendet: {message}",
+    },
+  },
   markdown: {
     empty: "Leer",
+    visual: {
+      title: "Zeichnung des Agenten",
+    },
     table: {
       scrollHint: "Scrollen, um weitere Spalten zu sehen",
     },

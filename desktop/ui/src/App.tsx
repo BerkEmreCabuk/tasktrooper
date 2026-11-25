@@ -44,12 +44,49 @@ const EntityPages = lazy(() => import("@/pages/ops/entity/EntityPages"));
 const EntityCrashes = lazy(() => import("@/pages/ops/entity/EntityCrashes"));
 const EntityTraces = lazy(() => import("@/pages/ops/entity/EntityTraces"));
 const DataSourcesPage = lazy(() => import("@/pages/DataSourcesPage").then((m) => ({ default: m.DataSourcesPage })));
+const TelemetryGate = lazy(() => import("@/components/operations/telemetry/TelemetryGate").then((m) => ({ default: m.TelemetryGate })));
+const TelemetryServicesPage = lazy(() => import("@/pages/ops/telemetry/TelemetryServicesPage"));
+const TelemetryServicePage = lazy(() => import("@/pages/ops/telemetry/TelemetryServicePage"));
+const TelemetryEndpointsPage = lazy(() => import("@/pages/ops/telemetry/TelemetryEndpointsPage"));
+const TelemetryEndpointPage = lazy(() => import("@/pages/ops/telemetry/TelemetryEndpointPage"));
+const TelemetryTracesPage = lazy(() => import("@/pages/ops/telemetry/TelemetryTracesPage"));
+const TelemetryTracePage = lazy(() => import("@/pages/ops/telemetry/TelemetryTracePage"));
+const TelemetryLogsPage = lazy(() => import("@/pages/ops/telemetry/TelemetryLogsPage"));
+const TelemetryErrorsPage = lazy(() => import("@/pages/ops/telemetry/TelemetryErrorsPage"));
+const TelemetryIncidentsPage = lazy(() => import("@/pages/ops/telemetry/TelemetryIncidentsPage"));
+const TelemetryMonitorsPage = lazy(() => import("@/pages/ops/telemetry/TelemetryMonitorsPage"));
+const TelemetryDeploysPage = lazy(() => import("@/pages/ops/telemetry/TelemetryDeploysPage"));
+const TelemetrySloPage = lazy(() => import("@/pages/ops/telemetry/TelemetrySloPage"));
+const TelemetryOverviewPage = lazy(() => import("@/pages/ops/telemetry/TelemetryOverviewPage"));
+const TelemetryServiceMapPage = lazy(() => import("@/pages/ops/telemetry/TelemetryServiceMapPage"));
+const TelemetryHostsPage = lazy(() => import("@/pages/ops/telemetry/TelemetryHostsPage"));
+const TelemetryHostPage = lazy(() => import("@/pages/ops/telemetry/TelemetryHostPage"));
+const TelemetryKubernetesPage = lazy(() => import("@/pages/ops/telemetry/TelemetryKubernetesPage"));
+const TelemetryK8sClusterPage = lazy(() => import("@/pages/ops/telemetry/TelemetryK8sClusterPage"));
+const TelemetryPodPage = lazy(() => import("@/pages/ops/telemetry/TelemetryPodPage"));
+const TelemetryDatabasesPage = lazy(() => import("@/pages/ops/telemetry/TelemetryDatabasesPage"));
+const TelemetryQueuesPage = lazy(() => import("@/pages/ops/telemetry/TelemetryQueuesPage"));
+const TelemetryServerlessPage = lazy(() => import("@/pages/ops/telemetry/TelemetryServerlessPage"));
+const TelemetryFunctionPage = lazy(() => import("@/pages/ops/telemetry/TelemetryFunctionPage"));
+const TelemetryAppsPage = lazy(() => import("@/pages/ops/telemetry/TelemetryAppsPage"));
+const TelemetryAppPage = lazy(() => import("@/pages/ops/telemetry/TelemetryAppPage"));
+const TelemetryReplaysPage = lazy(() => import("@/pages/ops/telemetry/TelemetryReplaysPage"));
+const TelemetryReplayPage = lazy(() => import("@/pages/ops/telemetry/TelemetryReplayPage"));
+const TelemetryProfilingPage = lazy(() => import("@/pages/ops/telemetry/TelemetryProfilingPage"));
+const TelemetryLlmPage = lazy(() => import("@/pages/ops/telemetry/TelemetryLlmPage"));
+const TelemetryLoadTestsPage = lazy(() => import("@/pages/ops/telemetry/TelemetryLoadTestsPage"));
+const TelemetryLoadTestRunPage = lazy(() => import("@/pages/ops/telemetry/TelemetryLoadTestRunPage"));
+const TelemetrySettingsPage = lazy(() => import("@/pages/TelemetrySettingsPage").then((m) => ({ default: m.TelemetrySettingsPage })));
 const OpsAlertConnectionsPage = lazy(() => import("@/pages/ops/OpsAlertConnectionsPage"));
 const FilesPage = lazy(() => import("@/pages/FilesPage").then((m) => ({ default: m.FilesPage })));
 const RulesPage = lazy(() => import("@/pages/RulesPage").then((m) => ({ default: m.RulesPage })));
+const RemoteAccessSettingsPage = lazy(() => import("@/pages/RemoteAccessSettingsPage").then((m) => ({ default: m.RemoteAccessSettingsPage })));
 const IntegrationsSettingsPage = lazy(() => import("@/pages/IntegrationsSettingsPage").then((m) => ({ default: m.IntegrationsSettingsPage })));
 const MCPServersPage = lazy(() => import("@/pages/MCPServersPage").then((m) => ({ default: m.MCPServersPage })));
 const SettingsPage = lazy(() => import("@/pages/SettingsPage").then((m) => ({ default: m.SettingsPage })));
+const AgentDefaultsSettingsPage = lazy(() => import("@/pages/AgentDefaultsSettingsPage").then((m) => ({ default: m.AgentDefaultsSettingsPage })));
+const VoiceSettingsPage = lazy(() => import("@/pages/VoiceSettingsPage").then((m) => ({ default: m.VoiceSettingsPage })));
+const AppSettingsPage = lazy(() => import("@/pages/AppSettingsPage").then((m) => ({ default: m.AppSettingsPage })));
 import { AdvancedConfigRoute } from "@/components/layout/AdvancedConfigRoute";
 import { EntitySubRoute } from "@/pages/ops/entity/EntitySubRoute";
 import { EntityIndexRedirect, LegacyComponentRedirect, RedirectKeepingSearch } from "@/pages/ops/opsRedirects";
@@ -61,6 +98,10 @@ const UsageSettingsPage = lazy(() => import("@/pages/UsageSettingsPage").then((m
 const CatalogPage = lazy(() => import("@/pages/CatalogPage").then((m) => ({ default: m.CatalogPage })));
 const EnvironmentSettingsPage = lazy(() => import("@/pages/EnvironmentSettingsPage").then((m) => ({ default: m.EnvironmentSettingsPage })));
 const SkillsPage = lazy(() => import("@/pages/SkillsPage").then((m) => ({ default: m.SkillsPage })));
+const AudiencePage = lazy(() => import("@/pages/audience/AudiencePage"));
+const AudienceDetailPage = lazy(() => import("@/pages/audience/AudienceDetailPage"));
+const AudienceStudyPage = lazy(() => import("@/pages/audience/StudyPage"));
+const AudienceNewStudyPage = lazy(() => import("@/pages/audience/NewStudyPage"));
 const ProjectsPage = lazy(() => import("@/pages/ProjectsPage").then((m) => ({ default: m.ProjectsPage })));
 const BacklogPage = lazy(() => import("@/pages/BacklogPage").then((m) => ({ default: m.BacklogPage })));
 const ReleasedPage = lazy(() => import("@/pages/ReleasedPage").then((m) => ({ default: m.ReleasedPage })));
@@ -102,6 +143,11 @@ export default function App() {
                     now lives under the project(s) it is linked to. This
                     redirect stays for old bookmarks and links. */}
                 <Route path="repositories" element={<Navigate to="/projects" replace />} />
+                <Route path="audience" element={<AudiencePage />} />
+                {/* Declared before audience/:audienceId so "studies" is never read as an id. */}
+                <Route path="audience/studies/new" element={<AudienceNewStudyPage />} />
+                <Route path="audience/studies/:studyId" element={<AudienceStudyPage />} />
+                <Route path="audience/:audienceId" element={<AudienceDetailPage />} />
                 <Route path="projects" element={<ProjectsPage />} />
                 {/* Declared before projects/:projectId so the static "new"
                     segment is never swallowed by the dynamic one. */}
@@ -147,6 +193,41 @@ export default function App() {
                   <Route path="alerts" element={<OpsAlertsPage />} />
                   <Route path="sources" element={<DataSourcesPage />} />
                   <Route path="alert-connections" element={<OpsAlertConnectionsPage />} />
+                  <Route path="telemetry" element={<TelemetryGate />}>
+                    <Route index element={<RedirectKeepingSearch to="/operations/telemetry/overview" />} />
+                    <Route path="overview" element={<TelemetryOverviewPage />} />
+                    <Route path="map" element={<TelemetryServiceMapPage />} />
+                    <Route path="services" element={<TelemetryServicesPage />} />
+                    <Route path="services/:name" element={<TelemetryServicePage />} />
+                    <Route path="endpoints" element={<TelemetryEndpointsPage />} />
+                    <Route path="endpoints/:service/:endpoint" element={<TelemetryEndpointPage />} />
+                    <Route path="traces" element={<TelemetryTracesPage />} />
+                    <Route path="traces/:traceId" element={<TelemetryTracePage />} />
+                    <Route path="logs" element={<TelemetryLogsPage />} />
+                    <Route path="errors" element={<TelemetryErrorsPage />} />
+                    <Route path="incidents" element={<TelemetryIncidentsPage />} />
+                    <Route path="monitors" element={<TelemetryMonitorsPage />} />
+                    <Route path="deploys" element={<TelemetryDeploysPage />} />
+                    <Route path="slo" element={<TelemetrySloPage />} />
+                    <Route path="infra/hosts" element={<TelemetryHostsPage />} />
+                    <Route path="infra/hosts/:host" element={<TelemetryHostPage />} />
+                    <Route path="infra/kubernetes" element={<TelemetryKubernetesPage />} />
+                    <Route path="infra/kubernetes/clusters/:cluster" element={<TelemetryK8sClusterPage />} />
+                    <Route path="infra/kubernetes/pods/:uid" element={<TelemetryPodPage />} />
+                    <Route path="infra/databases" element={<TelemetryDatabasesPage />} />
+                    <Route path="infra/queues" element={<TelemetryQueuesPage />} />
+                    <Route path="infra/serverless" element={<TelemetryServerlessPage />} />
+                    <Route path="infra/serverless/:id" element={<TelemetryFunctionPage />} />
+                    <Route path="apps" element={<TelemetryAppsPage />} />
+                    <Route path="apps/:app" element={<TelemetryAppPage />} />
+                    <Route path="replays" element={<TelemetryReplaysPage />} />
+                    <Route path="replays/:sessionId" element={<TelemetryReplayPage />} />
+                    <Route path="profiling" element={<TelemetryProfilingPage />} />
+                    <Route path="llm" element={<TelemetryLlmPage />} />
+                    <Route path="load-tests" element={<TelemetryLoadTestsPage />} />
+                    <Route path="load-tests/:id" element={<TelemetryLoadTestRunPage />} />
+                    <Route path="*" element={<RedirectKeepingSearch to="/operations/telemetry/overview" />} />
+                  </Route>
                   <Route path="entity/:componentId" element={<OpsEntityPage />}>
                     <Route index element={<EntityIndexRedirect />} />
                     <Route path="summary" element={<EntitySubRoute tab="summary" page={EntitySummary} />} />
@@ -176,6 +257,9 @@ export default function App() {
                 <Route path="memory" element={<SharedMemoryPage />} />
                 <Route path="settings" element={<SettingsLayout />}>
                   <Route index element={<SettingsPage />} />
+                  <Route path="agents" element={<AgentDefaultsSettingsPage />} />
+                  <Route path="voice" element={<VoiceSettingsPage />} />
+                  <Route path="app" element={<AppSettingsPage />} />
                   <Route path="board" element={<AdvancedConfigRoute><BoardSettingsPage /></AdvancedConfigRoute>} />
                   <Route path="roles" element={<AdvancedConfigRoute><RolesSettingsPage /></AdvancedConfigRoute>} />
                   <Route path="workflows" element={<AdvancedConfigRoute><WorkflowSettingsPage /></AdvancedConfigRoute>} />
@@ -186,6 +270,8 @@ export default function App() {
                   <Route path="memory" element={<Navigate to="/memory" replace />} />
                   <Route path="mcp" element={<MCPServersPage />} />
                   <Route path="integrations" element={<IntegrationsSettingsPage />} />
+                  <Route path="telemetry" element={<TelemetrySettingsPage />} />
+                  <Route path="remote-access" element={<RemoteAccessSettingsPage />} />
                   <Route path="device" element={<Navigate to="/settings" replace />} />
                   {/* The Local Runner page is gone — everything it offered now lives on
                       the Claude Code card under LLM Connection. This redirect stays

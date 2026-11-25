@@ -529,6 +529,9 @@ export const TOOLCHAIN_IDS = [
   "duckdb",
   "godot",
   "unity-hub",
+  "figcraft",
+  "vectorcraft",
+  "photocraft",
 ] as const;
 export type ToolchainId = (typeof TOOLCHAIN_IDS)[number];
 
@@ -663,4 +666,181 @@ export interface CloudStatus {
   code?: number;
   /** Chromium's own description, or one sentence from the supervisor. */
   description?: string;
+}
+
+// --- remote access (the tunnel for the mobile app) ---------------------------
+
+export const REMOTE_PROVIDERS = ["cloudflare", "ngrok"] as const;
+export type RemoteProvider = (typeof REMOTE_PROVIDERS)[number];
+
+/**
+ * quick: the provider assigns the address (a random `trycloudflare.com` name; the
+ * ngrok account's own assigned domain). named: the person's own hostname.
+ */
+export const REMOTE_MODES = ["quick", "named"] as const;
+export type RemoteMode = (typeof REMOTE_MODES)[number];
+
+export type RemoteTunnelState =
+  | "stopped"
+  | "starting"
+  | "connected"
+  | "reconnecting"
+  | "error"
+  | "binary_missing";
+
+/** Why the tunnel is in `error` when it is something the person fixes in the form. */
+export type RemoteTunnelProblem =
+  | "needs_login"
+  | "needs_token"
+  | "needs_hostname"
+  | "tunnel_setup_failed"
+  | "auth_failed"
+  | "server_unavailable"
+  | "enable_failed"
+  | "exited";
+
+/** The non-secret half of the configuration. The secrets are `RemoteSecretsView`. */
+export interface RemoteAccessConfig {
+  provider: RemoteProvider;
+  mode: RemoteMode;
+  /**
+   * named mode: the public hostname (cloudflare: `<subdomain>.<the domain of the zone the person
+   * logged in with>`, routed to the tunnel by this app; ngrok: a domain of the person's ngrok
+   * account). Empty in quick mode.
+   */
+  hostname: string;
+  /** Start the tunnel when the app launches. */
+  autoStart: boolean;
+  /** The computer's name shown on the phone at pairing. Empty: the server picks one. */
+  serverName: string;
+}
+
+/** Which secrets are stored. Never the values. */
+export interface RemoteSecretsView {
+  ngrokAuthtoken: boolean;
+  ngrokApiKey: boolean;
+}
+
+/**
+ * The person's Cloudflare login on this computer: the origin certificate
+ * `cloudflared tunnel login` leaves in `~/.cloudflared/cert.pem`, bound to the
+ * one zone (domain) they picked in the browser.
+ */
+export interface RemoteCloudflareAccount {
+  loggedIn: boolean;
+  /** The domain (zone) of the login, when Cloudflare told us. */
+  domain?: string;
+  /** Why the domain is unknown although the person is logged in (they then type the whole hostname). */
+  domainError?: string;
+  /** waiting: `cloudflared tunnel login` is running and the browser is open. */
+  phase: "idle" | "waiting" | "failed";
+  /** The sign-in link cloudflared printed, shown in case the browser did not open by itself. */
+  loginUrl?: string;
+  /** English, one line, secrets redacted. */
+  error?: string;
+  /** A subdomain that is likely free and recognisably ours: `tasktrooper-<short>`. */
+  suggestedSubdomain: string;
+}
+
+/** The person's ngrok account as far as this app can see it. */
+export interface RemoteNgrokAccount {
+  /** The authtoken was accepted by ngrok when it was saved. */
+  verified: boolean;
+  /** checking: a short-lived test tunnel is running to prove the authtoken. */
+  phase: "idle" | "checking";
+  /** Domains of the account (needs the optional ngrok API key). */
+  domains: string[];
+  error?: string;
+  apiKeyError?: string;
+}
+
+export interface RemoteBinaryDetection {
+  provider: RemoteProvider;
+  installed: boolean;
+  path?: string;
+  version?: string;
+  /** What the person runs to install it on this OS, display only; never executed by this app. */
+  installCommand?: string;
+  /** English one-liner when it is missing or unusable. */
+  detail?: string;
+}
+
+export interface RemoteAccessState {
+  tunnel: RemoteTunnelState;
+  /** The tunnel is wanted: the person pressed Start (or auto-start did) and has not stopped it. */
+  wanted: boolean;
+  config: RemoteAccessConfig;
+  secrets: RemoteSecretsView;
+  cloudflare: RemoteCloudflareAccount;
+  ngrok: RemoteNgrokAccount;
+  /** The public https base URL once the provider reported one. */
+  url?: string;
+  /** The loopback port of the server's remote listener the tunnel points at. */
+  remotePort?: number;
+  problem?: RemoteTunnelProblem;
+  /** English, one line, secrets redacted. */
+  error?: string;
+  /** Epoch ms of the last state change. */
+  since: number;
+  restarts: number;
+  detection?: RemoteBinaryDetection;
+  /** The last lines of the tunnel process's output, redacted. */
+  logTail: string[];
+  /** The port the server's remote listener asks for first (it stays the same between launches). */
+  suggestedPort: number;
+}
+
+// --- voice ------------------------------------------------------------------
+
+/** The languages a person can talk to an agent in. Anything else has no voice. */
+export type VoiceLanguage = "tr" | "en";
+
+/**
+ * The bundled voice engines: EMA Lightning reads Turkish, tiny-voca English.
+ */
+export const VOICE_ENGINES = ["ema", "tinyvoca"] as const;
+export type VoiceEngine = (typeof VOICE_ENGINES)[number];
+
+export interface VoiceEngineOption {
+  engine: VoiceEngine;
+  /**
+   * Its styles (speakers), its default first; empty for EMA, which has one.
+   * tiny-voca's are `F2` (female) and `M2` (male).
+   */
+  styles: string[];
+}
+
+/** Which bundled engine and style read a text; either left out is the default. */
+export interface VoiceChoice {
+  engine?: VoiceEngine;
+  style?: string;
+}
+
+export interface VoiceCapabilities {
+  /** This computer can turn speech in this language into text (macOS's recognizer). */
+  listen: Record<VoiceLanguage, boolean>;
+  /** A bundled engine reads this language; false means the page falls back to the OS voice. */
+  speak: Record<VoiceLanguage, boolean>;
+  /**
+   * The bundled engines that read each language, the one a `speak` without
+   * an engine uses first (EMA for Turkish and tiny-voca for English, when this
+   * copy has them); empty where there is none.
+   */
+  speakEngines: Record<VoiceLanguage, VoiceEngineOption[]>;
+}
+
+/** Speech recognition for one utterance, pushed as it happens. */
+export type VoiceTranscriptEvent =
+  | { id: string; type: "ready" }
+  | { id: string; type: "partial" | "final"; text: string }
+  | { id: string; type: "error"; code: string; message: string };
+
+/** A piece of spoken audio: little-endian float32 mono PCM, or the end of that speech. */
+export interface VoiceAudioEvent {
+  id: string;
+  sampleRate: number;
+  pcm?: ArrayBuffer;
+  done?: boolean;
+  /** English, for the person; set only with `done`. */
+  error?: string;
 }

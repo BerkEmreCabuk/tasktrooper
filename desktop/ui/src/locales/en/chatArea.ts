@@ -31,6 +31,7 @@ export const chatArea = {
       textRequired: "Please enter your answer",
       selectOne: "Select an option",
       selectMany: "Select all that apply",
+      selectUpTo: "Select up to {max}",
       other: "Other",
       skip: "Skip",
       answered: "Answered",
@@ -50,6 +51,7 @@ export const chatArea = {
         attached: "attached to",
         linked: "linked",
         deleted: "deleted",
+        proposed: "proposed",
       },
       entity: {
         board_task: "Task",
@@ -58,6 +60,7 @@ export const chatArea = {
         acceptance_criterion: "Acceptance criterion",
         initiative_project: "Project",
         repository: "Repository",
+        release: "Release",
       },
     },
     plan: {
@@ -108,6 +111,12 @@ export const chatArea = {
       queuedRemove: "Remove from queue",
       queuedHint: "Will be sent when the agent finishes its current work.",
       queuedReturned: "Queued messages were returned to the composer.",
+    },
+    wakes: {
+      waiting: "Waiting for background work, I will answer again when it ends",
+      stop: "Stop waiting",
+      stopFailed: "Could not stop waiting",
+      updateTitle: "Background work finished",
     },
     reasoning: {
       title: "Reasoning steps ({count})",
@@ -201,8 +210,28 @@ export const chatArea = {
       resultsCount: "{count} results",
     },
   },
+  voice: {
+    start: "Talk to the agent",
+    end: "End",
+    hint: "Listening — talk when you are ready",
+    state: {
+      starting: "Starting the microphone…",
+      listening: "Listening",
+      thinking: "Thinking…",
+      speaking: "Speaking — talk to interrupt",
+      off: "Voice off",
+    },
+    error: {
+      micDenied: "TaskTrooper cannot use the microphone. Allow it in System Settings → Privacy & Security → Microphone.",
+      micMissing: "No microphone was found.",
+      generic: "Voice stopped: {message}",
+    },
+  },
   markdown: {
     empty: "Empty",
+    visual: {
+      title: "Drawing from the agent",
+    },
     table: {
       scrollHint: "Scroll to see more columns",
     },

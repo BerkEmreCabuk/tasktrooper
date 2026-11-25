@@ -15,6 +15,7 @@ export const frame = {
         label: "Nachricht an {name}",
         placeholder: "PM fragen…",
         shortcut: "{mod}K",
+        voice: "Mit {name} sprechen",
         failed: "Unterhaltung konnte nicht gestartet werden",
       },
       feedback: {
@@ -44,6 +45,12 @@ export const frame = {
         markAllRead: "Alle als gelesen markieren",
         unreadBadge: "{count} ungelesen",
         unreadBadgeOverflow: "9+",
+        items: {
+          review: "{task} wartet auf Ihre Überprüfung",
+          uat: "{task} wartet auf Ihren Abnahmetest (UAT)",
+          decision: "{task} wartet auf Ihre Entscheidung",
+          question: "Ein Agent hat eine Frage zu {task}",
+        },
       },
       toolchain: {
         title: "Computer-Einrichtung",
@@ -97,7 +104,7 @@ export const frame = {
       home: "Start",
       team: "Team",
       newAgent: "Neuer Agent",
-      unreadAgent: "Neue Nachricht",
+      unreadAgentCount: "{count} ungelesene Nachrichten",
       management: "Verwaltung",
       teamMemory: "Team-Gedächtnis",
       settings: "Einstellungen",

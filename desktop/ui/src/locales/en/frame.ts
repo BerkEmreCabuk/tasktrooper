@@ -17,6 +17,7 @@ export const frame = {
         label: "Message {name}",
         placeholder: "Ask the PM…",
         shortcut: "{mod}K",
+        voice: "Talk to {name}",
         failed: "Couldn't start a conversation",
       },
       feedback: {
@@ -46,6 +47,12 @@ export const frame = {
         markAllRead: "Mark all as read",
         unreadBadge: "{count} unread",
         unreadBadgeOverflow: "9+",
+        items: {
+          review: "{task} is waiting for your review",
+          uat: "{task} is waiting for your UAT",
+          decision: "{task} needs your decision",
+          question: "An agent has a question on {task}",
+        },
       },
       toolchain: {
         title: "Computer setup",
@@ -99,7 +106,7 @@ export const frame = {
       home: "Home",
       team: "Team",
       newAgent: "New agent",
-      unreadAgent: "New message",
+      unreadAgentCount: "{count} unread messages",
       management: "Management",
       teamMemory: "Team Memory",
       settings: "Settings",

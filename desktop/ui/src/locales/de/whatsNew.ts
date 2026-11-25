@@ -1,0 +1,86 @@
+// Deutsches Wörterbuch für das Fenster "Neuigkeiten"; gleiche Struktur wie en/whatsNew.ts.
+export const whatsNew = {
+  dialogTitle: "Neu in TaskTrooper {version}",
+  seeAll: "Alle Änderungen ansehen",
+  gotIt: "Verstanden",
+  card: {
+    title: "Neuigkeiten",
+    help: "Sieh nach, was sich in der neuesten Version von TaskTrooper geändert hat.",
+    open: "Neuigkeiten anzeigen",
+  },
+  v0_3_20: {
+    title: "TaskTrooper Telemetry in Operationen, ein Designer, der in FigCraft zeichnet, Deploy-Marker",
+    items: {
+      operationsSource: "Verbinde TaskTrooper Telemetry in den Einstellungen, und es wird von selbst zu einer Datenquelle in Operationen: RED-Diagramme, Logs, Traces, Fehler und Endpunkte pro Komponente.",
+      agentTools: "Agenten erhalten die Telemetrie-Werkzeuge, die ihre Rolle braucht: Ursachenanalyse für Endpunkte, SLOs, Monitore und Lasttests. Ändern oder löschen dürfen sie nur Monitore und KPIs, die ein Agent angelegt hat.",
+      deployMarkers: "Jedes Deployment, das live geht, wird in der verbundenen Telemetrie mit seinem Commit markiert, sodass eine Regression neben dem verursachenden Release steht.",
+      figcraftDesigner: "Der ui-designer zeichnet in FigCraft: Jede Designaufgabe bekommt ihre eigene bearbeitbare Datei auf Basis deines Designsystems, deren Seiten du in der Aufgabe ansehen, in FigCraft öffnen oder im Finder zeigen kannst. FigCraft, VectorCraft und PhotoCraft werden unter Einstellungen → Entwicklungsumgebung installiert.",
+      telemetryScreens: "Neue Telemetrie-Ansichten: Übersicht, Service-Map, Infrastruktur, Apps, Profiling, LLM-Nutzung und Lasttests.",
+    },
+  },
+  v0_3_19: {
+    title: "QA, die testet und abschließt, automatisierte Tests pro Repository, eine Vorschau pro Aufgabe",
+    items: {
+      qaManualRound: "QA testet jetzt das laufende Produkt gegen die Kriterien der Aufgabe, statt es zu kompilieren: Build und Unit-Tests bleiben beim Code-Review.",
+      qaFinishes: "Eine QA-Runde kann nicht mit einem nicht ausgeführten Testfall oder einem unbewerteten Kriterium enden und keine Aufgabe ohne erfassten Fehler zurückschicken.",
+      automationTests: "Schalte Automatisierte Tests für ein Repository ein (Komponenten → Review): QA legt die Fälle jeder Aufgabe als Testcontainers- + WireMock-Tests unter qa-automation/ an, und eine Aufgabe verlässt QA nur mit grüner Suite. Beim Einschalten öffnet sich eine Aufgabe, die die fehlenden Tests schreibt.",
+      taskPreviews: "Jede Aufgabe bekommt ihre eigene lokale Vorschau auf eigenem Port, und das Verschieben einer Aufgabe stoppt nur deren Vorschau.",
+    },
+  },
+  v0_3_18: {
+    title: "Mit Agenten sprechen, überall anhängen und markieren, schlankere Aufgabenpläne",
+    items: {
+      voiceChat: "Sprich laut mit Agenten auf Türkisch oder Englisch: Die Antwort wird vorgelesen, während sie entsteht, Zeichnungen erscheinen auf dem Bildschirm, und du kannst durch Sprechen unterbrechen. Sprachmodell und Stimme wählst du unter Einstellungen → Sprache.",
+      attachAndMention: "Füge auf der Startseite, in der Schnellfrage oben und in Aufgabenkommentaren Dateien und Bilder ein und markiere Agenten, Projekte und Repositories mit @.",
+      notifications: "Die Benachrichtigungszentrale zeigt den Absender jeder Benachrichtigung mit Avatar und in deiner Sprache; das Abzeichen in der Seitenleiste zählt, was wirklich ungelesen ist.",
+      onePerFeature: "Der PM eröffnet pro Funktion, Repository und Rolle eine Aufgabe statt vieler kleiner, sodass jede Funktion einmal gebaut, geprüft und veröffentlicht wird.",
+      releaseBatch: "Der Release Engineer kann ein Sammel-Release zur Freigabe vorschlagen und fragt Schritt für Schritt, wie eine Komponente bereitgestellt wird.",
+    },
+  },
+  v0_3_17: {
+    title: "Gehostete Vorschauen zuerst, Screenshots, die Agenten sehen, kein QA-Pingpong mehr",
+    items: {
+      hostedPreview: "Hat der Pull Request einer Aufgabe eine fertige gehostete Vorschau (Vercel), öffnet das Vorschau-Panel zuerst diese, statt einen lokalen Lauf zu starten.",
+      chatImages: "Screenshots, die du im Agenten-Chat anhängst, erreichen jetzt Agenten auf Claude Code, opencode, Cursor und Antigravity, sodass sie lesen können, was darauf zu sehen ist.",
+      qaBlocked: "Kann QA etwas nicht prüfen, weil der Umgebung etwas fehlt (eine Integration, ein Zugang oder ein Gerät), wartet die Aufgabe auf dich, statt zwischen QA und Entwickler hin- und herzuspringen; QA testet unveränderten, bereits abgelehnten Code nicht erneut.",
+    },
+  },
+  v0_3_16: {
+    title: "Zielgruppentests vor der Arbeit, vergleichende Wiederholungen, vollständige Aufgaben",
+    items: {
+      studyRerun: "Führe eine abgeschlossene Studie nach einer Produktänderung erneut aus und sieh, was sich bewegt hat: Gesamtwertung, verschwundene oder neue Einwände und die Veränderung jeder Person.",
+      pmAudienceTest: "Hängt eine Anfrage davon ab, wie Menschen reagieren (Preis, kostenpflichtige Funktion, Texte, Onboarding), bietet der PM vor dem Anlegen der Arbeit einen Zielgruppentest an, lässt dich überarbeiten und neu testen und legt die Aufgaben an, wenn du es sagst.",
+      serialReleases: "Releases laufen pro Komponente nacheinander, sodass sich zwei Deployments desselben Dienstes nie überschneiden.",
+      completeTasks: "Von Agenten angelegte Aufgaben haben immer Beschreibung, Akzeptanzkriterien und eine zuständige Person; leere oder nicht zugewiesene Aufgaben werden abgelehnt und vom Agenten korrigiert.",
+      chatThinking: "Während ein Agent arbeitet, fließt sein Denken direkt in die Denkschritte statt zuerst als Antwort zu erscheinen; der Systemarchitekt beantwortet technische Fragen anhand des Codes.",
+      mascot: "Trooper, das neue Maskottchen, erscheint in leeren Ansichten, bei der Einrichtung und in Agenten-Avataren.",
+    },
+  },
+  v0_3_15: {
+    title: "Agenten bekommen den richtigen Leitfaden, Aufgaben einen Agenten, Docker Befehle",
+    items: {
+      agentsMd: "Die Agent-Leitfaden-Aufgabe aus dem Projekt-Setup schreibt jetzt eine einzige AGENTS.md für jede Agent-CLI und verlangt keine README mehr, die das Projekt schon hat.",
+      assignTasks: "Aufgaben, die ein Scan oder ein Agent anlegt, bekommen beim Erstellen einen passenden Agenten, und der PM kann den Bearbeiter einer Aufgabe direkt setzen oder korrigieren, statt sie neu anzulegen.",
+      dockerCommands: "Containerisierte Komponenten erhalten Docker-Befehle (Buildkit, Image-Build, Compose up, down und stop), Registry-, Plattform- und Tag-Einstellungen, eine Nur-in-Containern-Regel für Agenten, und jeder Befehl lässt sich entfernen.",
+    },
+  },
+  v0_3_14: {
+    title: "Zielgruppenforschung auf dem Handy",
+    items: {
+      phoneAudience: "Verwalte Zielgruppen in der TaskTrooper-App: mit dem PM oder per Formular anlegen, aufbauen und mit jeder Person einzeln sprechen.",
+      phoneStudies: "Starte Studien vom Handy aus: Typ wählen, das Interviewskript prüfen und freigeben, die Interviews verfolgen und den Bericht erzeugen.",
+      phoneReports: "Lies Studienberichte auf dem Handy und teile sie als eine einzelne HTML-Datei.",
+    },
+  },
+  v0_3_13: {
+    title: "Dein Handy, deine Zielgruppe und deine Telemetrie",
+    items: {
+      tunnel: "Melde dich unter Einstellungen → Fernzugriff bei Cloudflare oder ngrok an und erreiche diesen Computer mit der TaskTrooper-Mobil-App über einen Tunnel, den du selbst kontrollierst. Koppel ein Handy in einem Schritt: Handy koppeln öffnet ein Fenster mit QR-Code und Adresse.",
+      audience: "Zielgruppenforschung: Lass den PM-Agenten synthetische Personas erstellen oder führe selbst eine Studie durch - Interviews, Landingpage-Test, Botschaftstest oder A/B-Test - lies den Bericht und exportiere ihn als eine HTML-Datei.",
+      telemetry: "Die neuen Telemetrie-Ansichten unter Betrieb zeigen Services, Endpunkte, Traces, Logs, Fehler, Vorfälle, Monitore, Deployments und SLOs, und der Release-Engineer kümmert sich um die entstehenden Vorfälle.",
+      repoSetup: "Beim Import eines Repositorys öffnet sich jetzt die Checkliste „Projekt startklar machen“ (Scan, Werkzeuge, Index, README und Agenten-Leitfaden, Tests, CI, Auslieferung) mit einer Schaltfläche pro Schritt und einer, die alle der Reihe nach ausführt. Das Abmelden von deinem Konto entfernt es jetzt vollständig, sodass der Hinweis \"Arbeit ohne Konto\" nicht mehr stehen bleibt.",
+      runTrace: "Jeder Agentenlauf hinterlässt jetzt einen echten Trace in der Aufgabenleiste: was er gelesen, geändert und ausgeführt hat, mit Git abgeglichen. Nach einer Vorschau macht ein Klick die Arbeit des Laufs hinter einem Backup-Branch rückgängig.",
+      reviewHistory: "Jede Aufgabe trägt jetzt ihren Review-Verlauf: jede Review- und QA-Runde mit Reviewer, Befunden und deren Verbleib, den Rückläufern zwischen Spalten und was jeder Reviewer abgedeckt hat und was nicht. Eine Karte \"Braucht deine Prüfung\" listet, was Reviewer und Server von einer Person angesehen haben wollen.",
+    },
+  },
+};

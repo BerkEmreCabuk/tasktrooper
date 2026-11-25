@@ -3,6 +3,7 @@ package domain
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -79,8 +80,12 @@ const (
 	// default branch and the task goes back for rework.
 	MoveReasonReleaseRolledBack = "release_rolled_back"
 	MoveReasonReconciled        = "reconciled"
-	MoveReasonQuestionAnswered  = "question_answered"
-	MoveReasonQuotaRenewed      = "quota_renewed"
+	// MoveReasonReviewRejectedStalled: a reviewer asked for changes and the
+	// reviewers still to decide could not finish a run, so the round is
+	// closed on the verdict it has.
+	MoveReasonReviewRejectedStalled = "review_rejected_stalled"
+	MoveReasonQuestionAnswered      = "question_answered"
+	MoveReasonQuotaRenewed          = "quota_renewed"
 	// The resume half of quota_renewed's park; it also releases the deploy
 	// watch and work order. Stays "device_free" because rows already carry it
 	// and renaming would rewrite history.
@@ -102,6 +107,13 @@ const (
 	// no human in between; its own reason because no need_revision entries are
 	// involved — just a run-status streak.
 	MoveReasonCriteriaLoopParked = "criteria_loop_parked"
+	// The task came back to the QA gate with the exact diff QA had already
+	// rejected and no person in between; QA was not run again on it.
+	MoveReasonQAUnchangedRejectParked = "qa_unchanged_reject_parked"
+	// A reviewer answered BLOCKED: it could not verify because of something
+	// outside the code, so the card parked for a person instead of going to
+	// a developer who has nothing to fix.
+	MoveReasonReviewBlockedParked = "review_blocked_parked"
 	// The assignee's Mac is not connected; the one park a person can clear by
 	// opening a laptop.
 	MoveReasonRunnerOffline = "runner_offline"
@@ -149,12 +161,36 @@ type TaskComment struct {
 	// its current name on old comments.
 	AuthorName  string  `json:"author_name,omitempty"`
 	ActorUserID *string `json:"actor_user_id,omitempty"`
+	// Resolved at read time from the attachment-link table; empty/nil for
+	// every comment created before that table existed.
+	Attachments []AttachmentMeta `json:"attachments,omitempty"`
+}
+
+// ChangeRequestCommentPrefix marks a task comment as a change the stakeholder
+// asked for through the product manager while the task was being worked. The
+// comment is the durable copy of the request: a run that is live reads it at the
+// end of its turn, any later run reads it with its opening context.
+const ChangeRequestCommentPrefix = "Change request from PM:"
+
+// MaxChangeRequestChars bounds one change request; a larger rewrite belongs in
+// the task's own fields, which the request only points at.
+const MaxChangeRequestChars = 4000
+
+func ChangeRequestComment(summary string) string {
+	return ChangeRequestCommentPrefix + " " + strings.TrimSpace(summary)
+}
+
+func IsChangeRequestComment(content string) bool {
+	return strings.HasPrefix(strings.TrimSpace(content), ChangeRequestCommentPrefix)
 }
 
 type CreateTaskCommentRequest struct {
 	Content    string `json:"content"`
 	AuthorType string `json:"author_type,omitempty"`
 	AuthorID   string `json:"author_id,omitempty"`
+	// AttachmentIDs are already-uploaded binary attachments (POST
+	// /v1/attachments) to link to the comment once it is created.
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 	// Informational comments are recorded and shown but wake no agent: a note
 	// that lands after the run it describes would otherwise start another
 	// one. Never read from a request body.
@@ -201,6 +237,7 @@ type ActivityItem struct {
 	RepositoryID uuid.UUID       `json:"repository_id,omitempty"`
 	TaskID       uuid.UUID       `json:"task_id,omitempty"`
 	AgentID      *uuid.UUID      `json:"agent_id,omitempty"`
+	SessionID    *uuid.UUID      `json:"session_id,omitempty"`
 	Status       string          `json:"status,omitempty"`
 	Summary      string          `json:"summary,omitempty"`
 	EventType    string          `json:"event_type,omitempty"`
@@ -230,6 +267,12 @@ var (
 	// A cancel request for a run that already stopped — the caller races the
 	// run, so this is expected.
 	ErrRunNotLive = errors.New("agent run is not pending or running")
+	// An interrupt with no guidance would only restart the run.
+	// A task chat asked for an agent that does not exist or is switched off.
+	ErrChatAgentUnavailable     = errors.New("that agent is not available for a task chat")
+	ErrInterruptMessageRequired = errors.New("interrupt needs a message for the agent")
+	ErrChangeRequestEmpty       = errors.New("the change request is empty: say what changed")
+	ErrChangeRequestTooLong     = errors.New("the change request is too long: summarise it and keep the detail in the task's description or criteria")
 	// A re-run request for a run that is still going.
 	ErrRunNotTerminal = errors.New("agent run has not finished yet")
 	// A re-run request on a blocked task: recovery is moving it to a column,

@@ -28,6 +28,7 @@ export const chatArea = {
       textRequired: "Veuillez saisir votre réponse",
       selectOne: "Sélectionnez une option",
       selectMany: "Sélectionnez toutes les réponses applicables",
+      selectUpTo: "Sélectionnez jusqu'à {max}",
       other: "Autre",
       skip: "Passer",
       answered: "Répondu",
@@ -47,6 +48,7 @@ export const chatArea = {
         attached: ": ajout",
         linked: ": liaison",
         deleted: ": suppression",
+        proposed: "proposée",
       },
       entity: {
         board_task: "Tâche",
@@ -55,6 +57,7 @@ export const chatArea = {
         acceptance_criterion: "Critère d'acceptation",
         initiative_project: "Projet",
         repository: "Dépôt",
+        release: "Release",
       },
     },
     plan: {
@@ -103,6 +106,12 @@ export const chatArea = {
       queuedRemove: "Retirer de la file",
       queuedHint: "Sera envoyé quand l'agent aura terminé son travail en cours.",
       queuedReturned: "Les messages en file d'attente ont été replacés dans la zone de saisie.",
+    },
+    wakes: {
+      waiting: "Attend un travail en arrière-plan et répondra de nouveau à sa fin",
+      stop: "Arrêter l'attente",
+      stopFailed: "Impossible d'arrêter l'attente",
+      updateTitle: "Travail en arrière-plan terminé",
     },
     reasoning: {
       title: "Étapes de raisonnement ({count})",
@@ -193,8 +202,28 @@ export const chatArea = {
       resultsCount: "{count} résultats",
     },
   },
+  voice: {
+    start: "Parler à l'agent",
+    end: "Terminer",
+    hint: "À l'écoute — parlez quand vous voulez",
+    state: {
+      starting: "Ouverture du micro…",
+      listening: "À l'écoute",
+      thinking: "Réflexion…",
+      speaking: "Parle — parlez pour l'interrompre",
+      off: "Voix désactivée",
+    },
+    error: {
+      micDenied: "TaskTrooper ne peut pas utiliser le micro. Autorisez-le dans Réglages Système → Confidentialité et sécurité → Micro.",
+      micMissing: "Aucun micro trouvé.",
+      generic: "La voix s'est arrêtée : {message}",
+    },
+  },
   markdown: {
     empty: "Vide",
+    visual: {
+      title: "Dessin de l'agent",
+    },
     table: {
       scrollHint: "Faites défiler pour voir plus de colonnes",
     },

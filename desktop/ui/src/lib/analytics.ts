@@ -40,7 +40,7 @@ export interface AnalyticsEvents {
   task_review: { decision: "approve" | "send_back"; gate: "analysis" | "uat" };
   task_claim: { previous_owner: "none" | "someone" };
   issue_import: { provider: string };
-  chat_start: { agent_role: string; source: "chat" | "home_quick_ask" };
+  chat_start: { agent_role: string; source: "chat" | "home_quick_ask" | "home_voice" | "header_voice" };
   chat_message_send: { agent_role: string; outcome: "ok" };
   project_create: NoParams;
   repo_add: { provider: "github" | "folder" | "new" };
@@ -54,6 +54,11 @@ export interface AnalyticsEvents {
   invite_accept: NoParams;
   computer_pair: { outcome: "ok" | "failed" };
   refine_with_ai: NoParams;
+  review_flag_reviewed: { source: "agent" | "automatic"; code: string };
+  audience_create: { source: "form" | "pm" };
+  study_start: { kind: string };
+  study_report_export: { kind: string };
+  readiness_action: { action: "run_step" | "run_all" | "skip" | "unskip" | "hide" | "show"; step?: string };
 }
 
 /** The role key every platform reports for an agent: its catalog slug, or "custom". */
@@ -174,6 +179,10 @@ export const SCREENS: ReadonlyArray<readonly [pattern: string, name: string]> = 
   ["/operations/entity/:componentId/releases", "ops_entity_releases"],
   ["/operations/entity/:componentId/alerts", "ops_entity_alerts"],
   ["/operations/entity/:componentId/signals", "ops_entity_signals"],
+  ["/audience", "audience"],
+  ["/audience/studies/new", "audience_study_new"],
+  ["/audience/studies/:studyId", "audience_study"],
+  ["/audience/:audienceId", "audience_detail"],
   ["/files", "files"],
   ["/memory", "shared_memory"],
   ["/settings", "settings_general"],

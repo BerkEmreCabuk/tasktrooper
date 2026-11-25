@@ -31,6 +31,7 @@ export const chatArea: ChatAreaDict = {
       textRequired: "Lütfen cevabınızı yazın",
       selectOne: "Bir seçenek seçin",
       selectMany: "Uygun olanların tümünü seçin",
+      selectUpTo: "En fazla {max} seçin",
       other: "Diğer",
       skip: "Atla",
       answered: "Cevaplandı",
@@ -50,6 +51,7 @@ export const chatArea: ChatAreaDict = {
         attached: "doküman ekledi",
         linked: "ilişkilendirdi",
         deleted: "sildi",
+        proposed: "önerildi",
       },
       entity: {
         board_task: "Task",
@@ -58,6 +60,7 @@ export const chatArea: ChatAreaDict = {
         acceptance_criterion: "Kabul kriteri",
         initiative_project: "Proje",
         repository: "Repo",
+        release: "Release",
       },
     },
     plan: {
@@ -108,6 +111,12 @@ export const chatArea: ChatAreaDict = {
       queuedRemove: "Sıradan çıkar",
       queuedHint: "Ajan mevcut işi bitirince gönderilecek.",
       queuedReturned: "Sıradaki mesajlar yazı alanına geri alındı.",
+    },
+    wakes: {
+      waiting: "Arka plandaki işi bekliyor, bitince yeniden yanıt verecek",
+      stop: "Beklemeyi durdur",
+      stopFailed: "Bekleme durdurulamadı",
+      updateTitle: "Arka plandaki iş bitti",
     },
     reasoning: {
       title: "Düşünme adımları ({count})",
@@ -200,8 +209,28 @@ export const chatArea: ChatAreaDict = {
       resultsCount: "{count} sonuç",
     },
   },
+  voice: {
+    start: "Agent ile konuş",
+    end: "Bitir",
+    hint: "Dinliyorum — hazır olduğunda konuş",
+    state: {
+      starting: "Mikrofon açılıyor…",
+      listening: "Dinliyorum",
+      thinking: "Düşünüyor…",
+      speaking: "Konuşuyor — sözünü kesmek için konuş",
+      off: "Ses kapalı",
+    },
+    error: {
+      micDenied: "TaskTrooper mikrofonu kullanamıyor. Sistem Ayarları → Gizlilik ve Güvenlik → Mikrofon'dan izin verin.",
+      micMissing: "Mikrofon bulunamadı.",
+      generic: "Sesli konuşma durdu: {message}",
+    },
+  },
   markdown: {
     empty: "Boş",
+    visual: {
+      title: "Agent'ın çizimi",
+    },
     table: {
       scrollHint: "Diğer sütunları görmek için kaydırın",
     },

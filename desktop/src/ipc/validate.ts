@@ -19,13 +19,20 @@ import {
   BUILT_IN_PROVIDER_TYPES,
   CHILD_IDS,
   CUSTOM_PROVIDER_TYPE,
+  REMOTE_MODES,
+  REMOTE_PROVIDERS,
   TOOLCHAIN_IDS,
+  VOICE_ENGINES,
   type ChildId,
+  type RemoteMode,
+  type RemoteProvider,
   type ToolchainId,
   type ProviderKeyType,
   type NotificationPreferences,
   type RunnerPairingBundle,
   type UserSettings,
+  type VoiceEngine,
+  type VoiceLanguage,
 } from "./types.js";
 import type {
   AccountSignInRequest,
@@ -44,6 +51,9 @@ import type {
   OpenExternalRequest,
   PairRequest,
   PreflightRequest,
+  RemoteAccessConfigureRequest,
+  RemoteAccessNgrokConnectRequest,
+  RemoteAccessProviderRequest,
   RestartChildRequest,
   RevealRequest,
   ToolchainIdRequest,
@@ -664,4 +674,140 @@ function withDisabled(out: McpServerSetRequest, disabled: unknown): McpServerSet
 export function validateMcpServerRemove(raw: unknown): McpServerRemoveRequest {
   const o = asRecord(raw, "keys.mcp-remove");
   return { name: asMcpName(o.name, "keys.mcp-remove.name") };
+}
+
+// --- remote access ------------------------------------------------------------
+
+/** A DNS hostname, lowercase, at least two labels, no scheme/port/path. */
+const HOSTNAME = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+/**
+ * What a person pastes for a domain: `https://x.example.com/`, `X.example.com`.
+ * Reduced to the bare lowercase host; anything that is not one is refused.
+ */
+export function normalizeHostname(raw: string): string | null {
+  let host = raw.trim().toLowerCase();
+  host = host.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+  return HOSTNAME.test(host) ? host : null;
+}
+
+function asRemoteProvider(value: unknown, what: string): RemoteProvider {
+  const provider = asString(value, what, { max: 32 });
+  if (!(REMOTE_PROVIDERS as readonly string[]).includes(provider)) fail(`${what}: unknown provider ${provider}`);
+  return provider as RemoteProvider;
+}
+
+/** Tokens are opaque, but they are one line of printable ASCII, which is all argv-free transport needs. */
+function asSecretToken(value: unknown, what: string): string {
+  const s = asClean(value, what, { max: 2048 }).trim();
+  if (s === "") fail(`${what}: must not be empty`);
+  if (!/^[\x21-\x7e]+$/.test(s)) fail(`${what}: expected printable characters without spaces`);
+  return s;
+}
+
+export function validateRemoteAccessProvider(raw: unknown): RemoteAccessProviderRequest {
+  const o = asRecord(raw, "remoteAccess");
+  return { provider: asRemoteProvider(o.provider, "remoteAccess.provider") };
+}
+
+export function validateRemoteAccessConfigure(raw: unknown): RemoteAccessConfigureRequest {
+  const o = asRecord(raw, "remoteAccess");
+  const out: RemoteAccessConfigureRequest = {};
+  if (o.provider !== undefined) out.provider = asRemoteProvider(o.provider, "remoteAccess.provider");
+  if (o.mode !== undefined) {
+    const mode = asString(o.mode, "remoteAccess.mode", { max: 16 });
+    if (!(REMOTE_MODES as readonly string[]).includes(mode)) fail(`remoteAccess.mode: unknown mode ${mode}`);
+    out.mode = mode as RemoteMode;
+  }
+  if (o.hostname !== undefined) {
+    const raw = asClean(o.hostname, "remoteAccess.hostname", { max: 300 });
+    if (raw.trim() === "") out.hostname = "";
+    else {
+      const host = normalizeHostname(raw);
+      if (host === null) fail("remoteAccess.hostname: expected a hostname such as phone.example.com");
+      out.hostname = host;
+    }
+  }
+  if (o.autoStart !== undefined) out.autoStart = asBoolean(o.autoStart, "remoteAccess.autoStart");
+  if (o.serverName !== undefined) out.serverName = asClean(o.serverName, "remoteAccess.serverName", { max: 80 }).trim();
+  return out;
+}
+
+/** The ngrok credentials the person typed; each is printable ASCII without spaces. Neither means "refresh the domains". */
+export function validateRemoteAccessNgrokConnect(raw: unknown): RemoteAccessNgrokConnectRequest {
+  const o = asRecord(raw, "remoteAccess.ngrok");
+  const out: RemoteAccessNgrokConnectRequest = {};
+  if (o.authtoken !== undefined) out.authtoken = asSecretToken(o.authtoken, "remoteAccess.ngrok.authtoken");
+  if (o.apiKey !== undefined) out.apiKey = asSecretToken(o.apiKey, "remoteAccess.ngrok.apiKey");
+  return out;
+}
+
+// --- voice --------------------------------------------------------------------
+
+const VOICE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** 16 kHz s16le is 32 KB a second; the page sends about ten chunks a second. */
+const VOICE_AUDIO_MAX_BYTES = 64 * 1024;
+const VOICE_SPEAK_MAX_CHARS = 4000;
+
+function asVoiceLanguage(value: unknown, what: string): VoiceLanguage {
+  if (value === "tr" || value === "en") return value;
+  fail(`${what} must be "tr" or "en"`);
+}
+
+function asVoiceId(value: unknown, what: string): string {
+  if (typeof value === "string" && VOICE_ID.test(value)) return value;
+  fail(`${what} must be an id this app issued`);
+}
+
+export function validateVoiceListenStart(raw: unknown): { lang: VoiceLanguage } {
+  const o = asRecord(raw, "voice");
+  return { lang: asVoiceLanguage(o.lang, "voice.lang") };
+}
+
+export function validateVoiceId(raw: unknown): { id: string } {
+  const o = asRecord(raw, "voice");
+  return { id: asVoiceId(o.id, "voice.id") };
+}
+
+export function validateVoiceListenAudio(raw: unknown): { id: string; pcm: Uint8Array } {
+  const o = asRecord(raw, "voice");
+  const id = asVoiceId(o.id, "voice.id");
+  const pcm = o.pcm;
+  const bytes =
+    pcm instanceof ArrayBuffer ? new Uint8Array(pcm) : pcm instanceof Uint8Array ? pcm : fail("voice.pcm must be bytes");
+  if (bytes.byteLength === 0 || bytes.byteLength > VOICE_AUDIO_MAX_BYTES || bytes.byteLength % 2 !== 0) {
+    fail(`voice.pcm must be 2 to ${VOICE_AUDIO_MAX_BYTES} bytes of 16-bit samples`);
+  }
+  return { id, pcm: bytes };
+}
+
+const VOICE_STYLE = /^[A-Za-z0-9_]{1,32}$/;
+
+/** `voice` and each of its fields may be null, which is the same as left out. */
+export function validateVoiceSpeak(raw: unknown): { lang: VoiceLanguage; text: string; speed: number; engine?: VoiceEngine; style?: string } {
+  const o = asRecord(raw, "voice");
+  const lang = asVoiceLanguage(o.lang, "voice.lang");
+  const text = asString(o.text, "voice.text", { max: VOICE_SPEAK_MAX_CHARS });
+  if (!text.trim()) fail("voice.text must not be empty");
+  let speed = 1;
+  if (o.speed !== undefined) {
+    if (typeof o.speed !== "number" || !Number.isFinite(o.speed) || o.speed < 0.5 || o.speed > 2) {
+      fail("voice.speed must be a number from 0.5 to 2");
+    }
+    speed = o.speed;
+  }
+  const out: { lang: VoiceLanguage; text: string; speed: number; engine?: VoiceEngine; style?: string } = { lang, text, speed };
+  if (o.voice === undefined || o.voice === null) return out;
+  const choice = asRecord(o.voice, "voice.voice");
+  if (choice.engine !== undefined && choice.engine !== null) {
+    if (typeof choice.engine !== "string" || !(VOICE_ENGINES as readonly string[]).includes(choice.engine)) {
+      fail(`voice.voice.engine must be one of ${VOICE_ENGINES.join(", ")}`);
+    }
+    out.engine = choice.engine as VoiceEngine;
+  }
+  if (choice.style !== undefined && choice.style !== null) {
+    if (typeof choice.style !== "string" || !VOICE_STYLE.test(choice.style)) fail("voice.voice.style must be a voice style name like af_heart or F1");
+    out.style = choice.style;
+  }
+  return out;
 }

@@ -170,6 +170,21 @@ describe("ComponentsTab", () => {
     );
   });
 
+  it("toggling automation tests calls updateRepository with automation_tests", async () => {
+    renderTab("comp-api");
+    await waitFor(() => expect(screen.getByText("Automation tests")).toBeInTheDocument());
+
+    fireEvent.click(screen.getAllByRole("switch")[1]);
+
+    await waitFor(() =>
+      expect(updateRepository).toHaveBeenCalledWith("repo-1", {
+        name: model.repository.name,
+        description: model.repository.description,
+        automation_tests: true,
+      }),
+    );
+  });
+
   it("shows the no-CI-workflows notice when no check has source ci", async () => {
     renderTab("comp-api");
     await waitFor(() => expect(screen.getByText("No CI workflows")).toBeInTheDocument());
@@ -214,8 +229,8 @@ describe("ComponentsTab", () => {
     await screen.findByText("Quality gates");
     expect(screen.getByText(/opens a task to add the CI step/)).toBeInTheDocument();
 
-    // [0] is the review card's switch; the gates card's coverage switch follows it.
-    fireEvent.click(screen.getAllByRole("switch")[1]);
+    // [0] and [1] are the review card's human-review and automation switches; the gates card's coverage switch follows them.
+    fireEvent.click(screen.getAllByRole("switch")[2]);
 
     await waitFor(() => expect(updateComponent).toHaveBeenCalledWith("comp-api", { gates: { coverage_enabled: true } }));
     await waitFor(() =>
@@ -234,7 +249,7 @@ describe("ComponentsTab", () => {
     renderTab("comp-api");
     await screen.findByText("Quality gates");
 
-    fireEvent.click(screen.getAllByRole("switch")[2]);
+    fireEvent.click(screen.getAllByRole("switch")[3]);
 
     await waitFor(() =>
       expect(toastInfo).toHaveBeenCalledWith("The task adding mutation testing to CI is still open.", {
@@ -248,5 +263,71 @@ describe("ComponentsTab", () => {
     renderTab(null, buildModel({ components: [] }));
     await waitFor(() => expect(screen.getByText("Review")).toBeInTheDocument());
     expect(screen.getByText("No components yet")).toBeInTheDocument();
+  });
+});
+
+describe("ComponentsTab stack override", () => {
+  beforeEach(() => {
+    updateComponent.mockReset().mockResolvedValue(component);
+  });
+
+  it("saving the languages field sends a stack override", async () => {
+    renderTab("comp-api");
+    const input = await screen.findByPlaceholderText("e.g. Go, TypeScript");
+    fireEvent.change(input, { target: { value: "Go, Rust" } });
+    fireEvent.blur(input);
+    await waitFor(() =>
+      expect(updateComponent).toHaveBeenCalledWith("comp-api", { stack: { languages: [{ name: "Go" }, { name: "Rust" }] } }),
+    );
+  });
+
+  it("removes a detected command by sending an empty override, and offers it back", async () => {
+    const withInstall: Component = { ...component, commands: [{ purpose: "install", command: { detected: "npm ci" } }] };
+    renderTab("comp-api", { ...model, components: [withInstall] });
+    await screen.findByText("npm ci");
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove command" }));
+
+    await waitFor(() => expect(updateComponent).toHaveBeenCalledWith("comp-api", { commands: { install: "" } }));
+  });
+
+  it("shows a removed command as removed with a restore button that clears the override", async () => {
+    const removed: Component = { ...component, commands: [{ purpose: "install", command: { detected: "npm ci", override: "" } }] };
+    renderTab("comp-api", { ...model, components: [removed] });
+    await screen.findByText("Removed");
+    expect(screen.queryByText("npm ci")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+
+    await waitFor(() => expect(updateComponent).toHaveBeenCalledWith("comp-api", { commands: { install: null } }));
+  });
+
+  it("turns the Docker commands on with the has-containers switch", async () => {
+    renderTab("comp-api");
+    await screen.findByText("Containers");
+    expect(screen.queryByText("Image registry")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("switch", { name: "This component runs in containers" }));
+
+    await waitFor(() => expect(updateComponent).toHaveBeenCalledWith("comp-api", { container: { enabled: true } }));
+  });
+
+  it("saves the registry, platforms and tag of a containerised component", async () => {
+    const containerised: Component = { ...component, container: { enabled: true } };
+    renderTab("comp-api", { ...model, components: [containerised] });
+
+    const registry = await screen.findByPlaceholderText("ghcr.io/acme/app");
+    fireEvent.change(registry, { target: { value: "ghcr.io/acme/api" } });
+    fireEvent.blur(registry);
+    await waitFor(() =>
+      expect(updateComponent).toHaveBeenCalledWith("comp-api", { container: { enabled: true, registry: "ghcr.io/acme/api" } }),
+    );
+
+    const platforms = screen.getByPlaceholderText("linux/amd64, linux/arm64");
+    fireEvent.change(platforms, { target: { value: "linux/amd64, linux/arm64" } });
+    fireEvent.blur(platforms);
+    await waitFor(() =>
+      expect(updateComponent).toHaveBeenCalledWith("comp-api", { container: { enabled: true, platforms: ["linux/amd64", "linux/arm64"] } }),
+    );
   });
 });

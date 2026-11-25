@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/hooks/useI18n";
 import { usePolling } from "@/hooks/usePolling";
+import { useTaskPreviews } from "@/hooks/useTaskPreviews";
 import { desktopRunner } from "@/lib/desktop-bridge";
 
 const FAILED_TAIL_LINES = 12;
@@ -24,9 +25,8 @@ interface LocalPreviewPanelProps {
  * approve/decline call can be made against the real thing instead of a
  * reading of the diff. See server's localpreview.Service.
  *
- * Only one preview runs per repository — starting one for this task replaces
- * whatever else was running, which is why the panel also has to render the
- * case where the repository's active preview belongs to a DIFFERENT task.
+ * Each task has its own preview, so previews of several tasks in one
+ * repository can run at once; moving the task to another column stops it.
  */
 export function LocalPreviewPanel({ task, repositoryId, actions }: LocalPreviewPanelProps) {
   const { t } = useI18n();
@@ -39,12 +39,12 @@ export function LocalPreviewPanel({ task, repositoryId, actions }: LocalPreviewP
 
   const refresh = useCallback(async () => {
     try {
-      const res = await api.getLocalPreview(repositoryId);
+      const res = await api.getLocalPreview(repositoryId, task.id);
       setPreview(res.active ? (res.preview ?? null) : null);
     } catch {
       /* leave the last known state: a failed poll is not "nothing running" */
     }
-  }, [repositoryId]);
+  }, [repositoryId, task.id]);
 
   useEffect(() => {
     void refresh();
@@ -59,7 +59,16 @@ export function LocalPreviewPanel({ task, repositoryId, actions }: LocalPreviewP
   const isThisTask = preview !== null && preview.task_id === task.id;
   const live = isThisTask && !settled;
   const failed = isThisTask && preview.status === "failed";
-  const otherTaskLive = preview !== null && !isThisTask && !settled;
+
+  // A hosted preview the PR already produced is a better way to look at the
+  // task than waiting on a local dev server, so it leads when one is ready;
+  // "Run locally" stays available but moves to a secondary spot and is never
+  // triggered on its own.
+  const { previews: hostedPreviews } = useTaskPreviews(repositoryId, task.id, !!task.pr_url);
+  const hasReadyHostedPreview = (hostedPreviews ?? []).some(
+    (p) => p.status === "ready" && (p.branch_url || p.url),
+  );
+  const hostedPreviewLeads = !live && hasReadyHostedPreview;
 
   const openPreview = useCallback(
     (url: string) => {
@@ -110,7 +119,7 @@ export function LocalPreviewPanel({ task, repositoryId, actions }: LocalPreviewP
   const stop = async () => {
     setBusy(true);
     try {
-      await api.stopLocalPreview(repositoryId);
+      await api.stopLocalPreview(repositoryId, task.id);
       setPreview(null);
     } finally {
       setBusy(false);
@@ -158,7 +167,8 @@ export function LocalPreviewPanel({ task, repositoryId, actions }: LocalPreviewP
           </>
         ) : (
           <>
-            <Button size="sm" variant="outline" onClick={() => void start()} disabled={busy}>
+            {hostedPreviewLeads && actions}
+            <Button size="sm" variant={hostedPreviewLeads ? "ghost" : "outline"} onClick={() => void start()} disabled={busy}>
               {busy ? (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
               ) : (
@@ -167,12 +177,9 @@ export function LocalPreviewPanel({ task, repositoryId, actions }: LocalPreviewP
               {t("boardArea.components.taskDetail.runLocally")}
             </Button>
             {failed && statusBadge(preview.status)}
-            {otherTaskLive && (
-              <span className="text-xs text-muted-foreground">{t("boardArea.components.taskDetail.previewOtherTask")}</span>
-            )}
           </>
         )}
-        {actions}
+        {!hostedPreviewLeads && actions}
       </div>
       {failed && (
         <div className="space-y-1">

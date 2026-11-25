@@ -8,6 +8,7 @@ import { DesignLintChecks } from "@/components/projects/designsystem/DesignLintC
 import { DesignSystemFilesCard } from "@/components/projects/designsystem/DesignSystemFilesCard";
 import { DesignSystemGenerateCard } from "@/components/projects/designsystem/DesignSystemGenerateCard";
 import { DesignSystemVersionList } from "@/components/projects/designsystem/DesignSystemVersionList";
+import { FigCraftFileCard } from "@/components/board/FigCraftFileCard";
 import { DesignSystemVersionPanel } from "@/components/projects/designsystem/DesignSystemVersionPanel";
 import { DesignTokensPreview } from "@/components/projects/designsystem/DesignTokensPreview";
 import { Badge } from "@/components/ui/badge";
@@ -57,7 +58,7 @@ export function RepositoryDesignSystemTab({ repositoryId }: RepositoryDesignSyst
   if (!view) {
     return (
       <Card className="p-0">
-        <EmptyState icon={AlertTriangle} variant="critical" title={t("designSystem.loadFailed")} description={error ?? undefined} />
+        <EmptyState mascot="oops" icon={AlertTriangle} variant="critical" title={t("designSystem.loadFailed")} description={error ?? undefined} />
       </Card>
     );
   }
@@ -86,6 +87,9 @@ export function RepositoryDesignSystemTab({ repositoryId }: RepositoryDesignSyst
       {!hasDesignSystem && (
         <DesignSystemGenerateCard scope="repository" mode="create" request={view.request} onGenerate={generate} />
       )}
+
+      <FigCraftFileCard scope="repository" id={view.repository_id} />
+      {view.base_project_id && <FigCraftFileCard scope="project" id={view.base_project_id} />}
 
       <DesignSystemVersionList
         variant="pending"

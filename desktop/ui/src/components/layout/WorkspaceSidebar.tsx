@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Bot, Brain, FileText, House, Inbox, Kanban, Layers, ListChecks, MessageSquare, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Rocket, Settings, Users } from "lucide-react";
 import type { Agent, WorkspaceConfig } from "@/api";
 import { AgentAvatar } from "@/components/agent/AgentAvatar";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { SidebarNavLink } from "@/components/layout/SidebarNavLink";
@@ -24,7 +25,7 @@ interface WorkspaceSidebarProps {
   mobileOpen: boolean;
   onMobileClose: () => void;
   onRefresh: () => void;
-  unreadAgentIds: Set<string>;
+  unreadCounts: Record<string, number>;
 }
 
 export function WorkspaceSidebar({
@@ -36,7 +37,7 @@ export function WorkspaceSidebar({
   mobileOpen,
   onMobileClose,
   onRefresh,
-  unreadAgentIds,
+  unreadCounts,
 }: WorkspaceSidebarProps) {
   const { t } = useI18n();
   const [newAgentOpen, setNewAgentOpen] = useState(false);
@@ -47,16 +48,19 @@ export function WorkspaceSidebar({
   // this surface could not READ is not something to nag about.
   const { needsWork } = useSetup();
 
-  const unreadDot = (agentId: string) =>
-    unreadAgentIds.has(agentId) ? (
-      // A dot, not a Badge: there is no count to show (the server has no
-      // per-viewer read state to count against, see useAgentUnread), only
-      // "something changed here".
-      <span
-        className="h-2 w-2 shrink-0 rounded-full bg-primary"
-        title={t("frame.layout.sidebar.unreadAgent")}
-      />
-    ) : null;
+  const unreadBadge = (agentId: string) => {
+    const count = unreadCounts[agentId];
+    if (!count) return null;
+    return (
+      <Badge
+        variant="destructive"
+        aria-label={t("frame.layout.sidebar.unreadAgentCount", { count })}
+        className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full px-1 text-[10px] leading-none"
+      >
+        {count > 9 ? "9+" : count}
+      </Badge>
+    );
+  };
 
   const newAgentButton = collapsed ? (
     <>
@@ -188,6 +192,14 @@ export function WorkspaceSidebar({
               onClick={onMobileClose}
             />
             <SidebarNavLink
+              to="/audience"
+              label={t("audienceHub.nav")}
+              icon={Users}
+              end={false}
+              collapsed={collapsed}
+              onClick={onMobileClose}
+            />
+            <SidebarNavLink
               to="/projects"
               label={t("frame.layout.sidebar.projects")}
               icon={Layers}
@@ -202,12 +214,12 @@ export function WorkspaceSidebar({
                 <SidebarNavLink
                   to={`/agents/${leadAgent.id}/chat`}
                   label={leadAgent.name}
-                  leading={<AgentAvatar name={leadAgent.name} lead size="sm" />}
+                  leading={<AgentAvatar name={leadAgent.name} slug={leadAgent.catalog_slug} lead size="sm" />}
                   end={false}
                   collapsed={collapsed}
                   onClick={onMobileClose}
                   className="font-semibold"
-                  trailing={unreadDot(leadAgent.id)}
+                  trailing={unreadBadge(leadAgent.id)}
                 />
                 {teamAgents.length > 0 && (
                   <div
@@ -221,12 +233,12 @@ export function WorkspaceSidebar({
                         key={agent.id}
                         to={`/agents/${agent.id}/chat`}
                         label={agent.name}
-                        leading={<AgentAvatar name={agent.name} size="xs" />}
+                        leading={<AgentAvatar name={agent.name} slug={agent.catalog_slug} size="xs" />}
                         end={false}
                         collapsed={collapsed}
                         onClick={onMobileClose}
                         className="px-2 py-1.5"
-                        trailing={unreadDot(agent.id)}
+                        trailing={unreadBadge(agent.id)}
                       />
                     ))}
                   </div>
@@ -245,13 +257,13 @@ export function WorkspaceSidebar({
                     end={false}
                     collapsed={collapsed}
                     onClick={onMobileClose}
-                    trailing={unreadDot(agent.id)}
+                    trailing={unreadBadge(agent.id)}
                   />
                 ))}
               </>
             )}
             {!loading && !collapsed && agents.length === 0 && (
-              <EmptyState
+              <EmptyState mascot={false}
                 icon={Users}
                 title={t("chatArea.workspace.noAgents.title")}
                 description={t(ADVANCED_TEAM_CONFIG ? "chatArea.workspace.noAgents.description" : "chatArea.workspace.noAgents.descriptionCatalogOnly")}

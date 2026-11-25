@@ -176,28 +176,6 @@ func isUIRelevantPath(p string) bool {
 	return true
 }
 
-// PMUATExecutionTools demand the same evidence QAExecutionTools does, minus
-// run_terminal (PM has no shell); get_deploy_target is excluded too — resolving
-// the stage URL is a lookup, not exercising the product.
-var PMUATExecutionTools = []string{
-	"browser_navigate",
-	"browser_click",
-	"browser_fill",
-	"browser_wait_for",
-	"browser_read_dom",
-	"browser_screenshot",
-	"browser_set_viewport",
-	"mobile_launch_app",
-	"mobile_tap",
-	"mobile_type_text",
-	"mobile_swipe",
-	"mobile_wait_for",
-	"mobile_read_ui",
-	"mobile_screenshot",
-	"mobile_press_button",
-	"mobile_rotate",
-}
-
 // ImplementationVerificationTools are the evidence an implementation run
 // executed the code it wrote instead of only writing it. run_terminal is the
 // whole list because build/test commands are per-project and only the shell can
@@ -423,6 +401,21 @@ func RestrictToolsForStage(p ToolPolicy, stage WorkflowStage, typeDef TaskTypeDe
 	}
 	if stage.Has(BehaviourNoCodeReading) {
 		out = dropTools(out, func(name string) bool { return containsToolName(CodeExplorationTools, name) })
+	}
+	return out
+}
+
+// KeepWorkspaceWriters gives a stage-restricted policy back the workspace
+// writers the unrestricted one held: a QA round on a repository with
+// automation tests on writes its tests, and only them — the runner discards
+// every change outside the automation project before committing.
+func KeepWorkspaceWriters(restricted, full ToolPolicy) ToolPolicy {
+	out := restricted
+	out.AllowTools = append([]string(nil), restricted.AllowTools...)
+	for _, name := range full.AllowTools {
+		if isWorkspaceWriteTool(name) && !containsToolName(out.AllowTools, name) {
+			out.AllowTools = append(out.AllowTools, name)
+		}
 	}
 	return out
 }

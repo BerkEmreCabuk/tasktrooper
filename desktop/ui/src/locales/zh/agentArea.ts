@@ -178,13 +178,11 @@ export const agentArea = {
       task_completed: "任务完成",
       task_released: "任务已发布",
       revision_requested: "要求修改",
-      pm_uat_failed: "PM UAT 未通过",
       human_uat_failed: "人工 UAT 未通过",
       qa_bug_found: "QA 发现缺陷",
       qa_valid_scenario_confirmed: "有效场景已确认",
       qa_invalid_scenario_confirmed: "无效场景已确认",
       qa_task_tested: "QA 已完成测试",
-      pm_uat_completed: "PM UAT 已完成",
     },
     changeType: {
       skill_created: "已添加技能",
@@ -282,6 +280,13 @@ export const agentArea = {
     systemPrompt: "系统提示词",
     enabled: "已启用",
     coreHint: "核心智能体；无法关闭。",
+    commitCoauthor: {
+      label: "提交共同作者",
+      help: "姓名 <邮箱> 或完整的 Co-authored-by 行。留空则使用默认署名行。",
+      placeholder: "张三 <zhang@example.com>",
+      disable: "不添加共同作者",
+      disableHelp: "开启：此智能体的提交不带任何 Co-authored-by 行。",
+    },
     catalog: {
       autoPull: {
         label: "从目录拉取定义更新",
@@ -322,7 +327,8 @@ export const agentArea = {
         label: "给 {name} 发消息",
         placeholder: "提出功能需求、报告缺陷或询问看板情况…",
         send: "发送",
-        hint: "Enter 发送 · Shift+Enter 换行",
+        hint: "Enter 发送 · Shift+Enter 换行 · @ 标记智能体、项目或仓库",
+        voice: "语音对话",
         failed: "无法开始对话",
         suggestions: {
           board: {
@@ -376,10 +382,6 @@ export const agentArea = {
             qa: {
               label: "QA",
               detail: "测试",
-            },
-            acceptance: {
-              label: "PM 检查",
-              detail: "UAT",
             },
             approval: {
               label: "验收",

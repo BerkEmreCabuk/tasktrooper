@@ -16,6 +16,7 @@ tool_policy:
         - download_file
         - web_search
         - fetch_url
+        - http_request
         - get_repo_tree
         - grep_code
         - read_file
@@ -26,6 +27,11 @@ tool_policy:
         - query_runtime_logs
         - list_runtime_errors
         - list_deployments
+        - telemetry_get_service
+        - telemetry_explain_endpoint
+        - telemetry_search_traces
+        - telemetry_search_logs
+        - telemetry_list_errors
         - browser_navigate
         - browser_screenshot
         - browser_click
@@ -57,6 +63,7 @@ tool_policy:
         - record_test_cases
         - set_test_case_result
         - get_pipeline_status
+        - record_review_findings
         - get_deploy_target
         - get_task_preview
         - start_task_preview

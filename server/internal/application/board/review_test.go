@@ -94,7 +94,7 @@ func TestReviewPRContext_NoOriginReviewsTheDiffAlone(t *testing.T) {
 // they are: someone judging work they did not do.
 func TestIsReviewColumn(t *testing.T) {
 	for _, col := range []domain.TaskColumn{
-		domain.TaskColumnCodeReview, domain.TaskColumnAnalizReview, domain.TaskColumnPMUAT,
+		domain.TaskColumnCodeReview, domain.TaskColumnAnalizReview,
 		domain.TaskColumnInQA, domain.TaskColumnHumanUAT,
 	} {
 		assert.True(t, isReviewColumn(taskWF, col), "%s judges someone else's change", col)
@@ -134,4 +134,18 @@ func TestColumnInstructionCodeReviewReadsTheDiffInsteadOfRunningIt(t *testing.T)
 	for _, want := range []string{"pull request", "get_pipeline_status", "ready_for_qa", "need_revision"} {
 		assert.Contains(t, got, want)
 	}
+}
+
+func TestReviewPRContext_NonGitHubRemoteReviewsTheDiffWithoutRetrying(t *testing.T) {
+	g := &reviewGit{
+		origin: "https://gitlab.com/acme/acme-web.git",
+		prErrs: []error{domain.ErrNotGitHubRepo, domain.ErrNotGitHubRepo},
+	}
+
+	msg, err := (&Runner{git: g}).reviewPRContext(context.Background(), "/ws/task-1", uuid.New())
+
+	require.NoError(t, err)
+	assert.Empty(t, msg)
+	assert.Equal(t, 1, g.prCalls, "a non-GitHub origin is not retried")
+	assert.Zero(t, g.pushCalls)
 }

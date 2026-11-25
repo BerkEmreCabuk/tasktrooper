@@ -465,3 +465,80 @@ func TestB2DeleteLinkOnlyAllowsUserLinks(t *testing.T) {
 	_, err = store.GetLink(ctx, userLink.ID)
 	assert.Error(t, err)
 }
+
+func TestUpdateComponentStackOverrideKeepsDetectedExtrasAndClears(t *testing.T) {
+	svc, store, repos, _, _, _ := newB2Service(t)
+	ctx := context.Background()
+	repo := b2SeedRepo(t, repos, "demo")
+	detected := domain.ComponentStack{Languages: []domain.StackItem{{Name: "TypeScript"}}, PackageManager: "npm", DevPort: 3000}
+	comp := b2SeedComponent(t, store, domain.Component{
+		RepositoryID: repo.ID, Path: ".", Status: domain.ComponentStatusActive,
+		Stack: domain.Fact[domain.ComponentStack]{Detected: &detected},
+	})
+
+	want := domain.ComponentStack{Languages: []domain.StackItem{{Name: " Go "}, {Name: "go"}, {Name: ""}}}
+	got, err := svc.UpdateComponent(ctx, comp.ID, domain.ComponentPatch{Stack: domain.Patch[domain.ComponentStack]{Set: true, Value: &want}})
+	require.NoError(t, err)
+	eff := got.Stack.Get()
+	require.Len(t, eff.Languages, 1)
+	assert.Equal(t, "Go", eff.Languages[0].Name)
+	assert.Equal(t, "npm", eff.PackageManager)
+	assert.Equal(t, 3000, eff.DevPort)
+
+	stacks, err := svc.ComponentStacks(ctx, repo.ID, nil)
+	require.NoError(t, err)
+	require.Len(t, stacks, 1)
+	assert.Equal(t, "Go", stacks[0].Languages[0].Name)
+
+	got, err = svc.UpdateComponent(ctx, comp.ID, domain.ComponentPatch{Stack: domain.Patch[domain.ComponentStack]{Set: true}})
+	require.NoError(t, err)
+	assert.Nil(t, got.Stack.Override)
+	assert.Equal(t, "TypeScript", got.Stack.Get().Languages[0].Name)
+}
+
+func TestUpdateComponentCanRemoveADetectedCommandAndABrandNewDockerOne(t *testing.T) {
+	svc, store, repos, _, _, _ := newB2Service(t)
+	ctx := context.Background()
+	repo := b2SeedRepo(t, repos, "demo")
+	detectedInstall := "npm ci"
+	comp := b2SeedComponent(t, store, domain.Component{
+		RepositoryID: repo.ID, Path: ".", Status: domain.ComponentStatusActive,
+		Commands: []domain.ComponentCommand{{Purpose: domain.CommandInstall, Command: domain.Fact[string]{Detected: &detectedInstall}}},
+	})
+
+	removed, up := "", "docker compose up -d"
+	got, err := svc.UpdateComponent(ctx, comp.ID, domain.ComponentPatch{
+		Commands: map[domain.CommandPurpose]domain.Patch[string]{
+			domain.CommandInstall:   {Set: true, Value: &removed},
+			domain.CommandComposeUp: {Set: true, Value: &up},
+		},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "", got.Command(domain.CommandInstall), "an emptied command must read as no command, whatever the scan detected")
+	assert.Equal(t, up, got.Command(domain.CommandComposeUp))
+	assert.NotContains(t, briefCommandLines(got), "npm ci")
+	assert.Contains(t, briefCommandLines(got), "docker compose up -d")
+}
+
+func TestUpdateComponentSavesContainerSettingsAndRefusesBadOnes(t *testing.T) {
+	svc, store, repos, _, _, _ := newB2Service(t)
+	ctx := context.Background()
+	repo := b2SeedRepo(t, repos, "demo")
+	comp := b2SeedComponent(t, store, domain.Component{RepositoryID: repo.ID, Path: ".", Status: domain.ComponentStatusActive})
+
+	got, err := svc.UpdateComponent(ctx, comp.ID, domain.ComponentPatch{Container: &domain.ContainerSettings{
+		Enabled: true, Registry: " ghcr.io/acme/api ", Platforms: []string{"linux/amd64", "LINUX/arm64", "linux/amd64"},
+		TagPattern: "{sha}", ContainerOnly: true,
+	}})
+	require.NoError(t, err)
+	assert.Equal(t, domain.ContainerSettings{
+		Enabled: true, Registry: "ghcr.io/acme/api", Platforms: []string{"linux/amd64", "linux/arm64"}, TagPattern: "{sha}", ContainerOnly: true,
+	}, got.Container)
+	lines := briefContainerLines(got.Container)
+	assert.Contains(t, lines, "ghcr.io/acme/api")
+	assert.Contains(t, lines, "linux/amd64, linux/arm64")
+	assert.Contains(t, lines, "inside its containers")
+
+	_, err = svc.UpdateComponent(ctx, comp.ID, domain.ComponentPatch{Container: &domain.ContainerSettings{Platforms: []string{"not a platform"}}})
+	assert.ErrorIs(t, err, ErrInvalidInput)
+}

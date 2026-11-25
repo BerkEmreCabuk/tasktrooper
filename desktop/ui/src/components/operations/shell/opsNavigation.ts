@@ -1,6 +1,24 @@
 import {
+  Activity,
+  AppWindow,
+  Boxes,
+  Film,
+  Flame,
+  HardDrive,
+  Layers,
+  LayoutDashboard,
+  Sparkles,
+  Timer,
+  Waypoints,
+  Zap,
   BellRing,
   Bug,
+  Gauge,
+  Network,
+  Rocket,
+  Route as RouteIcon,
+  ShieldAlert,
+  Target,
   Database,
   GitCommitHorizontal,
   Globe,
@@ -29,9 +47,30 @@ export type OpsNavId =
   | "issues"
   | "alerts"
   | "sources"
-  | "alertConnections";
+  | "alertConnections"
+  | "telServices"
+  | "telEndpoints"
+  | "telTraces"
+  | "telLogs"
+  | "telErrors"
+  | "telIncidents"
+  | "telMonitors"
+  | "telDeploys"
+  | "telSlo"
+  | "telOverview"
+  | "telMap"
+  | "telHosts"
+  | "telKubernetes"
+  | "telDatabases"
+  | "telQueues"
+  | "telServerless"
+  | "telApps"
+  | "telReplays"
+  | "telProfiling"
+  | "telLlm"
+  | "telLoadTests";
 
-export type OpsNavGroupId = "explore" | "monitor" | "settings";
+export type OpsNavGroupId = "explore" | "monitor" | "telemetry" | "telInfra" | "telApps" | "telPerformance" | "settings";
 
 export interface OpsNavItem {
   id: OpsNavId;
@@ -66,6 +105,47 @@ export const OPS_NAV: OpsNavGroup[] = [
     ],
   },
   {
+    id: "telemetry",
+    items: [
+      { id: "telOverview", to: "/operations/telemetry/overview", icon: LayoutDashboard },
+      { id: "telMap", to: "/operations/telemetry/map", icon: Waypoints },
+      { id: "telServices", to: "/operations/telemetry/services", icon: Activity },
+      { id: "telEndpoints", to: "/operations/telemetry/endpoints", icon: Network },
+      { id: "telTraces", to: "/operations/telemetry/traces", icon: RouteIcon },
+      { id: "telLogs", to: "/operations/telemetry/logs", icon: ScrollText },
+      { id: "telErrors", to: "/operations/telemetry/errors", icon: ShieldAlert },
+      { id: "telIncidents", to: "/operations/telemetry/incidents", icon: Siren },
+      { id: "telMonitors", to: "/operations/telemetry/monitors", icon: Gauge },
+      { id: "telDeploys", to: "/operations/telemetry/deploys", icon: Rocket },
+      { id: "telSlo", to: "/operations/telemetry/slo", icon: Target },
+    ],
+  },
+  {
+    id: "telInfra",
+    items: [
+      { id: "telHosts", to: "/operations/telemetry/infra/hosts", icon: HardDrive },
+      { id: "telKubernetes", to: "/operations/telemetry/infra/kubernetes", icon: Boxes },
+      { id: "telDatabases", to: "/operations/telemetry/infra/databases", icon: Database },
+      { id: "telQueues", to: "/operations/telemetry/infra/queues", icon: Layers },
+      { id: "telServerless", to: "/operations/telemetry/infra/serverless", icon: Zap },
+    ],
+  },
+  {
+    id: "telApps",
+    items: [
+      { id: "telApps", to: "/operations/telemetry/apps", icon: AppWindow },
+      { id: "telReplays", to: "/operations/telemetry/replays", icon: Film },
+    ],
+  },
+  {
+    id: "telPerformance",
+    items: [
+      { id: "telProfiling", to: "/operations/telemetry/profiling", icon: Flame },
+      { id: "telLlm", to: "/operations/telemetry/llm", icon: Sparkles },
+      { id: "telLoadTests", to: "/operations/telemetry/load-tests", icon: Timer },
+    ],
+  },
+  {
     id: "settings",
     items: [
       { id: "sources", to: "/operations/sources", icon: Database },
@@ -90,6 +170,21 @@ export const OPS_SUB_PAGES: OpsSubPage[] = [
 export function opsSubPage(pathname: string): OpsSubPage | undefined {
   const path = pathname.replace(/\/+$/, "");
   return OPS_SUB_PAGES.find((p) => path === p.path);
+}
+
+const TELEMETRY_NAV_PREFIX = "tel";
+
+/** The telemetry group's labels live in its own dictionary; the console's
+ * older groups keep theirs under `operations.shell`. */
+export function navItemLabelKey(id: OpsNavId): string {
+  return id.startsWith(TELEMETRY_NAV_PREFIX)
+    ? `telemetryHub.nav.items.${id}`
+    : `operations.shell.items.${id}`;
+}
+
+export function navGroupLabelKey(id: OpsNavGroupId): string {
+  if (id === "telemetry") return "telemetryHub.nav.group";
+  return id.startsWith(TELEMETRY_NAV_PREFIX) ? `telemetryHub.nav.groups.${id}` : `operations.shell.groups.${id}`;
 }
 
 export function navGroupOf(id: OpsNavId): OpsNavGroupId {

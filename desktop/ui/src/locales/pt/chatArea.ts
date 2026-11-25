@@ -28,6 +28,7 @@ export const chatArea = {
       textRequired: "Digite sua resposta",
       selectOne: "Selecione uma opção",
       selectMany: "Selecione todas as que se aplicam",
+      selectUpTo: "Selecione até {max}",
       other: "Outro",
       skip: "Pular",
       answered: "Respondida",
@@ -47,6 +48,7 @@ export const chatArea = {
         attached: "anexado",
         linked: "vinculado",
         deleted: "excluída",
+        proposed: "proposto",
       },
       entity: {
         board_task: "Tarefa",
@@ -55,6 +57,7 @@ export const chatArea = {
         acceptance_criterion: "Critério de aceitação",
         initiative_project: "Projeto",
         repository: "Repositório",
+        release: "Release",
       },
     },
     plan: {
@@ -103,6 +106,12 @@ export const chatArea = {
       queuedRemove: "Remover da fila",
       queuedHint: "Será enviada quando o agente terminar o trabalho atual.",
       queuedReturned: "As mensagens na fila voltaram para o campo de mensagem.",
+    },
+    wakes: {
+      waiting: "Aguardando trabalho em segundo plano; responderá de novo quando terminar",
+      stop: "Parar de esperar",
+      stopFailed: "Não foi possível parar de esperar",
+      updateTitle: "Trabalho em segundo plano concluído",
     },
     reasoning: {
       title: "Passos de raciocínio ({count})",
@@ -193,8 +202,28 @@ export const chatArea = {
       resultsCount: "{count} resultados",
     },
   },
+  voice: {
+    start: "Falar com o agente",
+    end: "Encerrar",
+    hint: "Ouvindo — fale quando quiser",
+    state: {
+      starting: "Abrindo o microfone…",
+      listening: "Ouvindo",
+      thinking: "Pensando…",
+      speaking: "Falando — fale para interromper",
+      off: "Voz desligada",
+    },
+    error: {
+      micDenied: "O TaskTrooper não consegue usar o microfone. Permita em Ajustes do Sistema → Privacidade e Segurança → Microfone.",
+      micMissing: "Nenhum microfone encontrado.",
+      generic: "A voz parou: {message}",
+    },
+  },
   markdown: {
     empty: "Vazio",
+    visual: {
+      title: "Desenho do agente",
+    },
     table: {
       scrollHint: "Role para ver mais colunas",
     },

@@ -38,6 +38,14 @@ type reviewVerdictSweepMissingIntroData struct{ Role string }
 
 var reviewVerdictSweepMissingIntroKey = prompt.Define("board_context.review_verdict_sweep_missing_intro", reviewVerdictSweepMissingIntroData{Role: "qa"})
 
+var reviewVerdictSweepCasesNoneKey = prompt.Define("board_context.review_verdict_sweep_cases_none", struct{}{})
+
+type reviewVerdictSweepCasesPlannedData struct{ Count int }
+
+var reviewVerdictSweepCasesPlannedKey = prompt.Define("board_context.review_verdict_sweep_cases_planned", reviewVerdictSweepCasesPlannedData{Count: 2})
+
+var reviewVerdictSweepCasesFooterKey = prompt.Define("board_context.review_verdict_sweep_cases_footer", struct{}{})
+
 var reviewVerdictSweepMissingFooterKey = prompt.Define("board_context.review_verdict_sweep_missing_footer", struct{}{})
 
 type reviewVerdictSweepClosingData struct{ Exit string }
@@ -167,3 +175,22 @@ var analysisQuestionsKey = prompt.Define("board_context.analysis_questions", ana
 		{Key: "Q1", Kind: "technical", Prompt: "Which queue?", Blocking: true},
 	},
 })
+
+var qaAutomationOnKey = prompt.Define("board.qa_automation_on", struct{}{})
+
+var automationNoWorkspaceKey = prompt.Define("board_context.automation_no_workspace", struct{}{})
+
+var automationNoTestsKey = prompt.Define("board_context.automation_no_tests", struct{}{})
+
+var automationNoEntrypointKey = prompt.Define("board_context.automation_no_entrypoint", struct{}{})
+
+type automationFixPromptInput struct{ Report string }
+
+var automationFixPromptKey = prompt.Define("board_context.automation_fix_prompt", automationFixPromptInput{Report: "$ bash qa-automation/scripts/e2e.sh\nFAIL api/export_test"})
+
+type automationFailedCommentInput struct {
+	Rounds int
+	Report string
+}
+
+var automationFailedCommentKey = prompt.Define("board_context.automation_failed_comment", automationFailedCommentInput{Rounds: 2, Report: "FAIL api/export_test"})

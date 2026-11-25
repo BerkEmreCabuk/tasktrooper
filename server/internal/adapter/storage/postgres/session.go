@@ -160,6 +160,23 @@ func (s *SessionStore) FindByTask(ctx context.Context, taskID uuid.UUID) (domain
 	return sess, true, nil
 }
 
+// FindByTaskAndAgent returns the chat bound to taskID that is held with agentID,
+// so a task can carry one thread per agent talked to.
+func (s *SessionStore) FindByTaskAndAgent(ctx context.Context, taskID, agentID uuid.UUID) (domain.Session, bool, error) {
+	sess, err := s.scanSession(s.pool.QueryRow(ctx, `
+		SELECT `+sessionColumns+`
+		FROM sessions WHERE task_id = $1 AND agent_id = $2
+		ORDER BY updated_at DESC LIMIT 1
+	`, taskID, agentID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.Session{}, false, nil
+	}
+	if err != nil {
+		return domain.Session{}, false, fmt.Errorf("find session by task and agent: %w", err)
+	}
+	return sess, true, nil
+}
+
 func (s *SessionStore) UpdateWorkspaceDir(ctx context.Context, id uuid.UUID, workspaceDir string) error {
 	tag, err := s.pool.Exec(ctx, `UPDATE sessions SET workspace_dir = $2, updated_at = now() WHERE id = $1`, id, workspaceDir)
 	if err != nil {
@@ -346,6 +363,36 @@ func (s *SessionStore) ListByAgent(ctx context.Context, agentID uuid.UUID, limit
 	}
 	defer rows.Close()
 	return s.scanSessions(ctx, rows)
+}
+
+func (s *SessionStore) ListRecentChatMessages(ctx context.Context, limit int) ([]domain.ChatActivityEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT sm.id, sm.session_id, s.agent_id, s.task_id, sm.content, sm.created_at
+		FROM session_messages sm
+		JOIN sessions s ON s.id = sm.session_id
+		WHERE sm.role = $1 AND s.agent_id IS NOT NULL
+		ORDER BY sm.created_at DESC LIMIT $2
+	`, string(domain.RoleAssistant), limit)
+	if err != nil {
+		return nil, fmt.Errorf("list recent chat messages: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []domain.ChatActivityEntry
+	for rows.Next() {
+		var e domain.ChatActivityEntry
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.AgentID, &e.TaskID, &e.Content, &e.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan recent chat message: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	if entries == nil {
+		entries = []domain.ChatActivityEntry{}
+	}
+	return entries, rows.Err()
 }
 
 func (s *SessionStore) scanSessions(ctx context.Context, rows interface {
