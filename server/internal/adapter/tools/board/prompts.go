@@ -13,6 +13,12 @@ type refInput struct{ Ref string }
 var claimAlreadyAssignedKey = prompt.Define("guard.board_claim_already_assigned", refInput{Ref: "T-1"})
 var claimTaskNotFoundKey = prompt.Define("guard.board_claim_task_not_found", refInput{Ref: "T-1"})
 var assigneeNotAssignableKey = prompt.Define("guard.board_assignee_not_assignable", struct{}{})
+var taskDescriptionRequiredKey = prompt.Define("guard.board_task_description_required", struct{}{})
+var taskAssigneeRequiredKey = prompt.Define("guard.board_task_assignee_required", struct{}{})
+
+type taskCriteriaRequiredInput struct{ Dropped int }
+
+var taskCriteriaRequiredKey = prompt.Define("guard.board_task_criteria_required", taskCriteriaRequiredInput{Dropped: 1})
 
 type assigneeDisabledInput struct {
 	Agents []string
@@ -116,6 +122,8 @@ type releaseNextUnknownInput struct{ Status string }
 
 var releaseNextUnknownKey = prompt.Define("tool_results.board_release_next_unknown", releaseNextUnknownInput{Status: "x"})
 
+var proposeCutNextKey = prompt.Define("tool_results.board_propose_cut_next", struct{}{})
+
 var deployReleaseNextKey = prompt.Define("tool_results.board_deploy_release_next", struct{}{})
 var finishReleaseDoneKey = prompt.Define("tool_results.board_finish_release_done", struct{}{})
 var rollbackReleaseNextKey = prompt.Define("tool_results.board_rollback_release_next", struct{}{})
@@ -133,3 +141,8 @@ var criterionRuleCardWaitingKey = prompt.Define("guard.board_criterion_rule_card
 var criterionRuleNextTasksKey = prompt.Define("guard.board_criterion_rule_next_tasks", struct{}{})
 var criterionRuleToolMechanicsKey = prompt.Define("guard.board_criterion_rule_tool_mechanics", struct{}{})
 var criterionRuleHandoffKey = prompt.Define("guard.board_criterion_rule_handoff", struct{}{})
+
+var changeInterruptNeedsApprovalKey = prompt.Define("guard.board_change_interrupt_needs_approval", struct{}{})
+var changeInterruptedNoteKey = prompt.Define("tool_results.board_change_interrupted", struct{}{})
+var changeNotifiedNoteKey = prompt.Define("tool_results.board_change_notified", struct{}{})
+var changeStoredNoteKey = prompt.Define("tool_results.board_change_stored", struct{}{})

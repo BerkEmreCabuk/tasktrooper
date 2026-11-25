@@ -28,6 +28,7 @@ export const chatArea = {
       textRequired: "Introduce tu respuesta",
       selectOne: "Selecciona una opción",
       selectMany: "Selecciona todas las que correspondan",
+      selectUpTo: "Selecciona hasta {max}",
       other: "Otro",
       skip: "Omitir",
       answered: "Respondida",
@@ -47,6 +48,7 @@ export const chatArea = {
         attached: "adjuntado",
         linked: "vinculado",
         deleted: "eliminada",
+        proposed: "propuesto",
       },
       entity: {
         board_task: "Tarea",
@@ -55,6 +57,7 @@ export const chatArea = {
         acceptance_criterion: "Criterio de aceptación",
         initiative_project: "Proyecto",
         repository: "Repositorio",
+        release: "Release",
       },
     },
     plan: {
@@ -103,6 +106,12 @@ export const chatArea = {
       queuedRemove: "Quitar de la cola",
       queuedHint: "Se enviará cuando el agente termine su trabajo actual.",
       queuedReturned: "Los mensajes en cola volvieron al cuadro de texto.",
+    },
+    wakes: {
+      waiting: "Esperando trabajo en segundo plano; responderá de nuevo cuando termine",
+      stop: "Dejar de esperar",
+      stopFailed: "No se pudo dejar de esperar",
+      updateTitle: "Trabajo en segundo plano terminado",
     },
     reasoning: {
       title: "Pasos de razonamiento ({count})",
@@ -193,8 +202,28 @@ export const chatArea = {
       resultsCount: "{count} resultados",
     },
   },
+  voice: {
+    start: "Hablar con el agente",
+    end: "Terminar",
+    hint: "Escuchando: habla cuando quieras",
+    state: {
+      starting: "Abriendo el micrófono…",
+      listening: "Escuchando",
+      thinking: "Pensando…",
+      speaking: "Hablando: habla para interrumpir",
+      off: "Voz desactivada",
+    },
+    error: {
+      micDenied: "TaskTrooper no puede usar el micrófono. Permítelo en Ajustes del Sistema → Privacidad y seguridad → Micrófono.",
+      micMissing: "No se encontró ningún micrófono.",
+      generic: "La voz se detuvo: {message}",
+    },
+  },
   markdown: {
     empty: "Vacío",
+    visual: {
+      title: "Dibujo del agente",
+    },
     table: {
       scrollHint: "Desplázate para ver más columnas",
     },

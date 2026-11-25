@@ -180,13 +180,11 @@ export const agentArea: AgentAreaDict = {
       task_completed: "Görev tamamlandı",
       task_released: "Görev yayınlandı",
       revision_requested: "Revizyon istendi",
-      pm_uat_failed: "PM UAT başarısız",
       human_uat_failed: "İnsan UAT başarısız",
       qa_bug_found: "QA bug buldu",
       qa_valid_scenario_confirmed: "Geçerli senaryo doğrulandı",
       qa_invalid_scenario_confirmed: "Geçersiz senaryo doğrulandı",
       qa_task_tested: "QA testi tamamladı",
-      pm_uat_completed: "PM UAT'ı tamamladı",
     },
     changeType: {
       skill_created: "Skill eklendi",
@@ -290,6 +288,13 @@ export const agentArea: AgentAreaDict = {
     systemPrompt: "Sistem istemi",
     enabled: "Etkin",
     coreHint: "Çekirdek ajan; kapatılamaz.",
+    commitCoauthor: {
+      label: "Commit ortak yazarı",
+      help: "Ad <e-posta> veya tam bir Co-authored-by satırı. Varsayılan satırlar için boş bırakın.",
+      placeholder: "Ayşe Yılmaz <ayse@example.com>",
+      disable: "Ortak yazar ekleme",
+      disableHelp: "Açık: bu ajanın commit'lerinde hiç Co-authored-by satırı olmaz.",
+    },
     catalog: {
       autoPull: {
         label: "Tanım güncellemelerini katalogdan çek",
@@ -330,7 +335,8 @@ export const agentArea: AgentAreaDict = {
         label: "{name} için mesaj",
         placeholder: "Bir özellik iste, bir hata bildir ya da board'u sor…",
         send: "Gönder",
-        hint: "Enter ile gönder · Shift+Enter ile yeni satır",
+        hint: "Enter ile gönder · Shift+Enter ile yeni satır · @ ile ajan, proje veya repo etiketle",
+        voice: "Sesli konuş",
         failed: "Sohbet başlatılamadı",
         suggestions: {
           board: { label: "Board'da ne var?", message: "Board'da şu an ne var?" },
@@ -349,7 +355,6 @@ export const agentArea: AgentAreaDict = {
             build: { label: "Geliştirme", detail: "Kod + PR" },
             review: { label: "Review", detail: "Mimar + güvenlik" },
             qa: { label: "QA", detail: "Test" },
-            acceptance: { label: "PM kabulü", detail: "UAT" },
             approval: { label: "Son onay", detail: "Onaylarsın" },
             deploy: { label: "Deploy", detail: "Yayın" },
           },

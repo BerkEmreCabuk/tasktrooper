@@ -52,6 +52,7 @@ type Service struct {
 	attachments    AttachmentLinker
 	taskWorkspaces TaskWorkspaceResolver
 	chatExecutor   port.ChatExecutor
+	wakes          *wakeState
 	runsMu         sync.Mutex
 	runs           map[uuid.UUID]*runHandle
 	sessionRuns    map[uuid.UUID]map[uuid.UUID]struct{}
@@ -287,6 +288,9 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 		log.Warn().Err(err).Str("session_id", id.String()).
 			Msg("stopping the chat's in-flight turn before delete failed")
 	}
+	if _, err := s.StopWaiting(ctx, id, uuid.Nil); err != nil {
+		log.Warn().Err(err).Str("session_id", id.String()).Msg("dropping the chat's background waits before delete failed")
+	}
 	if err := s.store.Delete(ctx, id); err != nil {
 		return err
 	}
@@ -314,6 +318,10 @@ func (s *Service) ListByProject(ctx context.Context, projectID uuid.UUID, limit,
 
 func (s *Service) ListByAgent(ctx context.Context, agentID uuid.UUID, limit, offset int) ([]domain.Session, error) {
 	return s.store.ListByAgent(ctx, agentID, limit, offset)
+}
+
+func (s *Service) ListRecentChatMessages(ctx context.Context, limit int) ([]domain.ChatActivityEntry, error) {
+	return s.store.ListRecentChatMessages(ctx, limit)
 }
 
 func (s *Service) SendMessage(ctx context.Context, sessionID uuid.UUID, req domain.SessionMessageRequest, policy domain.ToolPolicy) (resp domain.AgentResponse, err error) {
@@ -371,6 +379,7 @@ func (s *Service) SendMessage(ctx context.Context, sessionID uuid.UUID, req doma
 	if err != nil {
 		return domain.AgentResponse{}, err
 	}
+	history = appendVoiceModePrompt(history, req.Voice)
 	model := resolveChatModel(req.Model, sess.Model, agentModel)
 	effectivePolicy := domain.CeilToolPolicy(domain.UpliftWorkspaceTools(domain.MergeToolPolicy(policy, agentPolicy)), req.ToolCeiling)
 
@@ -414,6 +423,10 @@ func (s *Service) SendMessage(ctx context.Context, sessionID uuid.UUID, req doma
 	useOrchestrator := s.orchestrator != nil && s.orchestrator.ShouldOrchestrate(req.Content, forceOrchestrate)
 
 	workspacePolicy := domain.EnsureAskUserTool(effectivePolicy)
+
+	if !domain.RequiresHostExecutor(agentProvider) {
+		inlineTextFileAttachments(history)
+	}
 
 	switch {
 	case domain.RequiresHostExecutor(agentProvider):
@@ -616,6 +629,7 @@ func (s *Service) SendMessageStream(ctx context.Context, sessionID uuid.UUID, re
 	if err != nil {
 		return domain.AgentResponse{}, err
 	}
+	history = appendVoiceModePrompt(history, req.Voice)
 	model := resolveChatModel(req.Model, sess.Model, agentModel)
 	effectivePolicy := domain.CeilToolPolicy(domain.UpliftWorkspaceTools(domain.MergeToolPolicy(policy, agentPolicy)), req.ToolCeiling)
 

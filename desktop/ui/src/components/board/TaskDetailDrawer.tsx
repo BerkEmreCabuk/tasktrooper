@@ -32,11 +32,15 @@ import { HumanUatDecision } from "@/components/board/HumanUatDecision";
 import { TaskAgentRunsSection } from "@/components/board/TaskAgentRunsSection";
 import { AnalizReviewDecision } from "@/components/board/AnalizReviewDecision";
 import { CodeReviewApprovals } from "@/components/board/CodeReviewApprovals";
+import { ReviewFlagsPanel, ReviewHistorySection } from "@/components/board/review/ReviewSection";
+import { useReviewHistory } from "@/hooks/useReviewHistory";
 import { BlockedQuestionsBanner } from "@/components/board/analysis/BlockedQuestionsBanner";
 import { PipelineSection } from "@/components/board/PipelineSection";
 import { TaskPreviewsSection } from "@/components/board/TaskPreviewsSection";
 import { RELEASE_STATUS_VARIANT, ReleaseDrawer } from "@/components/projects/repository/deploy/ReleaseDrawer";
 import { TaskAssigneeFields } from "@/components/board/TaskAssigneeFields";
+import { isDesignTask } from "@/lib/design-system";
+import { FigCraftFileCard } from "@/components/board/FigCraftFileCard";
 import { TaskDesignSection } from "@/components/board/TaskDesignSection";
 import { TaskDocumentList } from "@/components/board/TaskDocumentList";
 import { TaskHistory } from "@/components/board/TaskHistory";
@@ -67,6 +71,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { useI18n } from "@/hooks/useI18n";
+import { useMentionOptions } from "@/hooks/useMentionOptions";
 import { usePolling } from "@/hooks/usePolling";
 import { useRepositoryModel } from "@/hooks/useRepositoryModel";
 import { useTaskTypes } from "@/hooks/useTaskTypes";
@@ -84,6 +89,8 @@ import {
   taskTypeOptions,
 } from "@/lib/project-board";
 import { analysisReviewPath } from "@/lib/analysis-review";
+import { taskChatAgents } from "@/lib/taskChatAgents";
+import { Textarea } from "@/components/ui/textarea";
 import { componentLabel } from "@/lib/project-model";
 import { keepEqual } from "@/lib/stableState";
 import { formatDate, formatRelativeDate } from "@/lib/utils";
@@ -125,6 +132,8 @@ export function TaskDetailDrawer({
   const { t } = useI18n();
   const { taskTypes } = useTaskTypes();
   const navigate = useNavigate();
+  const mentionOptions = useMentionOptions();
+  const [envCredentialRejected, setEnvCredentialRejected] = useState(false);
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [runs, setRuns] = useState<TaskAgentRun[]>([]);
   const [documents, setDocuments] = useState<TaskDocument[]>([]);
@@ -133,8 +142,10 @@ export function TaskDetailDrawer({
   const [testCases, setTestCases] = useState<TaskTestCase[]>([]);
   const [release, setRelease] = useState<Release | null>(null);
   const [reviews, setReviews] = useState<TaskReviews | null>(null);
+  const [focusRun, setFocusRun] = useState<{ id: string; nonce: number } | null>(null);
   const [releaseDrawerOpen, setReleaseDrawerOpen] = useState(false);
   const [commentText, setCommentText] = useState("");
+  const [pendingCommentAttachments, setPendingCommentAttachments] = useState<AttachmentMeta[]>([]);
   const [submittingComment, setSubmittingComment] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingDescription, setEditingDescription] = useState(false);
@@ -146,6 +157,8 @@ export function TaskDetailDrawer({
   const [addingDoc, setAddingDoc] = useState(false);
   const [runActionId, setRunActionId] = useState<string | null>(null);
   const [stopRunId, setStopRunId] = useState<string | null>(null);
+  const [interruptRunId, setInterruptRunId] = useState<string | null>(null);
+  const [interruptText, setInterruptText] = useState("");
   const [openingChat, setOpeningChat] = useState(false);
   // Deploy runbook: three inline-editable fields, same pattern as description
   // and technical description above.
@@ -168,6 +181,10 @@ export function TaskDetailDrawer({
   const agentNameMap = useMemo(
     () => Object.fromEntries(agents.map((agent) => [agent.id, agent.name])),
     [agents],
+  );
+  const chatAgents = useMemo(
+    () => (task ? taskChatAgents(task, runs, reviews, agents) : []),
+    [task, runs, reviews, agents],
   );
   const assigneeName = task?.assignee_agent_id
     ? agents.find((a) => a.id === task.assignee_agent_id)?.name
@@ -222,6 +239,7 @@ export function TaskDetailDrawer({
   const taskID = task?.id ?? null;
   const taskIDRef = useRef(taskID);
   taskIDRef.current = taskID;
+  const { history: reviewHistory, reload: reloadReviewHistory } = useReviewHistory(repositoryId, taskID, open, task?.column);
 
   // Each slice keeps its previous value when the answer did not change, so an
   // idle tick re-renders nothing.
@@ -433,8 +451,14 @@ export function TaskDetailDrawer({
     if (!task || !commentText.trim()) return;
     setSubmittingComment(true);
     try {
-      await api.createTaskComment(repositoryId, task.id, commentText.trim());
+      await api.createTaskComment(
+        repositoryId,
+        task.id,
+        commentText.trim(),
+        pendingCommentAttachments.map((a) => a.id),
+      );
       setCommentText("");
+      setPendingCommentAttachments([]);
       await loadDetails();
       onUpdated();
       toast.success(t("boardArea.components.taskDetail.commentAdded"));
@@ -522,15 +546,32 @@ export function TaskDetailDrawer({
     }
   };
 
+  const interruptRun = async () => {
+    if (!task || !interruptRunId) return;
+    const runId = interruptRunId;
+    setRunActionId(runId);
+    try {
+      await api.interruptTaskAgentRun(repositoryId, task.id, runId, interruptText.trim());
+      toast.success(t("boardArea.components.taskDetail.runInterrupted"));
+      setInterruptText("");
+      setInterruptRunId(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("boardArea.components.taskDetail.runInterruptFailed"));
+    } finally {
+      await loadDetails();
+      setRunActionId(null);
+    }
+  };
+
   // The thread is opened server-side (it is seeded with the task and its pull
   // request), and it lives under the agent the endpoint hands back — which is
   // not necessarily the assignee, so the id from the response is the only one
   // that can be trusted for the deep link.
-  const discussTask = async () => {
+  const discussTask = async (withAgentId?: string) => {
     if (!task || openingChat) return;
     setOpeningChat(true);
     try {
-      const { session_id, agent_id } = await api.openTaskChat(repositoryId, task.id);
+      const { session_id, agent_id } = await api.openTaskChat(repositoryId, task.id, withAgentId);
       onOpenChange(false);
       navigate(`/agents/${agent_id}/chat/${session_id}`);
     } catch (e) {
@@ -592,6 +633,15 @@ export function TaskDetailDrawer({
                     it cannot be missed the way the old low-contrast inline
                     buttons were. */}
                 <HumanUatDecision task={task} repositoryId={repositoryId} onUpdated={onUpdated} />
+                {task.column === "human_uat" && (
+                  <ReviewFlagsPanel
+                    repositoryId={repositoryId}
+                    taskId={task.id}
+                    history={reviewHistory}
+                    reload={reloadReviewHistory}
+                    prominent
+                  />
+                )}
                 <AnalizReviewDecision
                   task={task}
                   repositoryId={repositoryId}
@@ -649,9 +699,11 @@ export function TaskDetailDrawer({
                           />
                         )}
                         <p className="text-xs text-amber-700 dark:text-amber-400">
-                          {t(`boardArea.components.taskDetail.mergeHold.${task.blocked_resource}`, {
-                            detail: task.blocked_question ?? "",
-                          })}
+                          {task.blocked_resource === "deploy_env" && envCredentialRejected
+                            ? t("boardArea.components.taskDetail.mergeHold.deploy_env_credential")
+                            : t(`boardArea.components.taskDetail.mergeHold.${task.blocked_resource}`, {
+                                detail: task.blocked_question ?? "",
+                              })}
                         </p>
                         {task.blocked_resource === "before_deploy" && (
                           <Button size="sm" variant="outline" onClick={() => setBeforeDeployConfirmOpen(true)}>
@@ -666,7 +718,12 @@ export function TaskDetailDrawer({
                           </Button>
                         )}
                         {task.blocked_resource === "deploy_env" && (
-                          <EnvVarsCard repositoryId={repositoryId} pendingOnly onSettled={onUpdated} />
+                          <EnvVarsCard
+                            repositoryId={repositoryId}
+                            pendingOnly
+                            onSettled={onUpdated}
+                            onCredentialRejected={setEnvCredentialRejected}
+                          />
                         )}
                       </>
                     ) : task.blocked_resource === "analysis_questions" ? (
@@ -753,6 +810,10 @@ export function TaskDetailDrawer({
                   )}
                 </section>
 
+                {isDesignTask(task) && (
+                  <FigCraftFileCard key={`figcraft-${task.id}`} scope="task" id={task.id} active={open} />
+                )}
+
                 {/* Distinct keys: these two are siblings, and a shared key made React
                     duplicate the design section on every poll that re-rendered them. */}
                 <TaskDesignSection
@@ -775,7 +836,7 @@ export function TaskDetailDrawer({
                   ) : (
                     <div className="space-y-2">
                       {criteria.map((c) => {
-                        const rejections = (c.checks ?? []).filter((ch) => !ch.approved && ch.note);
+                        const rejections = (c.checks ?? []).filter((ch) => ch.role === "qa" && !ch.approved && ch.note);
                         return (
                           <div key={c.id} className="rounded-md border border-border px-3 py-2">
                             <div className="flex items-start gap-2">
@@ -802,7 +863,6 @@ export function TaskDetailDrawer({
                                 )}
                                 <CriterionDevBadge completed={c.completed} t={t} />
                                 <CriterionCheckBadge role="qa" checks={c.checks} t={t} />
-                                <CriterionCheckBadge role="pm" checks={c.checks} t={t} />
                               </div>
                             </div>
                             {/* The reason a criterion was dropped belongs next to the
@@ -1075,7 +1135,9 @@ export function TaskDetailDrawer({
                   active={open}
                   runActionId={runActionId}
                   onStop={setStopRunId}
+                  onInterrupt={setInterruptRunId}
                   onRerun={(runId) => void rerunRun(runId)}
+                  focusRun={focusRun}
                 />
 
                 <Separator />
@@ -1258,7 +1320,16 @@ export function TaskDetailDrawer({
                     </section>
                   )}
 
-                  <CodeReviewApprovals reviews={reviews} inCodeReview={task.column === "code_review"} />
+                  <CodeReviewApprovals reviews={reviews} inCodeReview={task.column === "code_review"} onDiscuss={(id) => void discussTask(id)} />
+
+                  <ReviewHistorySection
+                    repositoryId={repositoryId}
+                    taskId={task.id}
+                    history={reviewHistory}
+                    reload={reloadReviewHistory}
+                    showFlags={task.column !== "human_uat"}
+                    onOpenRun={(id) => setFocusRun((prev) => ({ id, nonce: (prev?.nonce ?? 0) + 1 }))}
+                  />
 
                   {task.pr_url && <TaskPreviewsSection key={task.id} repositoryId={repositoryId} taskId={task.id} />}
 
@@ -1292,7 +1363,7 @@ export function TaskDetailDrawer({
                     size="sm"
                     variant="outline"
                     className="w-full gap-2"
-                    onClick={discussTask}
+                    onClick={() => void discussTask()}
                     disabled={openingChat}
                     title={t("boardArea.components.taskDetail.discussHint")}
                   >
@@ -1305,6 +1376,28 @@ export function TaskDetailDrawer({
                       ? t("boardArea.components.taskDetail.discussOpening")
                       : t("boardArea.components.taskDetail.discuss")}
                   </Button>
+                  {chatAgents.length > 1 && (
+                    <div className="flex flex-wrap items-center gap-1.5" data-testid="task-chat-agents">
+                      <span className="text-caption text-muted-foreground">
+                        {t("boardArea.components.taskDetail.discussWith")}
+                      </span>
+                      {chatAgents.map((a) => (
+                        <Button
+                          key={a.id}
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-6 gap-1 px-2 text-xs"
+                          disabled={openingChat}
+                          title={a.working ? t("boardArea.components.taskDetail.discussWorking") : undefined}
+                          onClick={() => void discussTask(a.id)}
+                        >
+                          {a.working && <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden />}
+                          {a.name}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
 
                   <Separator />
 
@@ -1343,6 +1436,9 @@ export function TaskDetailDrawer({
                                 <span>{formatRelativeDate(c.created_at)}</span>
                               </div>
                               <MarkdownContent content={c.content} className="mt-1.5 text-sm leading-relaxed" />
+                              {c.attachments && c.attachments.length > 0 && (
+                                <AttachmentList compact attachments={c.attachments} className="mt-1.5" />
+                              )}
                             </div>
                           );
                         })
@@ -1353,6 +1449,10 @@ export function TaskDetailDrawer({
                       onChange={setCommentText}
                       placeholder={t("boardArea.components.taskDetail.commentPlaceholder")}
                       rows={3}
+                      mentionOptions={mentionOptions}
+                      attachmentsEnabled
+                      pendingAttachments={pendingCommentAttachments}
+                      onPendingAttachmentsChange={setPendingCommentAttachments}
                     />
                     <Button
                       size="sm"
@@ -1381,6 +1481,28 @@ export function TaskDetailDrawer({
         loading={stopRunId !== null && runActionId === stopRunId}
         onConfirm={stopRun}
       />
+
+      <ConfirmDialog
+        open={interruptRunId !== null}
+        onOpenChange={(o) => {
+          if (!o) setInterruptRunId(null);
+        }}
+        variant="default"
+        title={t("boardArea.components.taskDetail.runInterruptTitle")}
+        description={t("boardArea.components.taskDetail.runInterruptDescription")}
+        confirmLabel={t("boardArea.components.taskDetail.runInterruptConfirm")}
+        confirmDisabled={interruptText.trim() === ""}
+        loading={interruptRunId !== null && runActionId === interruptRunId}
+        onConfirm={interruptRun}
+      >
+        <Textarea
+          value={interruptText}
+          onChange={(e) => setInterruptText(e.target.value)}
+          placeholder={t("boardArea.components.taskDetail.runInterruptPlaceholder")}
+          rows={4}
+          autoFocus
+        />
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={beforeDeployConfirmOpen}
@@ -1496,18 +1618,16 @@ function pascal(value: string): string {
     .join("");
 }
 
-function roleLabel(role: CriterionReviewRole, t: TranslateFn): string {
-  return role === "qa"
-    ? t("boardArea.components.taskDetail.checkRoleQa")
-    : t("boardArea.components.taskDetail.checkRolePm");
+function roleLabel(_role: CriterionReviewRole, t: TranslateFn): string {
+  return t("boardArea.components.taskDetail.checkRoleQa");
 }
 
-// The developer's own tick, rendered as a badge in the same row as QA and PM.
+// The developer's own tick, rendered as a badge in the same row as QA.
 // The checkbox alone read as a personal to-do marker, so a criterion could sit
 // unticked with nobody noticing — and an unticked criterion is exactly what
 // makes the board refuse the automatic hand-off to code review. As a badge next
-// to the two review verdicts it reads as what it is: the first of three states
-// the criterion has to pass through.
+// to the QA verdict it reads as what it is: the first of two states the
+// criterion has to pass through.
 function CriterionDevBadge({ completed, t }: { completed: boolean; t: TranslateFn }) {
   const label = t("boardArea.components.taskDetail.checkRoleDev");
   if (completed) {
@@ -1530,7 +1650,7 @@ function CriterionDevBadge({ completed, t }: { completed: boolean; t: TranslateF
   );
 }
 
-// The implementer's checkbox is a claim; the QA and PM verdicts render next to
+// The implementer's checkbox is a claim; the QA verdict renders next to
 // it separately, so the card tells who has actually verified each criterion.
 function CriterionCheckBadge({
   role,

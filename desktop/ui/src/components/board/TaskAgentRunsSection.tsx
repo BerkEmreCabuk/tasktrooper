@@ -1,5 +1,5 @@
-import { ChevronDown, ChevronRight, CircleStop, Loader2, RotateCcw } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, CircleStop, Hand, Loader2, RotateCcw } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Agent, BoardTask, TaskAgentRun } from "@/api";
 import { ActivityFeed } from "@/components/activity/ActivityFeed";
 import { AgentRunHeader } from "@/components/activity/AgentRunHeader";
@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RunTraceSection } from "@/components/board/RunTraceSection";
 import { useI18n } from "@/hooks/useI18n";
 import { useRunActivity } from "@/hooks/useRunActivity";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
@@ -56,7 +58,10 @@ interface TaskAgentRunsSectionProps {
   active: boolean;
   runActionId: string | null;
   onStop: (runId: string) => void;
+  onInterrupt: (runId: string) => void;
   onRerun: (runId: string) => void;
+  /** Shows this run's trace; a new `nonce` asks again for the same run. */
+  focusRun?: { id: string; nonce: number } | null;
 }
 
 export function TaskAgentRunsSection({
@@ -67,11 +72,21 @@ export function TaskAgentRunsSection({
   active,
   runActionId,
   onStop,
+  onInterrupt,
   onRerun,
+  focusRun,
 }: TaskAgentRunsSectionProps) {
   const { t } = useI18n();
   const [pickedId, setPickedId] = useState<string | null>(null);
   const [tokensOpen, setTokensOpen] = useState(false);
+  const [view, setView] = useState<"activity" | "trace">("activity");
+  const sectionRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!focusRun) return;
+    setPickedId(focusRun.id);
+    setView("trace");
+    sectionRef.current?.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  }, [focusRun]);
 
   const sorted = useMemo(
     () => [...runs].sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at)),
@@ -135,6 +150,12 @@ export function TaskAgentRunsSection({
   const actions = shown ? (
     <>
       {liveRow && (
+        <Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={busy} onClick={() => onInterrupt(shown.id)}>
+          <Hand />
+          {t("boardArea.components.taskDetail.runInterrupt")}
+        </Button>
+      )}
+      {liveRow && (
         <Button type="button" variant="outline" size="sm" className="gap-1.5" disabled={busy} onClick={() => onStop(shown.id)}>
           {busy ? <Loader2 className="animate-spin" /> : <CircleStop />}
           {t("boardArea.components.taskDetail.runStop")}
@@ -155,7 +176,7 @@ export function TaskAgentRunsSection({
   const TokensChevron = tokensOpen ? ChevronDown : ChevronRight;
 
   return (
-    <section className="min-w-0 space-y-3">
+    <section ref={sectionRef} className="min-w-0 space-y-3">
       <Label className="text-muted-foreground">
         {t("boardArea.components.taskDetail.agentRuns", { count: runs.length })}
       </Label>
@@ -177,11 +198,33 @@ export function TaskAgentRunsSection({
             actions={actions}
           />
 
+          <Tabs value={view} onValueChange={(v) => setView(v === "trace" ? "trace" : "activity")} variant="pill">
+            <TabsList>
+              <TabsTrigger value="activity" className="px-2.5 py-1 text-caption">
+                {t("runTrace.tab.activity")}
+              </TabsTrigger>
+              <TabsTrigger value="trace" className="px-2.5 py-1 text-caption">
+                {t("runTrace.tab.trace")}
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+
           {finished && shown.summary && (
             <p className="line-clamp-4 text-caption text-muted-foreground [overflow-wrap:anywhere]">{shown.summary}</p>
           )}
 
-          {waiting ? (
+          {view === "trace" ? (
+            <RunTraceSection
+              key={shown.id}
+              repositoryId={task.repository_id}
+              taskId={task.id}
+              runId={shown.id}
+              live={liveRow}
+              active={active}
+              prUrl={task.pr_url}
+              runStatus={shown.status}
+            />
+          ) : waiting ? (
             <p className="text-caption text-muted-foreground">{t("activityArea.runs.queued")}</p>
           ) : firstLoad ? (
             <Card className="space-y-2.5 p-3" aria-busy="true" aria-label={t("boardArea.components.taskDetail.runLoading")}>

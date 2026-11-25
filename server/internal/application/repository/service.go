@@ -19,6 +19,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/indexer"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prompt"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/reviewhistory"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/taskkey"
@@ -32,6 +33,14 @@ type ColumnValidator interface {
 
 type RevisionNotifier interface {
 	NotifyRevision(ctx context.Context, task domain.BoardTask)
+}
+
+// LocalPreviewStopper is localpreview.Service's seam here: a task's column
+// change is the one place that must stop that task's running preview,
+// however the task got there (human drag, agent move, pipeline release).
+// Other tasks' previews in the same repository keep running.
+type LocalPreviewStopper interface {
+	Stop(repositoryID, taskID uuid.UUID)
 }
 
 // ModelRefresher is the project-model service's compat seam for what used to
@@ -63,6 +72,7 @@ type Service struct {
 	documents        port.TaskDocumentStore
 	annotations      port.TaskDocumentAnnotationStore
 	questions        port.TaskQuestionStore
+	reviewHistory    *reviewhistory.Service
 	comments         port.TaskCommentStore
 	attachments      port.AttachmentStore
 	columns          ColumnValidator
@@ -73,6 +83,7 @@ type Service struct {
 	reviewQuorum     *board.ReviewQuorum
 	workOrderSweeper *board.WorkOrderSweeper
 	evolution        RevisionNotifier
+	localPreview     LocalPreviewStopper
 	pipelines        *board.PipelineRunner
 	pipelineStore    port.TaskPipelineStore
 	spans            StageEvidence
@@ -96,6 +107,7 @@ type Service struct {
 	restoreRun func(fn func())
 
 	prAsyncRun func(fn func())
+	prInFlight sync.Map
 
 	syncMu        sync.Mutex
 	syncWarnings  map[uuid.UUID]string
@@ -179,6 +191,10 @@ func (s *Service) SetCompletionStamper(cs *board.CompletionStamper) {
 
 func (s *Service) SetReviewGate(g *board.ReviewGate) {
 	s.reviewGate = g
+}
+
+func (s *Service) SetLocalPreview(lp LocalPreviewStopper) {
+	s.localPreview = lp
 }
 
 func (s *Service) SetReviewQuorum(q *board.ReviewQuorum) {
@@ -330,8 +346,6 @@ func (s *Service) ReviewTaskCriterion(ctx context.Context, criterionID, agentID 
 	switch {
 	case ok && channel == string(domain.CriterionReviewRoleQA):
 		role = domain.CriterionReviewRoleQA
-	case ok && channel == string(domain.CriterionReviewRolePM):
-		role = domain.CriterionReviewRolePM
 	default:
 		return domain.CriterionCheck{}, fmt.Errorf("%s", criterionVerdictWrongColumnKey.Render(criterionVerdictWrongColumnInput{Key: task.Key, Column: string(task.Column)}))
 	}
@@ -341,7 +355,12 @@ func (s *Service) ReviewTaskCriterion(ctx context.Context, criterionID, agentID 
 	}
 	check.VerifiedSHA = s.currentTaskSHA(ctx, task.ID)
 	check.VerifiedPatchID = s.currentTaskPatchID(ctx, task.ID)
-	return s.criteria.UpsertCheck(ctx, check)
+	saved, err := s.criteria.UpsertCheck(ctx, check)
+	if err != nil {
+		return saved, err
+	}
+	s.reviewHistory.RecordCriterionCheck(ctx, task, criterion, saved)
+	return saved, nil
 }
 
 func (s *Service) currentTaskSHA(ctx context.Context, taskID uuid.UUID) string {
@@ -448,8 +467,6 @@ func (s *Service) criteriaReviewGate(ctx context.Context, taskID uuid.UUID, task
 	switch {
 	case ok && channel == string(domain.CriterionReviewRoleQA):
 		role = domain.CriterionReviewRoleQA
-	case ok && channel == string(domain.CriterionReviewRolePM):
-		role = domain.CriterionReviewRolePM
 	default:
 		return nil
 	}
@@ -551,6 +568,12 @@ func (s *Service) workflow(ctx context.Context, taskType domain.TaskType) (domai
 // and not done/released it is returned as is (created == false), so repeated
 // clicks on the "no CI workflows" notice cannot pile up duplicates.
 func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid.UUID) (task domain.BoardTask, created bool, err error) {
+	return s.CreateWorkflowSetupTaskAfter(ctx, repositoryID, nil)
+}
+
+// CreateWorkflowSetupTaskAfter is CreateWorkflowSetupTask for a caller that
+// queues the work behind other tasks: the new task waits for blockedBy.
+func (s *Service) CreateWorkflowSetupTaskAfter(ctx context.Context, repositoryID uuid.UUID, blockedBy []domain.TaskRelationInput) (task domain.BoardTask, created bool, err error) {
 	s.ciSetupMu.Lock()
 	defer s.ciSetupMu.Unlock()
 
@@ -577,6 +600,7 @@ func (s *Service) CreateWorkflowSetupTask(ctx context.Context, repositoryID uuid
 		Column:          domain.TaskColumnTodo,
 		CreatedBy:       "system",
 		AssigneeAgentID: assignee,
+		BlockedBy:       blockedBy,
 	})
 	if err != nil {
 		return domain.BoardTask{}, false, err
@@ -963,6 +987,13 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, req domain.UpdateRep
 			engine = domain.ReleaseEngineAuto
 		}
 		updated, err := s.repos.UpdateReleaseEngine(ctx, id, engine)
+		if err != nil {
+			return domain.Repository{}, err
+		}
+		repo = updated
+	}
+	if req.AutomationTests != nil {
+		updated, err := s.setAutomationTests(ctx, repo, *req.AutomationTests)
 		if err != nil {
 			return domain.Repository{}, err
 		}
@@ -1534,7 +1565,7 @@ func (s *Service) resolveTaskType(ctx context.Context, requested domain.TaskType
 	return requested, nil
 }
 
-func (s *Service) resolveNewTaskAssignee(ctx context.Context, taskType domain.TaskType, repo domain.Repository, requested *uuid.UUID) (*uuid.UUID, error) {
+func (s *Service) resolveNewTaskAssignee(ctx context.Context, taskType domain.TaskType, repo domain.Repository, req domain.CreateBoardTaskRequest, requested *uuid.UUID) (*uuid.UUID, error) {
 	if s.roles == nil {
 		return requested, nil
 	}
@@ -1552,7 +1583,25 @@ func (s *Service) resolveNewTaskAssignee(ctx context.Context, taskType domain.Ta
 			return requested, nil
 		}
 	}
+	if resolved == nil && req.CreatedBy != "" && req.CreatedBy != "user" {
+		return s.fallbackAssignee(ctx, area)
+	}
 	return resolved, nil
+}
+
+// fallbackAssignee finds who suits a task nobody was named for: the agent
+// holding the system task-assignee role for the repository's area, so a task a
+// scan or an agent opens does not wait in TODO for a person to pick someone.
+// A task a person opens stays unassigned unless they chose otherwise.
+func (s *Service) fallbackAssignee(ctx context.Context, area string) (*uuid.UUID, error) {
+	id, err := s.roles.AgentForPurpose(ctx, domain.PurposeSystemTaskAssignee, area)
+	if err != nil || id == nil {
+		return nil, nil
+	}
+	if pm, err := s.isProductManager(ctx, *id); err != nil || pm {
+		return nil, nil
+	}
+	return id, nil
 }
 
 func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req domain.CreateBoardTaskRequest) (domain.BoardTask, error) {
@@ -1598,15 +1647,18 @@ func (s *Service) CreateTask(ctx context.Context, repositoryID uuid.UUID, req do
 			position = t.Position + 1
 		}
 	}
-	taskNumber, err := s.tasks.NextTaskNumber(ctx, taskType)
-	if err != nil {
-		return domain.BoardTask{}, err
-	}
 	requested, err := s.requestedAssignee(ctx, req)
 	if err != nil {
 		return domain.BoardTask{}, err
 	}
-	assignee, err := s.resolveNewTaskAssignee(ctx, taskType, repo, requested)
+	assignee, err := s.resolveNewTaskAssignee(ctx, taskType, repo, req, requested)
+	if err != nil {
+		return domain.BoardTask{}, err
+	}
+	if assignee == nil && req.RequireAssignee {
+		return domain.BoardTask{}, domain.ErrAssigneeRequired
+	}
+	taskNumber, err := s.tasks.NextTaskNumber(ctx, taskType)
 	if err != nil {
 		return domain.BoardTask{}, err
 	}
@@ -1830,7 +1882,10 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 			return domain.BoardTask{}, err
 		}
 
-		if err := s.testCaseGate(ctx, task.ID, task.TaskType, prevColumn, *req.Column); err != nil {
+		if err := s.testCaseGate(ctx, task.ID, task.TaskType, prevColumn, *req.Column, req.Actor); err != nil {
+			return domain.BoardTask{}, err
+		}
+		if err := s.automationGate(ctx, repo, task.TaskType, prevColumn, *req.Column, req.Actor); err != nil {
 			return domain.BoardTask{}, err
 		}
 
@@ -1927,6 +1982,13 @@ func (s *Service) UpdateTask(ctx context.Context, repositoryID, taskID uuid.UUID
 			}
 		}
 		_ = s.emit(ctx, repo, updated, domain.BoardEventTaskMoved, movePayload)
+
+		if s.localPreview != nil {
+			// Stop can block up to stopGrace waiting for the process group to
+			// exit; UpdateTask is the hot path for every column move (HTTP,
+			// the board runner, pipeline automation), so it must not wait on it.
+			go s.localPreview.Stop(repositoryID, updated.ID)
+		}
 
 		if s.workOrderSweeper != nil &&
 			(*req.Column == domain.TaskColumnDone || *req.Column == domain.TaskColumnReleased) {
@@ -2114,7 +2176,11 @@ func (s *Service) ensurePullRequestAsync(ctx context.Context, task domain.BoardT
 	if run == nil {
 		run = func(fn func()) { go fn() }
 	}
+	if _, busy := s.prInFlight.LoadOrStore(task.ID, struct{}{}); busy {
+		return
+	}
 	run(func() {
+		defer s.prInFlight.Delete(task.ID)
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Minute)
 		defer cancel()
 		url, err := s.git.EnsurePullRequest(ctx, workspacePath)
@@ -2236,7 +2302,54 @@ func (s *Service) ListComments(ctx context.Context, repositoryID, taskID uuid.UU
 	if err != nil {
 		return nil, err
 	}
+	s.enrichCommentAttachments(ctx, comments)
 	return comments, nil
+}
+
+// enrichCommentAttachments fills in Attachments for every comment that has
+// one; a comment created before migration 206 simply has none.
+func (s *Service) enrichCommentAttachments(ctx context.Context, comments []domain.TaskComment) {
+	if s.attachments == nil || len(comments) == 0 {
+		return
+	}
+	ids := make([]uuid.UUID, 0, len(comments))
+	for _, c := range comments {
+		ids = append(ids, c.ID)
+	}
+	metas, err := s.attachments.ListMetaByCommentIDs(ctx, ids)
+	if err != nil || len(metas) == 0 {
+		return
+	}
+	for i := range comments {
+		if a, ok := metas[comments[i].ID]; ok {
+			comments[i].Attachments = a
+		}
+	}
+}
+
+// linkCommentAttachments links already-uploaded attachments to a just-created
+// comment, returning the metas for the response; an unparseable or unknown id
+// is skipped rather than failing the whole comment.
+func (s *Service) linkCommentAttachments(ctx context.Context, commentID uuid.UUID, attachmentIDs []string) []domain.AttachmentMeta {
+	if s.attachments == nil || len(attachmentIDs) == 0 {
+		return nil
+	}
+	var metas []domain.AttachmentMeta
+	for _, raw := range attachmentIDs {
+		id, err := uuid.Parse(strings.TrimSpace(raw))
+		if err != nil {
+			continue
+		}
+		meta, err := s.attachments.GetMeta(ctx, id)
+		if err != nil {
+			continue
+		}
+		if err := s.attachments.LinkComment(ctx, commentID, id); err != nil {
+			continue
+		}
+		metas = append(metas, meta)
+	}
+	return metas
 }
 
 func (s *Service) AddComment(ctx context.Context, repositoryID, taskID uuid.UUID, req domain.CreateTaskCommentRequest) (domain.TaskComment, error) {
@@ -2269,6 +2382,7 @@ func (s *Service) AddComment(ctx context.Context, repositoryID, taskID uuid.UUID
 	if err != nil {
 		return domain.TaskComment{}, err
 	}
+	comment.Attachments = s.linkCommentAttachments(ctx, comment.ID, req.AttachmentIDs)
 	payload := map[string]interface{}{
 		"comment_id":  comment.ID.String(),
 		"content":     comment.Content,

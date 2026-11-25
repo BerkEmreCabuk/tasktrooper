@@ -42,6 +42,10 @@ type stuckVerdictNoteInput struct {
 	Texts string
 }
 
+type reviewVerdictMissingSummaryInput struct{ Marker, Column string }
+
+var reviewVerdictMissingSummaryKey = prompt.Define("notices.review_verdict_missing_summary", reviewVerdictMissingSummaryInput{Marker: "x", Column: "in_qa"})
+
 var stuckVerdictNoteKey = prompt.Define("notices.stuck_verdict_note", stuckVerdictNoteInput{Count: 1, Role: "qa", Texts: "x"})
 
 type stuckColumnCommentInput struct{ Column, Exit, Note string }
@@ -73,7 +77,6 @@ var diffSkipSummaryKey = prompt.Define("notices.diff_skip_summary", diffSkipSumm
 
 var rejectedDraftLabelKey = prompt.Define("notices.rejected_draft_label", struct{}{})
 var rejectedRunReportReplanKey = prompt.Define("notices.rejected_run_report_replan", struct{}{})
-var rejectedRunReportReapproveKey = prompt.Define("notices.rejected_run_report_reapprove", struct{}{})
 
 var pipelineGateNoGreenBuildKey = prompt.Define("notices.pipeline_gate_no_green_build", struct{}{})
 
@@ -109,3 +112,22 @@ var pipelineBounceNoteLabelKey = prompt.Define("notices.pipeline_bounce_note_lab
 type advisoryChecksCommentInput struct{ Marker, Report string }
 
 var advisoryChecksCommentKey = prompt.Define("notices.advisory_checks_comment", advisoryChecksCommentInput{Marker: "[advisory checks]", Report: "[coverage] overall 81.0%"})
+
+type qaUnchangedRejectCommentInput struct {
+	Column, ShortID string
+	Rejections      []string
+}
+
+var qaUnchangedRejectCommentKey = prompt.Define("notices.qa_unchanged_reject_comment", qaUnchangedRejectCommentInput{Column: "in_qa", ShortID: "x", Rejections: []string{"x"}})
+
+type qaUnchangedRejectDetailInput struct{ ShortID string }
+
+var qaUnchangedRejectDetailKey = prompt.Define("notices.qa_unchanged_reject_detail", qaUnchangedRejectDetailInput{ShortID: "x"})
+
+type reviewBlockedCommentInput struct{ Column, Review string }
+
+var reviewBlockedCommentKey = prompt.Define("notices.review_blocked_comment", reviewBlockedCommentInput{Column: "in_qa", Review: "x"})
+
+type reviewBlockedDetailInput struct{ Column string }
+
+var reviewBlockedDetailKey = prompt.Define("notices.review_blocked_detail", reviewBlockedDetailInput{Column: "in_qa"})

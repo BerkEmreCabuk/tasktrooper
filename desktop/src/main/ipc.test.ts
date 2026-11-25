@@ -81,6 +81,19 @@ function wire(mode: "local" | "account" = "account", consent: boolean | Promise<
       toolchainCancel: () => (calls.push("toolchain-cancel"), IDLE),
       toolchainDismiss: () => (calls.push("toolchain-dismiss"), IDLE),
       toolchainOpenPage: (id: string) => (calls.push(`toolchain-open ${id}`), Promise.resolve()),
+      remoteAccessState: () => (calls.push("remote-state"), { tunnel: "stopped" }),
+      remoteAccessConfigure: (request: Record<string, unknown>) => (calls.push(`remote-configure ${Object.keys(request).join(",")}`), { tunnel: "stopped" }),
+      remoteAccessStart: () => (calls.push("remote-start"), Promise.resolve({ tunnel: "starting" })),
+      remoteAccessStop: () => (calls.push("remote-stop"), Promise.resolve({ tunnel: "stopped" })),
+      remoteAccessDetect: (provider: string) => (calls.push(`remote-detect ${provider}`), Promise.resolve({ provider, installed: false })),
+      remoteAccessOpenInstallPage: (provider: string) => (calls.push(`remote-install-page ${provider}`), Promise.resolve()),
+      remoteAccessLogs: () => (calls.push("remote-logs"), []),
+      remoteAccessRefreshAccount: () => (calls.push("remote-refresh"), Promise.resolve({ tunnel: "stopped" })),
+      remoteAccessCloudflareLogin: () => (calls.push("remote-cf-login"), Promise.resolve({ tunnel: "stopped" })),
+      remoteAccessCloudflareLoginCancel: () => (calls.push("remote-cf-login-cancel"), Promise.resolve({ tunnel: "stopped" })),
+      remoteAccessCloudflareLogout: () => (calls.push("remote-cf-logout"), Promise.resolve({ tunnel: "stopped" })),
+      remoteAccessNgrokConnect: (request: Record<string, unknown>) => (calls.push(`remote-ngrok-connect ${Object.keys(request).join(",")}`), Promise.resolve({ tunnel: "stopped" })),
+      remoteAccessNgrokDisconnect: () => (calls.push("remote-ngrok-disconnect"), Promise.resolve({ tunnel: "stopped" })),
     },
     {
       get: (target, key: string) =>
@@ -450,6 +463,105 @@ describe("cloud:toolchain:*", () => {
     }
     await expect(invoke(CLOUD_CHANNELS.toolchainOpenPage, page, { id: "https://evil.example" })).rejects.toThrow(/invalid request/);
     await expect(invoke(CLOUD_CHANNELS.toolchainReport, page, { force: "yes" })).rejects.toThrow(/invalid request/);
+    expect(calls).toEqual([]);
+  });
+});
+
+describe("cloud:remote-access:*", () => {
+  const AUTHTOKEN = "2abcDEF1234ghi_5JkLmNoPqRsTuVwXyZ12";
+
+  it("answers the local page, validates the form and passes the ngrok credentials in", async () => {
+    const { calls, invoke } = wire("local");
+    const page = from(accountView, `${ACCOUNT}/settings`);
+    await invoke(CLOUD_CHANNELS.remoteAccessState, page);
+    await invoke(CLOUD_CHANNELS.remoteAccessConfigure, page, { provider: "cloudflare", mode: "named", hostname: "https://Phone.Example.com/" });
+    await invoke(CLOUD_CHANNELS.remoteAccessStart, page);
+    await invoke(CLOUD_CHANNELS.remoteAccessDetect, page, { provider: "ngrok" });
+    await invoke(CLOUD_CHANNELS.remoteAccessOpenInstallPage, page, { provider: "cloudflare" });
+    await invoke(CLOUD_CHANNELS.remoteAccessStop, page);
+    await invoke(CLOUD_CHANNELS.remoteAccessLogs, page);
+    await invoke(CLOUD_CHANNELS.remoteAccessRefreshAccount, page);
+    await invoke(CLOUD_CHANNELS.remoteAccessCloudflareLogin, page);
+    await invoke(CLOUD_CHANNELS.remoteAccessCloudflareLoginCancel, page);
+    await invoke(CLOUD_CHANNELS.remoteAccessCloudflareLogout, page);
+    await invoke(CLOUD_CHANNELS.remoteAccessNgrokConnect, page, { authtoken: AUTHTOKEN, apiKey: "2xYz_apiKey123" });
+    await invoke(CLOUD_CHANNELS.remoteAccessNgrokConnect, page, {});
+    await invoke(CLOUD_CHANNELS.remoteAccessNgrokDisconnect, page);
+    expect(calls).toEqual([
+      "remote-state",
+      "remote-configure provider,mode,hostname",
+      "remote-start",
+      "remote-detect ngrok",
+      "remote-install-page cloudflare",
+      "remote-stop",
+      "remote-logs",
+      "remote-refresh",
+      "remote-cf-login",
+      "remote-cf-login-cancel",
+      "remote-cf-logout",
+      "remote-ngrok-connect authtoken,apiKey",
+      "remote-ngrok-connect ",
+      "remote-ngrok-disconnect",
+    ]);
+  });
+
+  it("refuses a malformed form without echoing the token back", async () => {
+    const { calls, invoke } = wire("local");
+    const page = from(accountView, `${ACCOUNT}/settings`);
+    const bad = [
+      { provider: "pwn" },
+      { mode: "root" },
+      { hostname: "evil.com/../x; rm" },
+    ];
+    for (const payload of bad) {
+      const refusal = await invoke(CLOUD_CHANNELS.remoteAccessConfigure, page, payload).then(
+        () => "",
+        (err: unknown) => (err instanceof Error ? err.message : String(err)),
+      );
+      expect(refusal, JSON.stringify(payload)).toMatch(/invalid request/);
+    }
+    for (const payload of [{ authtoken: `${AUTHTOKEN}\nX: 1` }, { authtoken: "has space inside" }, { apiKey: "" }, "authtoken"]) {
+      const refusal = await invoke(CLOUD_CHANNELS.remoteAccessNgrokConnect, page, payload).then(
+        () => "",
+        (err: unknown) => (err instanceof Error ? err.message : String(err)),
+      );
+      expect(refusal, JSON.stringify(payload)).toMatch(/invalid request/);
+      expect(refusal).not.toContain(AUTHTOKEN);
+    }
+    await expect(invoke(CLOUD_CHANNELS.remoteAccessDetect, page, { provider: "tailscale" })).rejects.toThrow(/invalid request/);
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses every remote access channel in account mode, even for the trusted account page", async () => {
+    const { calls, invoke } = wire("account");
+    const page = from(accountView, `${ACCOUNT}/settings`);
+    for (const [channel, payload] of [
+      [CLOUD_CHANNELS.remoteAccessState, undefined],
+      [CLOUD_CHANNELS.remoteAccessConfigure, { autoStart: true }],
+      [CLOUD_CHANNELS.remoteAccessStart, undefined],
+      [CLOUD_CHANNELS.remoteAccessStop, undefined],
+      [CLOUD_CHANNELS.remoteAccessDetect, { provider: "ngrok" }],
+      [CLOUD_CHANNELS.remoteAccessOpenInstallPage, { provider: "ngrok" }],
+      [CLOUD_CHANNELS.remoteAccessLogs, undefined],
+      [CLOUD_CHANNELS.remoteAccessRefreshAccount, undefined],
+      [CLOUD_CHANNELS.remoteAccessCloudflareLogin, undefined],
+      [CLOUD_CHANNELS.remoteAccessCloudflareLoginCancel, undefined],
+      [CLOUD_CHANNELS.remoteAccessCloudflareLogout, undefined],
+      [CLOUD_CHANNELS.remoteAccessNgrokConnect, { authtoken: AUTHTOKEN }],
+      [CLOUD_CHANNELS.remoteAccessNgrokDisconnect, undefined],
+    ] as const) {
+      await expect(invoke(channel, page, payload), channel).rejects.toThrow(/locally/);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("refuses any other sender before looking at the payload", async () => {
+    const { calls, invoke } = wire("local");
+    for (const sender of [from(chrome, "file:///x.html"), from(contents(99), ACCOUNT), from(accountView, "https://evil.example/")]) {
+      await expect(invoke(CLOUD_CHANNELS.remoteAccessStart, sender)).rejects.toThrow(/refused/);
+      await expect(invoke(CLOUD_CHANNELS.remoteAccessNgrokConnect, sender, { authtoken: AUTHTOKEN })).rejects.toThrow(/refused/);
+      await expect(invoke(CLOUD_CHANNELS.remoteAccessCloudflareLogin, sender)).rejects.toThrow(/refused/);
+    }
     expect(calls).toEqual([]);
   });
 });

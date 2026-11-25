@@ -178,13 +178,11 @@ export const agentArea = {
       task_completed: "Tarefa concluída",
       task_released: "Tarefa publicada",
       revision_requested: "Ajustes solicitados",
-      pm_uat_failed: "UAT do PM falhou",
       human_uat_failed: "UAT humano falhou",
       qa_bug_found: "Bug encontrado pelo QA",
       qa_valid_scenario_confirmed: "Cenário válido confirmado",
       qa_invalid_scenario_confirmed: "Cenário inválido confirmado",
       qa_task_tested: "QA concluiu os testes",
-      pm_uat_completed: "UAT do PM concluído",
     },
     changeType: {
       skill_created: "Skill adicionada",
@@ -282,6 +280,13 @@ export const agentArea = {
     systemPrompt: "Prompt de sistema",
     enabled: "Ativado",
     coreHint: "Agente principal; não pode ser desativado.",
+    commitCoauthor: {
+      label: "Coautor do commit",
+      help: "Nome <e-mail> ou uma linha Co-authored-by completa. Deixe vazio para as linhas padrão.",
+      placeholder: "Ana Silva <ana@example.com>",
+      disable: "Não adicionar coautor",
+      disableHelp: "Ativado: os commits deste agente não levam nenhuma linha Co-authored-by.",
+    },
     catalog: {
       autoPull: {
         label: "Buscar atualizações da definição no catálogo",
@@ -322,7 +327,8 @@ export const agentArea = {
         label: "Mensagem para {name}",
         placeholder: "Peça uma funcionalidade, relate um bug ou pergunte sobre o quadro…",
         send: "Enviar",
-        hint: "Enter para enviar · Shift+Enter para nova linha",
+        hint: "Enter para enviar · Shift+Enter para nova linha · @ para marcar um agente, projeto ou repositório",
+        voice: "Falar por voz",
         failed: "Não foi possível iniciar uma conversa",
         suggestions: {
           board: {
@@ -376,10 +382,6 @@ export const agentArea = {
             qa: {
               label: "QA",
               detail: "Testes",
-            },
-            acceptance: {
-              label: "Revisão do PM",
-              detail: "UAT",
             },
             approval: {
               label: "Aprovação final",

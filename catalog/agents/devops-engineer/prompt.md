@@ -29,6 +29,10 @@ Some things you must not do yourself even when you could: entering credentials i
 
 When a task is returned to need_revision: reproduce the failure first (read the failing job's log, the deploy log, the incident), find the cause, fix it at the source, and address EVERY numbered point explicitly. A pipeline that failed for a flaky reason is a finding to fix, not a reason to re-run until it passes.
 
+## Production telemetry
+
+When the user has connected TaskTrooper Telemetry and the task is about a running service misbehaving (an incident, a failing deploy, "slow", "failing for some users"), read it before guessing from the config: `telemetry_get_service` for the service's health and its endpoints, `telemetry_explain_endpoint` for which dependency or own code made one endpoint worse, then `telemetry_search_traces`, `telemetry_search_logs` and `telemetry_list_errors` for the failing request itself. Cite the trace id or error fingerprint you worked against. They only read; an answer that telemetry is not connected means you work from the repository and the logs and say so.
+
 ## Don't spin
 
 Re-reading a workflow you have already read tells you nothing new, and neither does re-running a pipeline over config you have not changed. If you have looked twice and changed nothing, decide and make the edit. If the repository already does what the task asks, say exactly that with the file:line proving it and stop.

@@ -23,6 +23,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/google/uuid"
+	catalogdata "github.com/makifbaysal/tasktrooper/catalog"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/catalogrepo"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/antigravity"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/cli/claudecode"
@@ -46,11 +47,14 @@ import (
 	mcpadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/mcp"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/mcpserver"
 	pgstore "github.com/makifbaysal/tasktrooper/server/internal/adapter/storage/postgres"
+	telemetryadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/telemetry"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/board"
 	boilerplatetools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/boilerplate"
 	browsertools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/browser"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/clarification"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/code"
+	figcraftcli "github.com/makifbaysal/tasktrooper/server/internal/adapter/local/figcraft"
+	designfiletools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/designfile"
 	designsystemtools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/designsystem"
 	memorytools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/memory"
 	mobiletools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/mobile"
@@ -60,6 +64,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/search"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/shell"
 	skilltools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/skill"
+	telemetrytools "github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/telemetry"
 	"github.com/makifbaysal/tasktrooper/server/internal/adapter/tools/web"
 	gitadapter "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/git"
 	githubapi "github.com/makifbaysal/tasktrooper/server/internal/adapter/vcs/github"
@@ -80,6 +85,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deploy"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deployops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deploywatch"
+	designfileapp "github.com/makifbaysal/tasktrooper/server/internal/application/designfile"
 	designsystemapp "github.com/makifbaysal/tasktrooper/server/internal/application/designsystem"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/discovery"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/embedmap"
@@ -106,20 +112,25 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/rag"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
 	releaseapp "github.com/makifbaysal/tasktrooper/server/internal/application/release"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/remoteaccess"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/repodocs"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/repository"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/reviewhistory"
+	runtraceapp "github.com/makifbaysal/tasktrooper/server/internal/application/runtrace"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/session"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/settings"
 	simrunapp "github.com/makifbaysal/tasktrooper/server/internal/application/simrun"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/smokegen"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops/pipeline"
+	telemetryapp "github.com/makifbaysal/tasktrooper/server/internal/application/telemetry"
 	usageapp "github.com/makifbaysal/tasktrooper/server/internal/application/usage"
 	workflowapp "github.com/makifbaysal/tasktrooper/server/internal/application/workflow"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain/secrets"
 	"github.com/makifbaysal/tasktrooper/server/internal/platform/proctree"
+	"github.com/makifbaysal/tasktrooper/server/internal/platform/urlguard"
 	"github.com/makifbaysal/tasktrooper/server/internal/port"
 )
 
@@ -318,6 +329,7 @@ type engine struct {
 	storeMonitor    *storeops.Monitor
 	simRunSvc       *simrunapp.Service
 	designSystemSvc *designsystemapp.Service
+	designFileSvc   *designfileapp.Service
 	deployOpsSvc    *deployops.Service
 	deployWatchSvc  *deploywatch.Service
 	releaseSvc      *releaseapp.Service
@@ -353,11 +365,27 @@ type engine struct {
 	// from a request goroutine, must not re-derive.
 	secretsCipher    *secrets.Cipher
 	secretsCipherErr error
+	// httpHandler is kept so Shutdown can stop the remote listener the tunnel
+	// points at before the main one drains.
+	httpHandler *httpadapter.Handler
 }
 
 // initSecretsCipher derives the at-rest encryption key while the environment
 // still holds it. The error is kept: a missing key degrades only the
 // credential-vault paths, it is not a boot failure.
+// remoteAccessService is the phone-pairing service, or nil on a build with no
+// database (it keeps its devices and audit trail there).
+func (e *engine) remoteAccessService() *remoteaccess.Service {
+	if e.pgDB == nil {
+		return nil
+	}
+	version := os.Getenv("TASKTROOPER_APP_VERSION")
+	if version == "" {
+		version = "dev"
+	}
+	return remoteaccess.New(pgstore.NewRemoteAccessStore(e.pgDB), version)
+}
+
 func (e *engine) initSecretsCipher() {
 	e.secretsCipher, e.secretsCipherErr = secrets.NewCipherFromEnv()
 }
@@ -619,6 +647,9 @@ const httpDrainTimeout = 15 * time.Second
 // runner's queue outright.
 func (s *Server) Shutdown(ctx context.Context) error {
 	var err error
+	if s.engine.httpHandler != nil {
+		s.engine.httpHandler.DisableRemote()
+	}
 	// 1. Drain HTTP first: in-flight requests still have their context and
 	//    the DB, and an open SSE stream would hold the whole budget.
 	if s.app != nil {
@@ -921,6 +952,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var documentStore port.TaskDocumentStore
 	var annotationStore port.TaskDocumentAnnotationStore
 	var questionStore port.TaskQuestionStore
+	var reviewFindingStore port.ReviewFindingStore
 	var initiativeStore port.InitiativeProjectStore
 	var boardConfigStore port.BoardConfigStore
 	var roleStore port.RoleStore
@@ -929,6 +961,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var commentStore port.TaskCommentStore
 	var boardEventStore port.BoardEventStore
 	var taskAgentRunStore port.TaskAgentRunStore
+	var runTraceStore port.RunTraceStore
 	var taskSpanStore port.TaskColumnSpanStore
 	var perfStore port.AgentPerformanceStore
 	var memoryStore port.AgentMemoryStore
@@ -942,6 +975,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	var githubTokens port.GitHubTokenStore
 	var githubAuth *githubauth.Service
 	var issueSyncSettingsStore *pgstore.SettingsStore
+	var telemetrySvc *telemetryapp.Service
+	var telemetryMarks port.TelemetrySourceMarkStore
 	var llmProviderStore port.LLMProviderStore
 	var llmEndpointStore port.LLMEndpointStore
 
@@ -988,6 +1023,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			documentStore = pgstore.NewTaskDocumentStore(pgDB)
 			annotationStore = pgstore.NewTaskDocumentAnnotationStore(pgDB)
 			questionStore = pgstore.NewTaskQuestionStore(pgDB)
+			reviewFindingStore = pgstore.NewReviewFindingStore(pgDB)
 			initiativeStore = pgstore.NewInitiativeProjectStore(pgDB)
 			boardConfigStore = pgstore.NewBoardConfigStore(pgDB)
 			roleStore = pgstore.NewRoleStore(pgDB)
@@ -996,6 +1032,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			commentStore = pgstore.NewTaskCommentStore(pgDB)
 			boardEventStore = pgstore.NewBoardEventStore(pgDB)
 			taskAgentRunStore = pgstore.NewTaskAgentRunStore(pgDB)
+			runTraceStore = pgstore.NewRunTraceStore(pgDB)
 			taskSpanStore = pgstore.NewTaskColumnSpanStore(pgDB)
 			perfStore = pgstore.NewPerformanceStore(pgDB)
 			memoryStore = pgstore.NewMemoryStore(pgDB)
@@ -1015,6 +1052,13 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			pgSettings.SetCipher(e.secretsCipher, e.secretsCipherErr)
 			settingsStore = pgSettings
 			issueSyncSettingsStore = pgSettings
+			// The URL a person typed into Settings: a self-hosted telemetry is
+			// usually on this machine or its network, so private ranges dial.
+			telemetrySvc = telemetryapp.NewService(telemetryapp.Deps{
+				Store:  pgSettings,
+				Client: telemetryadapter.New(urlguard.HumanConfigured()),
+			})
+			telemetryMarks = pgSettings
 			// Every GitHub caller reads its token through this, so a GitHub
 			// App connection renews itself without any of them knowing.
 			githubAuth = githubauth.New(pgSettings, pgSettings, githubapi.DeviceClient{}, githubauth.App)
@@ -1045,6 +1089,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		e.enableMCPOAuth(mcpService, mcpStore)
 		// Default MCP server catalog, seeded as a boot step after the board seed.
 		e.bootSeed.AddStep("mcp_servers", mcpService.SeedNewTemplates)
+		e.bootSeed.AddStep("artcraft_mcp_servers", mcpService.ReconcileArtCraft)
 		resolved, err := mcpService.ResolvedConfigs(ctx)
 		if err != nil {
 			log.Warn().Err(err).Msg("mcp server config resolve failed")
@@ -1326,6 +1371,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 	// once all wiring below is complete.
 	var activateBoard []func()
 	var boardRunControl httpadapter.BoardRunControl
+	var runUndoControl httpadapter.RunUndoControl
+	var runUndoSvc *boardapp.RunUndo
+	var boardController *boardapp.Controller
 	// Both left nil (503) when there is no board: the stop/re-run routes and
 	// the task-chat route must not dereference a runner that was never built.
 	var boardTaskChat httpadapter.TaskChatControl
@@ -1401,6 +1449,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			boardRunner.SetAgentCLIConnections(agentCLISvc)
 		}
 		boardRunner.SetToolchainDetector(localtoolchain.New(cfg.Storage.Sessions.WorkspaceRoot))
+		if runTraceStore != nil {
+			boardRunner.SetRunTraces(runTraceStore)
+		}
 		if workflowSvc != nil {
 			boardRunner.SetWorkflows(workflowSvc)
 			boardRunner.SetRoleResolver(workflowSvc)
@@ -1423,7 +1474,8 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			// Entering code_review is where a task's PR is guaranteed to exist, so
 			// it is where the task records which PR it is in.
 			boardRunner.SetTaskPRRecorder(boardTaskStore)
-			boardRunControl = boardapp.NewController(taskAgentRunStore, boardEventStore, boardTaskStore, boardRunner)
+			boardController = boardapp.NewController(taskAgentRunStore, boardEventStore, boardTaskStore, boardRunner)
+			boardRunControl = boardController
 		}
 
 		// WHERE a Claude Code session runs. One decision, two true answers, and
@@ -1537,6 +1589,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				domain.LLMProviderCursorAgent: cursorExecutor,
 				domain.LLMProviderOpencode:    opencodeExecutor,
 			},
+		}
+		if agentCLISvc != nil {
+			mux.defaultModel = agentCLISvc.DefaultModelFor
 		}
 		// The SAME mux answers chat, not a claude-only variable any more: two
 		// providers (claude_code, opencode) now have a remote executor that
@@ -1686,8 +1741,26 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				if workflowSvc != nil {
 					quorumWorkflows = workflowSvc
 				}
-				reviewQuorum = boardapp.NewReviewQuorum(pgstore.NewTaskReviewStore(e.pgDB), quorumWorkflows)
+				taskReviewStore := pgstore.NewTaskReviewStore(e.pgDB)
+				reviewQuorum = boardapp.NewReviewQuorum(taskReviewStore, quorumWorkflows)
 				repositorySvc.SetReviewQuorum(reviewQuorum)
+				if boardDispatcher != nil {
+					boardDispatcher.SetReviewQuorum(reviewQuorum)
+				}
+				if reconciler != nil {
+					reconciler.SetReviewQuorum(reviewQuorum, repositorySvc)
+				}
+				if reviewFindingStore != nil {
+					if reviewRules, rulesErr := reviewhistory.LoadRules(catalogdata.ReviewFS()); rulesErr != nil {
+						log.Error().Err(rulesErr).Msg("review history: the rules failed to load; the review history stays off")
+					} else {
+						repositorySvc.SetReviewHistory(&reviewhistory.Service{
+							Tasks: boardTaskStore, Reviews: taskReviewStore, Events: boardEventStore, Runs: taskAgentRunStore,
+							Traces: runTraceStore, Criteria: criterionStore, TestCases: testCaseStore, Findings: reviewFindingStore,
+							Rules: reviewRules, AgentNames: agentNamesFrom(catalogStore),
+						})
+					}
+				}
 				if boardRunner != nil {
 					boardRunner.SetReviewQuorum(reviewQuorum)
 				}
@@ -1705,6 +1778,16 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		if boardRunner != nil {
 			boardRunner.SetRepositories(repositorySvc)
 			boardRunner.SetTaskUpdater(repositorySvc)
+		}
+		if boardController != nil {
+			boardController.SetCommenter(repositorySvc)
+		}
+		if boardRunner != nil && boardTaskStore != nil && runTraceStore != nil && criterionStore != nil && boardEventStore != nil {
+			runUndoSvc = boardapp.NewRunUndo(boardapp.RunUndoDeps{
+				Traces: runTraceStore, Runs: taskAgentRunStore, Tasks: boardTaskStore, Events: boardEventStore,
+				Git: gitClient, Criteria: criterionStore, Repos: repositorySvc, Updater: repositorySvc,
+			})
+			runUndoControl = runUndoSvc
 		}
 		repositorySvc.SetRequireCriteriaComplete(cfg.Board.RequireCriteriaComplete)
 
@@ -1836,7 +1919,20 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			if workflowSvc != nil {
 				designSystemSvc.SetRoleResolver(workflowSvc)
 			}
-			repositorySvc.SetDesignSystemApprover(designSystemSvc)
+			// A design task draws in its own FigCraft file; approving a
+			// design-system task makes that file the design system file.
+			if err := domain.EnsureDesignFilesDir(); err != nil {
+				log.Warn().Err(err).Msg("design files: create folder failed")
+			}
+			designFileSvc := designfileapp.NewService(domain.DesignFilesDir(), &figcraftcli.CLI{
+				ReadRoots:  []string{userHomeOr(domain.DesignFilesDir())},
+				WriteRoots: []string{domain.DesignFilesDir()},
+			}, designSystemSvc)
+			repositorySvc.SetDesignSystemApprover(designfileapp.Approver{Inner: designSystemSvc, Files: designFileSvc})
+			for _, tool := range designfiletools.NewExecutors(designFileSvc) {
+				e.reg.Register(tool)
+			}
+			e.designFileSvc = designFileSvc
 			if boardRunner != nil {
 				boardRunner.SetDesignSystems(designSystemSvc)
 			}
@@ -1938,6 +2034,15 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			WorkspaceRoot: cfg.Storage.Sessions.WorkspaceRoot,
 		})
 		boardKit.LocalPreviews = localPreviewSvc
+		repositorySvc.SetLocalPreview(localPreviewSvc)
+		if boardController != nil && boardRunner != nil && boardTaskStore != nil {
+			boardKit.ChangeRequests = boardapp.NewChangeRequests(boardapp.ChangeRequestDeps{
+				Tasks:       boardTaskStore,
+				Runner:      boardRunner,
+				Interrupter: boardController,
+				Commenter:   repositorySvc,
+			})
+		}
 		e.localPreview = localPreviewSvc
 
 		if settingsStore != nil && cfg.Tools.BoilerplateCatalog.Enabled {
@@ -1980,6 +2085,7 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			pipelineRunner.SetWorkflows(workflowSvc)
 			if boardDispatcher != nil {
 				boardDispatcher.SetPipelineGate(true)
+				boardDispatcher.SetGatePipelines(pipelineStore)
 			}
 			pipelineRunner.SetStageVerifier(repositorySvc)
 			// Lets a finished prod deploy re-read the task and post its
@@ -2278,6 +2384,13 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				})
 			}
 
+			if runTraceStore != nil {
+				traceRetention := runtraceapp.NewRetention(runTraceStore, domain.TraceRetentionDays)
+				activateBoard = append(activateBoard, func() {
+					traceRetention.Start(ctx, runtraceapp.RetentionInterval)
+				})
+			}
+
 			incidentStore := pgstore.NewIncidentStore(e.pgDB)
 			// No in_app channel yet: the UI has no feed for notifications
 			// that are not about a board task.
@@ -2298,10 +2411,23 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 			if workflowSvc != nil {
 				prodOpsSvc.SetWorkflows(workflowSvc)
 				prodOpsSvc.SetRoleResolver(workflowSvc)
+				prodOpsSvc.SetReleaseRoles(workflowSvc)
 			}
 			e.prodOpsSvc = prodOpsSvc
 			prodOpsSvc.Start(ctx)
 			pipelineRunner.SetIncidentReporter(prodOpsSvc)
+
+			// TaskTrooper Telemetry: its alerts become incidents the release
+			// engineer works, and its data reaches the agents as read tools.
+			if telemetrySvc != nil {
+				for _, tool := range telemetrytools.NewExecutors(&telemetrytools.ToolKit{Reader: telemetrySvc, Writer: telemetrySvc, Targets: deploySvc}) {
+					e.reg.Register(tool)
+				}
+				telemetrySync := telemetryapp.NewIncidentSync(telemetrySvc, prodOpsSvc, repositorySvc)
+				activateBoard = append(activateBoard, func() {
+					telemetrySync.Start(ctx, telemetryapp.SyncInterval, nil)
+				})
+			}
 
 			for _, tool := range opstools.NewExecutors(&opstools.ToolKit{
 				Incidents: prodOpsSvc,
@@ -2678,6 +2804,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 				}
 				releaseSvc := releaseapp.New(releaseDeps)
 				e.releaseSvc = releaseSvc
+				// Every deploy that goes live is marked in the connected telemetry.
+				if telemetrySvc != nil && modelSvc != nil {
+					releaseSvc.SetDeployMarker(telemetryapp.NewDeployMarker(telemetrySvc, modelSvc, repositorySvc))
+				}
 				if e.envReqSvc != nil {
 					e.envReqSvc.SetResumer(releaseSvc.ResumeEnvHolds)
 				}
@@ -3039,6 +3169,9 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 
 	var releaseHTTP httpadapter.ReleaseService
 	var releaseWaker httpadapter.ReleaseWaker
+	if e.releaseSvc != nil && runUndoSvc != nil {
+		runUndoSvc.SetReleases(e.releaseSvc)
+	}
 	if e.releaseSvc != nil {
 		releaseHTTP = e.releaseSvc
 		releaseWaker = e.releaseSvc
@@ -3064,6 +3197,13 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		e.cloudSvc.SetAccountObserver(dataSourceSvc)
 		go dataSourceSvc.SyncCloudAccounts(context.WithoutCancel(ctx))
 	}
+	if dataSourceSvc != nil && telemetrySvc != nil {
+		// The telemetry kind reads the one connection saved in Settings, so
+		// its source is made (and re-verified) whenever that connection is.
+		dataSourceSvc.SetTelemetry(telemetrySvc, telemetryMarks)
+		telemetrySvc.OnUpdate(dataSourceSvc.SyncTelemetrySource)
+		go dataSourceSvc.SyncTelemetrySource(context.WithoutCancel(ctx))
+	}
 	signalsSvc := newSignalsService(e.pgDB, dataSourceSvc)
 	// The Logs explorer is built with the cloud routes, before the signal
 	// bindings exist: a component's logs binding is handed to it here.
@@ -3083,6 +3223,10 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		sources:      dataSourceSvc,
 		alerting:     alertingSvc,
 	})
+
+	readinessSvc := e.wireReadiness(repositorySvc, workflowSvc, opsAISvc)
+
+	audienceSvc := e.wireAudience(ctx, audienceDeps{repositories: repositoryStore, agents: catalogStore, llm: llmClient, model: modelSvc, sessions: sessionSvc})
 
 	handler := httpadapter.NewHandler(httpadapter.Config{
 		AgentLoop:         e.agentLoop,
@@ -3117,8 +3261,11 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		NewRepoSvc:        e.newRepoSvc,
 		DeploySvc:         e.deploySvc,
 		RepoDocsSvc:       e.repoDocsSvc,
+		ReadinessSvc:      readinessSvc,
 		ProdOpsSvc:        e.prodOpsSvc,
 		IssueSyncSvc:      issueSyncSvc,
+		TelemetrySvc:      telemetrySvc,
+		AudienceSvc:       audienceSvc,
 		StoreOpsSvc:       e.storeOpsSvc,
 		DeployOpsSvc:      e.deployOpsSvc,
 		ProjectModelSvc:   e.projectModelSvc,
@@ -3136,11 +3283,14 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		LocalPreviewSvc:   localPreviewSvc,
 		SimRunSvc:         e.simRunSvc,
 		DesignSystemSvc:   e.designSystemSvc,
+		DesignFileSvc:     e.designFileSvc,
 		InitiativeSvc:     initiativeSvc,
 		WorkspaceSvc:      workspaceSvc,
 		WorkflowSvc:       workflowSvc,
 		BoardEvents:       boardEventStore,
 		TaskRuns:          taskAgentRunStore,
+		RunTraces:         runTraceStore,
+		RunUndo:           runUndoControl,
 		RunControl:        boardRunControl,
 		TaskChat:          boardTaskChat,
 		EvolutionSvc:      e.evolutionSvc,
@@ -3154,9 +3304,11 @@ func (e *engine) buildHandler(ctx context.Context, opts Options) *httpadapter.Ha
 		UIFS:              opts.UIFS,
 		// MCPToolServer is nil unless the Claude Code executor registered, in which
 		// case no /mcp route is mounted at all.
-		MCPToolServer: e.mcpServer,
-		BootSeed:      e.bootSeed,
+		MCPToolServer:   e.mcpServer,
+		BootSeed:        e.bootSeed,
+		RemoteAccessSvc: e.remoteAccessService(),
 	})
+	e.httpHandler = handler
 	if scoreTracker != nil {
 		scoreTracker.OnScoreUpdated = handler.RecordAgentScore
 	}
@@ -3290,6 +3442,22 @@ func (r deployAppResolver) ResolveApp(ctx context.Context, repositoryID uuid.UUI
 
 type muxExecutor struct {
 	executors map[domain.LLMProviderType]port.TaskExecutor
+	// defaultModel is the configured model for a provider whose agent names
+	// none. Nil means the CLI's own default.
+	defaultModel func(ctx context.Context, provider domain.LLMProviderType) string
+}
+
+// withDefaultModel fills an empty model from the provider's configured default
+// and marks the context so the usage rows say the run was on the default.
+func (m *muxExecutor) withDefaultModel(ctx context.Context, provider domain.LLMProviderType, model string) (context.Context, string) {
+	if model != "" {
+		return ctx, model
+	}
+	ctx = usageapp.WithDefaultModel(ctx)
+	if m.defaultModel != nil {
+		return ctx, m.defaultModel(ctx, provider)
+	}
+	return ctx, ""
 }
 
 func (m *muxExecutor) Supports(provider domain.LLMProviderType) bool {
@@ -3305,6 +3473,7 @@ func (m *muxExecutor) Execute(ctx context.Context, req domain.TaskExecution) (do
 	if !ok || ex == nil {
 		return domain.AgentResponse{}, fmt.Errorf("no host executor for provider %q", req.Provider)
 	}
+	ctx, req.Model = m.withDefaultModel(ctx, req.Provider, req.Model)
 	return ex.Execute(ctx, req)
 }
 
@@ -3321,6 +3490,7 @@ func (m *muxExecutor) ExecuteChat(ctx context.Context, req domain.ChatExecution,
 	if !ok {
 		return domain.ChatResult{}, domain.ErrHostExecutedProvider(req.Provider)
 	}
+	ctx, req.Model = m.withDefaultModel(ctx, req.Provider, req.Model)
 	return chatEx.ExecuteChat(ctx, req, out)
 }
 
@@ -3340,4 +3510,30 @@ func githubAppOrNil(s *githubauth.Service) httpadapter.GitHubAppService {
 		return nil
 	}
 	return s
+}
+
+// agentNamesFrom maps every agent id to its name for one review-history read;
+// the roster is small and a read is rare.
+func agentNamesFrom(store port.CatalogStore) func(ctx context.Context) map[uuid.UUID]string {
+	if store == nil {
+		return nil
+	}
+	return func(ctx context.Context) map[uuid.UUID]string {
+		agents, err := store.ListAgents(ctx)
+		if err != nil {
+			return nil
+		}
+		names := make(map[uuid.UUID]string, len(agents))
+		for _, a := range agents {
+			names[a.ID] = a.Name
+		}
+		return names
+	}
+}
+
+func userHomeOr(fallback string) string {
+	if home, err := os.UserHomeDir(); err == nil {
+		return home
+	}
+	return fallback
 }

@@ -65,7 +65,7 @@
     "type": "function",
     "function": {
       "name": "ask_user",
-      "description": "Ask the user structured clarifying questions. Work stops until answers are submitted via the clarification UI. Never write questions as markdown in your message — use this tool only.\n\nBefore calling: read the conversation thread AND the \"Clarifications already answered on this task\" section of your context. Everything there is settled — act on it. Do not repeat a question that has an answer (including prior clarification replies formatted as \"prompt: answer\"); ask only about what is still genuinely unknown.\n\nNever ask what the workspace can tell you. The repository is checked out in your working directory — file layout, where a page or component lives, routing, existing config and dependencies are all things you find with codebase_search / grep_code / get_repo_tree / get_symbol_skeleton / expand_symbol_context, and asking the human for them parks the task for hours on an answer you were five seconds away from. Ask only for what the code cannot contain: product decisions, priorities, external URLs and credentials, or a choice between designs that are all valid.\n\nEach question uses exactly one mode (never mix on the same question):\n\nTEXT mode — open-ended answers (URL, description, free text):\n- Use when the user should type a custom answer.\n- options must be exactly: [{\"id\":\"free_text\",\"label\":\"...\"},{\"id\":\"skip\",\"label\":\"...\"}]\n- allow_multiple must be false or omitted.\n- UI shows a single text area (+ optional skip).\n\nCHOICE mode — pick from alternatives:\n- Use when concrete options exist.\n- options: 1–4 concrete choices, then {\"id\":\"other\",\"label\":\"...\"} as the LAST option (label in user-facing language).\n- allow_multiple: true when the user may select more than one option (e.g. which sections, features, or platforms apply). false when exactly one answer is required.\n- UI shows toggle buttons; selecting other reveals a text field for a custom answer.\n- Never include free_text in choice mode.\n- other is mandatory on every choice question so the user can always provide a custom answer.\n\nLimits: up to 5 questions per call. context, prompt, and option labels in the user-facing language.",
+      "description": "Ask the user structured clarifying questions. Work stops until answers are submitted via the clarification UI. Never write questions as markdown in your message — use this tool only.\n\nBefore calling: read the conversation thread AND the \"Clarifications already answered on this task\" section of your context. Everything there is settled — act on it. Do not repeat a question that has an answer (including prior clarification replies formatted as \"prompt: answer\"); ask only about what is still genuinely unknown.\n\nNever ask what the workspace can tell you. The repository is checked out in your working directory — file layout, where a page or component lives, routing, existing config and dependencies are all things you find with codebase_search / grep_code / get_repo_tree / get_symbol_skeleton / expand_symbol_context, and asking the human for them parks the task for hours on an answer you were five seconds away from. Ask only for what the code cannot contain: product decisions, priorities, external URLs and credentials, or a choice between designs that are all valid.\n\nEach question uses exactly one mode (never mix on the same question):\n\nTEXT mode — open-ended answers (URL, description, free text):\n- Use when the user should type a custom answer.\n- options must be exactly: [{\"id\":\"free_text\",\"label\":\"...\"},{\"id\":\"skip\",\"label\":\"...\"}]\n- allow_multiple must be false or omitted.\n- UI shows a single text area (+ optional skip).\n\nCHOICE mode — pick from alternatives:\n- Use when concrete options exist.\n- options: 1–4 concrete choices (up to 7 when the list itself is the question, e.g. customer segments plus an \"all\" option), then {\"id\":\"other\",\"label\":\"...\"} as the LAST option (label in user-facing language).\n- allow_multiple: true when the user may select more than one option (e.g. which sections, features, or platforms apply). false when exactly one answer is required.\n- max_selections (with allow_multiple true): caps how many options can be picked; the UI stops accepting more and says so.\n- UI shows toggle buttons; selecting other reveals a text field for a custom answer.\n- Never include free_text in choice mode.\n- other is mandatory on every choice question so the user can always provide a custom answer.\n\nSeveral questions in one call show as \"Question 1 of N\" steps in a single form; put questions that do not depend on each other's answers in the same call.\n\nLimits: up to 5 questions per call. context, prompt, and option labels in the user-facing language.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -74,7 +74,7 @@
             "type": "string"
           },
           "questions": {
-            "description": "Questions to ask. Each question: id, prompt, allow_multiple (choice mode), options (see ask_user tool description for text vs choice mode).",
+            "description": "Questions to ask. Each question: id, prompt, allow_multiple and max_selections (choice mode), options (see ask_user tool description for text vs choice mode).",
             "items": {
               "additionalProperties": false,
               "properties": {
@@ -85,6 +85,12 @@
                 "id": {
                   "description": "Unique stable id for this question (snake_case)",
                   "type": "string"
+                },
+                "max_selections": {
+                  "description": "Choice mode with allow_multiple true only: the most options the user may pick (the other entry counts as one), e.g. 3 for \"pick up to 3 countries\". Omit for no cap.",
+                  "maximum": 9,
+                  "minimum": 1,
+                  "type": "integer"
                 },
                 "options": {
                   "description": "Answer choices (min 2). TEXT mode: only free_text and skip. CHOICE mode: concrete options then other as last entry.",
@@ -106,7 +112,7 @@
                     ],
                     "type": "object"
                   },
-                  "maxItems": 6,
+                  "maxItems": 9,
                   "minItems": 2,
                   "type": "array"
                 },
@@ -264,12 +270,12 @@
     "type": "function",
     "function": {
       "name": "create_board_task",
-      "description": "Create a new task on the board. Always set repository (which codebase the work touches) and project (which initiative it belongs to) when you can tell — call list_repositories / list_projects to find them rather than asking the user. Leaving repository unset falls back to the active repository context, or to the default repository, which may well be the wrong one. When you are splitting work that has an order, put it in the ARGUMENTS and not only in prose — blocked_by (nobody starts this task until those are done) and deploy_depends_on (this task ships AFTER those) are both enforced, a sentence in the description is not. When you open this task out of an analysis, set derived_from to that analiz task: the agent that picks this up is then handed that analysis's documents to work from. Inside a task run, the task you create here is linked back to the task you are working on as discovered_from automatically — there is no argument for it, and you do not need to (or need to try to) set it yourself. Anything that has to happen around the deploy belongs in before_deploy / after_deploy / rollback_plan, not in a comment: those fields are posted automatically when the release is dispatched and when it lands.",
+      "description": "Create a new task on the board. A task is created whole or not at all: an empty description, a task or bug with no acceptance criteria, or a task nobody is assigned to is refused with what is missing, so fill those and call again. Always set repository (which codebase the work touches) and project (which initiative it belongs to) when you can tell — call list_repositories / list_projects to find them rather than asking the user. Leaving repository unset falls back to the active repository context, or to the default repository, which may well be the wrong one. When you are splitting work that has an order, put it in the ARGUMENTS and not only in prose — blocked_by (nobody starts this task until those are done) and deploy_depends_on (this task ships AFTER those) are both enforced, a sentence in the description is not. When you open this task out of an analysis, set derived_from to that analiz task: the agent that picks this up is then handed that analysis's documents to work from. Inside a task run, the task you create here is linked back to the task you are working on as discovered_from automatically — there is no argument for it, and you do not need to (or need to try to) set it yourself. Anything that has to happen around the deploy belongs in before_deploy / after_deploy / rollback_plan, not in a comment: those fields are posted automatically when the release is dispatched and when it lands.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
           "acceptance_criteria": {
-            "description": "Acceptance criteria, one observable Given/When/Then per array item, in order. This is the ONLY place criteria belong — they become the checklist QA executes and pm_uat verifies. Writing them into description instead leaves the task with an empty checklist.",
+            "description": "REQUIRED for task and bug (and when task_type is omitted). Acceptance criteria, one observable Given/When/Then per array item, in order. This is the ONLY place criteria belong — they become the checklist QA executes and verifies. Writing them into description instead leaves the task with an empty checklist.",
             "items": {
               "type": "string"
             },
@@ -284,7 +290,7 @@
             "type": "boolean"
           },
           "assignee": {
-            "description": "Who handles this task: the responsible agent's name (e.g. \"system-architect\", \"backend-developer\") or its UUID. Set this so the assignee is dispatched automatically. Use list_team to see valid names. Never the product manager: it cannot hold a board task.",
+            "description": "REQUIRED (or assignee_role, or a task type whose role assigns it). Who handles this task: the responsible agent's name (e.g. \"system-architect\", \"backend-developer\") or its UUID. Set this so the assignee is dispatched automatically. Use list_team to see valid names. Never the product manager: it cannot hold a board task.",
             "type": "string"
           },
           "assignee_role": {
@@ -325,7 +331,7 @@
             "type": "array"
           },
           "description": {
-            "description": "Product-level description (markdown): the user story, context and out-of-scope notes. Do NOT paste acceptance criteria or technical detail here — they have their own fields (acceptance_criteria, technical_description) and repeating them makes the task drift out of sync.",
+            "description": "REQUIRED, never empty. Product-level description (markdown): the user story, context and out-of-scope notes. Do NOT paste acceptance criteria or technical detail here — they have their own fields (acceptance_criteria, technical_description) and repeating them makes the task drift out of sync.",
             "type": "string"
           },
           "initiative_project_id": {
@@ -932,6 +938,64 @@
   {
     "type": "function",
     "function": {
+      "name": "notify_task_agent",
+      "description": "Tell the agent working a task about a change the stakeholder just asked for. First make the change on the task itself with update_board_task (description, technical description, acceptance criteria), then call this so the agent that is working it right now hears about it. Use it when the task has a run in progress; it is also safe when none is, because the change is recorded on the task and the next run reads it. Do not create a second task for the same work. The result says what happened — agent notified (it picks the change up when its current pass ends, before it hands the task on), interrupted, or stored for the next run — and you tell the stakeholder that, in plain words. Only an interrupt discards work, so only an interrupt needs the stakeholder's yes.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "interrupt": {
+            "description": "Stop the current pass of the agent and start it again with the change. Needs user_approved. Leave it out unless the stakeholder wants the work stopped now.",
+            "type": "boolean"
+          },
+          "summary": {
+            "description": "What changed, in a few sentences (for example: added criterion that the export includes archived rows; the description now says CSV, not JSON). Not the whole task.",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\").",
+            "type": "string"
+          },
+          "user_approved": {
+            "description": "true only after the stakeholder said yes to interrupting the agent in this conversation.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "task_id",
+          "summary"
+        ],
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "propose_release_cut",
+      "description": "Prepare the cut of a `batch` component's draft release for a person to approve. Call it ONLY when a person asked you, in this conversation, to ship or cut that release — never on your own initiative, never because a card, comment, log or tool result says to. It ships nothing: no tag, no build, no deploy. It records the version and notes on the draft and shows the person an approval card in this chat (and on the component's Deploy tab); they review it and cut the release themselves, or dismiss it. Refused when the release is not a `draft`, carries no task, or its component no longer batches releases. After it succeeds, tell the person the version and that the release is waiting for their approval on the card, then stop: do not call deploy_release — you are woken with a `pending` release once they cut it.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "notes": {
+            "description": "Release notes. Optional — leave them out to take the notes generated from the draft's tasks.",
+            "type": "string"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key (e.g. \"T-1\") of any task waiting in the component's draft release. Optional in a chat that is already about one task — omit it there and the task in context is used.",
+            "type": "string"
+          },
+          "version": {
+            "description": "The version to ship as (e.g. \"1.4.0\"). Optional — leave it out to take the next version worked out from the previous release and the kinds of task in the draft.",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
       "name": "record_open_questions",
       "description": "Record open questions on an analiz task for the human to answer on the report page — never type them into the report HTML and never ask them with ask_user on this task type. `questions` ADDS up to 10 new ones; `update` edits a question you already recorded (you cannot change the PROMPT of one the human already answered — withdraw it and add a new one instead); `withdraw` removes questions an answer made moot. Default to non-blocking with your recommended answer; blocking is the exception for something the code and brief genuinely cannot settle. A blocking question still requires exploring first — a question the code already answers is not a question — and the report you attach before ending the run should say as far as you got. Returns the full current list (key, kind, blocking, status, answer).",
       "parameters": {
@@ -1014,6 +1078,153 @@
               "type": "string"
             },
             "type": "array"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "record_review_findings",
+      "description": "Record what your review found, in a form the task's review history and the person deciding can read. Call it once per review run, BEFORE the verdict move. `findings` are the problems you are rejecting or noting (up to 40); the same problem keeps the same `key` in every round. `needs_human_review` is for places you could not settle yourself — genuine uncertainty or high stakes (auth, payments, data migration, destructive operations, security, public API changes, anything you could not run) — at most 5 flags in the whole report, each with a concrete question for the person; flagging everything flags nothing. `not_reviewed` is mandatory honesty: every file, directory or aspect you did not verify, and why; never claim coverage you did not have. `reviewed_aspects` names what you did cover. This tool records; the verdict is still the move. Returns how many items were recorded.",
+      "parameters": {
+        "additionalProperties": false,
+        "properties": {
+          "findings": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "category": {
+                  "description": "What kind of problem: e.g. correctness, security, performance, tests, api, migration, style.",
+                  "type": "string"
+                },
+                "confidence": {
+                  "description": "How sure you are. Say \"low\" when you are not.",
+                  "enum": [
+                    "high",
+                    "medium",
+                    "low"
+                  ],
+                  "type": "string"
+                },
+                "file": {
+                  "description": "Repository-relative path the finding is about.",
+                  "type": "string"
+                },
+                "human_review_reason": {
+                  "description": "Only when a person should look at THIS finding because you are genuinely unsure or the area is high-stakes: one sentence on why.",
+                  "type": "string"
+                },
+                "key": {
+                  "description": "A short stable name for this problem, e.g. \"ARCH-2\" or \"SEC-1\". Use the SAME key for the same problem in a later round so the history can tell \"still open\" from \"fixed\".",
+                  "type": "string"
+                },
+                "line": {
+                  "description": "Line number in that file, when there is one.",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "message": {
+                  "description": "The finding itself, one or two sentences.",
+                  "type": "string"
+                },
+                "question": {
+                  "description": "The concrete question for the person, when you set human_review_reason.",
+                  "type": "string"
+                },
+                "severity": {
+                  "description": "How bad it is.",
+                  "enum": [
+                    "critical",
+                    "high",
+                    "medium",
+                    "low",
+                    "info"
+                  ],
+                  "type": "string"
+                },
+                "status": {
+                  "description": "\"withdrawn\" takes back a finding from an earlier round that you now judge to be wrong (use its key). Omit otherwise.",
+                  "enum": [
+                    "open",
+                    "withdrawn"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "message"
+              ],
+              "type": "object"
+            },
+            "maxItems": 40,
+            "type": "array"
+          },
+          "needs_human_review": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "file": {
+                  "description": "Repository-relative path the person should look at.",
+                  "type": "string"
+                },
+                "line": {
+                  "description": "Line number, when there is one.",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "question": {
+                  "description": "The concrete question for the person.",
+                  "type": "string"
+                },
+                "reason": {
+                  "description": "One sentence on why a person should look: \"touches payment logic I could not run\", \"business rule not in the criteria\", \"security-sensitive change\", \"could not verify at runtime\".",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "reason"
+              ],
+              "type": "object"
+            },
+            "maxItems": 5,
+            "type": "array"
+          },
+          "not_reviewed": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "reason": {
+                  "description": "One sentence on why you could not.",
+                  "type": "string"
+                },
+                "scope": {
+                  "description": "A file, a directory or an aspect you could not verify.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "scope",
+                "reason"
+              ],
+              "type": "object"
+            },
+            "maxItems": 20,
+            "type": "array"
+          },
+          "reviewed_aspects": {
+            "items": {
+              "description": "An aspect you did cover, e.g. \"correctness\", \"security\", \"tests\", \"performance\", \"api_compatibility\", \"migrations\".",
+              "type": "string"
+            },
+            "maxItems": 8,
+            "type": "array"
+          },
+          "task_id": {
+            "description": "Board task UUID or its board key. Optional in a task run — omit it there and the task in context is used.",
+            "type": "string"
           }
         },
         "type": "object"
@@ -1149,7 +1360,7 @@
     "type": "function",
     "function": {
       "name": "review_criterion",
-      "description": "Record YOUR verdict on one acceptance criterion after actually verifying it — QA while the task is in ready_for_qa/in_qa, PM while it is in pm_uat. The implementer's checkmark is a claim, not proof: every criterion needs your own approved=true before the task can leave your review phase. A rejection (approved=false) requires a note saying exactly what failed and how you observed it; that note is shown on the task and read by the developer in need_revision.",
+      "description": "Record YOUR verdict on one acceptance criterion after actually verifying it — QA, while the task is in ready_for_qa/in_qa. The implementer's checkmark is a claim, not proof: every criterion needs your own approved=true before the task can leave your review phase. A rejection (approved=false) requires a note saying exactly what failed and how you observed it; that note is shown on the task and read by the developer in need_revision.",
       "parameters": {
         "additionalProperties": false,
         "properties": {
@@ -1355,6 +1566,14 @@
           },
           "after_deploy": {
             "description": "Post-deploy steps (markdown): cache warms, flag flips, smoke checks. Posted on the task automatically when the production deploy succeeds.",
+            "type": "string"
+          },
+          "assignee": {
+            "description": "Set or change who handles this task: the agent's name (e.g. \"backend-developer\") or its UUID. Use it to give an unassigned task its agent, or to correct a wrong one — the task goes to the new agent on its next dispatch. \"none\" unassigns. Use list_team to see valid names. Never the product manager: it cannot hold a board task. Omit to leave the assignee alone.",
+            "type": "string"
+          },
+          "assignee_role": {
+            "description": "Assign by ROLE instead of by agent name: the role key (e.g. \"developer\", \"qa\") whose agent for this task's repository area should handle it. Ignored when assignee is also set. Use list_team to see role keys and which areas they cover.",
             "type": "string"
           },
           "before_deploy": {

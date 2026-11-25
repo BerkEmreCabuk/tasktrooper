@@ -17,7 +17,7 @@ A `sed -n '<from>,<to>p'` read of fewer than 200 lines gets a line appended to i
 
 ### `read_file`
 
-Reads a workspace file with line numbers. Registered unconditionally (no semantic index required), confined to the workspace root, and part of `CodeExplorationTools` — so every tool-scoped agent has it, including on unindexed repositories. `domain.RestrictCodeToolsForVerification` takes it back out of QA's policy in `in_qa`/`ready_for_qa`, and out of PM's whole `CodeExplorationTools` set in `pm_uat`/`human_uat` — those two roles verify a running product in those columns, never a file body.
+Reads a workspace file with line numbers. Registered unconditionally (no semantic index required), confined to the workspace root, and part of `CodeExplorationTools` — so every tool-scoped agent has it, including on unindexed repositories. `domain.RestrictCodeToolsForVerification` takes it back out of QA's policy in `in_qa`/`ready_for_qa`, and out of the whole `CodeExplorationTools` set in `human_uat`, where nobody reads code.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -134,7 +134,7 @@ The bypass secret reaches only this tool's output: the HTTP API returns `bypass_
 
 ### `start_task_preview`
 
-Starts (or reuses) the task branch's LOCAL preview (`internal/adapter/tools/board/local_preview.go`, backed by `application/localpreview.Service`): checks the branch out into the task workspace, detects a run command, starts it, and returns its `http://localhost` URL — the fallback for a repository with no per-branch Vercel preview and no stage environment. Held by `qa-agent` and `product-manager`; neither has a shell, so this is their only way to launch the product themselves.
+Starts (or reuses) the task branch's LOCAL preview (`internal/adapter/tools/board/local_preview.go`, backed by `application/localpreview.Service`): checks the branch out into the task workspace, detects a run command, starts it, and returns its `http://localhost` URL — the fallback for a repository with no per-branch Vercel preview and no stage environment. Held by `qa-agent` and `product-manager`; neither has a shell, so this is their only way to launch the product themselves. Previews are per task: several tasks of one repository can run at once (a second one gets a free `PORT`/`SERVER_PORT`/`QUARKUS_HTTP_PORT`), and a task's column move stops only its own.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -145,6 +145,19 @@ If this repository already has an active preview for THIS task (`starting`/`runn
 Response JSON: `{status, url?, branch, command, detail?, log_tail?, note}`. `url` is empty until the process has printed a `http://localhost:<port>` line; `log_tail` (last 15 lines) is included when the preview failed or the URL has not appeared yet. `note` tells the caller what to do next: open `url` with `browser_navigate`, call the tool again because no URL has appeared, or report `detail`/`log_tail` on the task because the preview failed.
 
 Never production — this is the task's own branch, running on this machine.
+
+### `notify_task_agent`
+
+Held by `product-manager`. After the PM has changed a task with `update_board_task` (description, criteria), this makes sure the agent working it hears of the change (`internal/adapter/tools/board/notify_task_agent.go`, backed by `application/board.ChangeRequests`).
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `task_id` | string | yes | Board task UUID or key |
+| `summary` | string | yes | What changed; at most 4000 characters |
+| `interrupt` | bool | no | Stop the current pass and restart the same agent. Refused without `user_approved` |
+| `user_approved` | bool | no | The stakeholder said yes to the interrupt |
+
+The request is always stored first, as an informational task comment by the PM starting `Change request from PM:` (visible in the task drawer like any comment). Delivery depends on this install's runner: with a run holding the task the outcome is `agent_notified` (the run reads the comment at the end of its turn, in `sweepChangeRequests` before the criteria sweep and the hand-off, as a follow-up in the same CLI session; a CLI run cannot take a message mid-turn) or, with `interrupt`, `interrupted` (`Controller.InterruptRunAs`: the run is cancelled and the same agent starts again, workspace kept); with no run here it is `stored`. Every later run reads the newest five change requests in its opening context (`changeRequestsMessage`), and a revision resume carries them too. Criteria are always read fresh from the database, so a criterion added mid-run reaches the criteria sweep.
 
 ### `record_test_cases` / `set_test_case_result` / `list_test_cases`
 
@@ -172,6 +185,10 @@ The structured project model's agent-facing surface (`internal/adapter/tools/pro
 
 Granted: all three to `system-architect`, `backend-developer`, `frontend-developer`, `mobile-developer`, `qa-agent` (every role that writes or reviews code) and, narrower, `get_project_brief` + `list_links` to `product-manager`.
 
+### `get_design_file`
+
+- **`get_design_file`** `{task_id?, repository_id?}` — the ui-designer's FigCraft file for its design task (`application/designfile`). `DESIGN_FILES` is `~/Documents/TaskTrooper Designs` (`TASKTROOPER_DESIGNS_DIR`). The first call copies the design system file the task builds on (the repository's layer file, else its base project's) to `tasks/<task id>.figcraft`; a task's file is never overwritten afterwards. Approving a design-system task (`designfile.Approver` around `ApproveForTask`) copies its file over the design system file of each approved version's scope. The ArtCraft MCP templates (`domain/mcp_template_artcraft.go`: figcraft, vectorcraft, photocraft, anicraft, effectcraft, filmcraft, lightcraft, solidcraft, soundcraft — `listed`, on when the CLI is found: `TASKTROOPER_ARTCRAFT_DIR`, `~/artCraft/<app>-cli/`, the toolchain install (`~/.local/bin`, `%LOCALAPPDATA%\Programs\<app>-cli`), the macOS app bundle, then PATH — `domain.ArtCraftCLI`; `mcp.Service.ReconcileArtCraft` re-points each server at boot and switches it on the first time its CLI appears, recording `<id>@on` in `mcp_template_seeds` so a later switch-off stays). The desktop toolchain installs figcraft, vectorcraft and photocraft (pinned GitHub release assets) and recommends them for the ui-designer read the home folder and write only `DESIGN_FILES`; the ui-designer names figcraft, vectorcraft and photocraft.
+
 ### `get_design_system`, `propose_design_system`
 
 The design system's agent-facing surface (`internal/adapter/tools/designsystem`, migration 178).
@@ -187,6 +204,43 @@ Granted: `get_design_system` to every agent; `propose_design_system` to `ui-desi
 ### `attach_to_task` on `browser_screenshot` and `mobile_screenshot`
 
 `{attach_to_task: true, title?}` also stores the image as an attachment of the run's task (`port.TaskImageAttacher`, `attachment.Service.AttachToTask`; `adapter/tools/toolattach`), so the human sees it under the task. Without a task in context the flag is ignored and the result says so; a failed save never fails the screenshot.
+
+### `telemetry_*` (TaskTrooper Telemetry)
+
+Tools over the connected TaskTrooper Telemetry (`adapter/tools/telemetry`). Reads go through the same allowlisted service the UI
+proxy uses; the five writes go through its separate agent write path (`telemetry.Service.Write`, see the API spec).
+Without a connection each answers with the `guard.telemetry_not_configured` text. Answers over ~48 KB are halved list by list and
+wrapped `{truncated:[{field,total,shown}], hint, data}`.
+
+- **`telemetry_get_incident`** `{incident_id}` — the incident and its timeline (`rootCause` is a hint only).
+- **`telemetry_list_incidents`** `{state?, service?, endpoint? ("METHOD /route"), since? (epoch ms), limit? (20, max 100)}`.
+- **`telemetry_get_service`** `{service, range?, env?}` — health, endpoints with ids, deploys, dependencies.
+- **`telemetry_explain_endpoint`** `{service, endpoint (slug or "METHOD /route", looked up), range?, env?, baseline? (prev|1d|7d)}` — the root-cause comparison of one endpoint and its dependencies against a baseline window.
+- **`telemetry_search_logs`** `{service?, level? (exact), q?, trace_id?, route?, range?, env?, before?, limit? (50, max 200)}`.
+- **`telemetry_search_traces`** `{trace_id? (alone: one trace), service?, endpoint? ("METHOD /route"), errors_only?, min_ms?, sort?, range?, env?, limit? (10, max 100)}`.
+- **`telemetry_list_errors`** `{fingerprint? (alone: one group with its stack), service?, route?, status?, range?, env?, limit? (20, max 100)}`.
+- **`telemetry_list_deploys`** `{service?, range?, env?}`.
+- **`telemetry_list_slos`** `{service? (serviceId), slo_id? (alone: one)}` — KPIs with SLI, budget and burn rates.
+- **`telemetry_list_monitors`** `{service?, endpoint?, kind?, suggestions? (proposed default|all|none)}` — monitors (with `source`) plus code-analysis alert suggestions.
+- **`telemetry_list_load_tests`** `{run_id? (alone: one run), scenario_id?}` — runs, scenarios without their spec, target domains (host, verified, method; never the token).
+- **`telemetry_api_get`** `{path, query?}` — any other readable route (infra, apps, replays, profiles, ai).
+
+Writes (release engineer only). Each except `telemetry_stop_load_test` acts only with `user_approved: true`; without it the answer
+is `{dry_run, would_send:{method,path,body}, approval_needed, …}` and nothing is written (the audience tools' pattern; the agent asks
+with `ask_user` on a card). Telemetry stamps what they create `source: "agent"`, and a `replace_id` must name a record an agent created
+(checked before approval is asked for, and again on send).
+
+- **`telemetry_propose_monitor`** `{monitor, preview_range? (24h), replace_id?, user_approved?}` — validates kind / severity / op, states the window (5m, anomaly 15m); without approval it also replays the monitor (`POST monitors/preview`, series trimmed to the last 60 buckets).
+- **`telemetry_propose_slo`** `{slo, replace_id?, user_approved?}` — an endpoint target ref must be "METHOD /route"; latency needs `good.thresholdMs`.
+- **`telemetry_accept_suggestion`** `{suggestion_id, threshold?, severity?, channels?, user_approved?}` — the dry run shows the suggestion.
+- **`telemetry_run_load_test`** `{scenario_id? | scenario:{name, spec}, environment? (staging default|production), user_approved?}` — exactly one of the two; a draft scenario is refused; the target host must be a verified domain (exact, or a subdomain of a DNS-verified one); a new spec without `gate` gets `{abortErrorRate: 0.5, abortP95Ms: 10000}`; a host that is the run's repository's `prod` deploy target (base or health URL) is refused unless `environment: "production"`.
+- **`telemetry_stop_load_test`** `{run_id}` — no approval: it only takes load away.
+
+Who holds them (`application/catalog/role_tools.go`, mirrored in each `catalog.yaml`): the release engineer all of them, with
+`propose_incident_remedy` and `resolve_incident` (the flow is the `telemetry-incident-response` skill); developers (backend, frontend,
+mobile, data, game) and QA the diagnose set `telemetry_get_service`, `telemetry_explain_endpoint`, `telemetry_search_traces`,
+`telemetry_search_logs`, `telemetry_list_errors`; the security agent logs, traces and errors; the architect `telemetry_get_service`;
+the product manager `telemetry_get_service` and `telemetry_list_slos`.
 
 ### `get_environment`, `query_runtime_logs`, `list_runtime_errors`, `list_deployments`
 
@@ -350,8 +404,8 @@ branch. This is how a finished task's code actually lands: task PRs are opened
 ready for review (they used to be drafts, which GitHub refuses to merge at all),
 and nothing else in the system merges anything. **Granted to `qa-agent` alone**,
 backfilled to existing installs by migration 104 — the developer must not merge
-its own branch, the architect reviews it, and the PM signs off on the product
-rather than on the git history. QA is dispatched into `done` for exactly this
+its own branch, the architect reviews it, and QA verifies the product
+rather than the git history. QA is dispatched into `done` for exactly this
 (see orchestration-agents.md).
 
 | Parameter | Type | Required | Description |
@@ -432,6 +486,24 @@ again whenever the current state is unclear. A `batch` component may return a
 cuts it. If nothing has opened a release for this task, the error says why
 (never merged, the component's mode never opens one, or its delivery profile
 is unconfirmed) instead of a bare not-found.
+
+### `propose_release_cut`
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `task_id` | string | no | Board task UUID or board key of any task in the component's draft release. |
+| `version` | string | no | The version to ship as; the suggested next version when left out. |
+| `notes` | string | no | Release notes; generated from the draft's tasks when left out. |
+
+Prepares the cut of a `batch` component's draft release for a person to
+approve, and ships nothing: it stores `cut_proposal` (version, notes) on the
+draft. The call is recorded in the chat's action ledger (`release` /
+`proposed`), which the chat renders as an approval card; the person reviews
+and cuts the release themselves (the same confirm-by-repository-name dialog as
+the Deploy tab) or dismisses it. Refused when the release is not a `draft`,
+carries no task, or its component no longer batches. Only for a person asking
+in a chat to ship the release — never from a card or on the agent's own
+initiative.
 
 ### `deploy_release`
 
@@ -774,3 +846,17 @@ layer an **unindexed-edit overlay** on top: `buildOverlay` shells `git -C <sessi
 and returns the changed files' bytes as `Snippet`, so uncommitted edits show up without a re-index.
 A stale index (migration 116) refuses with `domain.ErrIndexEmbeddingStale` rather than returning
 results a different embedding model produced.
+
+### `audience_*` / `study_*` (audience research, Product Manager)
+
+Native tools over `application/audience` (`adapter/tools/audience`); the PM's `audience-research` skill holds the flow. Without an
+agent runtime each answers with `guard.audience_no_runtime`. **Three tools spend model calls and refuse without
+`user_approved: true`**, answering `guard.audience_needs_approval` with the call count: `audience_build` (`ceil(people/8)`),
+`study_start` (people + 1), `study_ask_everyone` (one per person).
+
+- **`audience_list`**, **`audience_get {audience_id}`** (brief, people with ids, studies, `build_calls`).
+- **`audience_create {name, product, segments?, locations?, current_solutions?, pricing?, topic?, language?, persona_count?, repository?}`**, **`audience_update {audience_id, ...}`**: save a brief; no call runs.
+- **`audience_build {audience_id, user_approved}`**: writes the people in the background.
+- **`audience_talk {persona_id, message}`**: one 1:1 turn (the thread is kept; the person remembers the studies).
+- **`study_plan {audience_id, kind?, title?, goal?, intent?, pages?, variants?, questions?, price_points?, currency?}`** (kinds: `user_interviews`, `landing_page_test`, `message_testing`, `ab_test`; writes the interview script in the background), **`study_script {study_id, sections?, regenerate?, user_approved?}`**, **`study_start {study_id, user_approved}`**, **`study_cancel`**, **`study_rerun {study_id, changes?}`** (plans the same study again after the product changed; nothing is spent), **`study_compare {study_id, with_study_id?}`** (what changed between two finished studies, no model call), **`study_list {audience_id?}`**, **`study_status {study_id}`**, **`study_report {study_id, user_approved?}`** (writes the report of an `interviewed` study when approved).
+- **`study_follow_up {study_id, persona_id, question}`**, **`study_ask_everyone {study_id, question, user_approved}`**, **`study_ask_research {study_id, question}`**.

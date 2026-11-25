@@ -248,6 +248,10 @@ func (s *Service) briefComponentBlock(ctx context.Context, repo domain.Repositor
 		fmt.Fprintf(&b, "Commands (run %s):\n%s", where, cmds)
 	}
 
+	if container := briefContainerLines(c.Container); container != "" {
+		b.WriteString("Containers:\n" + container)
+	}
+
 	if runsOn := briefRunsOnLines(environments, c.ID); runsOn != "" {
 		b.WriteString("Runs on:\n" + runsOn)
 	}
@@ -292,6 +296,26 @@ func briefStackLine(stack domain.ComponentStack) string {
 		return ""
 	}
 	return strings.Join(parts, "; ")
+}
+
+func briefContainerLines(c domain.ContainerSettings) string {
+	if !c.Enabled && c.IsZero() {
+		return ""
+	}
+	var b strings.Builder
+	if c.Registry != "" {
+		fmt.Fprintf(&b, "- Image registry: `%s`\n", c.Registry)
+	}
+	if len(c.Platforms) > 0 {
+		fmt.Fprintf(&b, "- Build platforms: %s\n", strings.Join(c.Platforms, ", "))
+	}
+	if c.TagPattern != "" {
+		fmt.Fprintf(&b, "- Image tag pattern: `%s` ({sha} is the short commit SHA)\n", c.TagPattern)
+	}
+	if c.ContainerOnly {
+		b.WriteString("- Run this component's tooling (install, build, test, run) inside its containers, never directly on the host.\n")
+	}
+	return b.String()
 }
 
 func briefCommandLines(c domain.Component) string {
@@ -620,6 +644,27 @@ func (s *Service) ComponentsForArea(ctx context.Context, repoID uuid.UUID, area 
 	out := make([]uuid.UUID, 0, len(matched))
 	for _, c := range matched {
 		out = append(out, c.ID)
+	}
+	return out, nil
+}
+
+// ComponentStacks returns the effective stack (override over detected) of the
+// given components, or of every active component when none are named.
+func (s *Service) ComponentStacks(ctx context.Context, repoID uuid.UUID, componentIDs []uuid.UUID) ([]domain.ComponentStack, error) {
+	components, err := s.store.ListComponents(ctx, repoID)
+	if err != nil {
+		return nil, fmt.Errorf("component stacks: %w", err)
+	}
+	want := map[uuid.UUID]bool{}
+	for _, id := range componentIDs {
+		want[id] = true
+	}
+	var out []domain.ComponentStack
+	for _, c := range activeComponents(components) {
+		if len(want) > 0 && !want[c.ID] {
+			continue
+		}
+		out = append(out, c.Stack.Get())
 	}
 	return out, nil
 }

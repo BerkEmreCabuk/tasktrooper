@@ -5,6 +5,7 @@ import type { DesignSystemVersion } from "@/api";
 import { DesignSystemGenerateCard } from "@/components/projects/designsystem/DesignSystemGenerateCard";
 import { DesignSystemRepositoriesTable } from "@/components/projects/designsystem/DesignSystemRepositoriesTable";
 import { DesignSystemVersionList } from "@/components/projects/designsystem/DesignSystemVersionList";
+import { FigCraftFileCard } from "@/components/board/FigCraftFileCard";
 import { DesignSystemVersionPanel } from "@/components/projects/designsystem/DesignSystemVersionPanel";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -51,7 +52,7 @@ export function ProjectDesignSystemTab({ projectId }: ProjectDesignSystemTabProp
   if (!view) {
     return (
       <Card className="p-0">
-        <EmptyState icon={AlertTriangle} variant="critical" title={t("designSystem.loadFailed")} description={error ?? undefined} />
+        <EmptyState mascot="oops" icon={AlertTriangle} variant="critical" title={t("designSystem.loadFailed")} description={error ?? undefined} />
       </Card>
     );
   }
@@ -83,6 +84,8 @@ export function ProjectDesignSystemTab({ projectId }: ProjectDesignSystemTabProp
         onSelect={(v) => setSelectedId(v.id)}
         repositoryNames={repositoryNames}
       />
+
+      <FigCraftFileCard scope="project" id={projectId} />
 
       {shown && (
         <DesignSystemVersionPanel

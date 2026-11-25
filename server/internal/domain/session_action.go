@@ -24,6 +24,7 @@ const (
 	ActionEntityCriterion  SessionActionEntity = "acceptance_criterion"
 	ActionEntityProject    SessionActionEntity = "initiative_project"
 	ActionEntityRepository SessionActionEntity = "repository"
+	ActionEntityRelease    SessionActionEntity = "release"
 )
 
 const (
@@ -35,6 +36,7 @@ const (
 	ActionVerbAttached  = "attached"
 	ActionVerbLinked    = "linked"
 	ActionVerbDeleted   = "deleted"
+	ActionVerbProposed  = "proposed"
 )
 
 // SessionAction is one board-affecting thing an agent did inside a chat
@@ -81,6 +83,7 @@ var boardActionTools = map[string]BoardActionSpec{
 	"delete_board_task":       {Verb: ActionVerbDeleted, Entity: ActionEntityBoardTask},
 	"claim_board_task":        {Verb: ActionVerbClaimed, Entity: ActionEntityBoardTask},
 	"add_task_comment":        {Verb: ActionVerbCommented, Entity: ActionEntityComment},
+	"notify_task_agent":       {Verb: ActionVerbCommented, Entity: ActionEntityComment},
 	"add_task_document":       {Verb: ActionVerbAttached, Entity: ActionEntityDocument},
 	"update_task_document":    {Verb: ActionVerbUpdated, Entity: ActionEntityDocument},
 	"set_criterion_completed": {Verb: ActionVerbUpdated, Entity: ActionEntityCriterion},
@@ -88,6 +91,8 @@ var boardActionTools = map[string]BoardActionSpec{
 	"create_project":          {Verb: ActionVerbCreated, Entity: ActionEntityProject},
 	"update_project":          {Verb: ActionVerbUpdated, Entity: ActionEntityProject},
 	"set_repository_projects": {Verb: ActionVerbLinked, Entity: ActionEntityRepository},
+	// The card is where the person approves: the proposal ships nothing.
+	ProposeCutToolName: {Verb: ActionVerbProposed, Entity: ActionEntityRelease},
 }
 
 // ClassifyBoardAction reports whether a tool call is worth remembering.

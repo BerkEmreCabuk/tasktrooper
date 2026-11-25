@@ -15,6 +15,7 @@ export const frame = {
         label: "给 {name} 发消息",
         placeholder: "向 PM 提问…",
         shortcut: "{mod}K",
+        voice: "与 {name} 语音对话",
         failed: "无法开始对话",
       },
       feedback: {
@@ -44,6 +45,12 @@ export const frame = {
         markAllRead: "全部标为已读",
         unreadBadge: "{count} 条未读",
         unreadBadgeOverflow: "9+",
+        items: {
+          review: "{task} 正在等待你的审阅",
+          uat: "{task} 正在等待你的用户验收测试（UAT）",
+          decision: "{task} 正在等待你的决定",
+          question: "一个智能体就 {task} 有一个问题",
+        },
       },
       toolchain: {
         title: "电脑配置",
@@ -97,7 +104,7 @@ export const frame = {
       home: "主页",
       team: "团队",
       newAgent: "新建智能体",
-      unreadAgent: "新消息",
+      unreadAgentCount: "{count} 条未读消息",
       management: "管理",
       teamMemory: "团队记忆",
       settings: "设置",

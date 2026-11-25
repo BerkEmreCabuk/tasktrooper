@@ -42,7 +42,7 @@ func TestStartStopsAStaleNextDevServerHoldingTheCheckout(t *testing.T) {
 	repositoryID := uuid.New()
 	_, err = svc.Start(context.Background(), repositoryID, taskID, "sleep 30")
 	require.NoError(t, err)
-	t.Cleanup(func() { svc.Stop(repositoryID) })
+	t.Cleanup(func() { svc.Stop(repositoryID, taskID) })
 
 	select {
 	case <-exited:
@@ -69,7 +69,7 @@ func TestStartLeavesALockWhosePidIsNotNextAlone(t *testing.T) {
 	repositoryID := uuid.New()
 	_, err = svc.Start(context.Background(), repositoryID, taskID, "sleep 30")
 	require.NoError(t, err)
-	t.Cleanup(func() { svc.Stop(repositoryID) })
+	t.Cleanup(func() { svc.Stop(repositoryID, taskID) })
 
 	assert.NoError(t, syscall.Kill(other.Process.Pid, 0), "a reused pid that is not a Next server must not be touched")
 }
@@ -86,23 +86,27 @@ func TestNewServiceReapsAPreviousProcessesOrphan(t *testing.T) {
 	}
 
 	first := NewService(deps())
-	repositoryID := uuid.New()
-	_, err := first.Start(context.Background(), repositoryID, uuid.New(), "sleep 30")
+	repositoryID, taskID := uuid.New(), uuid.New()
+	_, err := first.Start(context.Background(), repositoryID, taskID, "sleep 30")
 	require.NoError(t, err)
 
 	first.mu.Lock()
-	pid := first.active[repositoryID].cmd.Process.Pid
+	pid := first.active[taskID].cmd.Process.Pid
 	first.mu.Unlock()
 	require.NoError(t, syscall.Kill(pid, 0), "the preview's process must actually be running before this test means anything")
 	persisted := loadState(workspaceRoot)
 	require.Len(t, persisted, 1)
 	assert.Equal(t, "sleep 30", persisted[0].Command, "the next boot needs the command to recognise the pid by")
+	assert.Equal(t, taskID, persisted[0].TaskID)
 
 	NewService(deps())
 
 	require.Eventually(t, func() bool {
 		return syscall.Kill(pid, 0) != nil
 	}, 2*time.Second, 20*time.Millisecond, "the orphaned process from the old Service must be reaped by the new one")
+	// The old Service still records its process's exit in workspaceRoot;
+	// let it finish before the temp dir is removed.
+	first.Close()
 }
 
 func TestNewServiceLeavesAPersistedPidItCannotVouchFor(t *testing.T) {

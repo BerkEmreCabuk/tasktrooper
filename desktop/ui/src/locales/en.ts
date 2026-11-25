@@ -18,11 +18,21 @@ import { operations } from "@/locales/en/operations";
 import { projectAdmin } from "@/locales/en/projectAdmin";
 import { projectModel } from "@/locales/en/projectModel";
 import { projectsHub } from "@/locales/en/projectsHub";
+import { readiness } from "@/locales/en/readiness";
 import { release } from "@/locales/en/release";
 import { repositoryPage } from "@/locales/en/repositoryPage";
 import { settingsPages } from "@/locales/en/settingsPages";
+import { audienceHub } from "@/locales/en/audienceHub";
+import { audienceReportKinds } from "@/locales/en/audienceReportKinds";
+import { audienceStudy } from "@/locales/en/audienceStudy";
+import { telemetryHub } from "@/locales/en/telemetryHub";
+import { telemetryViews } from "@/locales/en/telemetryViews";
 import { setup } from "@/locales/en/setup";
+import { remoteAccess } from "@/locales/en/remoteAccess";
+import { runTrace } from "@/locales/en/runTrace";
+import { runUndo } from "@/locales/en/runUndo";
 import { toolchain } from "@/locales/en/toolchain";
+import { whatsNew } from "@/locales/en/whatsNew";
 
 export const en = {
   common: {
@@ -71,6 +81,10 @@ export const en = {
       app: {
         title: "Desktop app",
         description: "Updates and privacy for TaskTrooper on this computer.",
+      },
+      voice: {
+        title: "Voice",
+        description: "Talking to agents out loud on this computer.",
       },
       desktopOnly: "Updates, desktop notifications and anonymous usage statistics are set in the TaskTrooper desktop app.",
     },
@@ -189,6 +203,22 @@ export const en = {
       bannerTitle: "Using TaskTrooper without your account for now",
       bannerBody: "You are still signed in to {origin}. Tasks assigned to you there wait until you go back.",
     },
+    voice: {
+      title: "Talking to agents",
+      help: "Press the microphone in a chat and talk; the agent answers out loud, writes what it says, and draws on the screen when that helps. Voice works when the app language is Türkçe or English. Speech is recognized on this Mac and the voice that answers, Turkish or English, is made on it too, so neither leaves this computer.",
+      unavailable: "Voice needs macOS, and the app language set to Türkçe or English.",
+      speed: "Reading speed",
+      bargeIn: "Interrupt by talking",
+      bargeInHelp: "Talking while the agent speaks stops it and it listens to you.",
+      language: "Language",
+      languageTr: "Turkish",
+      languageEn: "English",
+      style: "Voice",
+      preview: "Listen",
+      previewStop: "Stop",
+      female: "Female",
+      male: "Male",
+    },
     analytics: {
       label: "Usage statistics",
       help: "Sends which screens you open and which features you use, with the app version and system — never your tasks, chats, code, paths or email. Signed in to an account, a one-way hash of your account ID goes with it, so you count as one person across the desktop, web and mobile apps. Turning it off stops sending at once and deletes this install's random ID.",
@@ -245,11 +275,21 @@ export const en = {
   projectAdmin,
   projectModel,
   projectsHub,
+  readiness,
   release,
   repositoryPage,
   settingsPages,
+  audienceHub,
+  audienceReportKinds,
+  audienceStudy,
+  telemetryHub,
+  telemetryViews,
   setup,
+  remoteAccess,
+  runTrace,
+  runUndo,
   toolchain,
+  whatsNew,
 };
 
 // No `as const`: property strings widen to `string`, so tr.ts (typed `Dict`)

@@ -28,6 +28,7 @@ export const chatArea = {
       textRequired: "请输入你的回答",
       selectOne: "选择一个选项",
       selectMany: "选择所有适用项",
+      selectUpTo: "最多选择 {max} 项",
       other: "其他",
       skip: "跳过",
       answered: "已回答",
@@ -47,6 +48,7 @@ export const chatArea = {
         attached: "附加到",
         linked: "关联了",
         deleted: "删除了",
+        proposed: "已提议",
       },
       entity: {
         board_task: "任务",
@@ -55,6 +57,7 @@ export const chatArea = {
         acceptance_criterion: "验收标准",
         initiative_project: "项目",
         repository: "仓库",
+        release: "发布",
       },
     },
     plan: {
@@ -103,6 +106,12 @@ export const chatArea = {
       queuedRemove: "移出队列",
       queuedHint: "将在智能体完成当前工作后发送。",
       queuedReturned: "已排队的消息已退回到输入框。",
+    },
+    wakes: {
+      waiting: "正在等待后台任务，结束后会再次回复",
+      stop: "停止等待",
+      stopFailed: "无法停止等待",
+      updateTitle: "后台任务已完成",
     },
     reasoning: {
       title: "推理步骤（{count}）",
@@ -193,8 +202,28 @@ export const chatArea = {
       resultsCount: "{count} 个结果",
     },
   },
+  voice: {
+    start: "与智能体对话",
+    end: "结束",
+    hint: "正在聆听——准备好就说吧",
+    state: {
+      starting: "正在打开麦克风…",
+      listening: "正在聆听",
+      thinking: "思考中…",
+      speaking: "正在说话——开口即可打断",
+      off: "语音已关闭",
+    },
+    error: {
+      micDenied: "TaskTrooper 无法使用麦克风。请在 系统设置 → 隐私与安全性 → 麦克风 中允许。",
+      micMissing: "未找到麦克风。",
+      generic: "语音已停止：{message}",
+    },
+  },
   markdown: {
     empty: "空",
+    visual: {
+      title: "智能体绘制的图",
+    },
     table: {
       scrollHint: "滚动查看更多列",
     },

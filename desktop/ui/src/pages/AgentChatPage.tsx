@@ -15,6 +15,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { ChatTaskDrawer } from "@/components/chat/ChatTaskDrawer";
 import { Composer } from "@/components/chat/Composer";
+import { VoiceBar } from "@/components/chat/VoiceBar";
+import { PendingWakesBar } from "@/components/chat/PendingWakesBar";
 import type { MentionOption } from "@/components/chat/MentionMenu";
 import { MessageList } from "@/components/chat/MessageList";
 import { SessionActivityPanel } from "@/components/chat/SessionActivityPanel";
@@ -23,6 +25,7 @@ import { LeadChatHeader } from "@/components/chat/LeadChatHeader";
 import { PageHeader } from "@/components/admin/PageHeader";
 import { useWorkspaceOutlet } from "@/hooks/useWorkspaceOutlet";
 import { useI18n } from "@/hooks/useI18n";
+import { useVoiceConversation } from "@/hooks/useVoiceConversation";
 import { useMentionOptions } from "@/hooks/useMentionOptions";
 import { useAgentSessions } from "@/hooks/useAgentSessions";
 import { usePolling } from "@/hooks/usePolling";
@@ -30,6 +33,7 @@ import { isAbortError } from "@/lib/errors";
 import { loadQueue, mergeQueued, saveQueue, type QueuedMessage } from "@/lib/chatQueue";
 import {
   keepMessages,
+  LIVE_REASONING_KEY,
   mergeServerMessages,
   QUOTA_QUEUED_ERROR_TYPE,
   RATE_LIMIT_ERROR_TYPE,
@@ -66,10 +70,12 @@ interface SendOptions {
   attachments?: AttachmentMeta[];
   fileIds?: string[];
   fromQueue?: boolean;
+  /** Spoken by the person; the reply is read back to them in this language. */
+  voice?: "tr" | "en";
 }
 
 export function AgentChatPage() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const { agentId, sessionId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -78,6 +84,9 @@ export function AgentChatPage() {
   const autoSend = typeof location.state?.autoSend === "string" ? location.state.autoSend : "";
   const autoSendMentions: MessageMention[] = Array.isArray(location.state?.autoSendMentions)
     ? location.state.autoSendMentions
+    : [];
+  const autoSendAttachments: AttachmentMeta[] = Array.isArray(location.state?.autoSendAttachments)
+    ? location.state.autoSendAttachments
     : [];
   const workspace = useWorkspaceOutlet();
   const isLead = !!agentId && workspace?.leadAgent?.id === agentId;
@@ -117,6 +126,14 @@ export function AgentChatPage() {
   // answer alone, so this is the only place both halves of the turn are known.
   const [streamingReasoning, setStreamingReasoning] = useState<string[]>([]);
   const [reasoningByMessageId, setReasoningByMessageId] = useState<Record<string, string[]>>({});
+  // Lifted here, not left to each block, so the running turn's block hands its
+  // open state to the finished message's block instead of the two disagreeing
+  // the moment the turn lands.
+  const [reasoningOpen, setReasoningOpen] = useState<Record<string, boolean>>({});
+  const toggleReasoning = useCallback(
+    (key: string, open: boolean) => setReasoningOpen((prev) => ({ ...prev, [key]: open })),
+    [],
+  );
   // Cancels the SSE request of the send that is currently in flight.
   const streamAbortRef = useRef<AbortController | null>(null);
   // Set while a user-requested stop is unwinding, so the send's own cleanup
@@ -161,6 +178,7 @@ export function AgentChatPage() {
     setStreamingContent(null);
     setStreamingReasoning([]);
     setReasoningByMessageId({});
+    setReasoningOpen({});
     setInput("");
     setPendingAttachments([]);
     selectedMentionsRef.current = [];
@@ -371,11 +389,16 @@ export function AgentChatPage() {
       selectedMentionsRef.current = [];
       return;
     }
-    if (sending) return;
+    if (sending) {
+      // A spoken turn has nobody looking at the composer to retry it.
+      if (options.voice) voiceRef.current.replyDone(null);
+      return;
+    }
     if (ownsComposer) setInput("");
     setSending(true);
     setStreamingContent(null);
     setStreamingReasoning([]);
+    setReasoningOpen(({ [LIVE_REASONING_KEY]: _, ...rest }) => rest);
     const baselineAssistantCount = countAssistantMessages(messages);
     const optimistic: SessionMessage = {
       id: `temp-${Date.now()}`,
@@ -389,8 +412,12 @@ export function AgentChatPage() {
     // A's reply into session B.
     const stillHere = () => activeSessionIdRef.current === sessionAtSend;
     // Snapshot + clear like the input text: a failed send restores them below
-    // so nothing has to be re-attached from scratch.
-    const attachmentsAtSend = fromQueue ? (options.attachments ?? []) : pendingAttachments;
+    // so nothing has to be re-attached from scratch. An explicit
+    // `options.attachments` (fromQueue, or an override like autoSend) always
+    // wins over the composer's own state — reading `pendingAttachments` here
+    // for those calls would be the state as of this render, not the value a
+    // caller just asked to be set two lines ago in the same synchronous pass.
+    const attachmentsAtSend = options.attachments ?? (ownsComposer ? pendingAttachments : []);
     const attachmentIds = attachmentsAtSend.map((a) => a.id);
     if (ownsComposer) setPendingAttachments([]);
     const abort = new AbortController();
@@ -400,14 +427,14 @@ export function AgentChatPage() {
     const applyProgress = () => {
       progressFrameRef.current = null;
       if (!latestProgress || !stillHere()) return;
-      setStreamingContent(latestProgress.answer);
+      setStreamingContent(latestProgress.pending);
       setStreamingReasoning(latestProgress.reasoning);
       latestProgress = null;
     };
     try {
       const result = await sendSessionMessageWithRecovery(sessionAtSend, content, {
         fileIds: fromQueue ? (options.fileIds ?? []) : selectedFileIds,
-        attachmentIds: isOverride && !fromQueue ? undefined : attachmentIds,
+        attachmentIds,
         // Off by default, which is what makes the reply stream: the backend
         // refuses to stream an orchestrated turn, so forcing this on meant the
         // web client always waited for one whole answer. iOS has always sent
@@ -417,9 +444,14 @@ export function AgentChatPage() {
         orchestrate: getStoredOrchestrate(),
         baselineAssistantCount,
         mentions,
+        voice: options.voice,
         signal: abort.signal,
         onProgress: (progress) => {
           if (!stillHere()) return;
+          if (options.voice) {
+            if (progress.reasoning.length > reasoningSoFar.length) voiceRef.current.replyStretchClosed();
+            voiceRef.current.replyProgress(progress.pending);
+          }
           // Mirrored into a plain local as well: the commit below runs in this
           // same closure and needs the final list, which the state variable
           // captured at render time cannot give it.
@@ -437,16 +469,21 @@ export function AgentChatPage() {
       // The last assistant row is that message: the transcript was just reloaded
       // and this reply is what was appended to it.
       const answered = [...result.messages].reverse().find((m) => m.role === "assistant");
+      if (options.voice) voiceRef.current.replyDone(answered?.content ?? null);
       if (answered && reasoningSoFar.length > 0) {
         const segments = reasoningSoFar;
         setReasoningByMessageId((prev) => ({ ...prev, [answered.id]: segments }));
       }
+      setReasoningOpen(({ [LIVE_REASONING_KEY]: live, ...rest }) =>
+        answered && live ? { ...rest, [answered.id]: true } : rest,
+      );
       // Cleared in the same batch that commits the reply: leaving it for the
       // finally below would show the streaming bubble and the finished message
       // side by side across the await that follows. A frame still pending
       // would paint the partial answer back over it.
       cancelFrame(progressFrameRef);
       setStreamingContent(null);
+      setStreamingReasoning([]);
       logEvent("chat_message_send", { agent_role: agentRole(agent), outcome: "ok" });
       if (result.status === "recovered") {
         toast.info(t("agentArea.chat.toast.recovered"));
@@ -455,6 +492,7 @@ export function AgentChatPage() {
       void refreshSessions();
       await loadSessionActivity();
     } catch (e) {
+      if (options.voice) voiceRef.current.replyDone(null);
       // We cancelled this ourselves (session switch, or the user left the
       // chat); there is nothing to report and nothing left to render into.
       if (isAbortError(e)) return;
@@ -512,7 +550,10 @@ export function AgentChatPage() {
         // answer visible until the reload has the server's persisted copy of it,
         // so the text does not blink out and back in.
         if (stopRequestedRef.current) applyProgress();
-        else setStreamingContent(null);
+        else {
+          setStreamingContent(null);
+          setStreamingReasoning([]);
+        }
         setSending(false);
       }
     }
@@ -562,6 +603,7 @@ export function AgentChatPage() {
         await loadMessages(sessionAtStop);
         await loadSessionActivity();
         setStreamingContent(null);
+        setStreamingReasoning([]);
       }
       stopRequestedRef.current = false;
       setStopping(false);
@@ -584,7 +626,13 @@ export function AgentChatPage() {
     // handleSend reads the picked entities from this ref and keeps those whose
     // @Name is still in the text, exactly as for a message typed here.
     selectedMentionsRef.current = autoSendMentions;
-    void handleSend({ content: autoSend });
+    // Also shown as a pending chip for the same reason mentions go through a
+    // ref: handleSend is a plain function re-created every render, so the
+    // `setPendingAttachments` below would still be the pre-update value by
+    // the time the call right after it reads `pendingAttachments` — the
+    // attachments have to ride the call's own options instead.
+    if (autoSendAttachments.length > 0) setPendingAttachments(autoSendAttachments);
+    void handleSend({ content: autoSend, attachments: autoSendAttachments });
     window.history.replaceState({ ...(window.history.state ?? {}), usr: null }, "");
     // eslint-disable-next-line react-hooks/exhaustive-deps -- handleSend is recreated every render; the key ref guards re-sends
   }, [autoSend, activeSessionId, loadedSessionId, sending, stopping]);
@@ -615,6 +663,36 @@ export function AgentChatPage() {
   handleSendRef.current = handleSend;
   const handleStopRef = useRef(handleStop);
   handleStopRef.current = handleStop;
+  const voice = useVoiceConversation(lang, {
+    onUtterance: (text, voiceLang) => void handleSendRef.current({ content: text, voice: voiceLang }),
+    onInterrupt: () => {
+      if (streamAbortRef.current) void handleStopRef.current();
+    },
+  });
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+  useEffect(() => {
+    const error = voice.snapshot.error;
+    if (!error) return;
+    toast.error(
+      error === "microphone-denied"
+        ? t("chatArea.voice.error.micDenied")
+        : error === "microphone-missing"
+          ? t("chatArea.voice.error.micMissing")
+          : t("chatArea.voice.error.generic", { message: error }),
+    );
+  }, [voice.snapshot.error, t]);
+  // Leaving the chat ends the conversation; the hook stops it on unmount.
+  useEffect(() => voice.stop, [activeSessionId, voice.stop]);
+  // Entered from a "talk" button: the conversation starts once, when the session is loaded.
+  const autoVoice = location.state?.autoVoice === true;
+  const autoVoiceRef = useRef("");
+  useEffect(() => {
+    if (!autoVoice || !activeSessionId || loadedSessionId !== activeSessionId || !voice.available) return;
+    if (autoVoiceRef.current === activeSessionId) return;
+    autoVoiceRef.current = activeSessionId;
+    voice.start();
+  }, [autoVoice, activeSessionId, loadedSessionId, voice.available, voice.start]);
   const submitClarification = useCallback((answer: string) => void handleSendRef.current({ content: answer }), []);
   const stopTurn = useCallback(() => void handleStopRef.current(), []);
   const openActionTask = useCallback((action: SessionAction) => setOpenTaskId(action.entity_id ?? null), []);
@@ -685,6 +763,8 @@ export function AgentChatPage() {
                 streamingContent={streamingContent}
                 streamingReasoning={streamingReasoning}
                 reasoningByMessageId={reasoningByMessageId}
+                reasoningOpen={reasoningOpen}
+                onReasoningOpenChange={toggleReasoning}
                 actions={actions}
                 onOpenTask={openActionTask}
                 onSubmitClarification={submitClarification}
@@ -692,6 +772,8 @@ export function AgentChatPage() {
                 queued={queue}
                 onRemoveQueued={removeQueued}
               />
+              <PendingWakesBar sessionId={activeSessionId} />
+              {voice.active && <VoiceBar snapshot={voice.snapshot} onEnd={voice.stop} />}
               <Composer
                 value={input}
                 onChange={setInput}
@@ -700,6 +782,7 @@ export function AgentChatPage() {
                 queueing
                 onStop={stopTurn}
                 stopping={stopping}
+                onStartVoice={voice.available && !voice.active ? voice.start : undefined}
                 files={files}
                 selectedFileIds={selectedFileIds}
                 onToggleFile={(id, checked) =>

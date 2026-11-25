@@ -530,6 +530,9 @@ export const DESKTOP_TOOLCHAIN_IDS = [
   "duckdb",
   "godot",
   "unity-hub",
+  "figcraft",
+  "vectorcraft",
+  "photocraft",
 ] as const;
 export type ToolchainId = (typeof DESKTOP_TOOLCHAIN_IDS)[number];
 
@@ -607,6 +610,109 @@ export interface ToolchainJobState {
   restartRecommended?: boolean;
 }
 
+export type DesktopRemoteProvider = "cloudflare" | "ngrok";
+export type DesktopRemoteMode = "quick" | "named";
+export type DesktopRemoteTunnelState = "stopped" | "starting" | "connected" | "reconnecting" | "error" | "binary_missing";
+export type DesktopRemoteProblem =
+  | "needs_login"
+  | "needs_token"
+  | "needs_hostname"
+  | "tunnel_setup_failed"
+  | "auth_failed"
+  | "server_unavailable"
+  | "enable_failed"
+  | "exited";
+
+export interface DesktopRemoteAccessConfig {
+  provider: DesktopRemoteProvider;
+  mode: DesktopRemoteMode;
+  hostname: string;
+  autoStart: boolean;
+  serverName: string;
+}
+
+export interface DesktopRemoteBinaryDetection {
+  provider: DesktopRemoteProvider;
+  installed: boolean;
+  path?: string;
+  version?: string;
+  installCommand?: string;
+  detail?: string;
+}
+
+/** The Cloudflare login on this computer (the certificate `cloudflared tunnel login` keeps). */
+export interface DesktopRemoteCloudflareAccount {
+  loggedIn: boolean;
+  /** The domain of the login; absent when Cloudflare would not say (see `domainError`). */
+  domain?: string;
+  domainError?: string;
+  phase: "idle" | "waiting" | "failed";
+  loginUrl?: string;
+  error?: string;
+  suggestedSubdomain: string;
+}
+
+export interface DesktopRemoteNgrokAccount {
+  verified: boolean;
+  phase: "idle" | "checking";
+  domains: string[];
+  error?: string;
+  apiKeyError?: string;
+}
+
+export interface DesktopRemoteAccessState {
+  tunnel: DesktopRemoteTunnelState;
+  wanted: boolean;
+  config: DesktopRemoteAccessConfig;
+  /** Which secrets are stored; the values never cross the bridge. */
+  secrets: { ngrokAuthtoken: boolean; ngrokApiKey: boolean };
+  cloudflare: DesktopRemoteCloudflareAccount;
+  ngrok: DesktopRemoteNgrokAccount;
+  url?: string;
+  remotePort?: number;
+  problem?: DesktopRemoteProblem;
+  error?: string;
+  since: number;
+  restarts: number;
+  detection?: DesktopRemoteBinaryDetection;
+  logTail: string[];
+  suggestedPort: number;
+}
+
+export type DesktopRemoteAccessConfigureRequest = Partial<DesktopRemoteAccessConfig>;
+
+/** Neither field: list the account's domains again with the stored API key. */
+export interface DesktopRemoteNgrokConnectRequest {
+  authtoken?: string;
+  apiKey?: string;
+}
+
+/**
+ * The tunnel that lets the phone app reach this computer (bridge 8, local mode
+ * only). The ngrok credentials go in through `ngrokConnect` and are never
+ * answered back; Cloudflare is a browser login (`cloudflareLogin`).
+ */
+export interface DesktopRemoteAccessHost {
+  state(): Promise<DesktopRemoteAccessState>;
+  subscribe(cb: (state: DesktopRemoteAccessState) => void): () => void;
+  configure(request: DesktopRemoteAccessConfigureRequest): Promise<DesktopRemoteAccessState>;
+  start(): Promise<DesktopRemoteAccessState>;
+  stop(): Promise<DesktopRemoteAccessState>;
+  detect(provider: DesktopRemoteProvider): Promise<DesktopRemoteBinaryDetection>;
+  openInstallPage(provider: DesktopRemoteProvider): Promise<void>;
+  logs(): Promise<string[]>;
+  /** Re-reads the Cloudflare login from disk and looks up its domain. */
+  refreshAccount(): Promise<DesktopRemoteAccessState>;
+  /** Opens the browser for `cloudflared tunnel login`; the end arrives as a state push. */
+  cloudflareLogin(): Promise<DesktopRemoteAccessState>;
+  cloudflareLoginCancel(): Promise<DesktopRemoteAccessState>;
+  /** Deletes the login. Rejects while the tunnel runs on it. */
+  cloudflareLogout(): Promise<DesktopRemoteAccessState>;
+  /** Proves the authtoken with a test tunnel before storing it; an API key lists the account's domains. */
+  ngrokConnect(request: DesktopRemoteNgrokConnectRequest): Promise<DesktopRemoteAccessState>;
+  ngrokDisconnect(): Promise<DesktopRemoteAccessState>;
+}
+
 /**
  * Installs the developer tools the team's agents use (bridge 5). One job at a
  * time, run by the shell's main process, so it outlives this page.
@@ -630,6 +736,63 @@ export interface DesktopToolchainHost {
   dismiss(): Promise<ToolchainJobState>;
   /** Opens the item's own `url` (from the shell's table, never from the page) in the real browser. */
   openPage(id: ToolchainId): Promise<void>;
+}
+
+export type DesktopVoiceLanguage = "tr" | "en";
+
+/** EMA Lightning reads Turkish, tiny-voca English. */
+export type DesktopVoiceEngine = "ema" | "tinyvoca";
+
+export interface DesktopVoiceEngineOption {
+  engine: DesktopVoiceEngine;
+  /** Its styles, its default first; empty for EMA. */
+  styles: string[];
+}
+
+/** Which bundled engine and style read a text; either left out is the default. */
+export interface DesktopVoiceChoice {
+  engine?: DesktopVoiceEngine;
+  style?: string;
+}
+
+export interface DesktopVoiceCapabilities {
+  listen: Record<DesktopVoiceLanguage, boolean>;
+  speak: Record<DesktopVoiceLanguage, boolean>;
+  /** The bundled engines per language, the one used when none is named first; empty where there is none. */
+  speakEngines: Record<DesktopVoiceLanguage, DesktopVoiceEngineOption[]>;
+}
+
+export type DesktopVoiceTranscriptEvent =
+  | { id: string; type: "ready" }
+  | { id: string; type: "partial" | "final"; text: string }
+  | { id: string; type: "error"; code: string; message: string };
+
+export interface DesktopVoiceAudioEvent {
+  id: string;
+  sampleRate: number;
+  /** Little-endian float32 mono PCM. */
+  pcm?: ArrayBuffer;
+  done?: boolean;
+  error?: string;
+}
+
+/** Bridge 9: talking to an agent — this computer's speech recognizer and voice. */
+export interface DesktopVoiceHost {
+  capabilities(): Promise<DesktopVoiceCapabilities>;
+  listenStart(lang: DesktopVoiceLanguage): Promise<{ id: string }>;
+  /** 16 kHz mono s16le PCM, at most 64 KB per call. */
+  listenAudio(id: string, pcm: ArrayBuffer): Promise<void>;
+  listenStop(id: string): Promise<void>;
+  listenCancel(id: string): Promise<void>;
+  onTranscript(cb: (event: DesktopVoiceTranscriptEvent) => void): () => void;
+  /**
+   * `voice.engine` is one of `capabilities().speakEngines[lang]`, left out the
+   * first of them; `voice.style` one of that engine's styles, left out its
+   * default. A style for EMA is refused.
+   */
+  speak(lang: DesktopVoiceLanguage, text: string, speed?: number, voice?: DesktopVoiceChoice): Promise<{ id: string }>;
+  speakCancel(id: string): Promise<void>;
+  onAudio(cb: (event: DesktopVoiceAudioEvent) => void): () => void;
 }
 
 /** The hook the desktop preload installs on `window`. Absent in a browser. */
@@ -665,6 +828,10 @@ export interface TaskTrooperDesktopHost {
   analytics?: DesktopAnalyticsHost;
   /** Bridge 5. Absent in a browser and in older shells. */
   toolchain?: DesktopToolchainHost;
+  /** Bridge 8. Absent in a browser, in older shells and in account mode. */
+  remoteAccess?: DesktopRemoteAccessHost;
+  /** Bridge 9. Absent in a browser and in older shells. */
+  voice?: DesktopVoiceHost;
   /**
    * Where this app's API calls go: "http://127.0.0.1:<port>", no path suffix.
    *
@@ -684,6 +851,8 @@ export interface TaskTrooperDesktopHost {
    * 5: `toolchain` — detect and install the developer tools the agents use.
    * 6: `account.mcp` and `account.openKeys({mcp})` — this computer's own MCP servers.
    * 7: `analytics.track(event)` / `analytics.identify(userId)`.
+   * 8: `remoteAccess` — the tunnel for the phone app (local mode only).
+   * 9: `voice` — talking to an agent: speech to text and text to speech.
    */
   bridgeVersion?: number;
   /**
@@ -725,6 +894,34 @@ export function desktopAccount(): NonNullable<TaskTrooperDesktopHost["account"]>
   return window.__tasktrooperDesktop?.account ?? null;
 }
 
+const accountChangeListeners = new Set<() => void>();
+
+/**
+ * Says every mounted reader of `account.state()` that it changed. The bridge
+ * has no push for it, so whoever just changed the account (the Settings card's
+ * sign-out, the banner's) tells the others here; a banner that read the state
+ * once at mount would otherwise stay up after the sign-out that ended it.
+ */
+export function announceAccountChange(): void {
+  for (const listener of [...accountChangeListeners]) listener();
+}
+
+/** Subscribes to `announceAccountChange`; returns the unsubscribe. */
+export function onAccountChange(listener: () => void): () => void {
+  accountChangeListeners.add(listener);
+  return () => {
+    accountChangeListeners.delete(listener);
+  };
+}
+
 export function desktopToolchain(): DesktopToolchainHost | null {
   return window.__tasktrooperDesktop?.toolchain ?? null;
+}
+
+export function desktopRemoteAccess(): DesktopRemoteAccessHost | null {
+  return window.__tasktrooperDesktop?.remoteAccess ?? null;
+}
+
+export function desktopVoice(): DesktopVoiceHost | null {
+  return window.__tasktrooperDesktop?.voice ?? null;
 }

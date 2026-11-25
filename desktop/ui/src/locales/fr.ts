@@ -16,11 +16,21 @@ import { operations } from "@/locales/fr/operations";
 import { projectAdmin } from "@/locales/fr/projectAdmin";
 import { projectModel } from "@/locales/fr/projectModel";
 import { projectsHub } from "@/locales/fr/projectsHub";
+import { readiness } from "@/locales/fr/readiness";
 import { release } from "@/locales/fr/release";
 import { repositoryPage } from "@/locales/fr/repositoryPage";
 import { settingsPages } from "@/locales/fr/settingsPages";
+import { audienceHub } from "@/locales/fr/audienceHub";
+import { audienceReportKinds } from "@/locales/fr/audienceReportKinds";
+import { audienceStudy } from "@/locales/fr/audienceStudy";
+import { telemetryHub } from "@/locales/fr/telemetryHub";
+import { telemetryViews } from "@/locales/fr/telemetryViews";
 import { setup } from "@/locales/fr/setup";
+import { remoteAccess } from "@/locales/fr/remoteAccess";
+import { runTrace } from "@/locales/fr/runTrace";
+import { runUndo } from "@/locales/fr/runUndo";
 import { toolchain } from "@/locales/fr/toolchain";
+import { whatsNew } from "@/locales/fr/whatsNew";
 
 // French dictionary. Typed as Dict — must mirror en.ts keys exactly.
 export const fr: Dict = {
@@ -70,6 +80,10 @@ export const fr: Dict = {
       app: {
         title: "Application de bureau",
         description: "Mises à jour et confidentialité de TaskTrooper sur cet ordinateur.",
+      },
+      voice: {
+        title: "Voix",
+        description: "Parler aux agents à voix haute sur cet ordinateur.",
       },
       desktopOnly: "Les mises à jour, les notifications de bureau et les statistiques d'utilisation anonymes se règlent dans l'application de bureau TaskTrooper.",
     },
@@ -187,6 +201,22 @@ export const fr: Dict = {
       bannerTitle: "TaskTrooper fonctionne sans votre compte pour l'instant",
       bannerBody: "Vous êtes toujours connecté à {origin}. Les tâches qui vous y sont assignées attendent votre retour.",
     },
+    voice: {
+      title: "Parler aux agents",
+      help: "Appuyez sur le micro dans une discussion et parlez ; l'agent répond à voix haute, écrit ce qu'il dit et dessine à l'écran quand c'est utile. La voix fonctionne avec l'app en Türkçe ou English. La parole est reconnue sur ce Mac et la voix qui répond, en turc ou en anglais, y est aussi produite ; rien n'en sort.",
+      unavailable: "La voix nécessite macOS et la langue de l'app en Türkçe ou English.",
+      speed: "Vitesse de lecture",
+      bargeIn: "Interrompre en parlant",
+      bargeInHelp: "Si vous parlez pendant que l'agent parle, il s'arrête et vous écoute.",
+      language: "Langue",
+      languageTr: "Turc",
+      languageEn: "Anglais",
+      style: "Voix",
+      preview: "Écouter",
+      previewStop: "Arrêter",
+      female: "Femme",
+      male: "Homme",
+    },
     analytics: {
       label: "Statistiques d'utilisation",
       help: "Envoie les écrans que vous ouvrez et les fonctions que vous utilisez, avec la version de l'application et le système — jamais vos tâches, conversations, code, chemins ni votre e-mail. Connecté à un compte, un hachage à sens unique de votre identifiant de compte est ajouté, pour vous compter comme une seule personne sur les applications de bureau, web et mobile. La désactivation arrête l'envoi immédiatement et supprime l'identifiant aléatoire de cette installation.",
@@ -243,9 +273,19 @@ export const fr: Dict = {
   projectAdmin,
   projectModel,
   projectsHub,
+  readiness,
   release,
   repositoryPage,
   settingsPages,
+  audienceHub,
+  audienceReportKinds,
+  audienceStudy,
+  telemetryHub,
+  telemetryViews,
   setup,
+  remoteAccess,
+  runTrace,
+  runUndo,
   toolchain,
+  whatsNew,
 };

@@ -48,10 +48,15 @@ type ComponentPatch struct {
 	Commands map[CommandPurpose]Patch[string] `json:"commands,omitempty"`
 	Gates    *ComponentGates                  `json:"gates,omitempty"`
 	Docs     *RepositoryDocs                  `json:"docs,omitempty"`
-	Status   *ComponentStatus                 `json:"status,omitempty"`
+	// Container replaces the component's container settings wholesale.
+	Container *ContainerSettings `json:"container,omitempty"`
+	Status    *ComponentStatus   `json:"status,omitempty"`
 	// Delivery sets the delivery profile's override (validated), or clears it
 	// with null so the detected profile applies again.
 	Delivery Patch[ComponentDelivery] `json:"delivery"`
+	// Stack sets the stack's override (languages and frameworks the agent
+	// should treat the component as using), or clears it with null.
+	Stack Patch[ComponentStack] `json:"stack"`
 	// Reviewed true acknowledges a component a later scan added.
 	Reviewed *bool `json:"reviewed,omitempty"`
 }

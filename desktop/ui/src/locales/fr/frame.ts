@@ -15,6 +15,7 @@ export const frame = {
         label: "Écrire à {name}",
         placeholder: "Demander au PM…",
         shortcut: "{mod}K",
+        voice: "Parler à {name}",
         failed: "Impossible de démarrer une conversation",
       },
       feedback: {
@@ -44,6 +45,12 @@ export const frame = {
         markAllRead: "Tout marquer comme lu",
         unreadBadge: "{count} non lues",
         unreadBadgeOverflow: "9+",
+        items: {
+          review: "{task} attend votre relecture",
+          uat: "{task} attend votre recette (UAT)",
+          decision: "{task} attend votre décision",
+          question: "Un agent a une question sur {task}",
+        },
       },
       toolchain: {
         title: "Configuration de l'ordinateur",
@@ -97,7 +104,7 @@ export const frame = {
       home: "Accueil",
       team: "Équipe",
       newAgent: "Nouvel agent",
-      unreadAgent: "Nouveau message",
+      unreadAgentCount: "{count} messages non lus",
       management: "Gestion",
       teamMemory: "Mémoire de l'équipe",
       settings: "Paramètres",

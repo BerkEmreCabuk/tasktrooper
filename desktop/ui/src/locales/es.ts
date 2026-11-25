@@ -16,11 +16,21 @@ import { operations } from "@/locales/es/operations";
 import { projectAdmin } from "@/locales/es/projectAdmin";
 import { projectModel } from "@/locales/es/projectModel";
 import { projectsHub } from "@/locales/es/projectsHub";
+import { readiness } from "@/locales/es/readiness";
 import { release } from "@/locales/es/release";
 import { repositoryPage } from "@/locales/es/repositoryPage";
 import { settingsPages } from "@/locales/es/settingsPages";
+import { audienceHub } from "@/locales/es/audienceHub";
+import { audienceReportKinds } from "@/locales/es/audienceReportKinds";
+import { audienceStudy } from "@/locales/es/audienceStudy";
+import { telemetryHub } from "@/locales/es/telemetryHub";
+import { telemetryViews } from "@/locales/es/telemetryViews";
 import { setup } from "@/locales/es/setup";
+import { remoteAccess } from "@/locales/es/remoteAccess";
+import { runTrace } from "@/locales/es/runTrace";
+import { runUndo } from "@/locales/es/runUndo";
 import { toolchain } from "@/locales/es/toolchain";
+import { whatsNew } from "@/locales/es/whatsNew";
 
 // Spanish dictionary. Typed as Dict — must mirror en.ts keys exactly.
 export const es: Dict = {
@@ -70,6 +80,10 @@ export const es: Dict = {
       app: {
         title: "App de escritorio",
         description: "Actualizaciones y privacidad de TaskTrooper en este equipo.",
+      },
+      voice: {
+        title: "Voz",
+        description: "Hablar en voz alta con los agentes en este ordenador.",
       },
       desktopOnly: "Las actualizaciones, las notificaciones de escritorio y las estadísticas de uso anónimas se configuran en la app de escritorio de TaskTrooper.",
     },
@@ -187,6 +201,22 @@ export const es: Dict = {
       bannerTitle: "Usando TaskTrooper sin tu cuenta por ahora",
       bannerBody: "Sigues con la sesión iniciada en {origin}. Las tareas que te asignen allí esperan hasta que vuelvas.",
     },
+    voice: {
+      title: "Hablar con los agentes",
+      help: "Pulsa el micrófono en un chat y habla; el agente responde en voz alta, escribe lo que dice y dibuja en pantalla cuando ayuda. La voz funciona con la app en Türkçe o English. El habla se reconoce en este Mac y la voz que responde, en turco o en inglés, también se genera en él; nada sale de él.",
+      unavailable: "La voz necesita macOS y el idioma de la app en Türkçe o English.",
+      speed: "Velocidad de lectura",
+      bargeIn: "Interrumpir hablando",
+      bargeInHelp: "Si hablas mientras el agente habla, se detiene y te escucha.",
+      language: "Idioma",
+      languageTr: "Turco",
+      languageEn: "Inglés",
+      style: "Voz",
+      preview: "Escuchar",
+      previewStop: "Detener",
+      female: "Mujer",
+      male: "Hombre",
+    },
     analytics: {
       label: "Estadísticas de uso",
       help: "Envía qué pantallas abres y qué funciones usas, con la versión de la app y el sistema; nunca tus tareas, chats, código, rutas ni tu correo. Con una cuenta iniciada, se añade un hash unidireccional de tu ID de cuenta para contarte como una sola persona en las apps de escritorio, web y móvil. Al desactivarlo se deja de enviar al instante y se borra el ID aleatorio de esta instalación.",
@@ -243,9 +273,19 @@ export const es: Dict = {
   projectAdmin,
   projectModel,
   projectsHub,
+  readiness,
   release,
   repositoryPage,
   settingsPages,
+  audienceHub,
+  audienceReportKinds,
+  audienceStudy,
+  telemetryHub,
+  telemetryViews,
   setup,
+  remoteAccess,
+  runTrace,
+  runUndo,
   toolchain,
+  whatsNew,
 };

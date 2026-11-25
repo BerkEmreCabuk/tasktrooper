@@ -47,6 +47,7 @@ tool_policy:
         - record_open_questions
         - list_open_questions
         - get_pipeline_status
+        - record_review_findings
         - get_task_pull_request
         - comment_on_pull_request
         - save_memory
@@ -59,6 +60,7 @@ tool_policy:
         - list_links
         - get_environment
         - list_runtime_errors
+        - telemetry_get_service
         - request_design_system
     allow_mcp_servers: []
 roles:

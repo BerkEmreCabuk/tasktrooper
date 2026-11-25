@@ -16,11 +16,21 @@ import { operations } from "@/locales/tr/operations";
 import { projectAdmin } from "@/locales/tr/projectAdmin";
 import { projectModel } from "@/locales/tr/projectModel";
 import { projectsHub } from "@/locales/tr/projectsHub";
+import { readiness } from "@/locales/tr/readiness";
 import { release } from "@/locales/tr/release";
 import { repositoryPage } from "@/locales/tr/repositoryPage";
 import { settingsPages } from "@/locales/tr/settingsPages";
+import { audienceHub } from "@/locales/tr/audienceHub";
+import { audienceReportKinds } from "@/locales/tr/audienceReportKinds";
+import { audienceStudy } from "@/locales/tr/audienceStudy";
+import { telemetryHub } from "@/locales/tr/telemetryHub";
+import { telemetryViews } from "@/locales/tr/telemetryViews";
 import { setup } from "@/locales/tr/setup";
+import { remoteAccess } from "@/locales/tr/remoteAccess";
+import { runTrace } from "@/locales/tr/runTrace";
+import { runUndo } from "@/locales/tr/runUndo";
 import { toolchain } from "@/locales/tr/toolchain";
+import { whatsNew } from "@/locales/tr/whatsNew";
 
 // Turkish dictionary. Typed as Dict — must mirror en.ts keys exactly.
 export const tr: Dict = {
@@ -70,6 +80,10 @@ export const tr: Dict = {
       app: {
         title: "Masaüstü uygulaması",
         description: "Bu bilgisayardaki TaskTrooper için güncellemeler ve gizlilik.",
+      },
+      voice: {
+        title: "Ses",
+        description: "Bu bilgisayarda ajanlarla sesli konuşma.",
       },
       desktopOnly: "Güncellemeler, masaüstü bildirimleri ve anonim kullanım istatistikleri TaskTrooper masaüstü uygulamasından ayarlanır.",
     },
@@ -188,6 +202,22 @@ export const tr: Dict = {
       bannerTitle: "TaskTrooper şimdilik hesabın olmadan kullanılıyor",
       bannerBody: "{origin} hesabında oturumun hâlâ açık. Sana orada atanan görevler sen dönene kadar bekler.",
     },
+    voice: {
+      title: "Agent'larla sesli konuşma",
+      help: "Bir sohbette mikrofona basıp konuşun; agent sesli cevap verir, söylediklerini yazar ve gerektiğinde ekrana çizer. Ses, uygulama dili Türkçe veya English iken çalışır. Konuşmanız bu Mac'te tanınır; cevap veren Türkçe ya da İngilizce ses de bu Mac'te üretilir, ikisi de bilgisayardan çıkmaz.",
+      unavailable: "Sesli konuşma için macOS ve Türkçe ya da English uygulama dili gerekir.",
+      speed: "Okuma hızı",
+      bargeIn: "Konuşarak sözünü kes",
+      bargeInHelp: "Agent konuşurken siz konuşursanız durur ve sizi dinler.",
+      language: "Dil",
+      languageTr: "Türkçe",
+      languageEn: "İngilizce",
+      style: "Ses",
+      preview: "Dinle",
+      previewStop: "Durdur",
+      female: "Kadın",
+      male: "Erkek",
+    },
     analytics: {
       label: "Kullanım istatistikleri",
       help: "Hangi ekranları açtığınızı ve hangi özellikleri kullandığınızı, uygulama sürümü ve sistemle birlikte gönderir — görevleriniz, sohbetleriniz, kodunuz, dosya yollarınız veya e-postanız asla gönderilmez. Bir hesapla giriş yaptıysanız hesap kimliğinizin tek yönlü bir özeti de eklenir; böylece masaüstü, web ve mobil uygulamada tek kişi sayılırsınız. Kapatınca gönderim hemen durur ve bu kurulumun rastgele kimliği silinir.",
@@ -244,9 +274,19 @@ export const tr: Dict = {
   projectAdmin,
   projectModel,
   projectsHub,
+  readiness,
   release,
   repositoryPage,
   settingsPages,
+  audienceHub,
+  audienceReportKinds,
+  audienceStudy,
+  telemetryHub,
+  telemetryViews,
   setup,
+  remoteAccess,
+  runTrace,
+  runUndo,
   toolchain,
+  whatsNew,
 };

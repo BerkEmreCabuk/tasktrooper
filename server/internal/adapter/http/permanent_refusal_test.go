@@ -118,22 +118,22 @@ func TestCriteriaGateRefusalIsHumanReadable(t *testing.T) {
 
 	app.Get("/unchecked-single", func(c *fiber.Ctx) error {
 		err := domain.NewCriteriaGateError(
-			domain.TaskColumnPMUAT,
+			domain.TaskColumnInQA,
 			domain.CriteriaGateReasonUnchecked,
 			[]domain.CriteriaGateCriterion{{ID: criterionID, Text: "Given X, When Y, Then Z"}},
-			"cannot move to pm_uat: 1 acceptance criteria await your pm verdict: ["+criterionID.String()+"] Given X, When Y, Then Z — call review_criterion with each id above, then retry the move",
+			"cannot move to human_uat: 1 acceptance criteria await your qa verdict: ["+criterionID.String()+"] Given X, When Y, Then Z — call review_criterion with each id above, then retry the move",
 		)
 		return badRequestErr(c, err)
 	})
 	app.Get("/unchecked-multi", func(c *fiber.Ctx) error {
 		err := domain.NewCriteriaGateError(
-			domain.TaskColumnPMUAT,
+			domain.TaskColumnInQA,
 			domain.CriteriaGateReasonUnchecked,
 			[]domain.CriteriaGateCriterion{
 				{ID: criterionID, Text: "First criterion"},
 				{ID: taskID, Text: "Second criterion"},
 			},
-			"cannot move to pm_uat: 2 acceptance criteria await your pm verdict: [...] — call review_criterion with each id above, then retry the move",
+			"cannot move to human_uat: 2 acceptance criteria await your qa verdict: [...] — call review_criterion with each id above, then retry the move",
 		)
 		return badRequestErr(c, err)
 	})
@@ -307,6 +307,7 @@ func TestAgentValidationAnswers400(t *testing.T) {
 		{"create with no name", "POST", "/admin/agents", `{"description":"x"}`, "name is required"},
 		{"create with a bad effort", "POST", "/admin/agents", `{"name":"n","effort":"enormous"}`, "effort must be one of"},
 		{"create with a negative turn cap", "POST", "/admin/agents", `{"name":"n","max_turns":-1}`, "max_turns cannot be negative"},
+		{"create with a multi-line co-author", "POST", "/admin/agents", `{"name":"n","commit_coauthor":"a <a@b.cc>\nX: y"}`, "commit co-author"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

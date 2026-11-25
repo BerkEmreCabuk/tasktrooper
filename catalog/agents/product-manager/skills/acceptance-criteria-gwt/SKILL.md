@@ -18,14 +18,14 @@ Acceptance criteria are the contract QA tests the product against and the PM ver
 
 ## Where they go
 
-Criteria live in the board task's own `acceptance_criteria` field — an array of strings, one criterion per item, passed to `create_board_task` (or `update_board_task` to replace the whole list). Each item becomes a checkbox the implementer ticks with `set_criterion_completed`, and that QA (in ready_for_qa/in_qa) and you (in pm_uat) then rule on independently with `review_criterion`. The tick is the implementer's claim — QA and PM never call `set_criterion_completed`; your verdict is `review_criterion`.
+Criteria live in the board task's own `acceptance_criteria` field — an array of strings, one criterion per item, passed to `create_board_task` (or `update_board_task` to replace the whole list). Each item becomes a checkbox the implementer ticks with `set_criterion_completed`, and that QA (in ready_for_qa/in_qa) then rules on independently with `review_criterion`. The tick is the implementer's claim — QA never calls `set_criterion_completed`; its verdict is `review_criterion`.
 
 Never write them into `description`. A criteria block pasted as markdown leaves the task's checklist empty: nothing to tick, nothing the move guard can check, and the prose copy goes stale the moment the real criteria are edited.
 
 ## Testability gate
 
 For each criterion, before you save it, write down:
-- **who executes it** — QA in in_qa, and the PM in pm_uat with browser or mobile tools (or `http_request` against the task's own preview when the surface is an API, not a screen);
+- **who executes it** — QA in in_qa, with browser or mobile tools (or `http_request` against the task's own preview when the surface is an API, not a screen);
 - **the action** — a click path, a URL, or a request;
 - **the exact observable** — text, a count, an element state, or a file.
 
@@ -54,7 +54,7 @@ documents, without opening the board's history? If not, it is not a criterion.
 
 - **Observable + measurable.** "Then a 422 with message 'title too long'" — not "Then it handles it gracefully."
 - **At least one negative criterion where the feature accepts input or has permissions:** invalid input, unauthorized access, empty state. Not required for a pure copy or styling change.
-- **3–7 criteria per task.** More means the task should be split.
+- **3–7 criteria is typical; the feature decides, not the count.** A long list is a reason to check that the task does not bundle two roles, two repositories or two unrelated features — split those. One feature for one role in one repository stays one task even with 10–12 criteria: every extra task is another agent run, review and release. Drop criteria that restate each other before you split anything.
 - **No 'fast'/'user-friendly'/'robust'** — replace with a number or a concrete behavior.
 
 ## Mid-flight edits
@@ -99,7 +99,8 @@ Then they get 200 + text/csv with header "id,title,status,created_at"
 - Aspirational wording ("intuitive", "fast").
 - Only happy-path criteria, no negative, on a task with input or permissions.
 - A "Then" with no exact text, count or state — "an error appears" instead of the exact copy.
-- 12 criteria on one task → split it.
+- 12 criteria covering two features or two roles on one task → split it along that boundary.
+- One feature cut into several tasks just to keep each checklist short.
 - Criteria pasted into `description` as a markdown list instead of passed as `acceptance_criteria`.
 - Rewriting `acceptance_criteria` on a task already in progress instead of `cancel_criterion`.
 

@@ -1,7 +1,17 @@
+import { statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { downloadAllWithRetry } from "./download.js";
-import { createEmbeddingsServer, DEFAULT_IDLE_UNLOAD_MS } from "./server.js";
+import { createEmbeddingsServer, DEFAULT_IDLE_UNLOAD_MS, SPEECH_SAMPLE_RATES, type SpeechEngineInfo } from "./server.js";
+import {
+  EMA_FILES,
+  TINYVOCA_DEFAULT_STYLE,
+  TINYVOCA_FILES,
+  TINYVOCA_STYLES,
+  VOICE_DIR_NAME,
+  type VoiceFile,
+} from "./tts/files.js";
+import { startSpeechWorker, type SpeechEngineId } from "./tts/speech-worker.js";
 import { armParentWatchdog } from "./watchdog.js";
 import { defaultWasmThreads, startWorkerEngine } from "./worker-engine.js";
 
@@ -16,6 +26,12 @@ import { defaultWasmThreads, startWorkerEngine } from "./worker-engine.js";
  * time a request needs it. A machine that never indexes anything never pays
  * the ~650 MB a loaded model costs, and an idle unload terminates that worker,
  * which is the only thing that gives wasm memory back.
+ *
+ * The voices are not downloaded: their files ship in `voice/` beside this
+ * bundle (staged by scripts/build-embedder.mjs, hash-checked there), the same
+ * relative place in a dev build and a packaged one. Each voice engine (EMA,
+ * tiny-voca) loads in a worker of its own on its first
+ * `/v1/audio/speech` for it and idles out like the model does.
  *
  * Spawned as `process.execPath <this file> --cache-dir <userData>` with
  * `ELECTRON_RUN_AS_NODE=1` (see `main/supervisor/supervisor.ts`), which is
@@ -55,6 +71,21 @@ function wasmThreads(raw: string | undefined): number {
   return defaultWasmThreads(os.availableParallelism());
 }
 
+/**
+ * A voice's files, when every one is there at its pinned size. The hashes
+ * were checked by the build that put them there; a size is the cheap check
+ * that catches a truncated copy without reading 40 MB at every launch.
+ */
+function voiceFilesPresent(dir: string, files: readonly VoiceFile[]): boolean {
+  return files.every((file) => {
+    try {
+      return statSync(path.join(dir, file.name)).size === file.sizeBytes;
+    } catch {
+      return false;
+    }
+  });
+}
+
 function main(): void {
   const cacheDir = parseCacheDir(process.argv.slice(2));
 
@@ -66,9 +97,23 @@ function main(): void {
   const workerScript = path.join(__dirname, "worker.cjs");
   const numThreads = wasmThreads(process.env.EMBEDDER_THREADS);
 
-  const { server, enableLoading } = createEmbeddingsServer({
+  const { server, enableLoading, enableSpeech } = createEmbeddingsServer({
     idleUnloadMs: idleUnloadMs(process.env.EMBEDDER_IDLE_UNLOAD_MS),
   });
+
+  const voiceDir = path.join(__dirname, VOICE_DIR_NAME);
+  const speechScript = path.join(__dirname, "tts-worker.cjs");
+  const engines: [SpeechEngineId, readonly VoiceFile[], SpeechEngineInfo][] = [
+    ["ema", EMA_FILES, { sampleRate: SPEECH_SAMPLE_RATES.ema, styles: [] }],
+    ["tinyvoca", TINYVOCA_FILES, { sampleRate: SPEECH_SAMPLE_RATES.tinyvoca, styles: TINYVOCA_STYLES, defaultStyle: TINYVOCA_DEFAULT_STYLE }],
+  ];
+  for (const [engine, files, info] of engines) {
+    if (voiceFilesPresent(voiceDir, files)) {
+      enableSpeech(engine, () => startSpeechWorker(speechScript, { engine, voiceDir, wasmDir, numThreads }), info);
+    } else {
+      log.warn(`the ${engine} voice's files are missing or incomplete in ${voiceDir}; /v1/audio/speech answers 503 for it.`);
+    }
+  }
 
   let shuttingDown = false;
   const shutdown = (): void => {

@@ -16,11 +16,21 @@ import { operations } from "@/locales/zh/operations";
 import { projectAdmin } from "@/locales/zh/projectAdmin";
 import { projectModel } from "@/locales/zh/projectModel";
 import { projectsHub } from "@/locales/zh/projectsHub";
+import { readiness } from "@/locales/zh/readiness";
 import { release } from "@/locales/zh/release";
 import { repositoryPage } from "@/locales/zh/repositoryPage";
 import { settingsPages } from "@/locales/zh/settingsPages";
+import { audienceHub } from "@/locales/zh/audienceHub";
+import { audienceReportKinds } from "@/locales/zh/audienceReportKinds";
+import { audienceStudy } from "@/locales/zh/audienceStudy";
+import { telemetryHub } from "@/locales/zh/telemetryHub";
+import { telemetryViews } from "@/locales/zh/telemetryViews";
 import { setup } from "@/locales/zh/setup";
+import { remoteAccess } from "@/locales/zh/remoteAccess";
+import { runTrace } from "@/locales/zh/runTrace";
+import { runUndo } from "@/locales/zh/runUndo";
 import { toolchain } from "@/locales/zh/toolchain";
+import { whatsNew } from "@/locales/zh/whatsNew";
 
 // Simplified Chinese dictionary. Typed as Dict — must mirror en.ts keys exactly.
 export const zh: Dict = {
@@ -70,6 +80,10 @@ export const zh: Dict = {
       app: {
         title: "桌面应用",
         description: "此电脑上 TaskTrooper 的更新与隐私。",
+      },
+      voice: {
+        title: "语音",
+        description: "在这台电脑上与智能体语音对话。",
       },
       desktopOnly: "更新、桌面通知和匿名使用统计需在 TaskTrooper 桌面应用中设置。",
     },
@@ -187,6 +201,22 @@ export const zh: Dict = {
       bannerTitle: "暂时在没有账户的情况下使用 TaskTrooper",
       bannerBody: "你仍然登录在 {origin}。分配给你的任务会等你回来。",
     },
+    voice: {
+      title: "与智能体语音对话",
+      help: "在对话中点击麦克风并说话；智能体会大声回答、同步显示文字，并在有帮助时在屏幕上绘图。应用语言为 Türkçe 或 English 时可用语音。语音在本机识别，回答的土耳其语或英语语音也在本机生成，都不会离开这台电脑。",
+      unavailable: "语音需要 macOS，且应用语言为 Türkçe 或 English。",
+      speed: "朗读速度",
+      bargeIn: "说话即可打断",
+      bargeInHelp: "智能体说话时你开口，它会停下来听你说。",
+      language: "语言",
+      languageTr: "土耳其语",
+      languageEn: "英语",
+      style: "声音",
+      preview: "试听",
+      previewStop: "停止",
+      female: "女声",
+      male: "男声",
+    },
     analytics: {
       label: "使用统计",
       help: "发送你打开了哪些页面、使用了哪些功能，以及应用版本和系统——绝不包含你的任务、对话、代码、路径或邮箱。登录账号时，会附带账号 ID 的单向哈希，使你在桌面端、网页端和移动端只算作一个人。关闭后会立即停止发送，并删除此安装的随机 ID。",
@@ -243,9 +273,19 @@ export const zh: Dict = {
   projectAdmin,
   projectModel,
   projectsHub,
+  readiness,
   release,
   repositoryPage,
   settingsPages,
+  audienceHub,
+  audienceReportKinds,
+  audienceStudy,
+  telemetryHub,
+  telemetryViews,
   setup,
+  remoteAccess,
+  runTrace,
+  runUndo,
   toolchain,
+  whatsNew,
 };

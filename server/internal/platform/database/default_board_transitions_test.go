@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -40,13 +39,9 @@ func TestDefaultBoardTransitionsSuite(t *testing.T) {
 
 func (s *DefaultBoardTransitionsSuite) SetupSuite() {
 	s.ctx, s.cancel = context.WithTimeout(context.Background(), 5*time.Minute)
-	tmp := s.T().TempDir()
-	pg, err := database.StartEmbedded(s.ctx, database.EmbeddedConfig{
-		DataDir:     filepath.Join(tmp, "postgres"),
-		RuntimePath: filepath.Join(tmp, "runtime"),
-	})
-	s.Require().NoError(err)
+	pg := sharedPostgres(s.T())
 	s.pg = pg
+	var err error
 	s.boot, err = pgxpool.New(s.ctx, pg.DSN())
 	s.Require().NoError(err)
 }
@@ -54,9 +49,6 @@ func (s *DefaultBoardTransitionsSuite) SetupSuite() {
 func (s *DefaultBoardTransitionsSuite) TearDownSuite() {
 	if s.boot != nil {
 		s.boot.Close()
-	}
-	if s.pg != nil {
-		_ = s.pg.Stop()
 	}
 	if s.cancel != nil {
 		s.cancel()
@@ -178,7 +170,7 @@ func (s *DefaultBoardTransitionsSuite) seedStockColumns(pool *pgxpool.Pool) {
 	s.T().Helper()
 	slugs := []string{
 		"backlog", "todo", "in_progress", "analiz_review", "code_review", "ready_for_qa",
-		"in_qa", "need_revision", "pm_uat", "human_uat", "blocked", "done", "released",
+		"in_qa", "need_revision", "human_uat", "blocked", "done", "released",
 	}
 	for i, slug := range slugs {
 		_, err := pool.Exec(s.ctx, `INSERT INTO board_columns (slug, label, position, is_backlog) VALUES ($1, $1, $2, $3)`,

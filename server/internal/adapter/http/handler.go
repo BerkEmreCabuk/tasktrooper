@@ -28,12 +28,14 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/alerting"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/apikey"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/attachment"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/audience"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/billing"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/catalog"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/cloud"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/datasource"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deploy"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/deployops"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/designfile"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/designsystem"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/embedmap"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/evolution"
@@ -52,7 +54,9 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/prodops"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/projectmodel"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/rag"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/readiness"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/remoteaccess"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/repodocs"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/repository"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/session"
@@ -60,6 +64,7 @@ import (
 	"github.com/makifbaysal/tasktrooper/server/internal/application/signals"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/simrun"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/storeops"
+	telemetryapp "github.com/makifbaysal/tasktrooper/server/internal/application/telemetry"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workflow"
 	"github.com/makifbaysal/tasktrooper/server/internal/application/workspace"
 	"github.com/makifbaysal/tasktrooper/server/internal/domain"
@@ -73,6 +78,7 @@ import (
 type BoardRunControl interface {
 	CancelRun(ctx context.Context, repositoryID, taskID, runID uuid.UUID, reason string) (domain.TaskAgentRun, error)
 	RerunRun(ctx context.Context, repositoryID, taskID, runID uuid.UUID) (domain.TaskAgentRun, error)
+	InterruptRun(ctx context.Context, repositoryID, taskID, runID uuid.UUID, message string) (domain.TaskAgentRun, error)
 }
 
 // TaskChatControl opens (or reuses) the chat thread about one board task and
@@ -80,7 +86,7 @@ type BoardRunControl interface {
 // the same reason as BoardRunControl: it keeps this package clear of the board
 // package and everything the runner drags in.
 type TaskChatControl interface {
-	Open(ctx context.Context, repositoryID, taskID uuid.UUID) (sessionID uuid.UUID, agentID uuid.UUID, err error)
+	Open(ctx context.Context, repositoryID, taskID, wantedAgentID uuid.UUID) (sessionID uuid.UUID, agentID uuid.UUID, err error)
 }
 
 type Handler struct {
@@ -125,6 +131,8 @@ type Handler struct {
 	workflowSvc       *workflow.Service
 	boardEvents       port.BoardEventStore
 	taskRuns          port.TaskAgentRunStore
+	runTraces         port.RunTraceStore
+	runUndo           RunUndoControl
 	runControl        BoardRunControl
 	taskChat          TaskChatControl
 	evolutionSvc      *evolution.Service
@@ -138,8 +146,11 @@ type Handler struct {
 	uiFS              fs.FS
 	deploySvc         *deploy.Service
 	repoDocsSvc       *repodocs.Service
+	readinessSvc      *readiness.Service
 	prodOpsSvc        *prodops.Service
 	issueSyncSvc      *issuesync.Service
+	telemetrySvc      *telemetryapp.Service
+	audienceSvc       *audience.Service
 	storeOpsSvc       *storeops.Service
 	deployOpsSvc      *deployops.Service
 	projectModelSvc   *projectmodel.Service
@@ -163,11 +174,19 @@ type Handler struct {
 	localPreviewSvc *localpreview.Service
 	simRunSvc       *simrun.Service
 	designSystemSvc *designsystem.Service
+	designFileSvc   *designfile.Service
 	// mcpToolServer serves TaskTrooper's tools to a local Claude Code session.
 	// Nil on every host without the CLI, in which case no route is mounted.
 	mcpToolServer *mcpserver.Server
 
 	boardList boardListCache
+
+	// remoteSvc is nil unless the phone-pairing feature is wired; the
+	// /v1/remote-access routes are then not mounted and the remote listener
+	// cannot be started. remote is the dedicated listener the tunnel targets.
+	remoteSvc *remoteaccess.Service
+	remote    *remoteListener
+	mainApp   *fiber.App
 }
 
 type Config struct {
@@ -206,6 +225,8 @@ type Config struct {
 	WorkflowSvc       *workflow.Service
 	BoardEvents       port.BoardEventStore
 	TaskRuns          port.TaskAgentRunStore
+	RunTraces         port.RunTraceStore
+	RunUndo           RunUndoControl
 	RunControl        BoardRunControl
 	TaskChat          TaskChatControl
 	EvolutionSvc      *evolution.Service
@@ -219,8 +240,11 @@ type Config struct {
 	UIFS              fs.FS
 	DeploySvc         *deploy.Service
 	RepoDocsSvc       *repodocs.Service
+	ReadinessSvc      *readiness.Service
 	ProdOpsSvc        *prodops.Service
 	IssueSyncSvc      *issuesync.Service
+	TelemetrySvc      *telemetryapp.Service
+	AudienceSvc       *audience.Service
 	StoreOpsSvc       *storeops.Service
 	DeployOpsSvc      *deployops.Service
 	ProjectModelSvc   *projectmodel.Service
@@ -238,8 +262,10 @@ type Config struct {
 	LocalPreviewSvc   *localpreview.Service
 	SimRunSvc         *simrun.Service
 	DesignSystemSvc   *designsystem.Service
+	DesignFileSvc     *designfile.Service
 	MCPToolServer     *mcpserver.Server
 	BootSeed          BootSeed
+	RemoteAccessSvc   *remoteaccess.Service
 }
 
 func NewHandler(cfg Config) *Handler {
@@ -280,6 +306,8 @@ func NewHandler(cfg Config) *Handler {
 		workflowSvc:       cfg.WorkflowSvc,
 		boardEvents:       cfg.BoardEvents,
 		taskRuns:          cfg.TaskRuns,
+		runTraces:         cfg.RunTraces,
+		runUndo:           cfg.RunUndo,
 		runControl:        cfg.RunControl,
 		taskChat:          cfg.TaskChat,
 		evolutionSvc:      cfg.EvolutionSvc,
@@ -293,8 +321,11 @@ func NewHandler(cfg Config) *Handler {
 		uiFS:              cfg.UIFS,
 		deploySvc:         cfg.DeploySvc,
 		repoDocsSvc:       cfg.RepoDocsSvc,
+		readinessSvc:      cfg.ReadinessSvc,
 		prodOpsSvc:        cfg.ProdOpsSvc,
 		issueSyncSvc:      cfg.IssueSyncSvc,
+		telemetrySvc:      cfg.TelemetrySvc,
+		audienceSvc:       cfg.AudienceSvc,
 		storeOpsSvc:       cfg.StoreOpsSvc,
 		deployOpsSvc:      cfg.DeployOpsSvc,
 		projectModelSvc:   cfg.ProjectModelSvc,
@@ -312,8 +343,10 @@ func NewHandler(cfg Config) *Handler {
 		localPreviewSvc:   cfg.LocalPreviewSvc,
 		simRunSvc:         cfg.SimRunSvc,
 		designSystemSvc:   cfg.DesignSystemSvc,
+		designFileSvc:     cfg.DesignFileSvc,
 		mcpToolServer:     cfg.MCPToolServer,
 		bootSeed:          cfg.BootSeed,
+		remoteSvc:         cfg.RemoteAccessSvc,
 	}
 }
 
@@ -321,6 +354,7 @@ func NewHandler(cfg Config) *Handler {
 // configuration (CORS_ORIGINS) and belongs with the process that read it, so
 // platform/runtime installs it before this runs.
 func (h *Handler) RegisterRoutes(app *fiber.App) {
+	h.mainApp = app
 	app.Use(h.requestIDMiddleware)
 	app.Use(h.authMiddleware)
 	app.Use(h.bootSeedMiddleware)
@@ -366,12 +400,16 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	h.registerInitiativeRoutes(app)
 	h.registerDeployRoutes(app)
 	h.registerRepoDocsRoutes(app)
+	h.registerReadinessRoutes(app)
 	h.registerProdOpsRoutes(app)
 	h.registerIssueSyncRoutes(app)
+	h.registerTelemetryRoutes(app)
+	h.registerAudienceRoutes(app)
 	h.registerRepositoryOpsRoutes(app)
 	h.registerStoreOpsRoutes(app)
 	h.registerSimulatorRunRoutes(app)
 	h.registerDesignSystemRoutes(app)
+	h.registerDesignFileRoutes(app)
 	h.registerWorkspaceRoutes(app)
 	h.registerWorkflowRoutes(app)
 	h.registerEvolutionRoutes(app)
@@ -379,6 +417,7 @@ func (h *Handler) RegisterRoutes(app *fiber.App) {
 	h.registerSettingsRoutes(app)
 	h.registerCatalogRoutes(app)
 	h.registerMobileDeviceRoutes(app)
+	h.registerRemoteAccessRoutes(app)
 	h.registerLLMProviderRoutes(app)
 	h.registerAgentCLIRoutes(app)
 	h.registerLLMEndpointRoutes(app)
@@ -445,6 +484,13 @@ func (h *Handler) requestIDMiddleware(c *fiber.Ctx) error {
 }
 
 func (h *Handler) authMiddleware(c *fiber.Ctx) error {
+	// Set only by the remote listener after it authenticated a paired phone and
+	// matched the route against its allowlist (remote_app.go). A user value can
+	// only be written by code in this process, never by a request.
+	if dev, ok := c.Locals(remoteDeviceLocal).(remoteDevice); ok {
+		c.Locals("client_name", "remote:"+dev.Name)
+		return c.Next()
+	}
 	if h.isPublicPath(c.Path()) {
 		return c.Next()
 	}

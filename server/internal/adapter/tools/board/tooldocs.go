@@ -19,6 +19,7 @@ func init() {
 		deleteBoardTaskToolName,
 		claimBoardTaskToolName,
 		addTaskCommentToolName,
+		notifyTaskAgentToolName,
 		listTaskCommentsToolName,
 		addTaskDocumentToolName,
 		updateTaskDocumentToolName,
@@ -27,6 +28,7 @@ func init() {
 		resolveDocumentAnnotationsToolName,
 		recordOpenQuestionsToolName,
 		listOpenQuestionsToolName,
+		recordReviewFindingsToolName,
 		listCriteriaToolName,
 		setCriterionToolName,
 		cancelCriterionToolName,
@@ -58,6 +60,7 @@ func init() {
 		finishReleaseToolName,
 		rollbackReleaseToolName,
 		getDeployImpactToolName,
+		proposeCutToolName,
 	} {
 		prompt.Define[struct{}]("tool."+name, struct{}{})
 	}

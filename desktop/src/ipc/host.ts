@@ -35,6 +35,9 @@ import type {
   McpServersState,
   NotificationPreferences,
   PreflightReport,
+  RemoteAccessState,
+  RemoteBinaryDetection,
+  RemoteProvider,
   RunnerPairingBundle,
   RunnerPairingSummary,
   ToolchainId,
@@ -44,6 +47,13 @@ import type {
   ToolchainReport,
   TunnelStatus,
   UpdateStatus,
+  VoiceAudioEvent,
+  VoiceCapabilities,
+  VoiceChoice,
+  VoiceEngine,
+  VoiceEngineOption,
+  VoiceLanguage,
+  VoiceTranscriptEvent,
   WorkspaceCheck,
 } from "./types.js";
 import type {
@@ -51,6 +61,8 @@ import type {
   ChooseDirectoryRequest,
   KeysWindowPrefill,
   McpServerSetRequest,
+  RemoteAccessConfigureRequest,
+  RemoteAccessNgrokConnectRequest,
 } from "./channels.js";
 
 /**
@@ -231,6 +243,30 @@ export interface DesktopUpdatesHost {
  * The usage count. `set(false)` stops sending at once and deletes the
  * install's random id and the stored member id.
  */
+/**
+ * Talking to an agent (bridgeVersion 9). The page owns the microphone and the
+ * speaker; this side turns 16 kHz s16le PCM into text and text into float32
+ * PCM. Each utterance and each spoken text has its own id; events carry it.
+ */
+export interface DesktopVoiceHost {
+  capabilities(): Promise<VoiceCapabilities>;
+  listenStart(lang: VoiceLanguage): Promise<{ id: string }>;
+  /** About a tenth of a second of 16 kHz mono s16le PCM. */
+  listenAudio(id: string, pcm: ArrayBuffer): Promise<void>;
+  /** End of speech: the final text follows as an event. */
+  listenStop(id: string): Promise<void>;
+  listenCancel(id: string): Promise<void>;
+  onTranscript(cb: (event: VoiceTranscriptEvent) => void): () => void;
+  /**
+   * `voice.engine` is one of `capabilities().speakEngines[lang]`, left out
+   * the first of them; `voice.style` one of that engine's styles, left out
+   * its default. A style for EMA is refused.
+   */
+  speak(lang: VoiceLanguage, text: string, speed?: number, voice?: VoiceChoice): Promise<{ id: string }>;
+  speakCancel(id: string): Promise<void>;
+  onAudio(cb: (event: VoiceAudioEvent) => void): () => void;
+}
+
 export interface DesktopAnalyticsHost {
   get(): Promise<AnalyticsState>;
   set(on: boolean): Promise<AnalyticsState>;
@@ -263,6 +299,44 @@ export interface DesktopToolchainHost {
   dismiss(): Promise<ToolchainJobState>;
   /** Opens the item's own `url` (from main's table, never from the page) in the real browser. */
   openPage(id: ToolchainId): Promise<void>;
+}
+
+/**
+ * Remote access (local mode only): the Cloudflare or ngrok tunnel that makes the
+ * phone app able to reach this computer.
+ *
+ * `configure` takes the form, secrets included, and answers the state WITHOUT
+ * them (`secrets.<name>: boolean`). `start` enables the server's remote listener
+ * and runs the tunnel; `stop` stops both. The page then calls the server's own
+ * `/v1/remote-access/*` API (pairing codes, devices, audit) with `apiBase` and
+ * `apiToken`, using `state().url` as the public address.
+ */
+export interface DesktopRemoteAccessHost {
+  state(): Promise<RemoteAccessState>;
+  subscribe(cb: (state: RemoteAccessState) => void): () => void;
+  configure(request: RemoteAccessConfigureRequest): Promise<RemoteAccessState>;
+  start(): Promise<RemoteAccessState>;
+  stop(): Promise<RemoteAccessState>;
+  /** Is the provider's program on this computer? `force` is implied: each call probes. */
+  detect(provider: RemoteProvider): Promise<RemoteBinaryDetection>;
+  /** Opens the provider's download page (from main's table) in the real browser. */
+  openInstallPage(provider: RemoteProvider): Promise<void>;
+  /** The tunnel process's recent output, secrets redacted. */
+  logs(): Promise<string[]>;
+  /** Re-reads the Cloudflare login from disk (cheap) and looks up its domain once. */
+  refreshAccount(): Promise<RemoteAccessState>;
+  /**
+   * `cloudflared tunnel login`: opens the browser, waits for the person to pick
+   * a domain, and keeps the certificate. Answers at once with `cloudflare.phase:
+   * "waiting"`; the end arrives as a state push.
+   */
+  cloudflareLogin(): Promise<RemoteAccessState>;
+  cloudflareLoginCancel(): Promise<RemoteAccessState>;
+  /** Deletes the certificate (and forgets the tunnel this app made). Refused while the tunnel runs. */
+  cloudflareLogout(): Promise<RemoteAccessState>;
+  /** Proves the authtoken with a test tunnel, then stores it; lists domains when an API key is given. */
+  ngrokConnect(request: RemoteAccessNgrokConnectRequest): Promise<RemoteAccessState>;
+  ngrokDisconnect(): Promise<RemoteAccessState>;
 }
 
 /**
@@ -342,8 +416,10 @@ export interface DesktopHost {
    * 5: `toolchain` — detecting and installing the developer tools agents use.
    * 6: `account.mcp` and `account.openKeys({mcp})` — this computer's own MCP servers.
    * 7: `analytics.track(event)` / `analytics.identify(userId)`.
+   * 8: `remoteAccess` — the tunnel for the phone app (local mode only).
+   * 9: `voice` — talking to an agent: speech to text and text to speech.
    */
-  bridgeVersion: 7;
+  bridgeVersion: 9;
   /** Which world this page is in, read synchronously before the first render. */
   mode: AccountMode;
   account: DesktopAccountHost;
@@ -351,6 +427,8 @@ export interface DesktopHost {
   updates: DesktopUpdatesHost;
   analytics: DesktopAnalyticsHost;
   toolchain: DesktopToolchainHost;
+  remoteAccess: DesktopRemoteAccessHost;
+  voice: DesktopVoiceHost;
 }
 
 export type {
@@ -359,6 +437,11 @@ export type {
   ChooseDirectoryRequest,
   McpServersState,
   McpServerSetRequest,
+  RemoteAccessConfigureRequest,
+  RemoteAccessNgrokConnectRequest,
+  RemoteAccessState,
+  RemoteBinaryDetection,
+  RemoteProvider,
   RunnerPairingBundle,
   RunnerPairingSummary,
   ToolchainId,
@@ -367,4 +450,11 @@ export type {
   ToolchainJobStep,
   ToolchainReport,
   UpdateStatus,
+  VoiceAudioEvent,
+  VoiceCapabilities,
+  VoiceChoice,
+  VoiceEngine,
+  VoiceEngineOption,
+  VoiceLanguage,
+  VoiceTranscriptEvent,
 };

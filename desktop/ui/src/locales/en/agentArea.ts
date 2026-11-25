@@ -180,13 +180,11 @@ export const agentArea = {
       task_completed: "Task completed",
       task_released: "Task released",
       revision_requested: "Revision requested",
-      pm_uat_failed: "PM UAT failed",
       human_uat_failed: "Human UAT failed",
       qa_bug_found: "QA bug found",
       qa_valid_scenario_confirmed: "Valid scenario confirmed",
       qa_invalid_scenario_confirmed: "Invalid scenario confirmed",
       qa_task_tested: "QA finished testing",
-      pm_uat_completed: "PM UAT completed",
     },
     changeType: {
       skill_created: "Skill added",
@@ -290,6 +288,13 @@ export const agentArea = {
     systemPrompt: "System prompt",
     enabled: "Enabled",
     coreHint: "Core agent; it cannot be turned off.",
+    commitCoauthor: {
+      label: "Commit co-author",
+      help: "Name <email> or a full Co-authored-by line. Leave empty for the default trailers.",
+      placeholder: "Jane Doe <jane@example.com>",
+      disable: "Do not add a co-author",
+      disableHelp: "On: this agent's commits carry no Co-authored-by trailer at all.",
+    },
     catalog: {
       autoPull: {
         label: "Pull definition updates from the catalog",
@@ -330,7 +335,8 @@ export const agentArea = {
         label: "Message {name}",
         placeholder: "Request a feature, report a bug or ask about the board…",
         send: "Send",
-        hint: "Enter to send · Shift+Enter for a new line",
+        hint: "Enter to send · Shift+Enter for a new line · @ to tag an agent, project or repository",
+        voice: "Talk by voice",
         failed: "Couldn't start a conversation",
         suggestions: {
           board: { label: "What's on the board?", message: "What's on the board right now?" },
@@ -349,7 +355,6 @@ export const agentArea = {
             build: { label: "Build", detail: "Code + PR" },
             review: { label: "Review", detail: "Architect + security" },
             qa: { label: "QA", detail: "Tests" },
-            acceptance: { label: "PM check", detail: "UAT" },
             approval: { label: "Sign-off", detail: "You approve" },
             deploy: { label: "Deploy", detail: "Release" },
           },

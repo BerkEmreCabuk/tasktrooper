@@ -1,0 +1,581 @@
+package http
+
+import (
+	"errors"
+	"strings"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+	"github.com/rs/zerolog/log"
+
+	"github.com/makifbaysal/tasktrooper/server/internal/application/audience"
+	"github.com/makifbaysal/tasktrooper/server/internal/application/registry"
+	"github.com/makifbaysal/tasktrooper/server/internal/domain"
+)
+
+const (
+	audienceNoRuntimeCode = "audience_no_runtime"
+	audienceBusyCode      = "audience_busy"
+	audienceCallCode      = "audience_call_failed"
+)
+
+func (h *Handler) registerAudienceRoutes(app fiber.Router) {
+	if h.audienceSvc == nil {
+		return
+	}
+	app.Get("/v1/audience-research/status", h.GetAudienceRuntime)
+	app.Put("/v1/audience-research/runtime", h.SetAudienceRuntime)
+
+	app.Get("/v1/audiences", h.ListAudiences)
+	app.Post("/v1/audiences", h.CreateAudience)
+	app.Get("/v1/audiences/:id", h.GetAudience)
+	app.Patch("/v1/audiences/:id", h.UpdateAudience)
+	app.Delete("/v1/audiences/:id", h.DeleteAudience)
+	app.Post("/v1/audiences/:id/build", h.BuildAudience)
+	app.Post("/v1/audiences/:id/build/cancel", h.CancelAudienceBuild)
+	app.Post("/v1/audiences/:id/studies", h.PlanAudienceStudy)
+
+	app.Get("/v1/audience-studies", h.ListAudienceStudies)
+	app.Get("/v1/audience-studies/:id", h.GetAudienceStudy)
+	app.Patch("/v1/audience-studies/:id", h.UpdateAudienceStudy)
+	app.Delete("/v1/audience-studies/:id", h.DeleteAudienceStudy)
+	app.Post("/v1/audience-studies/:id/script", h.GenerateAudienceStudyScript)
+	app.Post("/v1/audience-studies/:id/script/approve", h.ApproveAudienceStudyScript)
+	app.Post("/v1/audience-studies/:id/start", h.StartAudienceStudy)
+	app.Post("/v1/audience-studies/:id/report", h.GenerateAudienceStudyReport)
+	app.Post("/v1/audience-studies/:id/retry", h.RetryAudienceStudy)
+	app.Post("/v1/audience-studies/:id/rerun", h.RerunAudienceStudy)
+	app.Get("/v1/audience-studies/:id/compare", h.CompareAudienceStudy)
+	app.Post("/v1/audience-studies/:id/cancel", h.CancelAudienceStudy)
+	app.Post("/v1/audience-studies/:id/ask", h.AskAudienceResearch)
+	app.Post("/v1/audience-studies/:id/ask-everyone", h.AskAudienceEveryone)
+	app.Post("/v1/audience-studies/:id/personas/:persona/follow-up", h.FollowUpAudiencePersona)
+
+	app.Get("/v1/audience-personas/:id/messages", h.GetAudienceThread)
+	app.Post("/v1/audience-personas/:id/messages", h.SendAudienceMessage)
+	app.Delete("/v1/audience-personas/:id/messages", h.ClearAudienceThread)
+}
+
+func audienceCoded(c *fiber.Ctx, status int, code, message string) error {
+	return c.Status(status).JSON(fiber.Map{"code": code, "error": message})
+}
+
+// audienceFailure maps the service's refusals to the answers the screen tells
+// apart; anything else is an internal error.
+func audienceFailure(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, domain.ErrAudienceNotFound), errors.Is(err, domain.ErrStudyNotFound), errors.Is(err, domain.ErrPersonaNotFound):
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": err.Error()})
+	case errors.Is(err, audience.ErrNoRuntime):
+		return audienceCoded(c, fiber.StatusConflict, audienceNoRuntimeCode, err.Error())
+	case errors.Is(err, audience.ErrScriptNotApproved):
+		return audienceCoded(c, fiber.StatusConflict, "script_not_approved", err.Error())
+	case errors.Is(err, audience.ErrScriptChanged):
+		return audienceCoded(c, fiber.StatusConflict, "script_changed", err.Error())
+	case errors.Is(err, audience.ErrBusy):
+		return audienceCoded(c, fiber.StatusConflict, audienceBusyCode, err.Error())
+	case errors.Is(err, domain.ErrAudienceInvalid):
+		return badRequest(c, strings.TrimPrefix(err.Error(), domain.ErrAudienceInvalid.Error()+": "))
+	case errors.Is(err, audience.ErrCallFailed):
+		log.Warn().Err(err).Msg("audience: model call failed")
+		return audienceCoded(c, fiber.StatusBadGateway, audienceCallCode, strings.TrimPrefix(err.Error(), audience.ErrCallFailed.Error()+": "))
+	}
+	return internalError(c, err)
+}
+
+func audienceID(c *fiber.Ctx, param string) (uuid.UUID, error) {
+	id, err := uuid.Parse(c.Params(param))
+	if err != nil {
+		return uuid.Nil, fiber.NewError(fiber.StatusBadRequest, "invalid id")
+	}
+	return id, nil
+}
+
+func (h *Handler) GetAudienceRuntime(c *fiber.Ctx) error {
+	out, err := h.audienceSvc.Runtime(h.enrichContext(c))
+	if err != nil {
+		return internalError(c, err)
+	}
+	return c.JSON(out)
+}
+
+func (h *Handler) ListAudiences(c *fiber.Ctx) error {
+	out, err := h.audienceSvc.ListAudiences(h.enrichContext(c))
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(fiber.Map{"audiences": out})
+}
+
+type audienceRequest struct {
+	Name          *string               `json:"name"`
+	Repository    *string               `json:"repository"`
+	Brief         *domain.AudienceBrief `json:"brief"`
+	PersonaTarget *int                  `json:"persona_target"`
+}
+
+func (h *Handler) CreateAudience(c *fiber.Ctx) error {
+	var req audienceRequest
+	if err := c.BodyParser(&req); err != nil {
+		return badRequest(c, "invalid request body")
+	}
+	in := audience.CreateAudienceInput{}
+	if req.Name != nil {
+		in.Name = *req.Name
+	}
+	if req.Repository != nil {
+		in.Repository = *req.Repository
+	}
+	if req.Brief != nil {
+		in.Brief = *req.Brief
+	}
+	if req.PersonaTarget != nil {
+		in.PersonaTarget = *req.PersonaTarget
+	}
+	out, err := h.audienceSvc.CreateAudience(h.enrichContext(c), in)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (h *Handler) GetAudience(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	out, err := h.audienceSvc.Audience(h.enrichContext(c), id)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(out)
+}
+
+func (h *Handler) UpdateAudience(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var req audienceRequest
+	if err := c.BodyParser(&req); err != nil {
+		return badRequest(c, "invalid request body")
+	}
+	out, err := h.audienceSvc.UpdateAudience(h.enrichContext(c), id, audience.UpdateAudienceInput{
+		Name: req.Name, Repository: req.Repository, Brief: req.Brief, PersonaTarget: req.PersonaTarget,
+	})
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(out)
+}
+
+func (h *Handler) DeleteAudience(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	if err := h.audienceSvc.DeleteAudience(h.enrichContext(c), id); err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func (h *Handler) BuildAudience(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	out, err := h.audienceSvc.Build(h.enrichContext(c), id)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.Status(fiber.StatusAccepted).JSON(out)
+}
+
+func (h *Handler) CancelAudienceBuild(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	if err := h.audienceSvc.CancelBuild(h.enrichContext(c), id); err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+type studyRequest struct {
+	Title       string              `json:"title"`
+	Goal        string              `json:"goal"`
+	Questions   []string            `json:"questions"`
+	PricePoints []float64           `json:"price_points"`
+	Currency    string              `json:"currency"`
+	Question    string              `json:"question"`
+	Kind        string              `json:"kind"`
+	Inputs      domain.StudyInputs  `json:"inputs"`
+	Script      *domain.StudyScript `json:"script"`
+}
+
+func (r studyRequest) plan() audience.PlanStudyInput {
+	return audience.PlanStudyInput{Title: r.Title, Goal: r.Goal, Questions: r.Questions, PricePoints: r.PricePoints, Currency: r.Currency,
+		Kind: r.Kind, Inputs: r.Inputs, Script: r.Script}
+}
+
+// startRequest is the body of a study start. user_approved is the
+// stakeholder's yes to the study's model calls, the same flag the Product
+// Manager's study_start tool needs; manual_report stops after the interviews
+// until the report is asked for.
+type startRequest struct {
+	UserApproved bool `json:"user_approved"`
+	ManualReport bool `json:"manual_report"`
+}
+
+func (h *Handler) PlanAudienceStudy(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var req studyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return badRequest(c, "invalid request body")
+	}
+	out, err := h.audienceSvc.PlanStudy(h.enrichContext(c), id, req.plan())
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+func (h *Handler) ListAudienceStudies(c *fiber.Ctx) error {
+	var filter *uuid.UUID
+	if raw := c.Query("audience_id"); raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil {
+			return badRequest(c, "invalid audience_id")
+		}
+		filter = &id
+	}
+	out, err := h.audienceSvc.ListStudies(h.enrichContext(c), filter)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(fiber.Map{"studies": out})
+}
+
+func (h *Handler) GetAudienceStudy(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	out, err := h.audienceSvc.Study(h.enrichContext(c), id)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(out)
+}
+
+func (h *Handler) UpdateAudienceStudy(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var req studyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return badRequest(c, "invalid request body")
+	}
+	out, err := h.audienceSvc.UpdateStudy(h.enrichContext(c), id, req.plan())
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(out)
+}
+
+func (h *Handler) DeleteAudienceStudy(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	if err := h.audienceSvc.DeleteStudy(h.enrichContext(c), id); err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func (h *Handler) StartAudienceStudy(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var req startRequest
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return badRequest(c, "invalid request body")
+		}
+	}
+	if !req.UserApproved {
+		return badRequest(c, "starting a study spends model calls; send user_approved: true once the person said yes")
+	}
+	out, err := h.audienceSvc.StartStudyWith(h.enrichContext(c), id, audience.StartOptions{ManualReport: req.ManualReport})
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.Status(fiber.StatusAccepted).JSON(out)
+}
+
+// ApproveAudienceStudyScript records the person's OK to one version of a
+// study's script: the one they were shown. A study only starts on an approved
+// script.
+func (h *Handler) ApproveAudienceStudyScript(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var req struct {
+		Version *int `json:"version"`
+	}
+	if err := c.BodyParser(&req); err != nil || req.Version == nil {
+		return badRequest(c, "send the version of the script that was shown")
+	}
+	ctx := h.enrichContext(c)
+	by := strings.TrimSpace(registry.ActorUserIDFromContext(ctx))
+	if by == "" {
+		by = "local"
+	}
+	out, err := h.audienceSvc.ApproveScript(ctx, id, *req.Version, by)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(out)
+}
+
+func (h *Handler) GenerateAudienceStudyScript(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	out, err := h.audienceSvc.GenerateScript(h.enrichContext(c), id)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.Status(fiber.StatusAccepted).JSON(out)
+}
+
+func (h *Handler) GenerateAudienceStudyReport(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var req startRequest
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return badRequest(c, "invalid request body")
+		}
+	}
+	if !req.UserApproved {
+		return badRequest(c, "writing the report spends a model call; send user_approved: true")
+	}
+	out, err := h.audienceSvc.GenerateReport(h.enrichContext(c), id)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.Status(fiber.StatusAccepted).JSON(out)
+}
+
+func (h *Handler) RetryAudienceStudy(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var req startRequest
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return badRequest(c, "invalid request body")
+		}
+	}
+	if !req.UserApproved {
+		return badRequest(c, "retrying interviews spends model calls; send user_approved: true")
+	}
+	out, err := h.audienceSvc.RetryFailed(h.enrichContext(c), id)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.Status(fiber.StatusAccepted).JSON(out)
+}
+
+func (h *Handler) CancelAudienceStudy(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	if err := h.audienceSvc.CancelStudy(h.enrichContext(c), id); err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+func (h *Handler) AskAudienceResearch(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var req studyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return badRequest(c, "invalid request body")
+	}
+	answer, err := h.audienceSvc.AskResearch(h.enrichContext(c), id, req.Question)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(fiber.Map{"answer": answer})
+}
+
+func (h *Handler) AskAudienceEveryone(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var req studyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return badRequest(c, "invalid request body")
+	}
+	group, calls, err := h.audienceSvc.AskEveryone(h.enrichContext(c), id, req.Question)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"group_id": group, "calls": calls})
+}
+
+func (h *Handler) FollowUpAudiencePersona(c *fiber.Ctx) error {
+	studyID, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	personaID, err := audienceID(c, "persona")
+	if err != nil {
+		return err
+	}
+	var req studyRequest
+	if err := c.BodyParser(&req); err != nil {
+		return badRequest(c, "invalid request body")
+	}
+	out, err := h.audienceSvc.FollowUp(h.enrichContext(c), studyID, personaID, req.Question)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(out)
+}
+
+func (h *Handler) GetAudienceThread(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	out, err := h.audienceSvc.Thread(h.enrichContext(c), id)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(fiber.Map{"messages": out})
+}
+
+func (h *Handler) SendAudienceMessage(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return badRequest(c, "invalid request body")
+	}
+	out, err := h.audienceSvc.Chat(h.enrichContext(c), id, req.Message)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(out)
+}
+
+func (h *Handler) ClearAudienceThread(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	if err := h.audienceSvc.ClearThread(h.enrichContext(c), id); err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.SendStatus(fiber.StatusNoContent)
+}
+
+// SetAudienceRuntime — PUT /v1/audience-research/runtime
+//
+// Picks the provider and model audience research runs on; an empty provider
+// goes back to the product manager's own runtime. Answers the resulting status.
+func (h *Handler) SetAudienceRuntime(c *fiber.Ctx) error {
+	var req struct {
+		Provider string `json:"provider"`
+		Model    string `json:"model"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return badRequest(c, "invalid request body")
+	}
+	out, err := h.audienceSvc.SetRuntimeChoice(h.enrichContext(c), req.Provider, req.Model)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(out)
+}
+
+// RerunAudienceStudy — POST /v1/audience-studies/:id/rerun {changes?}
+//
+// Plans a new study that asks the same people the same questions after the
+// product changed (the finished study's kind, goal, prices and script; the
+// script waits for approval again). Spends nothing until it is started.
+func (h *Handler) RerunAudienceStudy(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var req struct {
+		Changes string `json:"changes"`
+	}
+	if len(c.Body()) > 0 {
+		if err := c.BodyParser(&req); err != nil {
+			return badRequest(c, "invalid request body")
+		}
+	}
+	out, err := h.audienceSvc.Rerun(h.enrichContext(c), id, req.Changes)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.Status(fiber.StatusCreated).JSON(out)
+}
+
+// CompareAudienceStudy — GET /v1/audience-studies/:id/compare?with=<study id>
+//
+// What changed between an earlier study (`with`, default: the study this one
+// re-ran) and this one, from the two reports. No model is asked.
+func (h *Handler) CompareAudienceStudy(c *fiber.Ctx) error {
+	id, err := audienceID(c, "id")
+	if err != nil {
+		return err
+	}
+	var beforeID uuid.UUID
+	if raw := c.Query("with"); raw != "" {
+		if beforeID, err = uuid.Parse(raw); err != nil {
+			return badRequest(c, "invalid id")
+		}
+	} else {
+		st, err := h.audienceSvc.Study(h.enrichContext(c), id)
+		if err != nil {
+			return audienceFailure(c, err)
+		}
+		if st.ParentStudyID == nil {
+			return badRequest(c, "this study did not re-run another one; pass ?with=<study id>")
+		}
+		beforeID = *st.ParentStudyID
+	}
+	out, err := h.audienceSvc.CompareStudies(h.enrichContext(c), beforeID, id)
+	if err != nil {
+		return audienceFailure(c, err)
+	}
+	return c.JSON(out)
+}

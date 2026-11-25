@@ -85,3 +85,25 @@ export function mergeServerMessages(
 export function sessionRunKey(run: SessionRun): string {
   return `${run.id}:${run.status}:${run.started_at}:${run.completed_at ?? ""}`;
 }
+
+// The server's follow-up turn after background work the agent was waiting on
+// ended (session.WakeMessagePrefix). It is a system message in a user's role,
+// so the transcript must not show it as something the user typed.
+const BACKGROUND_UPDATE_PREFIX = "**Background update:**";
+
+export function isBackgroundUpdateMessage(content: string): boolean {
+  return content.startsWith(BACKGROUND_UPDATE_PREFIX);
+}
+
+/** The update's list of finished work, without the marker or the instructions to the agent. */
+export function backgroundUpdateSummary(content: string): string {
+  const body = content.slice(BACKGROUND_UPDATE_PREFIX.length);
+  const end = body.indexOf("\n\nThis message was sent by the system");
+  return (end === -1 ? body : body.slice(0, end)).trim();
+}
+
+/**
+ * Key the running turn's reasoning block files its open state under, until the
+ * turn lands and the state moves to the message it produced.
+ */
+export const LIVE_REASONING_KEY = "live";

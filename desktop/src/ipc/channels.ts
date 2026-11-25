@@ -37,6 +37,8 @@ import type {
   ProviderKeyType,
   RunnerPairingBundle,
   RunnerPairingSummary,
+  RemoteAccessConfig,
+  RemoteProvider,
   SupervisorSnapshot,
   ToolchainId,
   UpdateStatus,
@@ -73,10 +75,12 @@ export const SHELL_CHANNELS = {
    * Account mode, for the chrome's own failure screen: when the account's web
    * app cannot be reached, this runs TaskTrooper locally FOR NOW — the
    * account stays signed in and paired, and the next launch tries it again.
-   * Guarded on the sender like the update pair.
+   * `accountSignOut` is the other way on: forget the account for good, so
+   * nothing tries it again. Guarded on the sender like the update pair.
    */
   accountState: "shell:account:state",
   accountUseLocalForNow: "shell:account:use-local-for-now",
+  accountSignOut: "shell:account:sign-out",
 } as const;
 
 /**
@@ -284,6 +288,44 @@ export const CLOUD_CHANNELS = {
   toolchainCancel: "cloud:toolchain:cancel",
   toolchainDismiss: "cloud:toolchain:dismiss",
   toolchainOpenPage: "cloud:toolchain:open-page",
+
+  /**
+   * Remote access: the tunnel that lets the phone app reach this computer.
+   * LOCAL MODE ONLY — the handlers refuse in account mode, where the account's
+   * own cloud is the way in. The page names a provider and sends settings; the
+   * binary and its arguments are main's. The ngrok authtoken and API key go in
+   * on `remoteAccessNgrokConnect` and never come back: every answer carries
+   * `secrets: {…: boolean}` only.
+   */
+  remoteAccessState: "cloud:remote-access:state",
+  remoteAccessConfigure: "cloud:remote-access:configure",
+  remoteAccessStart: "cloud:remote-access:start",
+  remoteAccessStop: "cloud:remote-access:stop",
+  remoteAccessDetect: "cloud:remote-access:detect",
+  remoteAccessOpenInstallPage: "cloud:remote-access:open-install-page",
+  remoteAccessLogs: "cloud:remote-access:logs",
+  /** Re-read the Cloudflare login (the certificate on disk) and, if it changed, its domain. */
+  remoteAccessRefreshAccount: "cloud:remote-access:refresh-account",
+  /** `cloudflared tunnel login`: opens the browser; the answer is the state, progress arrives as events. */
+  remoteAccessCloudflareLogin: "cloud:remote-access:cloudflare-login",
+  remoteAccessCloudflareLoginCancel: "cloud:remote-access:cloudflare-login-cancel",
+  remoteAccessCloudflareLogout: "cloud:remote-access:cloudflare-logout",
+  /** Saves the ngrok authtoken (and optional API key) once ngrok accepted them. */
+  remoteAccessNgrokConnect: "cloud:remote-access:ngrok-connect",
+  remoteAccessNgrokDisconnect: "cloud:remote-access:ngrok-disconnect",
+
+  /**
+   * Talking to an agent, in both modes. The page holds the microphone and
+   * sends 16 kHz PCM; main runs the recognizer and the voice. The page names a
+   * language and sends text or audio, never a program or a path.
+   */
+  voiceCapabilities: "cloud:voice:capabilities",
+  voiceListenStart: "cloud:voice:listen-start",
+  voiceListenAudio: "cloud:voice:listen-audio",
+  voiceListenStop: "cloud:voice:listen-stop",
+  voiceListenCancel: "cloud:voice:listen-cancel",
+  voiceSpeak: "cloud:voice:speak",
+  voiceSpeakCancel: "cloud:voice:speak-cancel",
 } as const;
 
 /** Main → the web app. Push, so the page never polls the supervisor. */
@@ -292,6 +334,9 @@ export const CLOUD_EVENTS = {
   runnerLogs: "cloud:event:runner-logs",
   updateStatus: "cloud:event:update-status",
   toolchainState: "cloud:toolchain:state-changed",
+  remoteAccessState: "cloud:remote-access:state-changed",
+  voiceTranscript: "cloud:voice:transcript",
+  voiceAudio: "cloud:voice:audio",
 } as const;
 
 export type ShellChannel = (typeof SHELL_CHANNELS)[keyof typeof SHELL_CHANNELS];
@@ -371,6 +416,28 @@ export interface ToolchainIdRequest {
 /** Same rule as `PreflightRequest`: `force` re-probes, and only a real boolean says so. */
 export interface ToolchainReportRequest {
   force?: boolean;
+}
+
+/** A provider id, validated against `REMOTE_PROVIDERS`. */
+export interface RemoteAccessProviderRequest {
+  provider: RemoteProvider;
+}
+
+/**
+ * Saving the form. Every field is optional (a patch). Credentials never travel
+ * here: Cloudflare's login is the certificate cloudflared keeps, and the ngrok
+ * authtoken goes through `RemoteAccessNgrokConnectRequest`.
+ */
+export type RemoteAccessConfigureRequest = Partial<RemoteAccessConfig>;
+
+/**
+ * Connect the ngrok account: the authtoken is proven with a short test tunnel
+ * before it is stored; the API key (optional) is only used to list the
+ * account's domains. Neither: list the domains again with the stored API key.
+ */
+export interface RemoteAccessNgrokConnectRequest {
+  authtoken?: string;
+  apiKey?: string;
 }
 
 /** What `POST /api/runner/pair` returned. */
@@ -494,6 +561,8 @@ export interface ShellBridge {
    * the account's page cannot be reached; only an explicit sign-out unpairs.
    */
   useLocalForNow(): Promise<AccountState>;
+  /** Forget the account: unpair, clear its session, run locally; the next launch is local too. */
+  signOut(): Promise<AccountState>;
   onAccountState(cb: (state: AccountState) => void): () => void;
 }
 

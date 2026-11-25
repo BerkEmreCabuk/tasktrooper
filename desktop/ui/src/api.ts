@@ -295,10 +295,11 @@ export interface WorkflowBehavioursResponse {
 
 export interface ActivityItem {
   id: string;
-  kind: "board_event" | "agent_run";
+  kind: "board_event" | "agent_run" | "chat_message";
   project_id?: string;
   task_id?: string;
   agent_id?: string;
+  session_id?: string;
   status?: string;
   summary?: string;
   event_type?: string;
@@ -314,11 +315,12 @@ export interface TaskComment {
   author_name?: string;
   content: string;
   created_at: string;
+  attachments?: AttachmentMeta[];
 }
 
 export type LocalPreviewStatus = "starting" | "running" | "stopped" | "failed";
 
-/** One repository's "run it locally" process — see localpreview.Service. */
+/** One task's "run it locally" process — see localpreview.Service. */
 export interface LocalPreview {
   repository_id: string;
   task_id: string;
@@ -349,6 +351,140 @@ export interface TaskAgentRun {
   cache_write_tokens?: number;
   created_at: string;
   updated_at: string;
+}
+
+export type RunTraceCategory = "read" | "change" | "exec" | "external" | "board" | "undo";
+
+/** One tool call of a board run, recorded when the call finished. `detail`
+ * holds the structured summary of its arguments and outcome (paths, line
+ * ranges, hashes, command, exit code, output edges); never file contents. */
+export interface RunTraceEvent {
+  run_id: string;
+  seq: number;
+  at: string;
+  duration_ms: number;
+  tool: string;
+  native_tool?: string;
+  source: string;
+  category: RunTraceCategory;
+  target?: string;
+  status: "ok" | "error" | "unfinished";
+  error?: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface RunTraceFileChange {
+  path: string;
+  status: string;
+  from?: string;
+}
+
+export interface RunTraceVerification {
+  computed_at: string;
+  base_sha: string;
+  head_sha?: string;
+  available: boolean;
+  reason?: "no_checkout" | "no_base" | "git_failed" | string;
+  files: RunTraceFileChange[];
+  unrecorded: string[];
+  recorded_only: string[];
+  tracked_files: number;
+  untouched: number;
+}
+
+export interface RunTraceCounts {
+  read: number;
+  change: number;
+  exec: number;
+  external: number;
+  board: number;
+  undo: number;
+  failed: number;
+  total: number;
+  read_files: number;
+  changed_files: number;
+}
+
+export interface RunTraceEffect {
+  seq: number;
+  tool: string;
+  kind: string;
+  target?: string;
+}
+
+export interface RunTraceSummary {
+  run: {
+    run_id: string;
+    base_sha?: string;
+    head_sha?: string;
+    branch?: string;
+    column_before?: string;
+    remote?: boolean;
+    events: number;
+    dropped: number;
+    started_at: string;
+    finished_at?: string;
+  };
+  counts: RunTraceCounts;
+  verification?: RunTraceVerification;
+  non_undoable: RunTraceEffect[];
+}
+
+export interface RunUndoPreview {
+  run_id: string;
+  supported: boolean;
+  reason?: string;
+  mode: "reset" | "revert" | "nothing";
+  branch?: string;
+  base_sha?: string;
+  head_sha?: string;
+  commits: { sha: string; subject: string }[];
+  files: RunTraceFileChange[];
+  uncommitted: RunTraceFileChange[];
+  pushed: boolean;
+  remote_branch_sha?: string;
+  remote_ahead: boolean;
+  pull_request?: { url: string; number?: number; merged: boolean; merge_sha?: string };
+  release?: {
+    id: string;
+    version: string;
+    status: string;
+    rollback_allowed: boolean;
+    rollback_refusal?: string;
+    proposed: boolean;
+  };
+  backup_ref: string;
+  non_undoable: RunTraceEffect[];
+  move_to?: string;
+  revert_available: boolean;
+}
+
+export interface RunUndoResult {
+  run_id: string;
+  mode: string;
+  backup_ref: string;
+  reset_to?: string;
+  push_pending: boolean;
+  force_pushed: boolean;
+  cleaned_paths: string[];
+  left_untracked: string[];
+  moved_to?: string;
+  stale_criteria: number;
+  non_undoable: RunTraceEffect[];
+}
+
+export interface RunRollbackProposalResult {
+  run_id: string;
+  release_id: string;
+  version: string;
+}
+
+export interface RunRevertResult {
+  run_id: string;
+  branch: string;
+  pr_url?: string;
+  pr_error?: string;
+  merge_sha: string;
 }
 
 /** One board event in a task's history (created / moved / assigned / commented). */
@@ -455,6 +591,8 @@ export interface Repository {
   sub_repo_kinds?: string[];
   sub_projects?: RepoSubProject[];
   require_human_review?: boolean;
+  automation_tests?: boolean;
+  automation_task_id?: string;
   incident_policy?: IncidentPolicy;
   test_strategy?: TestStrategy;
   docs?: RepositoryDocs;
@@ -921,7 +1059,7 @@ export type TaskPriority = "low" | "medium" | "high" | "critical";
  */
 export type TaskRelationType = "blocks" | "deploy_depends_on";
 
-export type CriterionReviewRole = "qa" | "pm";
+export type CriterionReviewRole = "qa";
 
 export type ReviewerVerdict = "approve" | "reject" | "pending";
 
@@ -948,6 +1086,179 @@ export interface TaskReviewRound {
 export interface TaskReviews {
   column: string;
   rounds: TaskReviewRound[];
+}
+
+export type ReviewFindingState = "open" | "fixed" | "withdrawn" | "reopened";
+
+export interface ReviewHistorySummary {
+  rounds: number;
+  findings_raised: number;
+  fixed: number;
+  open: number;
+  withdrawn: number;
+  reopened: number;
+  bounces: number;
+  loop_guard_stops: number;
+  qa_failures: number;
+  open_flags: number;
+}
+
+export interface ReviewHistoryReviewer {
+  agent_id?: string;
+  agent_name?: string;
+  human?: boolean;
+  verdict: ReviewerVerdict;
+  decided_at?: string;
+  run_id?: string;
+}
+
+export interface ReviewHistoryMove {
+  at: string;
+  from: string;
+  to: string;
+  actor: string;
+  agent_id?: string;
+  agent_name?: string;
+  system_reason?: string;
+  bounce?: boolean;
+  loop_guard?: boolean;
+}
+
+export interface ReviewHistoryRun {
+  run_id: string;
+  agent_id: string;
+  agent_name?: string;
+  status: string;
+  started_at: string;
+  finished_at?: string;
+  summary?: string;
+  base_sha?: string;
+  head_sha?: string;
+  files_changed?: number;
+  has_trace: boolean;
+}
+
+export interface ReviewNotReviewed {
+  scope: string;
+  reason: string;
+  kind: "declared" | "check" | "role" | "skipped" | "large" | "truncated";
+  source: "declared" | "auto";
+  count?: number;
+  files?: string[];
+  file_url?: string;
+}
+
+export interface ReviewerCoverage {
+  agent_id?: string;
+  agent_name: string;
+  run_id?: string;
+  basis: string[];
+  aspects: string[];
+  files_total: number;
+  files_reviewed: number;
+  files_opened: number;
+  lines_total: number;
+  lines_reviewed: number;
+  diff_known: boolean;
+  criteria_total?: number;
+  criteria_checked?: number;
+  unread_files: string[];
+  unread_count: number;
+  not_reviewed: ReviewNotReviewed[];
+}
+
+export interface UncoveredFile {
+  path: string;
+  lines?: number;
+  file_url?: string;
+}
+
+export interface RoundCoverage {
+  changed_files: number;
+  changed_lines: number;
+  diff_truncated?: boolean;
+  reviewers: ReviewerCoverage[];
+  nobody_reviewed: UncoveredFile[];
+}
+
+export type ReviewRoundResult = "open" | "approved" | "changes_requested" | "failed" | "passed" | "closed";
+
+export interface ReviewHistoryRound {
+  seq: number;
+  number: number;
+  gate: string;
+  entered_at: string;
+  left_at?: string;
+  outcome: ReviewRoundResult;
+  reviewers: ReviewHistoryReviewer[];
+  from_sha?: string;
+  head_sha?: string;
+  raised: string[];
+  fixed: string[];
+  still_open: string[];
+  reopened: string[];
+  moves: ReviewHistoryMove[];
+  fix_runs: ReviewHistoryRun[];
+  loop_guard?: boolean;
+  coverage?: RoundCoverage;
+}
+
+export interface ReviewHistoryFinding {
+  id: string;
+  gate: string;
+  agent_id?: string;
+  agent_name?: string;
+  file?: string;
+  line?: number;
+  file_url?: string;
+  severity?: string;
+  category?: string;
+  message: string;
+  confidence?: string;
+  criterion_id?: string;
+  criterion_text?: string;
+  status: ReviewFindingState;
+  raised_round: number;
+  fixed_round?: number;
+  trail: { round: number; state: string; at: string }[];
+}
+
+export type ReviewFlagCode =
+  | "agent_uncertain"
+  | "sensitive_path"
+  | "large_diff"
+  | "unrecorded_changes"
+  | "loop_guard"
+  | "tests_missing"
+  | "qa_no_evidence"
+  | "coverage_gap";
+
+export interface ReviewFlag {
+  id: string;
+  source: "agent" | "automatic";
+  code: ReviewFlagCode;
+  reason?: string;
+  question?: string;
+  file?: string;
+  line?: number;
+  file_url?: string;
+  files?: string[];
+  count?: number;
+  gate?: string;
+  agent_id?: string;
+  agent_name?: string;
+  raised_at: string;
+  round?: number;
+  reviewed_by?: string;
+  reviewed_at?: string;
+}
+
+export interface ReviewHistory {
+  task_id: string;
+  summary: ReviewHistorySummary;
+  rounds: ReviewHistoryRound[];
+  findings: ReviewHistoryFinding[];
+  flags: ReviewFlag[];
 }
 
 // One reviewer role's own verdict on a criterion. `completed` on the
@@ -1657,6 +1968,8 @@ export interface AgentCLIFlavorView {
   label: string;
   available: boolean;
   connected: boolean;
+  /** What an agent set to "default model" runs on; empty = the CLI's own. */
+  default_model: string;
 }
 
 export interface AgentCLIState {
@@ -1747,6 +2060,7 @@ export interface ConnectLLMProviderRequest {
   base_url: string;
   api_key: string;
   timeout_seconds: number;
+  default_model?: string;
 }
 
 export interface SessionMessage {
@@ -1764,7 +2078,8 @@ export type SessionActionEntity =
   | "task_document"
   | "acceptance_criterion"
   | "initiative_project"
-  | "repository";
+  | "repository"
+  | "release";
 
 /**
  * One board record an agent created or changed inside a chat. Persisted so the
@@ -1787,6 +2102,17 @@ export interface SessionAction {
   repository_id?: string;
   is_error: boolean;
   created_at: string;
+}
+
+/** Background work the chat agent started and will answer again about when it ends. */
+export interface SessionWake {
+  id: string;
+  session_id: string;
+  kind: string;
+  ref_id: string;
+  label: string;
+  created_at: string;
+  expires_at: string;
 }
 
 export interface SessionRun {
@@ -1825,6 +2151,8 @@ export interface ClarificationQuestion {
   id: string;
   prompt: string;
   allow_multiple?: boolean;
+  /** Multi-select only: the most options that may be picked ("up to 3 countries"). */
+  max_selections?: number;
   options: ClarificationOption[];
 }
 
@@ -1899,6 +2227,9 @@ export interface Agent {
   // as "born connected to the catalog" in the settings page.
   auto_pull_agent_updates?: boolean;
   keep_skills_updated?: boolean;
+  // Optional: an older server omits them; empty/false = the built-in trailers.
+  commit_coauthor?: string;
+  commit_coauthor_disabled?: boolean;
   created_at: string;
 }
 
@@ -2546,6 +2877,56 @@ export function isOAuthClientRequiredError(e: unknown): boolean {
   return e instanceof ApiError && e.status === 400 && e.type === "oauth_client_required";
 }
 
+export type ReadinessStepId =
+  | "scan"
+  | "toolchain"
+  | "index"
+  | "guide"
+  | "tests"
+  | "ci"
+  | "delivery"
+  | "observability"
+  | "findings"
+  | "design"
+  | "store";
+
+export type ReadinessStatus = "done" | "todo" | "running" | "blocked" | "skipped" | "unknown";
+export type ReadinessAction = "run" | "task" | "navigate" | "desktop";
+
+export interface ReadinessTask {
+  id: string;
+  key: string;
+  title: string;
+  column: string;
+}
+
+export interface ReadinessStep {
+  id: ReadinessStepId;
+  status: ReadinessStatus;
+  action: ReadinessAction;
+  depends_on: string[];
+  reason?: string;
+  facts?: Record<string, unknown>;
+  task?: ReadinessTask;
+}
+
+export interface RepositoryReadiness {
+  repository_id: string;
+  steps: ReadinessStep[];
+  done: number;
+  skipped: number;
+  total: number;
+  complete: boolean;
+  dismissed: boolean;
+  run_all: { tasks: number; runs: number; steps: ReadinessStepId[] };
+}
+
+export interface ReadinessRunResult {
+  step: ReadinessStepId;
+  task?: ReadinessTask;
+  started: boolean;
+}
+
 async function request<T>(path: string, init: RequestInit = {}, deadlineMs?: number): Promise<T> {
   const headers: Record<string, string> = {
     ...(init.headers as Record<string, string>),
@@ -2584,6 +2965,32 @@ async function request<T>(path: string, init: RequestInit = {}, deadlineMs?: num
   return JSON.parse(body) as T;
 }
 
+/** Whose FigCraft file: a design task's own, or a project's / repository's design system file. */
+export type DesignFileScope = "task" | "project" | "repository";
+
+export interface DesignFileFrame {
+  id: number;
+  name: string;
+  width: number;
+  height: number;
+}
+
+export interface DesignFilePage {
+  id: number;
+  name: string;
+  frames: DesignFileFrame[];
+}
+
+export interface DesignFileManifest {
+  path: string;
+  exists: boolean;
+  installed: boolean;
+  name?: string;
+  pages: DesignFilePage[];
+  modified?: number;
+  error?: string;
+}
+
 // prompt_tokens is the TOTAL prompt; cache_read/cache_write are subsets of it.
 export interface UsageTotals {
   calls: number;
@@ -2597,7 +3004,13 @@ export interface UsageTotals {
 // a connected provider, "embedding" an indexing/search vector (estimated tokens).
 export type UsageKind = "api" | "cli" | "embedding";
 
-export type UsageByModel = { kind: UsageKind; provider: string; model: string } & UsageTotals;
+export type UsageByModel = {
+  kind: UsageKind;
+  provider: string;
+  model: string;
+  /** The agent named no model: this is the provider default or what the CLI reported. */
+  model_from_default?: boolean;
+} & UsageTotals;
 
 export type UsageByDay = { day: string } & UsageTotals;
 
@@ -2738,7 +3151,12 @@ export type CommandPurpose =
   | "typecheck"
   | "format"
   | "e2e"
-  | "migrate";
+  | "migrate"
+  | "buildkit_setup"
+  | "image_build"
+  | "compose_up"
+  | "compose_down"
+  | "compose_stop";
 
 export const COMMAND_PURPOSES: CommandPurpose[] = [
   "install",
@@ -2750,7 +3168,32 @@ export const COMMAND_PURPOSES: CommandPurpose[] = [
   "format",
   "e2e",
   "migrate",
+  "buildkit_setup",
+  "image_build",
+  "compose_up",
+  "compose_down",
+  "compose_stop",
 ];
+
+/** Purposes that only make sense on a containerised component. */
+export const CONTAINER_COMMAND_PURPOSES: CommandPurpose[] = [
+  "buildkit_setup",
+  "image_build",
+  "compose_up",
+  "compose_down",
+  "compose_stop",
+];
+
+export interface ContainerSettings {
+  /** The "has containers" switch: shows the container commands. */
+  enabled?: boolean;
+  registry?: string;
+  platforms?: string[];
+  /** Image tag; {sha} and {version} are filled in by whoever runs the build. */
+  tag_pattern?: string;
+  /** Agents run the component's tooling inside its containers, not on the host. */
+  container_only?: boolean;
+}
 
 export interface ComponentCommand {
   purpose: CommandPurpose;
@@ -2878,6 +3321,7 @@ export interface Component {
   mobile?: Fact<MobileFacts>;
   docs: RepositoryDocs;
   gates: ComponentGates;
+  container?: ContainerSettings;
   /** How a merge of this component reaches production; unconfirmed (no
    * override and detected confidence below high) means nothing deploys it.
    * Optional here, though the server always sends it, so pre-existing
@@ -3325,8 +3769,11 @@ export interface ComponentPatch {
   commands?: Partial<Record<CommandPurpose, string | null>>;
   gates?: ComponentGates | null;
   docs?: RepositoryDocs | null;
+  container?: ContainerSettings;
   /** null clears the override and reverts to the detected profile. */
   delivery?: ComponentDelivery | null;
+  /** Languages/frameworks the agents should treat the component as using; null reverts to detected. */
+  stack?: ComponentStack | null;
   status?: ComponentStatus;
   /** true acknowledges a component a later scan added (clears needs_review). */
   reviewed?: boolean;
@@ -4316,6 +4763,10 @@ export interface ComponentEnvStatus {
   vars: EnvVarView[];
   /** The provider could not be read; vars still lists the requirements. */
   error?: string;
+  /** "cloud_auth": the provider refused the connected account's credential — fix the account, not the variables. */
+  error_code?: "cloud_auth";
+  /** The cloud account this target reads through, for reconnecting it. */
+  account_id?: string;
 }
 
 /** One variable a human sets: kind classifies it; value is the literal, the secret, or the password to hash. */
@@ -4951,6 +5402,16 @@ export interface Release {
   /** A person dismissed the proposal; until another issue is put down to the
    * release, the release engineer cannot propose it again. */
   rollback_dismissal?: ReleaseRollbackDismissal | null;
+  /** A cut the release engineer prepared for this draft because a person
+   * asked for one; null once the release is cut or the proposal dismissed. */
+  cut_proposal?: ReleaseCutProposal | null;
+}
+
+export interface ReleaseCutProposal {
+  proposed_at: string;
+  by: string;
+  version: string;
+  notes?: string;
 }
 
 export interface ReleaseRollbackDismissal {
@@ -5385,6 +5846,523 @@ export interface DesignSystemGenerateResult {
   waiting_for_designer?: boolean;
 }
 
+export interface TelemetrySettings {
+  base_url: string;
+  configured: boolean;
+}
+
+export interface TelemetryConnectionTest {
+  ok: boolean;
+  error?: string;
+}
+
+export interface TelemetryStatus {
+  configured: boolean;
+  reachable: boolean;
+}
+
+/** The product's read API is reached only through the app server's proxy, so
+ * the key never leaves it. `path` is the product's own, below /api/v1. */
+export const TELEMETRY_NOT_CONFIGURED = "telemetry_not_configured";
+
+export function telemetryProxyPath(path: string, query?: Record<string, string | number | boolean | undefined>): string {
+  const params = new URLSearchParams();
+  for (const [k, v] of Object.entries(query ?? {})) {
+    if (v !== undefined && v !== "") params.set(k, String(v));
+  }
+  const qs = params.toString();
+  const clean = path.replace(/^\/+/, "");
+  return `/v1/telemetry/proxy/${clean}${qs ? `?${qs}` : ""}`;
+}
+
+
+// ---- Audience research: synthetic personas, studies and reports ----
+
+export type AudienceStatus = "draft" | "building" | "ready" | "failed";
+
+export interface AudienceSegment {
+  name: string;
+  description?: string;
+  count?: number;
+}
+
+export interface AudienceBrief {
+  product: string;
+  segments?: AudienceSegment[];
+  locations?: string;
+  current_solutions?: string;
+  pricing?: string;
+  topic?: string;
+  language?: string;
+}
+
+export interface Audience {
+  id: string;
+  name: string;
+  repository_id?: string;
+  status: AudienceStatus;
+  brief: AudienceBrief;
+  persona_target: number;
+  generation: number;
+  error?: string;
+  created_at: string;
+  updated_at: string;
+  built_at?: string;
+  persona_count: number;
+  study_count: number;
+}
+
+export interface PersonaProfile {
+  age?: number;
+  role?: string;
+  location?: string;
+  bio?: string;
+  goals?: string[];
+  pains?: string[];
+  current_solution?: string;
+  budget?: string;
+  tech_savviness?: string;
+  personality?: string;
+  quote?: string;
+}
+
+export interface AudiencePersona extends PersonaProfile {
+  id: string;
+  audience_id: string;
+  ordinal: number;
+  generation: number;
+  name: string;
+  segment?: string;
+}
+
+export type AudienceStudyStatus = "draft" | "running" | "interviewed" | "synthesizing" | "done" | "failed" | "cancelled";
+
+export type StudyKind = "user_interviews" | "landing_page_test" | "message_testing" | "ab_test";
+
+export const STUDY_KINDS: readonly StudyKind[] = ["user_interviews", "landing_page_test", "message_testing", "ab_test"];
+
+export interface StudyPageInput {
+  url?: string;
+  copy?: string;
+}
+
+export interface StudyInputs {
+  intent?: string;
+  pages?: StudyPageInput[];
+  variants?: string[];
+}
+
+export type ScriptState = "none" | "generating" | "awaiting_approval" | "approved" | "failed";
+
+export interface ScriptSection {
+  title: string;
+  questions: string[];
+}
+
+export interface StudyScript {
+  sections: ScriptSection[];
+}
+
+export interface NamedScore {
+  name: string;
+  value: number;
+}
+
+export interface LandingReport {
+  intent?: string;
+  source?: string;
+  clarity_mean: number;
+  clarity_by_segment?: NamedScore[];
+}
+
+export interface VariantReport {
+  variant: number;
+  text: string;
+  rank: number;
+  clarity: number;
+  relevance: number;
+  credibility: number;
+  appeal: number;
+  overall: number;
+  best_pct: number;
+  by_segment?: NamedScore[];
+}
+
+export interface MessageReport {
+  variants: VariantReport[];
+  winner: number;
+  rewrites?: { persona: string; segment?: string; role?: string; text: string }[];
+}
+
+export interface ArmMetric {
+  mean: number;
+  median: number;
+}
+
+/** One scorecard question across the two versions: every person scored both. diff is B's mean minus A's. */
+export interface ABMetric {
+  a: ArmMetric;
+  b: ArmMetric;
+  diff: number;
+  a_higher: number;
+  b_higher: number;
+  same: number;
+  effect_size: number;
+  effect_label: "negligible" | "small" | "medium" | "large";
+}
+
+export interface ABSide {
+  label: "A" | "B";
+  source?: string;
+  /** People who preferred this version. */
+  wins: number;
+  win_pct: number;
+  /** Mean act-now score of this version over everyone. */
+  mean_score: number;
+  act_pct: number;
+  win_pct_by_segment?: NamedScore[];
+  issues?: ReportTheme[];
+  reasons?: ReportTheme[];
+  quotes?: { persona: string; segment?: string; role?: string; text: string; version?: "A" | "B" }[];
+}
+
+export interface ABReport {
+  sides: [ABSide, ABSide];
+  act: ABMetric;
+  clarity: ABMetric;
+  winner: "A" | "B" | "tie";
+  confidence: "clear" | "lean" | "toss-up";
+  first_shown_win_pct: number;
+}
+
+export interface PriceTest {
+  price: number;
+  buy_pct: number;
+  asked: number;
+}
+
+export interface ReportBucket {
+  from: number;
+  to: number;
+  count: number;
+}
+
+export interface ReportMetrics {
+  respondents: number;
+  failed: number;
+  intent_distribution: number[];
+  intent_mean: number;
+  yes: number;
+  maybe: number;
+  no: number;
+  would_pay_now_pct: number;
+  price: {
+    currency: string;
+    answered: number;
+    not_willing: number;
+    min: number;
+    p25: number;
+    median: number;
+    mean: number;
+    p75: number;
+    max: number;
+    histogram: ReportBucket[];
+    tests?: PriceTest[];
+  };
+}
+
+export interface ReportTheme {
+  label: string;
+  count: number;
+  pct: number;
+  personas?: string[];
+}
+
+export interface AudienceReport {
+  kind?: StudyKind;
+  generated_at: string;
+  summary: string;
+  verdict: { label: "strong" | "promising" | "weak" | "poor"; score: number; rationale?: string };
+  metrics: ReportMetrics;
+  segments: { name: string; respondents: number; intent_mean: number; yes_pct: number; median_price: number; insight?: string }[];
+  objections: ReportTheme[];
+  needs: ReportTheme[];
+  alternatives: ReportTheme[];
+  quotes: { persona: string; segment?: string; role?: string; text: string; topic?: string; sentiment?: "positive" | "negative" | "neutral"; version?: "A" | "B" }[];
+  recommendations: { title: string; detail?: string; priority?: "high" | "medium" | "low" }[];
+  open_questions?: { question: string; digest: string }[];
+  strengths?: ReportTheme[];
+  landing?: LandingReport;
+  messages?: MessageReport;
+  ab?: ABReport;
+  methodology: string;
+  disclaimer: string;
+  synthesis_failed?: boolean;
+}
+
+export interface AudienceStudy {
+  id: string;
+  audience_id: string;
+  audience_name?: string;
+  title: string;
+  goal?: string;
+  kind: StudyKind;
+  inputs: StudyInputs;
+  script?: StudyScript;
+  script_state: ScriptState;
+  script_calls: number;
+  script_version: number;
+  script_approved_version: number;
+  script_approved_at?: string;
+  script_approved_by?: string;
+  questions: string[];
+  price_points: number[];
+  currency: string;
+  status: AudienceStudyStatus;
+  persona_total: number;
+  persona_done: number;
+  persona_failed: number;
+  calls_estimate: number;
+  error?: string;
+  report?: AudienceReport;
+  created_at: string;
+  started_at?: string;
+  /** The study this one re-ran after the product changed, and the note of what changed. */
+  parent_study_id?: string;
+  changes?: string;
+  finished_at?: string;
+}
+
+export interface StudyMetricChange {
+  key: string;
+  before: number;
+  after: number;
+  delta: number;
+}
+
+export interface StudySegmentChange {
+  name: string;
+  before_intent: number;
+  after_intent: number;
+  before_yes_pct: number;
+  after_yes_pct: number;
+}
+
+export type ThemeChangeStatus = "resolved" | "new" | "up" | "down" | "same";
+
+export interface StudyThemeChange {
+  label: string;
+  before_count: number;
+  after_count: number;
+  before_pct: number;
+  after_pct: number;
+  status: ThemeChangeStatus;
+}
+
+export interface StudyPersonChange {
+  persona_id: string;
+  name: string;
+  segment?: string;
+  before_intent: number;
+  after_intent: number;
+  before_verdict: string;
+  after_verdict: string;
+  before_quote?: string;
+  after_quote?: string;
+}
+
+export interface StudyRef {
+  id: string;
+  title: string;
+  finished_at?: string;
+  respondents: number;
+}
+
+/** What changed between two finished studies of one audience; computed, no model asked. */
+export interface StudyComparison {
+  before: StudyRef;
+  after: StudyRef;
+  kind: StudyKind;
+  changes?: string;
+  paired: number;
+  improved: number;
+  worse: number;
+  same: number;
+  verdict: StudyMetricChange;
+  verdict_labels: [string, string];
+  metrics: StudyMetricChange[];
+  segments: StudySegmentChange[];
+  objections: StudyThemeChange[];
+  needs: StudyThemeChange[];
+  alternatives: StudyThemeChange[];
+  strengths: StudyThemeChange[];
+  people: StudyPersonChange[];
+}
+
+export interface AudienceDetail extends Audience {
+  personas: AudiencePersona[];
+  studies: AudienceStudy[];
+  build_calls: number;
+}
+
+export interface StudyAnswer {
+  id: string;
+  persona_id?: string;
+  persona: PersonaProfile & { name: string; segment?: string; ordinal?: number };
+  status: "ok" | "failed";
+  answers: {
+    intent_score: number;
+    verdict: "yes" | "maybe" | "no";
+    would_pay_now: boolean;
+    reasoning?: string;
+    max_price?: number;
+    price_reactions?: { price: number; would_buy: boolean; comment?: string }[];
+    missing?: string[];
+    objections?: string[];
+    alternatives?: string[];
+    quote?: string;
+    answers?: { question: string; answer: string }[];
+    landing?: { first_impression?: string; clarity_score: number; trust_signals?: string[]; change?: string };
+    ratings?: { variant: number; clarity: number; relevance: number; credibility: number; appeal: number; comment?: string }[];
+    best_variant?: number;
+    stronger?: string;
+    page_a?: PageAssessment;
+    page_b?: PageAssessment;
+    preferred?: "a" | "b";
+    shown_first?: "a" | "b";
+  };
+  error?: string;
+}
+
+export interface PendingPerson extends PersonaProfile {
+  persona_id: string;
+  ordinal: number;
+  name: string;
+  segment?: string;
+}
+
+export interface PageAssessment {
+  first_impression?: string;
+  clarity_score: number;
+  act_score: number;
+  verdict: "yes" | "maybe" | "no";
+  objections?: string[];
+  missing?: string[];
+  trust_signals?: string[];
+  change?: string;
+}
+
+export interface StudyFollowUp {
+  group_id: string;
+  question: string;
+  asked_at: string;
+  asked: number;
+  replies: { persona_id?: string; persona: string; text: string }[];
+}
+
+export interface AudienceStudyDetail extends AudienceStudy {
+  answers: StudyAnswer[];
+  pending: PendingPerson[];
+  follow_ups: StudyFollowUp[];
+  running: boolean;
+}
+
+export interface AudienceChatMessage {
+  id: string;
+  persona_id: string;
+  study_id?: string;
+  role: "user" | "persona";
+  content: string;
+  created_at: string;
+}
+
+export interface AudienceRuntime {
+  ready: boolean;
+  agent?: string;
+  provider?: string;
+  model?: string;
+  /** The person picked the provider and model themselves. */
+  chosen?: boolean;
+}
+
+export interface AudienceInput {
+  name?: string;
+  repository?: string;
+  brief?: AudienceBrief;
+  persona_target?: number;
+}
+
+export interface StudyPlanInput {
+  title?: string;
+  goal?: string;
+  kind?: StudyKind;
+  inputs?: StudyInputs;
+  questions?: string[];
+  script?: StudyScript;
+  price_points?: number[];
+  currency?: string;
+}
+
+export const AUDIENCE_NO_RUNTIME = "audience_no_runtime";
+
+
+// --- remote access (the phone app), contract section 9 ---
+
+export type RemoteDeviceRole = "operator" | "viewer";
+
+export interface RemoteAccessStatus {
+  enabled: boolean;
+  /** The loopback port of the remote listener; 0 when it is off. */
+  port: number;
+  server_name: string;
+  device_count: number;
+  pending_pairings: number;
+}
+
+export interface RemotePairing {
+  id: string;
+  /** The 12-character code without separators. */
+  code: string;
+  /** The same code grouped for a person, `K7QD-2M9W-XH4T`. */
+  code_display: string;
+  /** `tasktrooper://pair?...`: what the QR code carries. */
+  uri: string;
+  expires_at: string;
+}
+
+export interface RemotePairingRequest {
+  role: RemoteDeviceRole;
+  /** 0 = never expires. */
+  expires_in_days: number;
+  public_url: string;
+  device_label?: string;
+}
+
+export interface RemoteDevice {
+  id: string;
+  name: string;
+  platform?: string;
+  role: RemoteDeviceRole;
+  created_at: string;
+  last_seen_at?: string | null;
+  expires_at?: string | null;
+  revoked_at?: string | null;
+}
+
+export type RemoteAuditKind = "request" | "auth_failed" | "pair" | "pair_failed" | "revoke" | "rate_limited";
+
+export interface RemoteAuditEntry {
+  id: string | number;
+  at: string;
+  device_id?: string | null;
+  device_name?: string | null;
+  method?: string;
+  route?: string;
+  status?: number;
+  kind: RemoteAuditKind;
+}
+
+
 export const api = {
   health: () => request<HealthResponse>("/health"),
 
@@ -5419,6 +6397,71 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(settings),
     }),
+  telemetrySettings: () => request<TelemetrySettings>("/v1/telemetry/settings"),
+  saveTelemetrySettings: (data: { base_url: string; api_key?: string }) =>
+    request<TelemetrySettings>("/v1/telemetry/settings", { method: "PUT", body: JSON.stringify(data) }),
+  testTelemetry: (data?: { base_url?: string; api_key?: string }) =>
+    request<TelemetryConnectionTest>("/v1/telemetry/settings/test", { method: "POST", ...(data ? { body: JSON.stringify(data) } : {}) }),
+  audienceRuntime: () => request<AudienceRuntime>("/v1/audience-research/status"),
+  setAudienceRuntime: (provider: string, model: string) =>
+    request<AudienceRuntime>("/v1/audience-research/runtime", {
+      method: "PUT",
+      body: JSON.stringify({ provider, model }),
+    }),
+  audiences: () => request<{ audiences: Audience[] }>("/v1/audiences"),
+  createAudience: (data: AudienceInput) => request<Audience>("/v1/audiences", { method: "POST", body: JSON.stringify(data) }),
+  audience: (id: string) => request<AudienceDetail>(`/v1/audiences/${id}`),
+  updateAudience: (id: string, data: AudienceInput) =>
+    request<Audience>(`/v1/audiences/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteAudience: (id: string) => request<void>(`/v1/audiences/${id}`, { method: "DELETE" }),
+  buildAudience: (id: string) => request<Audience>(`/v1/audiences/${id}/build`, { method: "POST" }),
+  cancelAudienceBuild: (id: string) => request<void>(`/v1/audiences/${id}/build/cancel`, { method: "POST" }),
+  planAudienceStudy: (audienceId: string, data: StudyPlanInput) =>
+    request<AudienceStudy>(`/v1/audiences/${audienceId}/studies`, { method: "POST", body: JSON.stringify(data) }),
+  audienceStudies: (audienceId?: string) =>
+    request<{ studies: AudienceStudy[] }>(`/v1/audience-studies${audienceId ? `?audience_id=${encodeURIComponent(audienceId)}` : ""}`),
+  audienceStudy: (id: string) => request<AudienceStudyDetail>(`/v1/audience-studies/${id}`),
+  rerunAudienceStudy: (id: string, changes: string) =>
+    request<AudienceStudy>(`/v1/audience-studies/${id}/rerun`, { method: "POST", body: JSON.stringify({ changes }) }),
+  compareAudienceStudy: (id: string, withId?: string) =>
+    request<StudyComparison>(`/v1/audience-studies/${id}/compare${withId ? `?with=${encodeURIComponent(withId)}` : ""}`),
+  updateAudienceStudy: (id: string, data: StudyPlanInput) =>
+    request<AudienceStudy>(`/v1/audience-studies/${id}`, { method: "PATCH", body: JSON.stringify(data) }),
+  deleteAudienceStudy: (id: string) => request<void>(`/v1/audience-studies/${id}`, { method: "DELETE" }),
+  startAudienceStudy: (id: string, opts: { manualReport?: boolean } = {}) =>
+    request<AudienceStudy>(`/v1/audience-studies/${id}/start`, {
+      method: "POST",
+      body: JSON.stringify({ user_approved: true, manual_report: opts.manualReport ?? false }),
+    }),
+  approveAudienceStudyScript: (id: string, version: number) =>
+    request<AudienceStudy>(`/v1/audience-studies/${id}/script/approve`, { method: "POST", body: JSON.stringify({ version }) }),
+  generateAudienceStudyScript: (id: string) =>
+    request<AudienceStudy>(`/v1/audience-studies/${id}/script`, { method: "POST" }),
+  generateAudienceStudyReport: (id: string) =>
+    request<AudienceStudy>(`/v1/audience-studies/${id}/report`, { method: "POST", body: JSON.stringify({ user_approved: true }) }),
+  retryAudienceStudy: (id: string) =>
+    request<AudienceStudy>(`/v1/audience-studies/${id}/retry`, { method: "POST", body: JSON.stringify({ user_approved: true }) }),
+  cancelAudienceStudy: (id: string) => request<void>(`/v1/audience-studies/${id}/cancel`, { method: "POST" }),
+  askAudienceResearch: (id: string, question: string) =>
+    request<{ answer: string }>(`/v1/audience-studies/${id}/ask`, { method: "POST", body: JSON.stringify({ question }) }),
+  askAudienceEveryone: (id: string, question: string) =>
+    request<{ group_id: string; calls: number }>(`/v1/audience-studies/${id}/ask-everyone`, {
+      method: "POST",
+      body: JSON.stringify({ question }),
+    }),
+  followUpAudiencePersona: (studyId: string, personaId: string, question: string) =>
+    request<AudienceChatMessage>(`/v1/audience-studies/${studyId}/personas/${personaId}/follow-up`, {
+      method: "POST",
+      body: JSON.stringify({ question }),
+    }),
+  audienceThread: (personaId: string) =>
+    request<{ messages: AudienceChatMessage[] }>(`/v1/audience-personas/${personaId}/messages`),
+  sendAudienceMessage: (personaId: string, message: string) =>
+    request<AudienceChatMessage>(`/v1/audience-personas/${personaId}/messages`, { method: "POST", body: JSON.stringify({ message }) }),
+  clearAudienceThread: (personaId: string) => request<void>(`/v1/audience-personas/${personaId}/messages`, { method: "DELETE" }),
+  telemetryStatus: () => request<TelemetryStatus>("/v1/telemetry/status"),
+  telemetryGet: <T>(path: string, query?: Record<string, string | number | boolean | undefined>) =>
+    request<T>(telemetryProxyPath(path, query)),
   usageSummary: (days = 30, tz = "") =>
     request<UsageSummary>(`/v1/usage?days=${days}&tz=${encodeURIComponent(tz)}`),
   billingStatus: () => request<BillingStatus>("/v1/billing"),
@@ -5430,6 +6473,12 @@ export const api = {
     request<ModelPrice>("/admin/billing/model-prices", { method: "PUT", body: JSON.stringify(data) }),
   deleteModelPrice: (model: string) =>
     request<void>(`/admin/billing/model-prices/${encodeURIComponent(model)}`, { method: "DELETE" }),
+
+  setAgentCliDefaultModel: (flavor: AgentCLIFlavor, model: string) =>
+    request<AgentCLIState>(`/v1/agent-cli/${flavor}/default-model`, {
+      method: "PUT",
+      body: JSON.stringify({ model }),
+    }),
 
   listModels: (provider?: LLMProviderType) =>
     request<{ object: string; data: LLMModel[] }>(
@@ -5665,10 +6714,12 @@ export const api = {
       orchestrate?: boolean;
       mentions?: MessageMention[];
       attachmentIds?: string[];
+      /** The user spoke this and hears the reply, in this language. */
+      voice?: "tr" | "en";
       signal?: AbortSignal;
     } = {},
   ): AsyncGenerator<ChatStreamEvent> {
-    const { fileIds, orchestrate, mentions, attachmentIds, signal } = options;
+    const { fileIds, orchestrate, mentions, attachmentIds, voice, signal } = options;
     const res = await fetchWithTimeout(apiUrl(`/v1/sessions/${sessionId}/messages`), {
       method: "POST",
       headers: authHeaders({
@@ -5683,6 +6734,7 @@ export const api = {
         ...(orchestrate ? { orchestrate: true } : {}),
         ...(mentions && mentions.length > 0 ? { mentions } : {}),
         ...(attachmentIds && attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+        ...(voice ? { voice } : {}),
       }),
       signal,
     });
@@ -5723,6 +6775,14 @@ export const api = {
 
   sessionActivity: (sessionId: string) =>
     request<{ runs: SessionRun[] }>(`/v1/sessions/${sessionId}/activity`),
+
+  sessionWakes: (sessionId: string) =>
+    request<{ wakes: SessionWake[] }>(`/v1/sessions/${sessionId}/wakes`),
+
+  stopSessionWakes: (sessionId: string, wakeId?: string) =>
+    request<{ stopped: number }>(`/v1/sessions/${sessionId}/wakes${wakeId ? `/${wakeId}` : ""}`, {
+      method: "DELETE",
+    }),
 
   runSteps: (runId: string, since?: string) =>
     request<{ steps: SessionStep[] }>(
@@ -6103,6 +7163,7 @@ export const api = {
       build_command?: string;
       test_command?: string;
       require_human_review?: boolean;
+      automation_tests?: boolean;
       docs?: RepositoryDocs;
       release_engine?: ReleaseEngine;
     },
@@ -6146,6 +7207,33 @@ export const api = {
 
   getWorkflowSetupTask: (id: string) =>
     request<{ task: BoardTask | null }>(`/v1/repositories/${id}/pipeline/setup-task`),
+
+  getRepositoryReadiness: (repositoryId: string) =>
+    request<RepositoryReadiness>(`/v1/repositories/${repositoryId}/readiness`),
+
+  runReadinessStep: (repositoryId: string, step: ReadinessStepId, approve: boolean) =>
+    request<ReadinessRunResult>(`/v1/repositories/${repositoryId}/readiness/steps/${step}/run`, {
+      method: "POST",
+      body: JSON.stringify({ approve }),
+    }),
+
+  runReadinessAll: (repositoryId: string, approveTasks: number) =>
+    request<{ results: ReadinessRunResult[] }>(`/v1/repositories/${repositoryId}/readiness/run-all`, {
+      method: "POST",
+      body: JSON.stringify({ approve_tasks: approveTasks }),
+    }),
+
+  setReadinessStepSkipped: (repositoryId: string, step: ReadinessStepId, skipped: boolean) =>
+    request<RepositoryReadiness>(`/v1/repositories/${repositoryId}/readiness/steps/${step}`, {
+      method: "PUT",
+      body: JSON.stringify({ skipped }),
+    }),
+
+  setReadinessDismissed: (repositoryId: string, dismissed: boolean) =>
+    request<RepositoryReadiness>(`/v1/repositories/${repositoryId}/readiness`, {
+      method: "PUT",
+      body: JSON.stringify({ dismissed }),
+    }),
 
   saveStoreCredential: (provider: StoreCredentialProvider, data: Record<string, string>) =>
     request<void>(`/v1/store/credentials/${provider}`, {
@@ -6860,10 +7948,13 @@ export const api = {
       `/v1/repositories/${repositoryId}/tasks/${taskId}/comments`,
     ),
 
-  createTaskComment: (repositoryId: string, taskId: string, content: string) =>
+  createTaskComment: (repositoryId: string, taskId: string, content: string, attachmentIds?: string[]) =>
     request<TaskComment>(`/v1/repositories/${repositoryId}/tasks/${taskId}/comments`, {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({
+        content,
+        ...(attachmentIds && attachmentIds.length > 0 ? { attachment_ids: attachmentIds } : {}),
+      }),
     }),
 
   /**
@@ -6871,17 +7962,17 @@ export const api = {
    * request opened for it. The agent it answers with is the one that owns the
    * session, so both ids are needed to reach `/agents/:agentId/chat/:sessionId`.
    */
-  openTaskChat: (repositoryId: string, taskId: string) =>
+  openTaskChat: (repositoryId: string, taskId: string, agentId?: string) =>
     request<{ session_id: string; agent_id: string }>(
       `/v1/repositories/${repositoryId}/tasks/${taskId}/chat`,
-      { method: "POST" },
+      { method: "POST", ...(agentId ? { body: JSON.stringify({ agent_id: agentId }) } : {}) },
     ),
 
   /**
    * Starts (or restarts) the repository's local preview on this task's
    * branch — the same checkout `openTaskChat`'s agent works in, run instead
-   * of talked to. Only one preview runs per repository; starting a second
-   * one replaces the first.
+   * of talked to. Each task runs its own preview, side by side with other
+   * tasks' previews of the same repository; starting it again replaces it.
    */
   startLocalPreview: (repositoryId: string, taskId: string) =>
     request<LocalPreview>(
@@ -6889,17 +7980,50 @@ export const api = {
       { method: "POST" },
     ),
 
-  stopLocalPreview: (repositoryId: string) =>
-    request<void>(`/v1/repositories/${repositoryId}/local-preview/stop`, { method: "POST" }),
+  stopLocalPreview: (repositoryId: string, taskId: string) =>
+    request<void>(`/v1/repositories/${repositoryId}/tasks/${taskId}/local-preview/stop`, { method: "POST" }),
 
-  /** The repository's current preview, whichever task started it. */
-  getLocalPreview: (repositoryId: string) =>
+  /** The task's own preview; other tasks' previews never show up here. */
+  getLocalPreview: (repositoryId: string, taskId: string) =>
     request<{ active: boolean; preview?: LocalPreview }>(
-      `/v1/repositories/${repositoryId}/local-preview`,
+      `/v1/repositories/${repositoryId}/tasks/${taskId}/local-preview`,
     ),
 
   listTaskAgentRuns: (repositoryId: string, taskId: string) =>
     request<{ runs: TaskAgentRun[] }>(`/v1/repositories/${repositoryId}/tasks/${taskId}/runs`),
+
+  getRunTraceSummary: (repositoryId: string, taskId: string, runId: string) =>
+    request<{ recorded: boolean; summary?: RunTraceSummary }>(
+      `/v1/repositories/${repositoryId}/tasks/${taskId}/runs/${runId}/trace/summary`,
+    ),
+
+  getRunUndoPreview: (repositoryId: string, taskId: string, runId: string) =>
+    request<{ preview: RunUndoPreview }>(`/v1/repositories/${repositoryId}/tasks/${taskId}/runs/${runId}/undo/preview`),
+
+  undoRun: (repositoryId: string, taskId: string, runId: string, body: { force_push?: boolean; keep_column?: boolean }) =>
+    request<{ result: RunUndoResult }>(`/v1/repositories/${repositoryId}/tasks/${taskId}/runs/${runId}/undo`, {
+      method: "POST",
+      body: JSON.stringify({ confirm: true, ...body }),
+    }),
+
+  proposeRunRollback: (repositoryId: string, taskId: string, runId: string, note: string) =>
+    request<{ result: RunRollbackProposalResult }>(
+      `/v1/repositories/${repositoryId}/tasks/${taskId}/runs/${runId}/undo/rollback-proposal`,
+      { method: "POST", body: JSON.stringify({ confirm: true, note }) },
+    ),
+
+  revertRun: (repositoryId: string, taskId: string, runId: string) =>
+    request<{ result: RunRevertResult }>(`/v1/repositories/${repositoryId}/tasks/${taskId}/runs/${runId}/undo/revert`, {
+      method: "POST",
+      body: JSON.stringify({ confirm: true }),
+    }),
+
+  listRunTrace: (repositoryId: string, taskId: string, runId: string, after = 0, category?: RunTraceCategory) =>
+    request<{ recorded: boolean; events: RunTraceEvent[]; count: number; next_after?: number }>(
+      `/v1/repositories/${repositoryId}/tasks/${taskId}/runs/${runId}/trace?limit=500&after=${after}${
+        category ? `&category=${category}` : ""
+      }`,
+    ),
 
   cancelTaskAgentRun: (repositoryId: string, taskId: string, runId: string, reason?: string) =>
     request<{ run: TaskAgentRun }>(
@@ -6917,11 +8041,27 @@ export const api = {
       { method: "POST" },
     ),
 
+  /**
+   * Breaks into a live run with guidance: it stops and the same agent starts
+   * again with the message, without blocking the task. Returns the new run.
+   */
+  interruptTaskAgentRun: (repositoryId: string, taskId: string, runId: string, message: string) =>
+    request<{ run: TaskAgentRun }>(
+      `/v1/repositories/${repositoryId}/tasks/${taskId}/runs/${runId}/interrupt`,
+      { method: "POST", body: JSON.stringify({ message }) },
+    ),
+
   listTaskEvents: (repositoryId: string, taskId: string) =>
     request<{ events: TaskEvent[] }>(`/v1/repositories/${repositoryId}/tasks/${taskId}/events`),
 
   listTaskReviews: (repositoryId: string, taskId: string) =>
     request<TaskReviews>(`/v1/repositories/${repositoryId}/tasks/${taskId}/reviews`),
+  getReviewHistory: (repositoryId: string, taskId: string) =>
+    request<ReviewHistory>(`/v1/repositories/${repositoryId}/tasks/${taskId}/review-history`),
+  markReviewFlagReviewed: (repositoryId: string, taskId: string, flagId: string) =>
+    request<ReviewFlag>(`/v1/repositories/${repositoryId}/tasks/${taskId}/review-flags/${encodeURIComponent(flagId)}/reviewed`, {
+      method: "POST",
+    }),
 
   listTaskPipelines: (repositoryId: string, taskId: string) =>
     request<{ pipelines: TaskPipeline[] }>(
@@ -6981,6 +8121,27 @@ export const api = {
   // An empty list when the repository follows no design system.
   getRepositoryDesignSystemFiles: (repositoryId: string) =>
     request<{ files: DesignSystemFile[] | null }>(`/v1/repositories/${repositoryId}/design-system/files`),
+
+  getDesignFile: (scope: DesignFileScope, id: string) => request<DesignFileManifest>(`/v1/design-files/${scope}/${id}`),
+
+  // A render can take a few seconds on a large page; it is cached until the file changes.
+  fetchDesignFilePreview: async (scope: DesignFileScope, id: string, pageId: number, modified?: number) => {
+    const res = await fetchWithTimeout(
+      apiUrl(`/v1/design-files/${scope}/${id}/pages/${pageId}/preview?v=${modified ?? 0}`),
+      { method: "GET", headers: authHeaders() },
+      120_000,
+    );
+    if (!res.ok) {
+      throw await apiErrorFrom(res);
+    }
+    return res.blob();
+  },
+
+  openDesignFile: (scope: DesignFileScope, id: string) =>
+    request<void>(`/v1/design-files/${scope}/${id}/open`, { method: "POST" }),
+
+  revealDesignFile: (scope: DesignFileScope, id: string) =>
+    request<void>(`/v1/design-files/${scope}/${id}/reveal`, { method: "POST" }),
 
   getTaskDesign: (repositoryId: string, taskId: string) =>
     request<TaskDesign>(`/v1/repositories/${repositoryId}/tasks/${taskId}/design`),
@@ -7487,6 +8648,9 @@ export const api = {
   dismissRollbackProposal: (releaseId: string) =>
     request<Release | undefined>(`/v1/releases/${encodeURIComponent(releaseId)}/rollback-proposal/dismiss`, { method: "POST" }),
 
+  dismissCutProposal: (releaseId: string) =>
+    request<Release>(`/v1/releases/${encodeURIComponent(releaseId)}/cut-proposal/dismiss`, { method: "POST" }),
+
   // PATCHes the component with only {delivery}: a value sets the override, null clears it.
   updateComponentDelivery: (componentId: string, delivery: ComponentDelivery | null) =>
     request<Component>(`/v1/components/${componentId}`, {
@@ -7513,4 +8677,20 @@ export const api = {
 
   cancelSmokeGeneration: (jobId: string) =>
     request<void>(`/v1/smoke-check-generations/${jobId}`, { method: "DELETE" }),
+
+  remoteAccessStatus: () => request<RemoteAccessStatus>("/v1/remote-access"),
+
+  createRemotePairing: (body: RemotePairingRequest) =>
+    request<RemotePairing>("/v1/remote-access/pairings", { method: "POST", body: JSON.stringify(body) }),
+
+  cancelRemotePairing: (id: string) =>
+    request<void>(`/v1/remote-access/pairings/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  listRemoteDevices: () => request<{ devices: RemoteDevice[] }>("/v1/remote-access/devices"),
+
+  revokeRemoteDevice: (id: string) =>
+    request<void>(`/v1/remote-access/devices/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  remoteAccessAudit: (limit = 100) =>
+    request<{ entries: RemoteAuditEntry[] }>(`/v1/remote-access/audit?limit=${limit}`),
 };

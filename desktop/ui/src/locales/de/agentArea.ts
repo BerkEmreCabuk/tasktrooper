@@ -178,13 +178,11 @@ export const agentArea = {
       task_completed: "Aufgabe abgeschlossen",
       task_released: "Aufgabe veröffentlicht",
       revision_requested: "Überarbeitung angefordert",
-      pm_uat_failed: "PM-UAT fehlgeschlagen",
       human_uat_failed: "Menschlicher UAT fehlgeschlagen",
       qa_bug_found: "QA hat Bug gefunden",
       qa_valid_scenario_confirmed: "Gültiges Szenario bestätigt",
       qa_invalid_scenario_confirmed: "Ungültiges Szenario bestätigt",
       qa_task_tested: "QA-Test abgeschlossen",
-      pm_uat_completed: "PM-UAT abgeschlossen",
     },
     changeType: {
       skill_created: "Skill hinzugefügt",
@@ -282,6 +280,13 @@ export const agentArea = {
     systemPrompt: "System-Prompt",
     enabled: "Aktiviert",
     coreHint: "Kernagent; kann nicht deaktiviert werden.",
+    commitCoauthor: {
+      label: "Commit-Co-Autor",
+      help: "Name <E-Mail> oder eine vollständige Co-authored-by-Zeile. Leer lassen für die Standardzeilen.",
+      placeholder: "Erika Muster <erika@example.com>",
+      disable: "Keinen Co-Autor hinzufügen",
+      disableHelp: "Ein: Die Commits dieses Agenten enthalten gar keine Co-authored-by-Zeile.",
+    },
     catalog: {
       autoPull: {
         label: "Definitionsupdates aus dem Katalog übernehmen",
@@ -322,7 +327,8 @@ export const agentArea = {
         label: "Nachricht an {name}",
         placeholder: "Feature anfragen, Bug melden oder Fragen zum Board stellen…",
         send: "Senden",
-        hint: "Enter zum Senden · Shift+Enter für eine neue Zeile",
+        hint: "Enter zum Senden · Shift+Enter für eine neue Zeile · @ zum Markieren eines Agenten, Projekts oder Repositorys",
+        voice: "Per Sprache reden",
         failed: "Unterhaltung konnte nicht gestartet werden",
         suggestions: {
           board: {
@@ -376,10 +382,6 @@ export const agentArea = {
             qa: {
               label: "QA",
               detail: "Tests",
-            },
-            acceptance: {
-              label: "PM-Prüfung",
-              detail: "UAT",
             },
             approval: {
               label: "Abnahme",

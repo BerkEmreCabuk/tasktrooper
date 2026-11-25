@@ -477,6 +477,7 @@ repository's name (same guardrail as the deploy-target rollback endpoints).
 - `POST /v1/releases/{releaseId}/rollback-proposal/dismiss` — no body → `Release` with
   `rollback_proposal` null and `rollback_dismissal` set (`api.dismissRollbackProposal`; an empty
   answer is applied locally).
+- `POST /v1/releases/{releaseId}/cut-proposal/dismiss` — no body → `Release` with `cut_proposal` cleared (the cut the release engineer prepared for a draft; nothing shipped, the draft stays open).
 - `POST /v1/repositories/{id}/tasks/{taskId}/before-deploy/confirm` — no body. Stamps
   `before_deploy_confirmed_at` and, when the task sits in `done`, wakes the release engineer
   immediately. Driven by `TaskDetailDrawer`'s before-deploy Confirm button
@@ -836,6 +837,16 @@ carries `fields`; read them with `dataSourceFieldErrors(e)`.
   A store kind's list address is the app it reads (`package_name` / `app_id`). An option is
   looked up with its dots as `_` (`dataSourceSchema#optionKey`; `t()` splits keys on dots), so
   Datadog's sites have labels (`kinds.datadog.fields.site.options.datadoghq_com`, …).
+  **`tasktrooper_telemetry`** (server branch `feat/telemetry-native-source`; not drawn yet): label "TaskTrooper
+  Telemetry", capabilities `metrics`, `logs`, `traces`, `errors`, **no fields** — it reads the connection saved in
+  Settings → TaskTrooper Telemetry (`/v1/telemetry/settings`), so the add form has nothing to fill (a hint pointing
+  at that Settings card is all it needs, and it can be disabled while `GET /v1/telemetry/status` says
+  `configured: false`). The server makes the source on its own (name `TaskTrooper Telemetry`) once that connection
+  is saved; deleting it is remembered, and adding it back is `POST /v1/data-sources {kind: "tasktrooper_telemetry"}`.
+  One per install: a second create is 400 `fields: {kind: "duplicate"}` (new field code). Its query language is
+  JSON `{"service", "env"?, "endpoint"?, "metric"?, "quantile"?}` (metric `requests` | `error_ratio` | `errors` |
+  `latency` | `retries` | `dead_letters`; env `*` = every environment); recipe `tasktrooper-telemetry` (params
+  `service`, `env`). While the connection is cleared it verifies `error` with a "not configured" detail.
 - `GET /v1/data-sources` → `{data_sources: DataSource[]}`; `GET /v1/data-sources/{id}` → one
   (`listDataSources`, `getDataSource`). `DataSource` = `{id, kind, name, config, secrets_set,
   status: ok|error|unverified, status_detail, info: {version, detail}, verified_at (null until
@@ -1424,6 +1435,12 @@ task proposed and supersedes the one each replaces.
   `DESIGN.md`, `design/tokens.json`, `design/tokens.css` and (when there is an
   inventory) `design/INVENTORY.md`, rendered from the effective version; an
   empty list when the repository follows no design system (`DesignSystemFile`).
+- `GET /v1/design-files/{scope}/{id}` (`scope`: `task` | `project` | `repository`) →
+  `DesignFileManifest {path, exists, installed, name?, pages, modified?, error?}`;
+  `GET …/pages/{pageId}/preview` → PNG (fetched as a blob, `api.fetchDesignFilePreview`);
+  `POST …/open` and `POST …/reveal` → 204. `FigCraftFileCard` renders them on a
+  design task's drawer, its review page, the designs a task builds on and the
+  Design System tabs, and renders nothing until the file exists.
 - `GET /v1/repositories/{id}/tasks/{taskId}/design` → `TaskDesign
   {references: [{task_id, key, title, task_type: "design", column, repository_id, documents: TaskDocument[]}], design_system?: {project_id?, project_name?, base_version?, layer_version?, ambiguous?}}`
   — the approved design tasks this task derives from or is blocked by, with
@@ -1547,3 +1564,42 @@ mean-center, then block power iteration with Gram-Schmidt deflation against the
 covariance action `Xᵀ(Xv)` — the d×d covariance matrix is never materialized.
 It is deterministic down to the last bit, including the parallel decomposition,
 so a client may cache a projection and diff it against a later one.
+
+## TaskTrooper Telemetry (Settings → TaskTrooper Telemetry, Operations → Telemetry)
+
+The app server holds the address and API key of a TaskTrooper Telemetry server and relays reads to it; the key never
+reaches this bundle.
+
+- `GET /v1/telemetry/settings` → `{ base_url, configured }` (never the key).
+- `PUT /v1/telemetry/settings` `{ base_url, api_key? }` → the same shape; `api_key` omitted keeps the stored key, `""` clears it.
+- `POST /v1/telemetry/settings/test` → `{ ok, error? }`.
+- `GET /v1/telemetry/status` → `{ configured, reachable }`; the screens' gate (`TelemetryGate`) reads it.
+- `GET /v1/telemetry/proxy/<path>?<query>` → the product's own `GET /api/v1/<path>` as JSON (`api.telemetryGet(path, query)`).
+  Read-only. `409 { code: "telemetry_not_configured" }` when unset (the screen falls back to the connect guidance),
+  `502 { code: "telemetry_unreachable", error }` when the product does not answer.
+
+The paths the screens read (below `/api/v1`): `services`, `services/{name}` (+ `/series`, `/endpoints`, `/dependencies`,
+`/deploys`, `/endpoints/{id}` (+ `/series`, `/rca`)), `environments`, `traces`, `traces/{id}`, `logs`, `logs/series`,
+`errors`, `errors/{fingerprint}`, `incidents`, `incidents/{id}/events`, `monitors`, `deploys`, `kpis`. The second wave adds `overview/series`, `service-map`, `infra/hosts` (+ `/{host}`), `infra/k8s/clusters` (+ `/{cluster}`), `infra/k8s/workloads`, `infra/k8s/pods` (+ `/{uid}`), `infra/k8s/events`, `infra/databases` (+ `/{id}/queries`), `infra/clusters`, `infra/clusters/{id}/groups/{group}/lag`, `infra/groups`, `infra/topics`, `serverless/summary`, `serverless/functions` (+ `/{id}`), `apps/{app}/summary|series|pages|sessions|errors|app-starts`, `replays` (+ `/{sessionId}`), `profiles/types|top|flamegraph|series`, `ai/overview`, `ai/calls`, `loadtests/scenarios`, `loadtests/runs` (+ `/{id}`, `/{id}/series`). Every root is already in the server allowlist; nothing here writes. The product answers only the
+windows `15m 30m 1h 6h 24h 7d`: the console's picks round up (`lib/telemetryHub#telemetryRange`).
+
+## Audience research (Audience screen)
+
+Synthetic personas written from a project's brief, studies that ask them the same questions, reports, and 1:1 conversations. Every
+model call runs on the user's own agent runtime through the app server; the full route table is in `server/.ai/api-spec.md`
+("Audience research"). The bundle reads: `api.audienceRuntime` (`{ ready, agent?, provider? }`), `api.audiences` /
+`api.audience(id)` (detail with `personas`, `studies`, `build_calls`), `api.audienceStudies` / `api.audienceStudy(id)` (detail with
+`report`, `answers[]`, `follow_ups[]`, `running`), and the actions `createAudience`, `updateAudience`, `buildAudience`,
+`planAudienceStudy`, `startAudienceStudy`, `cancelAudienceStudy`, `askAudienceResearch`, `askAudienceEveryone`,
+`followUpAudiencePersona`, `audienceThread`, `sendAudienceMessage`. Errors with `type: "audience_no_runtime"` show the
+connect-an-agent guidance. A build and a study are asynchronous: the pages poll every 3-4 s while one is `building`, `running` or
+`synthesizing`, and for 3 minutes after a question to everyone.
+
+## Repository setup checklist
+
+`api.getRepositoryReadiness(id)` → the checklist the repository page's "Get this project ready" card shows
+(`components/projects/repository/ReadinessCard`); `api.runReadinessStep(id, step, approve)`,
+`api.runReadinessAll(id, approveTasks)`, `api.setReadinessStepSkipped(id, step, skipped)` and
+`api.setReadinessDismissed(id, dismissed)` act on it. Contract and statuses: `server/.ai/api-spec.md`
+("Repository setup checklist"). The `toolchain` step is `unknown` from the server and resolved in the app
+from the desktop shell's toolchain report (`lib/readiness.ts`).
